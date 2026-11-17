@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 61 / 7 / 26 / 236 | counted |
+| Done / exceeds / partial / missing | 66 / 7 / 32 / 225 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **24.5 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **14.2 %** | counted |
-| Size-weighted parity over all rows, no area weights | 13.7 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **27.0 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **17.5 %** | counted |
+| Size-weighted parity over all rows, no area weights | 17.7 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -44,8 +44,8 @@ never estimated by hand.
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
 | Materials and shading | 5 (4 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 7 % |
-| Render engine: core | 8 (6 %) | 17 | 0 | 0 | 2 | 15 | 2 | 6 % | 5 % |
-| Render engine: lights, camera effects and output | 6 (5 %) | 19 | 0 | 0 | 0 | 19 | 0 | 0 % | 0 % |
+| Render engine: core | 8 (6 %) | 17 | 5 | 0 | 5 | 7 | 2 | 44 % | 53 % |
+| Render engine: lights, camera effects and output | 6 (5 %) | 19 | 0 | 0 | 3 | 16 | 0 | 8 % | 6 % |
 | Rigging | 6 (5 %) | 15 | 0 | 0 | 0 | 15 | 0 | 0 % | 0 % |
 | Animation | 8 (6 %) | 17 | 0 | 0 | 0 | 17 | 0 | 0 % | 0 % |
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
@@ -409,20 +409,20 @@ Weight: 8
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Real-time viewport PBR | C M Z | P | M | Rasterized studio lighting; no shadows or image lighting |
-| Path tracing on the CPU | C M R | M | XL | Later, ideally a shared craft-raster3d (RFC-0032) |
-| Path tracing on the GPU | C R | M | XL | |
-| One scene, matching CPU and GPU results | R | M | L | |
-| Multiple importance sampling and next-event estimation | R | M | L | |
-| Ray-tracing acceleration structure for the whole scene | R | P | L | A triangle BVH exists for sculpt picking; none for rendering |
+| Path tracing on the CPU | C M R | D | XL | `craft-render-core`: unidirectional, all cores, deterministic per seed; checked against analytic lights and a furnace test. Which surface, light and output features it carries is counted in their own rows |
+| Path tracing on the GPU | C R | P | XL | `craft-render-gpu`: the same kernel as a wgpu compute pipeline (Vulkan, Metal, DX12), 30–50× the 24-thread CPU on an RTX 4090 ([performance.md](performance.md)); software BVH traversal, no hardware ray queries; scenes are limited by the device's buffer sizes |
+| One scene, matching CPU and GPU results | R | D | L | Same samples, same estimator: a test holds the two images to a relative MSE under 0.002, on hardware and on a software Vulkan driver |
+| Multiple importance sampling and next-event estimation | R | D | L | Power heuristic over light and BSDF sampling; a test checks that light-only, BSDF-only and combined estimators agree |
+| Ray-tracing acceleration structure for the whole scene | R | D | L | `craft-render-bvh`: binned-SAH BVH built in parallel (2.0 M triangles in 0.56 s), one flat layout for CPU and GPU; no instancing or motion yet (their own rows) |
 | Adaptive sampling with a noise threshold | R | M | M | |
-| Progressive mode | R | M | M | |
+| Progressive mode | R | D | M | Passes accumulate on one film; any number of passes equals one render of the same sample count |
 | Bucket mode | R | M | M | |
-| Interactive preview render with live edits | C M R | M | L | |
+| Interactive preview render with live edits | C M R | P | L | Render View (F9) restarts on scene, material and camera changes; not during a sculpt stroke, no region, no light or exposure controls |
 | Denoiser | C R | M | L | |
-| Path controls: bounces per type, clamping, sample limits | R | M | S | |
+| Path controls: bounces per type, clamping, sample limits | R | P | S | Total bounces, indirect clamp and sample count; not per lobe type |
 | Instanced geometry at render time | C M R | M | L | |
 | Render region | C M R | M | S | |
-| Batch and command-line renders | C M Z R | M | M | |
+| Batch and command-line renders | C M Z R | P | M | `modelcraft-cli render` writes one PNG per call (CPU or GPU); no frame ranges or EXR yet |
 | Distributed rendering over the network | C M R | M | L | |
 | Render queue | C M | M | M | |
 | Vendor cloud rendering services | C R | O | L | A paid hosted service, not a feature of the app; distributed rendering above covers the user need |
@@ -434,8 +434,8 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Point, spot and directional lights | C M R | M | M | |
-| Area lights: rectangle, disk, sphere, mesh | C M R | M | M | |
+| Point, spot and directional lights | C M R | P | M | Point and directional in the engine (tested against their formulas); no spot, and no light objects in the scene graph: renders use a built-in studio light |
+| Area lights: rectangle, disk, sphere, mesh | C M R | P | M | Any emissive mesh is a light, sampled by power (a rectangle is checked against its closed-form irradiance); no light objects, disk or sphere shapes |
 | Dome / image-based lighting with importance sampling | C M R | M | M | |
 | Physical sun and sky | C M R | M | M | |
 | Light linking (include / exclude) | C M R | M | M | |
@@ -445,7 +445,7 @@ Weight: 6
 | Volumes: homogeneous, heterogeneous, sparse grids | C M R | M | L | |
 | Render-time displacement with adaptive subdivision | C M R | M | L | |
 | Motion blur: transform and deformation | C M R | M | L | |
-| Depth of field and bokeh | C M R | M | M | |
+| Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); no aperture control in the app or CLI yet |
 | Physical camera: exposure, white balance, lens distortion | C M R | M | S | |
 | Caustics and path guiding | R | M | L | |
 | Render passes (AOVs) and ID mattes | C M R | M | M | |
@@ -622,6 +622,7 @@ Weight: 3
 - Files: `crates/formats` (project round trip with blobs, corrupted-project proptest, GLB/OBJ/STL round trips, torn journal).
 - Engine: `crates/engine/src/tests.rs` (`journal_recovers_unsaved_work_after_a_crash`, `undo_memory_is_bounded`).
 - GPU: `crates/render/src/gpu.rs` `renders_a_quad_when_a_gpu_is_present` (renders and reads back).
+- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs`, `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).

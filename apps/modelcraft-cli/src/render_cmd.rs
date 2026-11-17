@@ -49,7 +49,21 @@ pub struct RenderArgs {
 
 impl Default for RenderArgs {
     fn default() -> Self {
-        RenderArgs { width: 960, height: 540, samples: 64, depth: 12, seed: 0, device: Device::Auto, exposure: 0.0, yaw: None, pitch: None, fov: None, ortho: false, sky: None, ground: true }
+        RenderArgs {
+            width: 960,
+            height: 540,
+            samples: 64,
+            depth: 12,
+            seed: 0,
+            device: Device::Auto,
+            exposure: 0.0,
+            yaw: None,
+            pitch: None,
+            fov: None,
+            ortho: false,
+            sky: None,
+            ground: true,
+        }
     }
 }
 
@@ -139,7 +153,12 @@ pub struct Report {
 
 /// Render `scene` with the device the arguments ask for.
 pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
-    let settings = RenderSettings { width: args.width, height: args.height, integrator: IntegratorSettings { max_depth: args.depth, ..IntegratorSettings::default() }, seed: args.seed };
+    let settings = RenderSettings {
+        width: args.width,
+        height: args.height,
+        integrator: IntegratorSettings { max_depth: args.depth, ..IntegratorSettings::default() },
+        seed: args.seed,
+    };
     let gpu = match args.device {
         Device::Cpu => None,
         Device::Gpu => Some(GpuContext::new().ok_or("no GPU adapter is available; use --device cpu")?),
@@ -213,8 +232,13 @@ mod tests {
 
     #[test]
     fn parses_options_and_rejects_bad_ones() {
-        let a = parse(&args(&["--width", "64", "--height", "48", "--samples", "0", "--device", "cpu", "--sky", "0.5", "--no-ground", "--yaw", "30", "--ortho"])).unwrap();
-        assert_eq!((a.width, a.height, a.samples, a.device, a.sky, a.ground, a.yaw, a.ortho), (64, 48, 1, Device::Cpu, Some([0.5; 3]), false, Some(30.0), true));
+        let a =
+            parse(&args(&["--width", "64", "--height", "48", "--samples", "0", "--device", "cpu", "--sky", "0.5", "--no-ground", "--yaw", "30", "--ortho"]))
+                .unwrap();
+        assert_eq!(
+            (a.width, a.height, a.samples, a.device, a.sky, a.ground, a.yaw, a.ortho),
+            (64, 48, 1, Device::Cpu, Some([0.5; 3]), false, Some(30.0), true)
+        );
         assert_eq!(parse(&[]).unwrap(), RenderArgs::default());
         assert!(parse(&args(&["--width", "wide"])).is_err());
         assert!(parse(&args(&["--device", "abacus"])).is_err());

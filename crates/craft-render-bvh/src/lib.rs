@@ -332,8 +332,9 @@ impl Bvh {
     /// Build over any primitives. Primitives whose bounds are empty or not finite are left out.
     pub fn build(prims: &[PrimInfo]) -> Bvh {
         let limit = prims.len().min(u32::MAX as usize / 2);
-        let mut idx: Vec<u32> =
-            (0..limit as u32).filter(|i| prims.get(*i as usize).is_some_and(|p| p.bounds.is_finite() && !p.bounds.is_empty() && p.centroid.is_finite())).collect();
+        let mut idx: Vec<u32> = (0..limit as u32)
+            .filter(|i| prims.get(*i as usize).is_some_and(|p| p.bounds.is_finite() && !p.bounds.is_empty() && p.centroid.is_finite()))
+            .collect();
         if idx.is_empty() {
             return Bvh::default();
         }
@@ -633,7 +634,11 @@ mod tests {
         let empty = TriangleBvh::build(&[]);
         assert!(empty.intersect(&Ray::new(Vec3::ZERO, Vec3::X)).is_none());
         assert!(!empty.occluded(&Ray::new(Vec3::ZERO, Vec3::X)));
-        let bad = [[Vec3::splat(f32::NAN); 3], [Vec3::ZERO, Vec3::splat(f32::INFINITY), Vec3::X], [Vec3::new(1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, -1.0), Vec3::new(1.0, 0.0, 1.0)]];
+        let bad = [
+            [Vec3::splat(f32::NAN); 3],
+            [Vec3::ZERO, Vec3::splat(f32::INFINITY), Vec3::X],
+            [Vec3::new(1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, -1.0), Vec3::new(1.0, 0.0, 1.0)],
+        ];
         let bvh = TriangleBvh::build(&bad);
         assert_eq!(bvh.triangle_count(), 1);
         let hit = bvh.intersect(&Ray::new(Vec3::ZERO, Vec3::X)).unwrap();
@@ -674,5 +679,46 @@ mod tests {
         // An accept filter that rejects everything finds nothing; one that rejects the first
         // surface finds none behind it here.
         assert!(bvh.intersect_with(&ray, |_| false).is_none());
+    }
+
+    /// A timing, not a check: `cargo test --release -p craft-render-bvh -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_build_two_million_triangles() {
+        let n = 1000;
+        let mut tris = Vec::with_capacity(n * n * 2);
+        for y in 0..n {
+            for x in 0..n {
+                let h = |x: usize, y: usize| ((x as f32 * 0.05).sin() + (y as f32 * 0.07).cos()) * 3.0;
+                let p = |x: usize, y: usize| Vec3::new(x as f32 * 0.1, h(x, y), y as f32 * 0.1);
+                tris.push([p(x, y), p(x + 1, y), p(x, y + 1)]);
+                tris.push([p(x + 1, y), p(x + 1, y + 1), p(x, y + 1)]);
+            }
+        }
+        let t = std::time::Instant::now();
+        let bvh = TriangleBvh::build(&tris);
+        let build = t.elapsed();
+        let s = bvh.bvh.stats();
+        let t = std::time::Instant::now();
+        let rays = 2_000_000;
+        let mut hits = 0;
+        for i in 0..rays {
+            let (a, b) = ((i % 1000) as f32 * 0.1 + 0.03, (i / 1000 % 1000) as f32 * 0.1 + 0.05);
+            let ray = Ray::new(Vec3::new(a, 20.0, b), Vec3::new(0.3, -1.0, 0.2).normalize());
+            hits += usize::from(bvh.intersect(&ray).is_some());
+        }
+        let trace = t.elapsed();
+        eprintln!(
+            "{} triangles: build {:.0} ms, {} nodes, depth {}, SAH cost {:.1}; {} rays on one thread in {:.0} ms ({:.2} M rays/s), {} hits",
+            tris.len(),
+            build.as_secs_f64() * 1e3,
+            s.nodes,
+            s.max_depth,
+            s.sah_cost,
+            rays,
+            trace.as_secs_f64() * 1e3,
+            rays as f64 / trace.as_secs_f64() / 1e6,
+            hits
+        );
     }
 }

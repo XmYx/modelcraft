@@ -42,9 +42,10 @@ pub fn trace_mesh(m: &PolyMesh) -> MeshData {
     let positions: Vec<Vec3> = data.vertices.iter().map(|v| Vec3::from_array(v.pos)).collect();
     let mut indices = Vec::with_capacity(data.indices.len() / 3);
     let mut normals = Vec::with_capacity(data.indices.len() / 3);
-    for t in data.indices.chunks_exact(3) {
+    let (triangles, _) = data.indices.as_chunks::<3>();
+    for t in triangles {
         let n = |i: u32| data.vertices.get(i as usize).map_or(Vec3::ZERO, |v| Vec3::from_array(v.normal));
-        indices.push([t[0], t[1], t[2]]);
+        indices.push(*t);
         normals.push([n(t[0]), n(t[1]), n(t[2])]);
     }
     MeshData { positions, indices, normals: Some(normals), uvs: None }
@@ -163,9 +164,21 @@ mod tests {
 
     fn cube_scene() -> Scene {
         let mut s = Scene::new();
-        let cube = s.add("Cube", ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::Cube { size: Vec3::splat(2.0), segments: 1 } }, steps: vec![] }, None).unwrap();
+        let cube = s
+            .add(
+                "Cube",
+                ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::Cube { size: Vec3::splat(2.0), segments: 1 } }, steps: vec![] },
+                None,
+            )
+            .unwrap();
         s.edit(cube).unwrap().material = Material { base_color: [0.9, 0.1, 0.1, 1.0], metallic: 0.0, roughness: 0.5, linked: None };
-        let hidden = s.add("Hidden", ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::Cube { size: Vec3::splat(50.0), segments: 1 } }, steps: vec![] }, None).unwrap();
+        let hidden = s
+            .add(
+                "Hidden",
+                ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::Cube { size: Vec3::splat(50.0), segments: 1 } }, steps: vec![] },
+                None,
+            )
+            .unwrap();
         s.edit(hidden).unwrap().visible = false;
         s.add("Group", ObjectKind::Group, None).unwrap();
         s

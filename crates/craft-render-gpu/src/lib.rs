@@ -83,7 +83,12 @@ impl GpuContext {
                 ..wgpu::Limits::default()
             };
             let open = |limits: wgpu::Limits| {
-                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("craft-render"), required_limits: limits, ..Default::default() })).ok()
+                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                    label: Some("craft-render"),
+                    required_limits: limits,
+                    ..Default::default()
+                }))
+                .ok()
             };
             if let Some((device, queue)) = open(wanted).or_else(|| open(wgpu::Limits::default())) {
                 return Some(GpuContext::from_device(device, queue, &info));
@@ -284,11 +289,29 @@ impl GpuRenderer {
                 Light::Point { position, intensity } => (KIND_POINT, position, intensity),
                 Light::Directional { direction, irradiance } => (KIND_DIRECTIONAL, direction.normalize_or_zero(), irradiance),
             };
-            entries.push(GpuLight { p0: p0.to_array(), kind, e1: [0.0; 3], cdf: cdf.get(k).copied().unwrap_or(1.0), e2: [0.0; 3], area: 0.0, radiance: radiance.to_array(), pmf: lights.pmf(k) });
+            entries.push(GpuLight {
+                p0: p0.to_array(),
+                kind,
+                e1: [0.0; 3],
+                cdf: cdf.get(k).copied().unwrap_or(1.0),
+                e2: [0.0; 3],
+                area: 0.0,
+                radiance: radiance.to_array(),
+                pmf: lights.pmf(k),
+            });
         }
         if entries.len() < cdf.len() {
             let k = cdf.len() - 1;
-            entries.push(GpuLight { p0: [0.0; 3], kind: KIND_ENVIRONMENT, e1: [0.0; 3], cdf: 1.0, e2: [0.0; 3], area: 0.0, radiance: lights.environment.to_array(), pmf: lights.pmf(k) });
+            entries.push(GpuLight {
+                p0: [0.0; 3],
+                kind: KIND_ENVIRONMENT,
+                e1: [0.0; 3],
+                cdf: 1.0,
+                e2: [0.0; 3],
+                area: 0.0,
+                radiance: lights.environment.to_array(),
+                pmf: lights.pmf(k),
+            });
         }
         let light_count = entries.len() as u32;
 
@@ -333,7 +356,10 @@ impl GpuRenderer {
 
         scoped(ctx, || {
             let device = &ctx.device;
-            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("craft path tracer"), source: wgpu::ShaderSource::Wgsl(include_str!("pathtrace.wgsl").into()) });
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("craft path tracer"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("pathtrace.wgsl").into()),
+            });
             let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("craft path tracer"),
                 layout: None,
@@ -356,7 +382,11 @@ impl GpuRenderer {
             let buffers = [&params_buf, &nodes_buf, &tris_buf, &attrs_buf, &mats_buf, &lights_buf, &table_buf, &accum];
             let entries: Vec<wgpu::BindGroupEntry<'_>> =
                 buffers.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("craft path tracer"), layout: &pipeline.get_bind_group_layout(0), entries: &entries });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("craft path tracer"),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &entries,
+            });
             GpuRenderer { pipeline, bind_group, params_buf, accum, params, samples: 0 }
         })
     }

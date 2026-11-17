@@ -75,12 +75,24 @@ fn analytic_lights_match_their_formulas() {
     // Lambert: L = albedo/π · E.
     let albedo_over_pi = 0.5 / std::f64::consts::PI;
     // Point light of intensity 10 W/sr, 2 m above the plane: E = I/d².
-    let f = render(lit_plane(|b| b.add_light(Light::Point { position: Vec3::new(0.0, 2.0, 0.0), intensity: Vec3::splat(10.0) }).unwrap()), 16, 16, 16, IntegratorSettings::default());
+    let f = render(
+        lit_plane(|b| b.add_light(Light::Point { position: Vec3::new(0.0, 2.0, 0.0), intensity: Vec3::splat(10.0) }).unwrap()),
+        16,
+        16,
+        16,
+        IntegratorSettings::default(),
+    );
     let m = centre_mean(&f, 4.0);
     assert!((m[0] - albedo_over_pi * 10.0 / 4.0).abs() < 2e-3, "point {m:?}");
     // Sun at 60° from the normal with irradiance 3 on a facing surface: E = 3·cos 60°.
     let dir = Vec3::new(60f32.to_radians().sin(), 60f32.to_radians().cos(), 0.0);
-    let f = render(lit_plane(|b| b.add_light(Light::Directional { direction: dir, irradiance: Vec3::splat(3.0) }).unwrap()), 16, 16, 16, IntegratorSettings::default());
+    let f = render(
+        lit_plane(|b| b.add_light(Light::Directional { direction: dir, irradiance: Vec3::splat(3.0) }).unwrap()),
+        16,
+        16,
+        16,
+        IntegratorSettings::default(),
+    );
     let m = centre_mean(&f, 4.0);
     assert!((m[0] - albedo_over_pi * 1.5).abs() < 2e-3, "sun {m:?}");
     // Uniform sky of radiance 2: E = π·L, so the plane shows albedo·L.
@@ -163,7 +175,15 @@ fn hostile_scenes_render_without_panicking() {
     use crate::shapes::MeshData;
     // Empty scene, zero-area and non-finite triangles, absurd parameters.
     let mut b = SceneBuilder::new();
-    let m = b.add_material(Material { base_color: Vec3::splat(f32::NAN), specular_roughness: -3.0, specular_ior: f32::INFINITY, emission_luminance: f32::NAN, ..Material::default() }).unwrap();
+    let m = b
+        .add_material(Material {
+            base_color: Vec3::splat(f32::NAN),
+            specular_roughness: -3.0,
+            specular_ior: f32::INFINITY,
+            emission_luminance: f32::NAN,
+            ..Material::default()
+        })
+        .unwrap();
     let mesh = MeshData {
         positions: vec![Vec3::ZERO, Vec3::ZERO, Vec3::ZERO, Vec3::splat(f32::NAN), Vec3::X, Vec3::Y],
         indices: vec![[0, 1, 2], [3, 4, 5], [0, 4, 5]],

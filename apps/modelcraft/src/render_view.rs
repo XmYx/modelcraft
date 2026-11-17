@@ -111,7 +111,15 @@ fn mix(h: u64, v: u64) -> u64 {
 }
 
 /// The worker: build the scene, then add passes until the target, an error or a cancel.
-fn worker(builder: SceneBuilder, settings: RenderSettings, target: u32, device: Device, cancel: Arc<AtomicBool>, shared: Arc<Mutex<Shared>>, ctx: egui::Context) {
+fn worker(
+    builder: SceneBuilder,
+    settings: RenderSettings,
+    target: u32,
+    device: Device,
+    cancel: Arc<AtomicBool>,
+    shared: Arc<Mutex<Shared>>,
+    ctx: egui::Context,
+) {
     let start = Instant::now();
     let scene = Arc::new(builder.build());
     let publish = |film: &modelcraft_render::pathtrace::Film, label: &str, done: bool| {
@@ -318,7 +326,12 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
         if let Some(e) = &s.error {
             finished_now = Some(crate::tlf!("Render failed: {error}", error = e));
         } else if s.done && s.samples >= j.target {
-            finished_now = Some(crate::tlf!("Render finished: {samples} samples in {seconds} s ({device})", samples = s.samples, seconds = format!("{:.1}", s.seconds), device = s.device));
+            finished_now = Some(crate::tlf!(
+                "Render finished: {samples} samples in {seconds} s ({device})",
+                samples = s.samples,
+                seconds = format!("{:.1}", s.seconds),
+                device = s.device
+            ));
         } else if s.done {
             finished_now = Some(crate::tlf!("Render stopped at {samples} samples", samples = s.samples));
         }
@@ -381,7 +394,8 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
                 let avail = ui.available_size().max(egui::vec2(64.0, 64.0));
                 let scale = (avail.x / size.x).min(avail.y / size.y).min(1.0);
                 let r = ui.add(egui::Image::new(egui::load::SizedTexture::new(tex.id(), size * scale)));
-                let label = crate::tlf!("Rendered image, {width} by {height} pixels, {samples} samples", width = size.x as u32, height = size.y as u32, samples = done);
+                let label =
+                    crate::tlf!("Rendered image, {width} by {height} pixels, {samples} samples", width = size.x as u32, height = size.y as u32, samples = done);
                 ui.ctx().accesskit_node_builder(r.id, |n| {
                     n.set_role(egui::accesskit::Role::Image);
                     n.set_label(label);

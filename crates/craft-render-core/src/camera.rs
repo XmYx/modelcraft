@@ -23,7 +23,15 @@ pub struct Camera {
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera { eye: Vec3::new(0.0, 1.0, 5.0), target: Vec3::ZERO, up: Vec3::Y, fov_y: 40f32.to_radians(), ortho_height: None, aperture_radius: 0.0, focus_distance: 5.0 }
+        Camera {
+            eye: Vec3::new(0.0, 1.0, 5.0),
+            target: Vec3::ZERO,
+            up: Vec3::Y,
+            fov_y: 40f32.to_radians(),
+            ortho_height: None,
+            aperture_radius: 0.0,
+            focus_distance: 5.0,
+        }
     }
 }
 
@@ -73,7 +81,17 @@ impl Camera {
         };
         let aperture = if self.aperture_radius.is_finite() { self.aperture_radius.max(0.0) } else { 0.0 };
         let focus = if self.focus_distance.is_finite() && self.focus_distance > 1e-6 { self.focus_distance } else { (target - eye).length().max(1e-3) };
-        PreparedCamera { origin: eye.into(), right: right.into(), up: up.into(), forward: forward.into(), half_w: half_h * aspect, half_h, ortho, aperture, focus }
+        PreparedCamera {
+            origin: eye.into(),
+            right: right.into(),
+            up: up.into(),
+            forward: forward.into(),
+            half_w: half_h * aspect,
+            half_h,
+            ortho,
+            aperture,
+            focus,
+        }
     }
 }
 
@@ -153,7 +171,15 @@ mod tests {
 
     #[test]
     fn hostile_cameras_are_repaired() {
-        let cam = Camera { eye: Vec3::splat(f32::NAN), target: Vec3::ZERO, up: Vec3::ZERO, fov_y: f32::INFINITY, ortho_height: Some(-1.0), aperture_radius: f32::NAN, focus_distance: 0.0 };
+        let cam = Camera {
+            eye: Vec3::splat(f32::NAN),
+            target: Vec3::ZERO,
+            up: Vec3::ZERO,
+            fov_y: f32::INFINITY,
+            ortho_height: Some(-1.0),
+            aperture_radius: f32::NAN,
+            focus_distance: 0.0,
+        };
         let r = cam.prepare(f32::NAN).ray(Vec2::new(0.3, 0.3), Vec2::splat(0.2));
         assert!(r.origin.is_finite() && r.dir.is_finite() && (r.dir.length() - 1.0).abs() < 1e-4);
         let same = Camera { eye: Vec3::ONE, target: Vec3::ONE, ..Camera::default() }.prepare(1.0).ray(Vec2::ZERO, Vec2::ZERO);

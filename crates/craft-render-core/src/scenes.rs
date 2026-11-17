@@ -28,7 +28,13 @@ pub fn cornell_box() -> Result<Scene, SceneError> {
     let block = cuboid(Vec3::new(-0.3, 0.0, -0.3), Vec3::new(0.3, 1.0, 0.3));
     b.add_mesh(&block, Mat4::from_translation(Vec3::new(-0.35, 0.0, -0.3)) * Mat4::from_rotation_y(0.3) * Mat4::from_scale(Vec3::new(1.0, 1.2, 1.0)), white)?;
     b.add_mesh(&block, Mat4::from_translation(Vec3::new(0.35, 0.0, 0.3)) * Mat4::from_rotation_y(-0.3) * Mat4::from_scale(Vec3::new(1.0, 0.6, 1.0)), white)?;
-    b.set_camera(Camera { eye: Vec3::new(0.0, 1.0, 4.6), target: Vec3::new(0.0, 1.0, 0.0), fov_y: 36f32.to_radians(), focus_distance: 4.6, ..Camera::default() });
+    b.set_camera(Camera {
+        eye: Vec3::new(0.0, 1.0, 4.6),
+        target: Vec3::new(0.0, 1.0, 0.0),
+        fov_y: 36f32.to_radians(),
+        focus_distance: 4.6,
+        ..Camera::default()
+    });
     Ok(b.build())
 }
 
@@ -54,7 +60,8 @@ pub fn material_row() -> Result<Scene, SceneError> {
     for i in 0..5 {
         let t = i as f32 / 4.0;
         let metal = b.add_material(Material::metal(Vec3::new(0.95, 0.75, 0.4), 0.05 + 0.6 * t))?;
-        let plastic = b.add_material(Material { base_color: Vec3::new(0.1 + 0.6 * t, 0.25, 0.7 - 0.5 * t), specular_roughness: 0.6 - 0.55 * t, ..Material::default() })?;
+        let plastic =
+            b.add_material(Material { base_color: Vec3::new(0.1 + 0.6 * t, 0.25, 0.7 - 0.5 * t), specular_roughness: 0.6 - 0.55 * t, ..Material::default() })?;
         let x = (i as f32 - 2.0) * 1.2;
         b.add_mesh(&sphere, Mat4::from_translation(Vec3::new(x, 0.5, -0.7)), metal)?;
         b.add_mesh(&sphere, Mat4::from_translation(Vec3::new(x, 0.5, 0.7)), plastic)?;

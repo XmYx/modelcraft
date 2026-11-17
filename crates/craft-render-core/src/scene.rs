@@ -199,7 +199,13 @@ impl Lights {
                 Light::Point { position, intensity } => {
                     let d = Vec3A::from(position) - p;
                     let dist2 = d.length_squared();
-                    (dist2 > 0.0).then(|| LightSample { wi: d / dist2.sqrt(), distance: dist2.sqrt(), radiance: Vec3A::from(intensity) / dist2, pdf: pmf, delta: true })
+                    (dist2 > 0.0).then(|| LightSample {
+                        wi: d / dist2.sqrt(),
+                        distance: dist2.sqrt(),
+                        radiance: Vec3A::from(intensity) / dist2,
+                        pdf: pmf,
+                        delta: true,
+                    })
                 }
                 Light::Directional { direction, irradiance } => {
                     let wi = Vec3A::from(direction).normalize_or_zero();
@@ -360,7 +366,9 @@ impl SceneBuilder {
         }
         let ok = match light {
             Light::Point { position, intensity } => position.is_finite() && intensity.is_finite() && intensity.max_element() > 0.0,
-            Light::Directional { direction, irradiance } => direction.is_finite() && direction.length_squared() > 0.0 && irradiance.is_finite() && irradiance.max_element() > 0.0,
+            Light::Directional { direction, irradiance } => {
+                direction.is_finite() && direction.length_squared() > 0.0 && irradiance.is_finite() && irradiance.max_element() > 0.0
+            }
         };
         if ok {
             self.scene.lights.analytic.push(light);
