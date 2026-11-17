@@ -56,8 +56,6 @@ this size) and the undo snapshot.
 Level changes build the level topology twice through the validated mesh builder; that, not the
 linear refinement itself, is most of the time, and it is single-threaded.
 
-<<<<<<< HEAD
-=======
 ## The ten newer brushes (same bench, same mesh and radius)
 
 Measured 2026-11-17 while other builds shared the machine (the seven rows above re-measured in
@@ -112,7 +110,6 @@ dab at 12.6 M triangles (p95 8.6 ms to 32 ms), and session start showed no gain 
 noise. A dab touches a few thousand vertices, too little to pay for the hand-over when the cores
 are contended. Dabs therefore stay on one thread until this is measured on an idle machine.
 
->>>>>>> e166a55 (Scale: measured numbers, docs, parity rows)
 ## Live detail and even remesh (`modelcraft-cli bench`, last lines)
 
 Measured 2026-11-17 on the same machine while other builds were running, engine only (no GPU
