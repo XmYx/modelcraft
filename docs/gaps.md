@@ -296,7 +296,7 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3** builds on craft-ui `docking` for tabs and splits. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
+Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

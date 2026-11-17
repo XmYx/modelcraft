@@ -52,7 +52,7 @@ never estimated by hand.
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
 | Hair, fur and grooming | 4 (3 %) | 6 | 0 | 0 | 0 | 6 | 0 | 0 % | 0 % |
 | Volumes | 2 (2 %) | 2 | 0 | 0 | 0 | 2 | 0 | 0 % | 0 % |
-| Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 3 | 5 | 1 | 35 % | 21 % |
+| Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 4 | 4 | 1 | 40 % | 26 % |
 | Pipeline formats and referencing | 6 (5 %) | 15 | 5 | 1 | 0 | 9 | 1 | 40 % | 19 % |
 | UI and workspaces | 4 (3 %) | 13 | 7 | 1 | 3 | 2 | 0 | 73 % | 62 % |
 | Stability and performance | 3 (2 %) | 6 | 4 | 1 | 0 | 1 | 0 | 83 % | 75 % |
@@ -555,7 +555,7 @@ Weight: 5
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | M | M | |
-| User tools, shelves and recorded macros | C M Z | M | M | |
+| User tools, shelves and recorded macros | C M Z | P | M | Any command can sit on the Quick Bar; no recorded macros or user-written tools yet |
 | Event callbacks (scene changed, selection changed) | C M | M | M | |
 | Plugin SDK for native extensions | C M Z | M | L | |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
@@ -595,11 +595,11 @@ Weight: 4
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |
 | Customisable shortcuts | C M Z | D | S | Suite Keyboard Shortcuts dialog (craft-keymap): conflicts, saved sets, per-workspace contexts |
-| Radial and marking menus | C M Z | M | M | |
-| User palettes and shelves | C M Z | M | M | |
+| Radial and marking menus | C M Z | D | M | Radial Menu (Shift+Space): eight context actions (add objects, component tools, brushes); numbers 1–8, Tab and Enter, or the pointer |
+| User palettes and shelves | C M Z | D | M | Quick Bar: any command as a button, edited in Preferences or from its context menu, saved in the preferences |
 | Undo history panel (jump to any step) | M Z | D | S | |
 | Open Recent, incremental save | C M Z | D | S | |
-| Preferences | C M Z | P | S | Navigation, snapping, brush size, shortcuts; no units or display settings |
+| Preferences | C M Z | D | S | Preferences window (Ctrl+,): language, navigation, length units, display (grid, axis triad, wireframe, patches), snapping steps, brush size, Quick Bar, shortcuts |
 | Translated interface | C M Z | P | M | Strings go through craft-i18n; no shipped translations |
 | Accessibility: keyboard paths, screen-reader tree | | X | S | Tree items, viewport object nodes, numeric gizmo path, kittest tests |
 

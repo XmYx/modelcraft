@@ -1,5 +1,5 @@
-//! The shelf: a bar of the user's own buttons under the tool options, one per chosen action
-//! (any menu or palette command). Edited in Preferences ▸ Shelf (a checkbox per action) or with
+//! The Quick Bar (internally the shelf): a bar of the user's own buttons under the tool options, one per chosen action
+//! (any menu or palette command). Edited in Preferences ▸ Quick Bar (a checkbox per action) or with
 //! the right-click menu of a shelf button; saved in the preferences by action id.
 
 use crate::actions::{self, Action};
@@ -16,19 +16,19 @@ pub fn action(id: &str) -> Option<Action> {
 
 pub fn contains(app: &ModelApp, a: Action) -> bool {
     let id = a.id();
-    app.shelf.iter().any(|s| *s == id)
+    app.shelf.contains(&id)
 }
 
 pub fn toggle(app: &mut ModelApp, a: Action) {
     let id = a.id();
     if let Some(i) = app.shelf.iter().position(|s| *s == id) {
         app.shelf.remove(i);
-        app.status = crate::tlf!("{action} removed from the shelf", action = a.label());
+        app.status = crate::tlf!("{action} removed from the Quick Bar", action = a.label());
     } else if app.shelf.len() < MAX {
         app.shelf.push(id);
-        app.status = crate::tlf!("{action} added to the shelf", action = a.label());
+        app.status = crate::tlf!("{action} added to the Quick Bar", action = a.label());
     } else {
-        app.status = crate::tlf!("The shelf holds {count} buttons at most", count = MAX);
+        app.status = crate::tlf!("The Quick Bar holds {count} buttons at most", count = MAX);
     }
 }
 
@@ -51,17 +51,17 @@ pub fn bar(app: &mut ModelApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     egui::Panel::top("shelf").frame(egui::Frame::NONE.fill(theme::PANEL_DEEP).inner_margin(egui::Margin::symmetric(6, 2))).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(tl!("Shelf")).color(theme::TEXT_DIM).small());
+            ui.label(egui::RichText::new(tl!("Quick Bar")).color(theme::TEXT_DIM).small());
             for a in app.shelf.clone().iter().filter_map(|id| action(id)) {
                 let r = ui.button(a.label()).on_hover_text(a.shortcut_text(app));
                 // Told apart from the same command elsewhere; the name starts with the visible label.
-                let name = crate::tlf!("{action}, on the shelf", action = a.label());
+                let name = crate::tlf!("{action}, on the Quick Bar", action = a.label());
                 ui.ctx().accesskit_node_builder(r.id, |n| n.set_label(name));
                 if r.clicked() {
                     app.act(&ctx, a);
                 }
                 r.context_menu(|ui| {
-                    if ui.button(tl!("Remove from Shelf")).clicked() {
+                    if ui.button(tl!("Remove from the Quick Bar")).clicked() {
                         toggle(app, a);
                         ui.close();
                     }

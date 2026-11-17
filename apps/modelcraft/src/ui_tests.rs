@@ -578,7 +578,7 @@ fn preferences_shelf_units_and_display() {
     // Shelf: filter, tick Subdivide; its button appears on the shelf and works.
     h.get_by_label("Display").click();
     h.run();
-    h.get_by_label("Shelf").click();
+    h.get_by_label("Quick Bar").click();
     h.run();
     h.get_by_label("Filter commands").focus();
     h.run();
@@ -590,7 +590,7 @@ fn preferences_shelf_units_and_display() {
     h.key_press(Key::Escape);
     h.run();
     assert!(!h.state().prefs_window.open, "Esc closes it");
-    h.get_by_role_and_label(Role::Button, "Subdivide, on the shelf").click();
+    h.get_by_role_and_label(Role::Button, "Subdivide, on the Quick Bar").click();
     h.run();
     let id = h.state().selection[0];
     assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 1);

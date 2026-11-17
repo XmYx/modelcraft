@@ -1,0 +1,1 @@
+| 2026-11-17 | Radial Menu (Shift+Space) with context actions, the Quick Bar of user-chosen commands, and a Preferences window (Ctrl+,) for language, navigation, length units, display, snapping, brush size and the Quick Bar |

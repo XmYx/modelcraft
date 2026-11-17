@@ -58,3 +58,6 @@ Names deliberately **not** used as labels: the reference products' names and the
 (their remesher, sculpt-mesh, layer and brush product names, object/attribute manager names,
 "construction history", "channel box", "subdivision surface" object name, "polygroups", "alphas",
 "dyntopo", "multires"). The parity document names the products only to describe the comparison.
+| Radial Menu | pie / marking menus | Generic ("radial menu" is a common UI pattern name); the reference term avoided | Use |
+| Quick Bar | shelves / custom palettes | No live software mark found for this phrase in class 9; plain descriptive words | Use |
+| Preferences | settings dialogs | Generic | Use |

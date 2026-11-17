@@ -165,8 +165,8 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
                     named(ui, &r, tl!("Brush size"));
                 });
             });
-            egui::CollapsingHeader::new(tl!("Shelf")).default_open(false).show(ui, |ui| {
-                ui.label(RichText::new(tl!("Tick the commands that get a button on the shelf.")).color(theme::TEXT_DIM).small());
+            egui::CollapsingHeader::new(tl!("Quick Bar")).default_open(false).show(ui, |ui| {
+                ui.label(RichText::new(tl!("Tick the commands that get a button on the Quick Bar.")).color(theme::TEXT_DIM).small());
                 let f = ui.add(egui::TextEdit::singleline(&mut app.prefs_window.filter).hint_text(tl!("Filter commands")));
                 named(ui, &f, tl!("Filter commands"));
                 let filter = app.prefs_window.filter.to_lowercase();

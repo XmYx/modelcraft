@@ -1,0 +1,1 @@
+- Radial Menu on Shift+Space, a Quick Bar for your own command buttons, and Edit ▸ Preferences… with language, length units and display settings.
