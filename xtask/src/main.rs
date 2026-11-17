@@ -11,7 +11,8 @@
 //!   fragments in `docs/progress.d/`; `--check` validates the fragments (part of `ci`).
 //! - `parity [--write]`: scores `docs/target-app-parity.md` (row parity and weighted parity, see
 //!   `parity.rs`); `--write` updates the block between the `parity:` markers, and without it the
-//!   command fails when the block is out of date (part of `ci`).
+//!   command fails when the block is out of date. `ci` validates the rows strictly but only warns
+//!   about a stale block (feature PRs flip rows; a maintainer refreshes the block separately).
 //! - `version [set <x.y.z>]`: print or set `[workspace.package] version`.
 //! - `icons`: render `assets/app-icon/modelcraft.svg` to the hicolor PNGs, the 1024 px PNG, the
 //!   Windows `.ico` and the macOS `.icns` (all committed, so packaging needs no tools).
@@ -442,26 +443,57 @@ fn icons() -> Result<(), String> {
     Ok(())
 }
 
+const PARITY_START: &str = "<!-- parity:start -->\n";
+const PARITY_END: &str = "<!-- parity:end -->";
+
+/// The byte range of the generated block inside the map, between the `parity:` markers.
+fn parity_block_range(text: &str) -> Result<(usize, usize), String> {
+    let (Some(a), Some(b)) = (text.find(PARITY_START), text.find(PARITY_END)) else { return Err("parity markers missing".into()) };
+    if a + PARITY_START.len() > b {
+        return Err("parity markers out of order".into());
+    }
+    Ok((a, b))
+}
+
 fn parity(write: bool) -> Result<(), String> {
     let path = root().join("docs/target-app-parity.md");
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let block = parity::score(&text)?.block();
     print!("{block}");
-    let start = "<!-- parity:start -->\n";
-    let end = "<!-- parity:end -->";
-    let (Some(a), Some(b)) = (text.find(start), text.find(end)) else { return Err("parity markers missing".into()) };
-    if a + start.len() > b {
-        return Err("parity markers out of order".into());
-    }
-    if text[a + start.len()..b] == block {
+    let (a, b) = parity_block_range(&text)?;
+    if text[a + PARITY_START.len()..b] == block {
         return Ok(());
     }
     if !write {
         return Err("the parity headline is out of date: run `cargo xtask parity --write`".into());
     }
-    let new = format!("{}{start}{block}{}", &text[..a], &text[b..]);
+    let new = format!("{}{PARITY_START}{block}{}", &text[..a], &text[b..]);
     std::fs::write(&path, new).map_err(|e| e.to_string())?;
     println!("wrote {}", path.display());
+    Ok(())
+}
+
+/// The parity check `ci` runs. The rows are validated strictly (a malformed row, a bad status or
+/// size, a table that does not parse, or missing markers is an error), but a stale generated block
+/// only warns: rows are flipped in many concurrent PRs, so committing the block there would make
+/// them all conflict. A maintainer refreshes it separately with `cargo xtask parity --write`.
+fn parity_ci_check(text: &str) -> Result<Option<String>, String> {
+    let block = parity::score(text)?.block();
+    let (a, b) = parity_block_range(text)?;
+    if text[a + PARITY_START.len()..b] == block {
+        return Ok(None);
+    }
+    Ok(Some(
+        "the generated parity headline is out of date (not a failure; a maintainer refreshes it with `cargo xtask parity --write` in a separate PR)".into(),
+    ))
+}
+
+fn parity_ci() -> Result<(), String> {
+    let path = root().join("docs/target-app-parity.md");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if let Some(warning) = parity_ci_check(&text)? {
+        eprintln!("xtask: warning: {warning}");
+    }
     Ok(())
 }
 
@@ -472,7 +504,7 @@ fn ci() -> Result<(), String> {
     layers()?;
     assets()?;
     licenses()?;
-    parity(false)?;
+    parity_ci()?;
     progress(true)
 }
 
@@ -502,7 +534,37 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::license_ok;
+    use super::{license_ok, parity_ci_check};
+
+    const ROWS: &str = "## One\nWeight: 2\n\n| Feature | Refs | Status | Size | Notes |\n|---|---|---|---|---|\n| a | C | D | S | |\n| b | C | P | L | |\n| c | C | M | M | |\n";
+
+    fn doc(block: &str, rows: &str) -> String {
+        format!("# Map\n\n<!-- parity:start -->\n{block}<!-- parity:end -->\n\n{rows}")
+    }
+
+    #[test]
+    fn fresh_block_is_silent() {
+        let block = crate::parity::score(ROWS).map(|r| r.block()).unwrap_or_default();
+        assert!(!block.is_empty());
+        assert_eq!(parity_ci_check(&doc(&block, ROWS)), Ok(None));
+    }
+
+    #[test]
+    fn stale_block_warns_but_does_not_fail() {
+        let checked = parity_ci_check(&doc("| | Value | Kind |\n|---|---|---|\n| In-scope feature rows | 1 | counted |\n", ROWS));
+        assert!(matches!(&checked, Ok(Some(w)) if w.contains("out of date")), "{checked:?}");
+    }
+
+    #[test]
+    fn malformed_rows_and_markers_still_fail() {
+        let block = "x\n";
+        let bad_size = ROWS.replace("| P | L |", "| P | huge |");
+        assert!(parity_ci_check(&doc(block, &bad_size)).is_err(), "bad size");
+        let no_weight = ROWS.replace("Weight: 2\n", "");
+        assert!(parity_ci_check(&doc(block, &no_weight)).is_err(), "area without a weight");
+        assert!(parity_ci_check(&doc(block, "no table at all\n")).is_err(), "no rows");
+        assert!(parity_ci_check(ROWS).is_err(), "markers missing");
+    }
 
     #[test]
     fn icon_containers() {
