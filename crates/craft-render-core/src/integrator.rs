@@ -49,8 +49,28 @@ impl Default for IntegratorSettings {
     }
 }
 
+/// What one path saw at its first surface, for the feature images a denoiser reads.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Features {
+    /// Base colour of the first surface (the environment's colour where nothing was hit).
+    pub albedo: Rgb,
+    /// Shading normal of the first surface in world space (zero where nothing was hit).
+    pub normal: Vec3A,
+    /// Distance from the camera to the first surface (zero where nothing was hit).
+    pub depth: f32,
+    /// World position of the first surface, if any.
+    pub position: Option<Vec3A>,
+}
+
 /// Radiance arriving along `ray` (one path).
-pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> Rgb {
+pub fn radiance(scene: &Scene, ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> Rgb {
+    radiance_and_features(scene, ray, sampler, cfg).0
+}
+
+/// [`radiance`] together with the features of the first surface the path met.
+pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> (Rgb, Features) {
+    let mut features = Features::default();
+    let mut first = true;
     let mut total = Vec3A::ZERO;
     let mut throughput = Vec3A::ONE;
     // Density of the direction that led here; infinite for the camera ray.
@@ -68,6 +88,9 @@ pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &Integr
     let mut depth = 0u32;
     while depth <= max_depth {
         let Some(hit) = scene.accel.intersect(&ray) else {
+            if first {
+                features.albedo = scene.lights.environment_radiance(ray.dir).min(Vec3A::ONE);
+            }
             if scene.lights.has_environment() {
                 let env = scene.lights.environment_radiance(ray.dir);
                 let w = if prev_pdf.is_infinite() {
@@ -109,12 +132,20 @@ pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &Integr
             add(throughput * le * w, depth);
         }
         if depth == max_depth {
+            if first {
+                features = Features { albedo: Vec3A::from(material.base_color), normal: sf.frame.n, depth: hit.t, position: Some(sf.p) };
+            }
             break;
         }
         shading_frame(scene, material, hit.prim, &mut sf);
         let transmissive = material.is_transmissive();
         let inside = transmissive && !sf.front;
-        let bsdf = Bsdf::new(&material.params(sf.uv, &scene.textures), sf.frame.to_local(-ray.dir), inside);
+        let params = material.params(sf.uv, &scene.textures);
+        if first {
+            first = false;
+            features = Features { albedo: params.base, normal: sf.frame.n, depth: hit.t, position: Some(sf.p) };
+        }
+        let bsdf = Bsdf::new(&params, sf.frame.to_local(-ray.dir), inside);
 
         // Direct light from one chosen light.
         if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
@@ -165,7 +196,7 @@ pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &Integr
         ray = Scene::spawn(sf.p, sf.ng, wi, f32::INFINITY);
         depth += 1;
     }
-    total
+    (total, features)
 }
 
 /// Apply the material's normal map, bump map and anisotropy direction to the shading frame.

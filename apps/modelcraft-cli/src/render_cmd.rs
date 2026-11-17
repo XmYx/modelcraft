@@ -13,7 +13,9 @@ use modelcraft_render::trace::{ExportOptions, Lighting, export_scene, load_panor
 use modelcraft_render::{Camera, Projection};
 
 pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
-                                    path-trace an image. Built-in scenes: cornell, materials, showcase, furnace
+                                    path-trace an image. Built-in scenes: cornell, materials,
+                                    interior, night-street, studio, showcase, furnace. A .exr output also holds
+                                    the feature images (albedo, normal, depth, motion, variance)
       --width N --height N          image size (default 960×540)
       --samples N                   samples per pixel (default 64)
       --depth N                     bounces (default 12)
@@ -135,14 +137,7 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
 
 /// A built-in scene by name.
 pub fn builtin(name: &str) -> Result<Scene, String> {
-    match name {
-        "cornell" => scenes::cornell_box(),
-        "materials" => scenes::material_row(),
-        "showcase" => scenes::showcase(),
-        "furnace" => scenes::furnace(modelcraft_render::pathtrace::Material::metal(glam::Vec3::ONE, 0.5)),
-        other => return Err(format!("unknown built-in scene {other:?} (cornell, materials, showcase, furnace)")),
-    }
-    .map_err(|e| e.to_string())
+    scenes::by_name(name).ok_or_else(|| format!("unknown built-in scene {name:?} ({}, furnace)", scenes::BENCHMARKS.join(", ")))?.map_err(|e| e.to_string())
 }
 
 /// The path tracer's scene for a document, seen by a camera that frames everything.
@@ -188,6 +183,7 @@ pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
         height: args.height,
         integrator: IntegratorSettings { max_depth: args.depth, ..IntegratorSettings::default() },
         seed: args.seed,
+        ..RenderSettings::default()
     };
     let gpu = match args.device {
         Device::Cpu => None,
@@ -223,10 +219,35 @@ pub fn write_png(path: &Path, film: &Film, exposure: f32) -> Result<(), String> 
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Write the film as one OpenEXR part of 32-bit float channels: `R G B` (linear radiance, not
+/// exposed or tone-mapped), then the feature images in the customary layer names
+/// (`albedo.R/G/B`, `N.X/Y/Z`, `Z`, `motion.X/Y`, `variance`).
+pub fn write_exr(path: &Path, film: &Film) -> Result<(), String> {
+    use craft_exr::decode::{Channel, Compression, Samples};
+    let k = if film.samples > 0 { 1.0 / film.samples as f32 } else { 0.0 };
+    let plane = |name: &str, values: Vec<f32>| Channel { name: name.to_string(), samples: Samples::F32(values) };
+    let of3 = |src: &[[f32; 3]], c: usize| src.iter().map(|p| p[c] * k).collect::<Vec<f32>>();
+    let mut channels = Vec::new();
+    for (c, name) in ["R", "G", "B"].into_iter().enumerate() {
+        channels.push(plane(name, of3(&film.sum, c)));
+        channels.push(plane(&format!("albedo.{name}"), of3(&film.albedo, c)));
+    }
+    for (c, name) in ["N.X", "N.Y", "N.Z"].into_iter().enumerate() {
+        channels.push(plane(name, of3(&film.normal, c)));
+    }
+    channels.push(plane("Z", film.depth.iter().map(|d| d * k).collect()));
+    channels.push(plane("motion.X", film.motion.iter().map(|m| m[0] * k).collect()));
+    channels.push(plane("motion.Y", film.motion.iter().map(|m| m[1] * k).collect()));
+    channels.push(plane("variance", film.variance()));
+    let bytes = craft_exr::decode::write(film.width, film.height, &channels, Compression::Zip16).map_err(|e| e.to_string())?;
+    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// The whole command: load or build the scene, render, write the image, describe the run.
 pub fn run(source: &str, out: &str, args: &RenderArgs, load: impl FnOnce(&str) -> Result<Document, String>) -> Result<serde_json::Value, String> {
-    if !out.to_ascii_lowercase().ends_with(".png") {
-        return Err(format!("{out}: the output must be a .png file"));
+    let lower = out.to_ascii_lowercase();
+    if !(lower.ends_with(".png") || lower.ends_with(".exr")) {
+        return Err(format!("{out}: the output must be a .png or .exr file"));
     }
     let t = Instant::now();
     let scene = match source.strip_prefix("builtin:") {
@@ -236,7 +257,11 @@ pub fn run(source: &str, out: &str, args: &RenderArgs, load: impl FnOnce(&str) -
     let build_seconds = t.elapsed().as_secs_f64();
     let triangles = scene.triangle_count();
     let report = render(scene, args)?;
-    write_png(Path::new(out), &report.film, args.exposure)?;
+    if lower.ends_with(".exr") {
+        write_exr(Path::new(out), &report.film)?;
+    } else {
+        write_png(Path::new(out), &report.film, args.exposure)?;
+    }
     let pixels = f64::from(report.film.width) * f64::from(report.film.height);
     Ok(serde_json::json!({
         "output": out,
@@ -324,6 +349,18 @@ mod tests {
         run("scene", out.to_str().unwrap(), &RenderArgs { env: Some(pano.display().to_string()), ..small.clone() }, cube).unwrap();
         std::fs::write(&pano, b"not a picture").unwrap();
         assert!(run("scene", out.to_str().unwrap(), &RenderArgs { env: Some(pano.display().to_string()), ..small.clone() }, cube).is_err());
+        // EXR: linear radiance plus the feature images, read back through craft-exr.
+        let out = dir.join("cornell.exr");
+        run("builtin:cornell", out.to_str().unwrap(), &small, |_| Err("not used".into())).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        let part = craft_exr::decode::decode_part(&bytes, 0, &|_| true, &craft_exr::decode::Limits::none()).unwrap();
+        for name in ["R", "G", "B", "albedo.R", "N.X", "Z", "motion.X", "variance"] {
+            assert_eq!(part.channel(name).map(|c| c.samples.len()), Some(40 * 30), "{name}");
+        }
+        // The back wall's normal faces the camera (+z) and its depth is the room's.
+        let centre = 8 * 40 + 20;
+        assert!(part.channel("N.Z").unwrap().samples.get_f32(centre) > 0.9);
+        assert!((part.channel("Z").unwrap().samples.get_f32(centre) - 5.6).abs() < 0.3);
         assert!(run("builtin:cornell", "out.jpg", &small, |_| Err("not used".into())).is_err());
         assert!(run("missing.glb", out.to_str().unwrap(), &small, |p| Err(format!("{p}: no such file"))).is_err());
         // An impossible size is an error, not a crash.

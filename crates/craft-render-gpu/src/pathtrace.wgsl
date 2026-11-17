@@ -19,6 +19,10 @@ struct Params {
     node_count: u32,
     clamp_indirect: f32,
     strategy: u32, // 0 both estimators (MIS), 1 light sampling only, 2 BSDF sampling only
+    z_bits: u32,   // index bits of the z-curve pixel order; 255: every pixel on its own
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
 }
 
 struct Node {
@@ -128,6 +132,14 @@ fn sobol1(index: u32) -> u32 {
         i >>= 1u;
     }
     return x;
+}
+
+fn spread_bits(value: u32) -> u32 {
+    var v = value & 0xffffu;
+    v = (v | (v << 8u)) & 0x00ff00ffu;
+    v = (v | (v << 4u)) & 0x0f0f0f0fu;
+    v = (v | (v << 2u)) & 0x33333333u;
+    return (v | (v << 1u)) & 0x55555555u;
 }
 
 fn next2() -> vec2<f32> {
@@ -308,6 +320,16 @@ fn intersect(o: vec3<f32>, d: vec3<f32>, limit: f32, any: bool) -> Hit {
     return best;
 }
 
+// The two ray queries the kernel makes. Everything above is one implementation of them (BVH
+// traversal in the shader); another backend, such as hardware ray queries, replaces these two.
+fn trace_closest(o: vec3<f32>, d: vec3<f32>) -> Hit {
+    return intersect(o, d, INF, false);
+}
+
+fn trace_any(o: vec3<f32>, d: vec3<f32>, tmax: f32) -> bool {
+    return intersect(o, d, tmax, true).slot != NO_HIT;
+}
+
 fn spawn_origin(p: vec3<f32>, ng: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
     let eps = 4e-5 * (1.0 + max3(abs(p)));
     let side = select(-1.0, 1.0, dot(dir, ng) >= 0.0);
@@ -317,7 +339,7 @@ fn spawn_origin(p: vec3<f32>, ng: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
 fn occluded(p: vec3<f32>, ng: vec3<f32>, dir: vec3<f32>, distance: f32) -> bool {
     let o = spawn_origin(p, ng, dir);
     if distance >= INF {
-        return intersect(o, dir, INF, true).slot != NO_HIT;
+        return trace_any(o, dir, INF);
     }
     // Aim from the offset origin at the point on the light and stop just short of it.
     let to = p + dir * distance - o;
@@ -326,7 +348,7 @@ fn occluded(p: vec3<f32>, ng: vec3<f32>, dir: vec3<f32>, distance: f32) -> bool 
     if tmax <= 0.0 {
         return false;
     }
-    return intersect(o, to / len, tmax, true).slot != NO_HIT;
+    return trace_any(o, to / len, tmax);
 }
 
 // ---- surface model ----------------------------------------------------------------------
@@ -580,7 +602,7 @@ fn radiance(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
         clamp_to = params.clamp_indirect;
     }
     for (var depth = 0u; depth <= params.max_depth; depth++) {
-        let hit = intersect(o, d, INF, false);
+        let hit = trace_closest(o, d);
         if hit.slot == NO_HIT {
             if max3(params.env.rgb) > 0.0 {
                 var w = 1.0;
@@ -714,6 +736,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         s_index = params.first_sample + s;
         s_seed = seed;
         s_dim = 0u;
+        // Pixels share one sequence along the z-curve while its 32-bit index lasts.
+        if params.z_bits < 32u && (params.z_bits == 0u || s_index < (1u << (32u - params.z_bits))) {
+            s_index = (s_index << params.z_bits) | spread_bits(gid.x) | (spread_bits(gid.y) << 1u);
+            s_seed = hash32(params.seed ^ 0x5bd1e995u);
+        }
         let jitter = next2();
         let lens = next2();
         let ndc = vec2<f32>(

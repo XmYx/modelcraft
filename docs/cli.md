@@ -11,6 +11,9 @@ modelcraft-cli export scene.modelcraft out.glb
 modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
+modelcraft-cli bake scene.modelcraft Cube out.mcpc --start 0 --end 48 --step 1 --world
+                                              # an object's vertices per frame (point cache)
+modelcraft-cli cache-info out.mcpc            # a point cache's header and bounds
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
@@ -53,6 +56,7 @@ Object ids are numbers (`info` prints them).
 ### Animation
 
 One command, `anim`, with the operation in `op`: `{"cmd":"anim","op":"set_key",…}`.
+Key operations work in the active layer.
 Time is in frames. A key is named by its object, attribute path and frame: `{id, path, frame}`.
 Attribute paths: `translate.x|y|z`, `rotate.x|y|z` (XYZ Euler degrees), `scale.x|y|z`, `visible`,
 `material.metallic`, `material.roughness`, `material.base_color.0`…`3`, `primitive.<parameter>`,
@@ -72,6 +76,12 @@ names (`levels`, `deformer.angle`, …). Whole-number attributes round; switches
 | `remove_track` | `id`, `path?` (every curve of the object without it) |
 | `bake_track` | `id`, `path`, `start?`, `end?` (the playback range), `step` (default 1) |
 | `simplify_track` | `id`, `path`, `tolerance` |
+| `euler_filter` | `ids`: rewrite keyed rotations as the equal angles nearest to the key before |
+| `turntable` | `ids`, `axis` (x, y, z; default y), `turns` (default 1), `start?`, `end?`; replaces the rotation curves |
+| `add_layer` | `name?`, `mode?` (add, override); the new layer becomes active |
+| `remove_layer`, `set_active_layer` | `layer` (0 is the base layer) |
+| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?` |
+| `flatten_layers` | `step` (default 1): bake every layer into the base curves |
 | `set_time` | `frame` (poses the scene; not an undo step) |
 | `set_time_range` | `start?`, `end?`, `fps?` |
 | `set_auto_key` | `on` |
@@ -86,7 +96,7 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
-model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:showcase`, `builtin:furnace`) and
+model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:interior`, `builtin:night-street`, `builtin:studio`, `builtin:showcase`, `builtin:furnace`) and
 prints one JSON line: device, size, samples, triangles, scene and render seconds, and million
 samples per second.
 
@@ -105,6 +115,15 @@ samples per second.
 
 The scene graph has no light objects yet, so a project is lit by a studio set-up (a soft sky and
 one key light sized to the scene) on a matte ground plane.
+
+An output ending in `.exr` holds linear radiance (`R`, `G`, `B`) and the feature images a denoiser
+or compositor reads: `albedo.R/G/B`, `N.X/Y/Z` (world-space normal), `Z` (distance from the
+camera), `motion.X/Y` and `variance`, all 32-bit float. The feature images come from the CPU path.
+
+`modelcraft-cli render-bench [--scenes a,b] [--size N] [--spp 1,4,16] [--seeds N] [--reference N]
+[--device cpu|gpu] [--order z|independent]` measures error against samples and time on the
+benchmark scenes, each against its own converged reference, and prints one JSON line per scene and
+a table ([performance.md](performance.md) explains the protocol).
 
 ## Control channel
 

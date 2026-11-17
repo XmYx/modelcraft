@@ -42,6 +42,8 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   bumps the revision only of objects whose values changed, so the evaluator re-runs exactly what
   the frame touched. Going to a frame is not an undo step and is journaled lazily (before the next
   command). Auto-key compares the scene before and after a command and keys what changed.
+  Tracks live in layers: the base, then layers that add to or replace the value below by a weight
+  (`Animation::value_at`); key commands work in the active layer.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.
@@ -67,6 +69,13 @@ WGSL compute kernel over the same BVH bytes, so the two converge to the same ima
 bakes world transforms, converts the material and adds lighting (the scene graph has no light
 objects yet). The Render View (`apps/modelcraft/src/render_view.rs`) and `modelcraft-cli render`
 are thin callers; the render itself runs on a worker thread.
+
+The kernel asks for rays through two functions, `trace_closest` and `trace_any`; today both are
+BVH traversal in the shader, which is the default and the reference. A hardware ray-query backend
+is planned behind the same two functions: off by default behind a cargo feature (`hw-ray-query`)
+and a runtime setting, its one `unsafe` call (wgpu's experimental-features constructor) confined
+to a module of its own and named as an exception in AGENTS.md when it lands, with a test that
+compares it against the software traversal and an automatic fall-back. It is not implemented yet.
 
 ## Shared libraries and gaps (house rule 16)
 

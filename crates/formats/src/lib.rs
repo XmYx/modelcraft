@@ -6,6 +6,7 @@
 //! - [`journal`]: an append-only JSON-lines log of every command since the last save, next to
 //!   the project. After a crash, opening the project replays it (autosave recovery).
 //! - [`exchange`]: glTF 2.0 / GLB, OBJ, STL and PLY through the shared `craft-mesh` crate.
+//! - [`pointcache`]: baked vertex positions per frame (`.mcpc`).
 //! - [`blob`]: the bounded binary mesh encoding used inside projects.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -13,6 +14,7 @@
 pub mod blob;
 pub mod exchange;
 pub mod journal;
+pub mod pointcache;
 pub mod project;
 
 /// Name and version written into files.

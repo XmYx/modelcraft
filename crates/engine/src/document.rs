@@ -733,6 +733,49 @@ impl Document {
         craft_atomic_write(path, &bytes)
     }
 
+    /// Bake the vertices of one object over a run of frames: its final mesh (history, deformers,
+    /// animated parameters) at every `step` frames from `start` to `end`, in the object's own
+    /// space or, with `world`, in world space with its animated transform applied. The current
+    /// frame is restored afterwards. Fails when the vertex count changes during the span.
+    pub fn bake_points(
+        &mut self,
+        id: ObjectId,
+        start: f64,
+        end: f64,
+        step: f64,
+        world: bool,
+    ) -> Result<modelcraft_formats::pointcache::PointCache, EngineError> {
+        if self.scene.get(id).is_none() {
+            return Err(SceneError::NoObject(id).into());
+        }
+        if !(start.is_finite() && end.is_finite() && step.is_finite()) || end < start || step <= 0.0 || (end - start) / step > 1_000_000.0 {
+            return invalid("a bake needs start <= end, a positive step and at most a million samples");
+        }
+        self.sync_sculpt();
+        let now = self.scene.anim.frame;
+        let frames = ((end - start) / step).floor() as usize + 1;
+        let mut cache: Option<modelcraft_formats::pointcache::PointCache> = None;
+        let mut failed = None;
+        for i in 0..frames {
+            let f = start + i as f64 * step;
+            self.scene.set_frame(f);
+            let mesh = self.eval.evaluate(&self.scene, id).mesh;
+            let m = if world { self.scene.world_matrix(id) } else { glam::Mat4::IDENTITY };
+            let pts: Vec<glam::Vec3> = mesh.positions().iter().map(|p| m.transform_point3(*p)).collect();
+            let c = cache.get_or_insert_with(|| modelcraft_formats::pointcache::PointCache::new(self.scene.anim.time.fps, start, step, pts.len()));
+            if let Err(e) = c.push(&pts) {
+                failed = Some(EngineError::Invalid(format!("frame {f}: {e} (the mesh must keep its vertex count)")));
+                break;
+            }
+        }
+        self.scene.set_frame(now);
+        match (failed, cache) {
+            (Some(e), _) => Err(e),
+            (None, Some(c)) => Ok(c),
+            (None, None) => invalid("nothing to bake"),
+        }
+    }
+
     /// Total triangles of everything visible (for the status bar).
     pub fn triangle_count(&mut self) -> usize {
         let ids: Vec<ObjectId> = self.scene.objects().iter().map(|o| o.id).collect();

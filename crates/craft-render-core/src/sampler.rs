@@ -72,6 +72,25 @@ fn to_unit(x: u32) -> f32 {
     (x >> 8) as f32 * (1.0 / 16_777_216.0)
 }
 
+/// Interleave the low 16 bits of `x` and `y` (the position of a pixel along the z-curve).
+#[inline]
+pub fn morton(x: u32, y: u32) -> u32 {
+    fn spread(v: u32) -> u32 {
+        let mut v = v & 0xffff;
+        v = (v | (v << 8)) & 0x00ff_00ff;
+        v = (v | (v << 4)) & 0x0f0f_0f0f;
+        v = (v | (v << 2)) & 0x3333_3333;
+        (v | (v << 1)) & 0x5555_5555
+    }
+    spread(x) | (spread(y) << 1)
+}
+
+/// Index bits needed to give every pixel of a `width × height` image its place on the z-curve.
+pub fn z_order_bits(width: u32, height: u32) -> u32 {
+    let side = width.max(height).max(1).next_power_of_two();
+    2 * side.trailing_zeros()
+}
+
 /// The stream of numbers for one sample of one pixel.
 #[derive(Clone, Copy, Debug)]
 pub struct Sampler {
@@ -91,6 +110,22 @@ impl Sampler {
     #[inline]
     pub fn pixel_seed(x: u32, y: u32, render_seed: u32) -> u32 {
         hash_combine(hash_combine(render_seed, x), y)
+    }
+
+    /// The sampler for sample `sample` of pixel `(x, y)` when pixels share one sequence in
+    /// Morton (z-curve) order: each pass hands consecutive blocks of the sequence to neighbouring
+    /// pixels, so neighbours get complementary samples and the image's error is pushed towards
+    /// high frequencies, where it is less visible and easier to filter (Ahmed and Wonka,
+    /// "Screen-Space Blue-Noise Diffusion of Monte Carlo Sampling Error via Hierarchical Ordering
+    /// of Pixels", 2020). `bits` is the number of index bits the image's pixels need
+    /// ([`z_order_bits`]). `None` when the sequence's 32-bit index would run out; the caller
+    /// then uses independent pixels.
+    #[inline]
+    pub fn z_ordered(x: u32, y: u32, sample: u32, bits: u32, render_seed: u32) -> Option<Sampler> {
+        if bits >= 32 || (bits > 0 && sample >= (1u32 << (32 - bits))) {
+            return None;
+        }
+        Some(Sampler { index: (sample << bits) | morton(x, y), seed: hash32(render_seed ^ 0x5bd1_e995), dim: 0 })
     }
 
     /// Two numbers in `[0, 1)` that are well distributed together across sample indices.
@@ -131,6 +166,29 @@ mod tests {
                 assert!(cells.iter().all(|c| *c == 1), "seed {seed} grid {a}x{b}");
             }
         }
+    }
+
+    #[test]
+    fn z_order_gives_neighbours_complementary_samples() {
+        assert_eq!(morton(0b11, 0b00), 0b0101);
+        assert_eq!(morton(0b00, 0b11), 0b1010);
+        assert_eq!((z_order_bits(640, 360), z_order_bits(1, 1), z_order_bits(1024, 1024)), (20, 0, 20));
+        // The 16 pixels of any aligned 4×4 block, in one pass, together hold a stratified set.
+        let bits = z_order_bits(64, 64);
+        for (bx, by, pass) in [(0, 0, 0), (8, 20, 3), (60, 60, 17)] {
+            let mut cells = [0u32; 16];
+            for y in 0..4 {
+                for x in 0..4 {
+                    let u = Sampler::z_ordered(bx + x, by + y, pass, bits, 9).unwrap().next2();
+                    cells[(u.y * 4.0) as usize * 4 + (u.x * 4.0) as usize] += 1;
+                }
+            }
+            assert!(cells.iter().all(|c| *c == 1), "block ({bx}, {by}) pass {pass}: {cells:?}");
+        }
+        // The index runs out after 2^(32 − bits) passes; the caller falls back.
+        assert!(Sampler::z_ordered(0, 0, 4095, bits, 9).is_some());
+        assert!(Sampler::z_ordered(0, 0, 1 << 20, bits, 9).is_none());
+        assert!(Sampler::z_ordered(0, 0, 0, 32, 9).is_none());
     }
 
     #[test]

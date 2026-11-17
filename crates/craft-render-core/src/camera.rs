@@ -119,6 +119,18 @@ impl PreparedCamera {
         self.forward
     }
 
+    /// Where a world point appears, in the same coordinates [`PreparedCamera::ray`] takes;
+    /// `None` behind a perspective camera.
+    #[inline]
+    pub fn project(&self, p: Vec3A) -> Option<Vec2> {
+        let d = p - self.origin;
+        let (x, y, z) = (d.dot(self.right), d.dot(self.up), d.dot(self.forward));
+        if self.ortho {
+            return Some(Vec2::new(x / self.half_w, y / self.half_h));
+        }
+        (z > 1e-6).then(|| Vec2::new(x / (z * self.half_w), y / (z * self.half_h)))
+    }
+
     /// The resolved camera as plain numbers (what a GPU implementation uploads).
     pub fn data(&self) -> CameraData {
         CameraData {

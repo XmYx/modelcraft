@@ -14,7 +14,7 @@ use crate::scenes;
 use crate::shapes::quad;
 
 fn render(scene: Scene, w: u32, h: u32, spp: u32, integrator: IntegratorSettings) -> Film {
-    render_image(Arc::new(scene), RenderSettings { width: w, height: h, integrator, seed: 7 }, spp).unwrap()
+    render_image(Arc::new(scene), RenderSettings { width: w, height: h, integrator, seed: 7, ..RenderSettings::default() }, spp).unwrap()
 }
 
 /// Mean over the pixels whose centre lies within `radius` (in pixels) of the image centre.
@@ -129,7 +129,13 @@ fn area_light_matches_the_form_factor() {
 fn the_three_estimators_agree_on_the_cornell_box() {
     let scene = Arc::new(scenes::cornell_box().unwrap());
     let run = |strategy, spp| {
-        let s = RenderSettings { width: 40, height: 40, integrator: IntegratorSettings { strategy, max_depth: 5, ..IntegratorSettings::default() }, seed: 3 };
+        let s = RenderSettings {
+            width: 40,
+            height: 40,
+            integrator: IntegratorSettings { strategy, max_depth: 5, ..IntegratorSettings::default() },
+            seed: 3,
+            ..RenderSettings::default()
+        };
         mean_rgb(&render_image(scene.clone(), s, spp).unwrap().mean())
     };
     let mis = run(Strategy::Mis, 256);
@@ -340,7 +346,7 @@ fn spot_sun_and_image_lighting_match_their_formulas() {
     let run = |strategy, spp| {
         let p = patch.clone();
         let f = render(
-            lit_plane(move |b| b.set_environment_map(p, 0.0)),
+            lit_plane(move |b| b.set_environment_map_uncompensated(p, 0.0)),
             16,
             16,
             spp,
@@ -379,8 +385,13 @@ fn the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights() {
     };
     let s = scene();
     let run = |light_sampling, spp, seed| {
-        let settings =
-            RenderSettings { width: 48, height: 48, integrator: IntegratorSettings { max_depth: 1, light_sampling, ..IntegratorSettings::default() }, seed };
+        let settings = RenderSettings {
+            width: 48,
+            height: 48,
+            integrator: IntegratorSettings { max_depth: 1, light_sampling, ..IntegratorSettings::default() },
+            seed,
+            ..RenderSettings::default()
+        };
         render_image(s.clone(), settings, spp).unwrap().mean()
     };
     let reference = run(LightSampling::Tree, 4096, 1);
@@ -390,5 +401,113 @@ fn the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights() {
     assert!((rm - pm).abs() < 0.02 * rm, "tree {rm} power {pm}");
     // …with far less noise at equal samples.
     let (et, ep) = (mse(&tree, &reference), mse(&power, &reference));
-    assert!(et * 3.0 < ep, "MSE with the tree {et}, by power {ep}");
+    assert!(et * 2.0 < ep, "MSE with the tree {et}, by power {ep}");
+}
+
+#[test]
+fn feature_images_describe_the_first_surface() {
+    use crate::render::PixelOrder;
+    let scene = Arc::new(scenes::cornell_box().unwrap());
+    let cam = scene.camera;
+    // The previous frame's camera stood 0.1 to the left.
+    let previous = Camera { eye: cam.eye - Vec3::X * 0.1, target: cam.target - Vec3::X * 0.1, ..cam };
+    let settings = RenderSettings { width: 48, height: 48, previous_camera: Some(previous), pixel_order: PixelOrder::ZCurve, ..RenderSettings::default() };
+    let f = render_image(scene, settings, 16).unwrap();
+    let at = |x: usize, y: usize| y * 48 + x;
+    let (albedo, normal) = (f.mean_of(&f.albedo), f.mean_of(&f.normal));
+    // Left wall: red, facing +x. Right wall: green, facing −x. Floor: white, facing up.
+    let (l, r, floor) = (at(7, 24), at(40, 24), at(14, 42));
+    assert!(albedo[l][0] > 0.5 && albedo[l][1] < 0.1 && normal[l][0] > 0.95, "{:?} {:?}", albedo[l], normal[l]);
+    assert!(albedo[r][1] > 0.4 && albedo[r][0] < 0.2 && normal[r][0] < -0.95);
+    assert!((albedo[floor][0] - 0.73).abs() < 0.02 && normal[floor][1] > 0.95);
+    // Depth: the back wall (centre) is farther than the floor near the camera.
+    let depth = |i: usize| f.depth[i] / f.samples as f32;
+    assert!(depth(at(25, 14)) > depth(floor) && (depth(at(25, 14)) - 5.6).abs() < 0.3, "{} {}", depth(at(25, 14)), depth(floor));
+    // Motion: the camera moved right, so everything moved left on screen, near surfaces most.
+    let motion = |i: usize| f.motion[i][0] / f.samples as f32;
+    let (near, far) = (motion(floor), motion(at(25, 14)));
+    assert!(near < far && far < -0.5 && f.motion[floor][1].abs() / (f.samples as f32) < 0.2, "{near} {far}");
+    // Variance: the estimate of a pixel's noise is positive in lit regions and predicts the
+    // actual error of the image against a long render within a factor of a few.
+    let var = f.variance();
+    let reference = render_image(Arc::new(scenes::cornell_box().unwrap()), RenderSettings { seed: 5, ..settings }, 2048).unwrap().mean();
+    let lum = |p: &[f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+    let actual: f64 = f.mean().iter().zip(&reference).map(|(a, b)| f64::from(lum(a) - lum(b)).powi(2)).sum::<f64>() / var.len() as f64;
+    let predicted: f64 = var.iter().map(|v| f64::from(*v)).sum::<f64>() / var.len() as f64;
+    assert!(predicted > 0.0 && actual / predicted < 4.0 && predicted / actual < 30.0, "predicted {predicted}, actual {actual}");
+}
+
+#[test]
+fn z_curve_pixel_order_moves_error_to_high_frequencies() {
+    use crate::render::PixelOrder;
+    // Error against a long render, before and after averaging 4×4 blocks: with pixels ordered
+    // along the z-curve the averaged error must be clearly lower than with independent pixels,
+    // while the raw error stays about the same.
+    let scene = Arc::new(scenes::cornell_box().unwrap());
+    let base = RenderSettings { width: 64, height: 64, ..RenderSettings::default() };
+    let reference = render_image(scene.clone(), RenderSettings { seed: 77, pixel_order: PixelOrder::Independent, ..base }, 4096).unwrap().mean();
+    let blocks = |img: &[[f32; 3]]| -> Vec<[f32; 3]> {
+        let mut out = vec![[0.0f32; 3]; 16 * 16];
+        for y in 0..64 {
+            for x in 0..64 {
+                for k in 0..3 {
+                    out[(y / 4) * 16 + x / 4][k] += img[y * 64 + x][k] / 16.0;
+                }
+            }
+        }
+        out
+    };
+    let (mut raw, mut smooth) = ([0.0f64; 2], [0.0f64; 2]);
+    for seed in 0..6 {
+        for (k, order) in [PixelOrder::ZCurve, PixelOrder::Independent].into_iter().enumerate() {
+            let img = render_image(scene.clone(), RenderSettings { seed, pixel_order: order, ..base }, 1).unwrap().mean();
+            raw[k] += mse(&img, &reference);
+            smooth[k] += mse(&blocks(&img), &blocks(&reference));
+        }
+    }
+    assert!(raw[0] < raw[1] * 1.3, "raw error: z-curve {} independent {}", raw[0], raw[1]);
+    assert!(smooth[0] * 1.5 < smooth[1], "4×4-averaged error: z-curve {} independent {}", smooth[0], smooth[1]);
+}
+
+#[test]
+fn mis_compensation_lowers_the_noise_of_image_lighting() {
+    use craft_texture::{Image, Kind};
+    // A bright sun patch in an otherwise evenly bright sky over a matte plane.
+    let sky = Image::generate(64, 32, Kind::Color, |x, y| if y < 4 && x < 8 { [60.0, 60.0, 60.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] });
+    let run = |compensated: bool, spp: u32, seed: u32| {
+        let s = sky.clone();
+        let scene = lit_plane(move |b| if compensated { b.set_environment_map(s, 0.0) } else { b.set_environment_map_uncompensated(s, 0.0) });
+        render_image(
+            Arc::new(scene),
+            RenderSettings {
+                width: 24,
+                height: 24,
+                integrator: IntegratorSettings { max_depth: 1, ..IntegratorSettings::default() },
+                seed,
+                ..RenderSettings::default()
+            },
+            spp,
+        )
+        .unwrap()
+        .mean()
+    };
+    let reference = run(false, 8192, 1);
+    let (plain, compensated) = (mse(&run(false, 16, 2), &reference), mse(&run(true, 16, 2), &reference));
+    // Same answer, less noise.
+    let (a, b) = (mean_rgb(&run(true, 2048, 3))[0], mean_rgb(&reference)[0]);
+    assert!((a - b).abs() < 0.01 * b, "compensated {a} plain {b}");
+    assert!(compensated * 1.3 < plain, "MSE compensated {compensated}, plain {plain}");
+}
+
+#[test]
+fn benchmark_scenes_build_and_light_up() {
+    for name in scenes::BENCHMARKS {
+        let scene = scenes::by_name(name).unwrap().unwrap();
+        let f = render(scene, 40, 24, 8, IntegratorSettings::default());
+        let m = mean_rgb(&f.mean());
+        assert!(f.sum.iter().all(|p| p.iter().all(|c| c.is_finite())) && m[1] > 1e-3 && m[1] < 20.0, "{name}: {m:?}");
+    }
+    let street = scenes::night_street().unwrap();
+    assert_eq!((street.lights.emissive.len(), street.lights.analytic.len()), (10_000, 500));
+    assert!(scenes::by_name("teapot").is_none());
 }

@@ -91,6 +91,149 @@ fn key_editing_commands() {
 }
 
 #[test]
+fn euler_filter_and_turntable() {
+    let mut d = Document::new();
+    let id = cube(&mut d);
+    for (f, v) in [(0.0, 170.0), (10.0, -170.0)] {
+        key(&mut d, id, "rotate.y", f, v);
+    }
+    let out = d.execute(Command::Anim(A::EulerFilter { ids: vec![id] })).unwrap();
+    assert_eq!(out.warnings, vec!["1 keys changed".to_string()]);
+    assert_eq!(d.scene.anim.curve(id, "rotate.y").unwrap().eval(10.0), Some(190.0));
+    assert!(d.execute(Command::Anim(A::EulerFilter { ids: vec![] })).is_err());
+    // A turntable replaces the spin axis: one turn over the range, repeating on both sides.
+    d.execute(Command::Anim(A::Turntable { ids: vec![id], axis: "y".into(), turns: 1.0, start: Some(0.0), end: Some(48.0) })).unwrap();
+    let c = d.scene.anim.curve(id, "rotate.y").unwrap();
+    let base = c.eval(0.0).unwrap();
+    assert!((base - 170.0).abs() < 1e-3, "the start pose keeps its plain angle, not a flipped triple: {base}");
+    assert!((c.eval(12.0).unwrap() - base - 90.0).abs() < 1e-9);
+    assert!((c.eval(60.0).unwrap() - base - 450.0).abs() < 1e-9, "keeps turning after the span");
+    assert!((c.eval(-12.0).unwrap() - base + 90.0).abs() < 1e-9);
+    assert_eq!(d.scene.anim.tracks().len(), 3, "all three angles are keyed");
+    d.set_frame(12.0);
+    let q = d.scene.get(id).unwrap().transform.rotation;
+    let want = glam::Quat::from_rotation_y((base as f32 + 90.0).to_radians());
+    assert!(q.dot(want).abs() > 0.9999, "a quarter turn the positive way: {q:?}");
+    for bad in [
+        A::Turntable { ids: vec![id], axis: "w".into(), turns: 1.0, start: None, end: None },
+        A::Turntable { ids: vec![id], axis: "y".into(), turns: f64::NAN, start: None, end: None },
+        A::Turntable { ids: vec![id], axis: "y".into(), turns: 1.0, start: Some(5.0), end: Some(5.0) },
+        A::Turntable { ids: vec![ObjectId(9)], axis: "y".into(), turns: 1.0, start: None, end: None },
+    ] {
+        assert!(d.execute(Command::Anim(bad)).is_err());
+    }
+}
+
+#[test]
+fn point_cache_bakes_animated_deformation() {
+    let mut d = Document::new();
+    let id = cube(&mut d);
+    let bend = d.execute(Command::AddDeformer { kind: "bend".into(), target: id }).unwrap().created[0];
+    key(&mut d, bend, "deformer.angle", 0.0, 0.0);
+    key(&mut d, bend, "deformer.angle", 10.0, 90.0);
+    key(&mut d, id, "translate.x", 0.0, 0.0);
+    key(&mut d, id, "translate.x", 10.0, 5.0);
+    d.set_frame(3.0);
+    let local = d.bake_points(id, 0.0, 10.0, 5.0, false).unwrap();
+    assert_eq!((local.frames(), local.vertices, local.fps, local.step), (3, 8, 24.0, 5.0));
+    assert_eq!(d.scene.anim.frame, 3.0, "the frame is restored");
+    assert_ne!(local.frame(0), local.frame(2), "the bend deforms the points");
+    let world = d.bake_points(id, 0.0, 10.0, 5.0, true).unwrap();
+    let shift = world.frame(2).unwrap()[0] - local.frame(2).unwrap()[0];
+    assert!((shift - Vec3::new(5.0, 0.0, 0.0)).length() < 1e-4, "{shift:?}");
+    let back = modelcraft_formats::pointcache::PointCache::from_bytes(&world.to_bytes().unwrap()).unwrap();
+    assert_eq!(back, world);
+    // A vertex count that changes is an error, as are bad spans.
+    key(&mut d, id, "primitive.segments", 0.0, 1.0);
+    key(&mut d, id, "primitive.segments", 10.0, 4.0);
+    assert!(d.bake_points(id, 0.0, 10.0, 1.0, false).is_err());
+    assert_eq!(d.scene.anim.frame, 3.0);
+    assert!(d.bake_points(id, 5.0, 1.0, 1.0, false).is_err());
+    assert!(d.bake_points(id, 0.0, 1.0, 0.0, false).is_err());
+    assert!(d.bake_points(ObjectId(99), 0.0, 1.0, 1.0, false).is_err());
+}
+
+#[test]
+fn layers_adjust_the_animation_below_without_changing_it() {
+    use modelcraft_scene::LayerMode;
+    let mut d = Document::new();
+    let id = cube(&mut d);
+    key(&mut d, id, "translate.x", 0.0, 0.0);
+    key(&mut d, id, "translate.x", 10.0, 10.0);
+    d.execute(Command::Anim(A::EditKey {
+        key: key_ref(id, "translate.x", 0.0),
+        value: None,
+        interp: Some(Interp::Linear),
+        tangent: None,
+        in_slope: None,
+        out_slope: None,
+        in_weight: None,
+        out_weight: None,
+    }))
+    .unwrap();
+    let base = d.scene.anim.curve(id, "translate.x").unwrap().clone();
+    // An adding layer: a constant offset of 2, then faded and muted.
+    d.execute(Command::Anim(A::AddLayer { name: Some("Offset".into()), mode: LayerMode::Add })).unwrap();
+    let layer = d.scene.anim.active_layer();
+    assert_eq!((layer, d.scene.anim.layers()[0].name.as_str()), (1, "Offset"));
+    assert!(d.scene.anim.curve(id, "translate.x").is_none(), "the layer starts empty");
+    key(&mut d, id, "translate.x", 0.0, 2.0);
+    d.set_frame(5.0);
+    assert_eq!(x(&d, id), 7.0);
+    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: Some(0.5), mute: None, mode: None })).unwrap();
+    assert_eq!(x(&d, id), 6.0);
+    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: None, mute: Some(true), mode: None })).unwrap();
+    assert_eq!(x(&d, id), 5.0);
+    d.execute(Command::Anim(A::SetLayer { layer, name: Some("Lift".into()), weight: Some(9.0), mute: Some(false), mode: Some(LayerMode::Override) })).unwrap();
+    assert_eq!(x(&d, id), 2.0, "an overriding layer at full weight replaces the base");
+    // Keying the current pose in a layer makes the result equal it: move to 8 at frame 5.
+    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: Some(0.5), mute: None, mode: Some(LayerMode::Add) })).unwrap();
+    d.execute(Command::Anim(A::SetAutoKey { on: true })).unwrap();
+    d.execute(Command::SetTransform { id, transform: Transform { translation: Vec3::new(8.0, 0.0, 0.0), ..Default::default() } }).unwrap();
+    assert_eq!(d.scene.anim.curve(id, "translate.x").unwrap().eval(5.0), Some(6.0), "(8 − 5) / 0.5");
+    d.set_frame(0.0);
+    d.set_frame(5.0);
+    assert_eq!(x(&d, id), 8.0);
+    // A new attribute keyed in a layer gets a base key first, so the layer has something below.
+    key(&mut d, id, "scale.y", 5.0, 0.5);
+    assert_eq!(d.scene.anim.track_in(id, "scale.y", 0).map(|t| t.curve.len()), Some(1));
+    assert_eq!(d.scene.get(id).unwrap().transform.scale.y, 1.25, "1 + 0.5 × 0.5");
+    // The base is untouched; the base layer shows it again when made active.
+    d.execute(Command::Anim(A::SetActiveLayer { layer: 0 })).unwrap();
+    assert_eq!(d.scene.anim.curve(id, "translate.x").unwrap(), &base);
+    // Flatten bakes the result into the base and removes the layers; the motion stays.
+    let before: Vec<f64> = (0..=10).map(|f| d.scene.anim.value_at(id, "translate.x", f as f64).unwrap()).collect();
+    d.execute(Command::Anim(A::FlattenLayers { step: 1.0 })).unwrap();
+    assert!(d.scene.anim.layers().is_empty());
+    let after: Vec<f64> = (0..=10).map(|f| d.scene.anim.value_at(id, "translate.x", f as f64).unwrap()).collect();
+    assert!(before.iter().zip(&after).all(|(a, b)| (a - b).abs() < 1e-9), "{before:?} {after:?}");
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.scene.anim.layers().len(), 1);
+    // Errors.
+    for bad in [
+        A::RemoveLayer { layer: 42 },
+        A::SetActiveLayer { layer: 42 },
+        A::SetLayer { layer: 42, name: None, weight: None, mute: None, mode: None },
+        A::SetLayer { layer, name: None, weight: Some(f64::NAN), mute: None, mode: None },
+        A::FlattenLayers { step: 0.0 },
+    ] {
+        assert!(d.execute(Command::Anim(bad)).is_err());
+    }
+    d.execute(Command::Anim(A::RemoveLayer { layer })).unwrap();
+    assert_eq!(d.scene.anim.active_layer(), 0);
+    assert!(d.execute(Command::Anim(A::FlattenLayers { step: 1.0 })).is_err());
+    // Layers survive a save.
+    d.execute(Command::Anim(A::AddLayer { name: None, mode: LayerMode::Override })).unwrap();
+    key(&mut d, id, "translate.x", 3.0, 1.0);
+    let dir = std::env::temp_dir().join(format!("mc-layers-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join("l.modelcraft");
+    d.save_as(&p).unwrap();
+    assert_eq!(Document::open(&p).unwrap().scene.anim, d.scene.anim);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn auto_key_turns_edits_into_keys() {
     let mut d = Document::new();
     let id = cube(&mut d);
@@ -143,7 +286,7 @@ fn commands_are_json_and_round_trip() {
     assert!(e.contains("missing field `path`"), "{e}");
     let e = serde_json::from_str::<Command>(r#"{"cmd":"anim","op":"wobble"}"#).unwrap_err().to_string();
     assert!(e.contains("unknown variant `wobble`"), "{e}");
-    assert_eq!(crate::anim::COMMANDS.len(), 14);
+    assert_eq!(crate::anim::COMMANDS.len(), 21);
     // Every listed name parses as a command tag.
     for (name, _) in crate::anim::COMMANDS {
         let e = serde_json::from_str::<A>(&format!(r#"{{"op":"{name}"}}"#)).err().map(|e| e.to_string()).unwrap_or_default();
