@@ -6,6 +6,7 @@
 //! objects yet. The path tracer itself lives in the UI-free `craft-render-*` crates.
 
 use craft_render_core::shapes::quad;
+use craft_render_core::sky::Sky;
 use craft_render_core::texture::{Image, Kind, Limits, srgb_to_linear};
 use craft_render_core::{Camera as TraceCamera, Material as TraceMaterial, MeshData, Scene as TraceScene, SceneBuilder, SceneError};
 use glam::{Mat4, Vec2, Vec3};
@@ -16,15 +17,21 @@ use crate::buffers::mesh_data;
 use crate::camera::{Camera, Projection};
 
 /// Lighting added on export.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Lighting {
     /// A soft sky plus one large key light above and to the side, sized to the scene.
     Studio,
     /// Uniform light from every direction with this radiance.
     Sky(Vec3),
+    /// A physical daytime sky with the sun at `elevation` above the horizon and compass angle
+    /// `azimuth` (radians).
+    Daylight { elevation: f32, azimuth: f32 },
+    /// An image of the surroundings (latitude–longitude, linear radiance), turned by `rotation`
+    /// radians about the vertical axis.
+    Image { image: Image, rotation: f32 },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExportOptions {
     pub lighting: Lighting,
     /// Add a matte ground plane under the scene to catch shadows.
@@ -120,6 +127,23 @@ fn apply_linked(path: &str, builder: &mut SceneBuilder, material: &mut TraceMate
         }
     }
     Ok(())
+}
+
+/// Largest panorama file that is read.
+const MAX_PANORAMA_BYTES: u64 = 1 << 30;
+
+/// Read a Radiance HDR panorama as an environment image.
+pub fn load_panorama(path: &str) -> Result<Image, String> {
+    let size = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.len();
+    if size > MAX_PANORAMA_BYTES {
+        return Err(format!("{path}: {size} bytes is more than the {MAX_PANORAMA_BYTES} read for a panorama"));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    if !craft_hdr::sniff(&bytes) {
+        return Err(format!("{path}: not a Radiance HDR (.hdr) picture"));
+    }
+    let picture = craft_hdr::decode_rgba(&bytes, &craft_hdr::Limits::default()).map_err(|e| format!("{path}: {e}"))?;
+    Image::from_data(picture.width, picture.height, Kind::Color, picture.rgba, &Limits::default()).map_err(|e| format!("{path}: {e}"))
 }
 
 /// The path tracer's material for a scene material (without its linked maps).
@@ -221,8 +245,16 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
         let y = lo.y - radius * 1e-4;
         b.add_mesh(&quad(Vec3::new(centre.x - s, y, centre.z - s), Vec3::Z * (2.0 * s), Vec3::X * (2.0 * s)), Mat4::IDENTITY, ground)?;
     }
-    match options.lighting {
-        Lighting::Sky(radiance) => b.set_environment(radiance),
+    match &options.lighting {
+        Lighting::Sky(radiance) => b.set_environment(*radiance),
+        Lighting::Daylight { elevation, azimuth } => {
+            let sky = Sky::from_angles(*elevation, *azimuth);
+            b.set_environment_map(sky.bake(256), 0.0);
+            if let Some(sun) = sky.sun_light() {
+                b.add_light(sun)?;
+            }
+        }
+        Lighting::Image { image, rotation } => b.set_environment_map(image.clone(), *rotation),
         Lighting::Studio => {
             b.set_environment(Vec3::new(0.32, 0.36, 0.42));
             // The key: a square of side 1.5 radii, 3 radii away, up and to the camera's left,
@@ -388,8 +420,36 @@ mod tests {
         assert_eq!((t.textures.len(), t.lights.emissive.len()), (0, 2));
         // With links turned off nothing is read.
         s.edit(id).unwrap().material = Material { linked: Some(path.display().to_string()), ..Material::default() };
-        let t = export_scene(&s, &mut eval, &cam, &ExportOptions { linked_materials: false, ..options }).unwrap();
+        let t = export_scene(&s, &mut eval, &cam, &ExportOptions { linked_materials: false, ..options.clone() }).unwrap();
         assert!(t.textures.is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn daylight_and_image_lighting_export() {
+        let mut eval = Evaluator::new();
+        let scene = cube_scene();
+        let cam = Camera::default();
+        let day =
+            export_scene(&scene, &mut eval, &cam, &ExportOptions { lighting: Lighting::Daylight { elevation: 0.9, azimuth: 0.5 }, ..ExportOptions::default() })
+                .unwrap();
+        assert!(day.lights.env_map.is_some());
+        assert!(matches!(day.lights.analytic.as_slice(), [craft_render_core::Light::Sun { .. }]));
+        let film = render_image(Arc::new(day), RenderSettings { width: 32, height: 32, ..RenderSettings::default() }, 32).unwrap();
+        let m = mean_rgb(&film.mean());
+        assert!(m[1] > 0.05 && m[1] < 5.0, "{m:?}");
+        // After sunset there is no sun light, and the export still works.
+        let night = export_scene(
+            &scene,
+            &mut eval,
+            &cam,
+            &ExportOptions { lighting: Lighting::Daylight { elevation: -0.5, azimuth: 0.0 }, ..ExportOptions::default() },
+        )
+        .unwrap();
+        assert!(night.lights.analytic.is_empty());
+        let image = Image::filled(16, 8, Kind::Color, [0.5, 0.5, 0.5, 1.0]);
+        let lit =
+            export_scene(&scene, &mut eval, &cam, &ExportOptions { lighting: Lighting::Image { image, rotation: 1.0 }, ..ExportOptions::default() }).unwrap();
+        assert!(lit.lights.env_map.is_some() && lit.lights.emissive.is_empty());
     }
 }
