@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 71 / 7 / 36 / 216 | counted |
+| Done / exceeds / partial / missing | 71 / 7 / 38 / 214 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **29.1 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **20.5 %** | counted |
-| Size-weighted parity over all rows, no area weights | 20.7 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **29.4 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **20.8 %** | counted |
+| Size-weighted parity over all rows, no area weights | 21.0 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -39,7 +39,7 @@ never estimated by hand.
 | Subdivision surfaces | 2 (2 %) | 6 | 3 | 0 | 0 | 3 | 0 | 50 % | 36 % |
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
-| UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
+| UVs | 4 (3 %) | 10 | 0 | 0 | 3 | 7 | 0 | 15 % | 12 % |
 | Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 8 | 1 | 4 | 9 | 0 | 50 % | 36 % |
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 2 | 0 | 2 | 5 | 0 | 33 % | 35 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |

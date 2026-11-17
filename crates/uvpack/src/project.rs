@@ -90,6 +90,7 @@ pub enum Projection {
     /// Longitude around `axis` as u, latitude as v.
     Spherical { axis: Axis },
     /// Perspective or orthographic view-projection matrix (column-major, as `Mat4::to_cols_array`).
+    /// Faces with a corner on or behind the camera plane keep their UVs.
     Camera { view_proj: [f32; 16] },
 }
 
@@ -203,10 +204,16 @@ pub fn project(mesh: &PolyMesh, opts: &ProjectOptions) -> Result<Vec<Vec2>, Pack
             }
             Projection::Camera { view_proj } => {
                 let m = Mat4::from_cols_array(&view_proj);
-                for (h, p) in corners.iter().zip(&pts) {
-                    let c = m * Vec4::new(p.x + centre.x, p.y + centre.y, p.z + centre.z, 1.0);
-                    let w = if c.w.abs() < 1e-9 { 1e-9 } else { c.w };
-                    raw.push((*h, Vec2::new(0.5 + 0.5 * c.x / w, 0.5 - 0.5 * c.y / w)));
+                if !m.is_finite() {
+                    return Err(PackError::NonFinite);
+                }
+                let clip: Vec<Vec4> = pts.iter().map(|p| m * Vec4::new(p.x + centre.x, p.y + centre.y, p.z + centre.z, 1.0)).collect();
+                // A face with a corner on or behind the camera plane has no sensible image: skip it.
+                if clip.iter().any(|c| c.w.is_nan() || c.w <= 1e-6) {
+                    continue;
+                }
+                for (h, c) in corners.iter().zip(&clip) {
+                    raw.push((*h, Vec2::new(0.5 + 0.5 * c.x / c.w, 0.5 - 0.5 * c.y / c.w)));
                 }
             }
         }

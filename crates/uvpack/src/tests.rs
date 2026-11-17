@@ -361,3 +361,67 @@ proptest! {
         }
     }
 }
+
+/// Sweep over the x order: every pair of islands whose x ranges overlap must be apart in y.
+fn assert_no_overlap_sweep(islands: &[PackIsland], r: &PackResult) {
+    let mut b: Vec<(Vec2, Vec2)> = islands.iter().zip(&r.placements).map(|(i, p)| bounds_of(i, p)).collect();
+    b.sort_by(|a, c| a.0.x.total_cmp(&c.0.x));
+    let mut active: Vec<(Vec2, Vec2)> = Vec::new();
+    for cur in &b {
+        assert!(cur.0.min_element() >= -1e-4 && cur.1.max_element() <= 1.0 + 1e-4, "outside the square: {} {}", cur.0, cur.1);
+        active.retain(|a| a.1.x > cur.0.x + 1e-6);
+        for a in &active {
+            assert!(a.1.y <= cur.0.y + 1e-6 || cur.1.y <= a.0.y + 1e-6, "overlap");
+        }
+        active.push(*cur);
+    }
+}
+
+#[test]
+fn packing_work_is_bounded_at_the_island_cap() {
+    // The most islands accepted: the linear shelf packer takes over and the work is a small multiple of n.
+    let islands: Vec<PackIsland> = (0..MAX_ISLANDS).map(|i| rect(0.2 + (i % 7) as f32 * 0.1, 0.2 + (i % 5) as f32 * 0.1, 1.0)).collect();
+    let r = pack(&islands, &PackOptions { margin: 0.0, rotation: Rotation::Quarter, density: Density::Keep }).unwrap();
+    assert!(r.shelf_fallback);
+    assert!(r.work <= 30 * MAX_ISLANDS as u64, "work {} for {} islands", r.work, MAX_ISLANDS);
+    assert_eq!(r.placements.len(), MAX_ISLANDS);
+    assert_no_overlap_sweep(&islands, &r);
+    assert!(r.utilisation > 0.3, "{}", r.utilisation);
+    // One island more is refused.
+    assert_eq!(pack(&vec![PackIsland::default(); MAX_ISLANDS + 1], &PackOptions::default()).unwrap_err(), PackError::TooLarge(MAX_ISLANDS + 1));
+}
+
+#[test]
+fn an_exhausted_budget_falls_back_to_shelves_and_stays_valid() {
+    let islands: Vec<PackIsland> = (0..300).map(|i| rect(0.1 + (i % 11) as f32 * 0.07, 0.1 + (i % 6) as f32 * 0.09, 1.0)).collect();
+    let full = pack(&islands, &PackOptions::default()).unwrap();
+    assert!(!full.shelf_fallback);
+    assert!(full.work <= MAX_WORK);
+    // A tiny budget stops MaxRects at once; the shelf layout is valid, only looser.
+    let small = pack_with_limit(&islands, &PackOptions::default(), 500).unwrap();
+    assert!(small.shelf_fallback);
+    assert!(small.work <= 500 + 25 * islands.len() as u64, "{}", small.work);
+    assert_no_overlap_sweep(&islands, &small);
+    assert!(small.utilisation > 0.2 && small.utilisation <= full.utilisation + 1e-3, "{} vs {}", small.utilisation, full.utilisation);
+    // The work is a count, so it is identical on every run and machine.
+    assert_eq!(pack(&islands, &PackOptions::default()).unwrap().work, full.work);
+}
+
+#[test]
+fn faces_behind_the_camera_keep_their_uvs() {
+    let m = Primitive::Plane { width: 2.0, depth: 2.0, segments: 2 }.build().unwrap();
+    // A perspective camera at height 1 looking down: the plane is in front. Moving the camera below the plane puts it behind.
+    let proj = Mat4::perspective_rh(1.0, 1.0, 0.1, 100.0);
+    let front = Mat4::look_at_rh(Vec3::new(0.0, 3.0, 0.0), Vec3::ZERO, Vec3::NEG_Z);
+    let ok = project(&m, &ProjectOptions { fit: Fit::None, ..ProjectOptions::new(Projection::Camera { view_proj: (proj * front).to_cols_array() }) }).unwrap();
+    assert_ne!(ok, m.corner_uvs());
+    let behind = Mat4::look_at_rh(Vec3::new(0.0, -3.0, 0.0), Vec3::new(0.0, -6.0, 0.0), Vec3::NEG_Z);
+    let out =
+        project(&m, &ProjectOptions { fit: Fit::None, ..ProjectOptions::new(Projection::Camera { view_proj: (proj * behind).to_cols_array() }) }).unwrap();
+    assert_eq!(out, m.corner_uvs(), "nothing is in front of the camera, so nothing is projected");
+    // A face straddling the camera plane is skipped, the others are projected.
+    let tall = Primitive::Plane { width: 2.0, depth: 8.0, segments: 4 }.build().unwrap();
+    let cam = Mat4::look_at_rh(Vec3::new(0.0, 0.5, 0.0), Vec3::new(0.0, 0.5, -1.0), Vec3::Y);
+    let o = project(&tall, &ProjectOptions { fit: Fit::None, ..ProjectOptions::new(Projection::Camera { view_proj: (proj * cam).to_cols_array() }) }).unwrap();
+    assert!(o.iter().all(|u| u.is_finite() && u.abs().max_element() < 1e4), "no huge values from w near zero");
+}

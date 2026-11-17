@@ -146,18 +146,28 @@ that, the honest statement is the absolute rates above.
 
 ## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
 
-Random rectangular islands (fixed seed, sides 0.05 to 1.55, margin 0.004, even texel density), packed
-into the unit square by MaxRects; utilisation is the share of the square the islands cover. Same
-machine as above, release build. Above 400 islands only one packing order is tried per scale.
+Random rectangular islands (fixed seed, sides 0.05 to 1.55, even texel density), packed into the
+unit square; utilisation is the share of the square the islands cover. Same machine as above
+(a loaded one: other builds were running), release build. The margin is 0.004 up to 1,000 islands
+and 0.0005 above (it is per island on every side, so very many islands need a thinner one to fit
+at all). Up to 500 islands MaxRects packs (four heuristics up to 350, one above); beyond that, or
+when MaxRects has examined 300 million free rectangles, a linear next-fit shelf packer does. `work`
+counts free rectangles examined and is identical on every run, so the bound is tested without a
+clock (`packing_work_is_bounded_at_the_island_cap`).
 
-| Islands | Rotation | Time | Utilisation |
-|---|---|---|---|
-| 50 | none / quarter turns / fit | 3 / 4 / 4 ms | 87.4 / 88.1 / 88.1 % |
-| 200 | none / quarter turns / fit | 66 / 59 / 58 ms | 84.0 / 84.8 / 84.8 % |
-| 1,000 | none / quarter turns / fit | 1,530 / 1,360 / 1,360 ms | 71.4 / 71.2 / 71.2 % |
+| Islands | Packer | Time (rotation none / fit) | Utilisation (none / fit) | Work |
+|---|---|---|---|---|
+| 50 | MaxRects | 3 / 4 ms | 87.4 / 88.1 % | 1.2 M |
+| 200 | MaxRects | 68 / 55 ms | 84.0 / 84.8 % | 43 to 50 M |
+| 350 | MaxRects | 327 / 352 ms | 80.9 / 82.0 % | 190 to 200 M |
+| 500 | MaxRects, one heuristic | 234 / 178 ms | 78.6 / 79.2 % | 220 to 250 M |
+| 1,000 | shelves | 0 / 1 ms | 69.8 / 70.6 % | 21 k |
+| 20,000 | shelves | 12 / 10 ms | 84.7 / 84.6 % | 0.42 M |
+| 100,000 (the cap) | shelves | 55 / 63 ms | 70.3 / 70.3 % | 2.1 M |
 
 Rectangles gain little from rotation by definition; the rotation modes matter for slanted islands
 (a diagonal strip packs 1.8 times as densely once straightened, `fit_rotation_straightens_a_diagonal_strip`).
+Before the work bound, 2,000 islands took 20 s with MaxRects alone (reported in review).
 
 ## How the numbers stay low
 

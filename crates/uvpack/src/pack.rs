@@ -6,13 +6,16 @@
 //!   gets as many texels per metre as a large one; [`Density::Keep`] keeps the islands' relative
 //!   sizes.
 //! - *Rotation.* The best angle of an island is the one that makes its bounding rectangle
-//!   smallest, tried for every edge of its convex hull (the minimum-area rectangle of a convex
+//!   smallest, tried for up to 90 edges of its convex hull (the minimum-area rectangle of a convex
 //!   polygon has a side on a hull edge, Freeman and Shapira 1975). The packer may also turn a
 //!   rectangle by 90 degrees.
 //! - *Packing.* Rectangles go into the square by MaxRects with best-short-side-fit (Jylänki, "A
 //!   Thousand Ways to Pack the Bin", 2010): a list of the maximal free rectangles is kept, the
 //!   rectangle goes into the one it fits tightest, and every free rectangle it overlaps is split.
 //!   All islands share one scale, found by bisection as the largest that still fits.
+//! - *Bounded time.* MaxRects is quadratic, so it runs only for up to [`MAX_RECTS_ISLANDS`] islands
+//!   and within a work budget ([`MAX_WORK`]); beyond either, a linear next-fit shelf packer does
+//!   the job (looser, but O(n) per scale).
 
 use glam::{Mat2, Vec2};
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,13 @@ use crate::PackError;
 pub const MAX_ISLANDS: usize = 100_000;
 /// Most points (triangle corners) one pack accepts in total.
 pub const MAX_POINTS: usize = 30_000_000;
+/// Most islands MaxRects packs (one heuristic above 350, all four up to there); above it the
+/// packer uses linear-time shelves (see `shelves`).
+pub const MAX_RECTS_ISLANDS: usize = 500;
+/// Free rectangles MaxRects may examine in one pack, across all scales tried: about a second on
+/// a loaded desktop processor (`modelcraft-cli uv-pack-bench` shows 0.3 to 1.5 million per
+/// millisecond, the work being the same on every run).
+pub const MAX_WORK: u64 = 300_000_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,6 +107,12 @@ pub struct PackResult {
     pub scale: f32,
     /// Share of the unit square the islands' triangles cover.
     pub utilisation: f32,
+    /// Work done by the packing search (free rectangles examined; at most [`MAX_WORK`] plus the
+    /// linear shelf passes), a measure of time that does not depend on the machine.
+    pub work: u64,
+    /// The MaxRects search ran out of its work budget (or there were too many islands) and the
+    /// shelf packer finished the job: the layout is valid but looser.
+    pub shelf_fallback: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -118,11 +134,26 @@ impl Rect {
 
 /// Where each rectangle (width, height) goes in a `size`×`size` bin, or `None` when they do not
 /// fit. A placement is `(x, y, turned)`; `turned` swaps the width and height.
-fn max_rects(sizes: &[(f64, f64)], order: &[usize], size: f64, allow_turn: bool, area_fit: bool) -> Option<Vec<(f64, f64, bool)>> {
+///
+/// `work` counts the free rectangles examined; when it passes `limit` the search stops with
+/// `Err(OutOfBudget)`, so the running time is bounded whatever the input.
+fn max_rects(
+    sizes: &[(f64, f64)],
+    order: &[usize],
+    size: f64,
+    allow_turn: bool,
+    area_fit: bool,
+    work: &mut u64,
+    limit: u64,
+) -> Result<Option<Vec<(f64, f64, bool)>>, OutOfBudget> {
     let mut free = vec![Rect { x: 0.0, y: 0.0, w: size, h: size }];
     let mut out = vec![(0.0, 0.0, false); sizes.len()];
     for &i in order {
-        let &(w, h) = sizes.get(i)?;
+        let Some(&(w, h)) = sizes.get(i) else { return Ok(None) };
+        *work += free.len() as u64;
+        if *work > limit {
+            return Err(OutOfBudget);
+        }
         // Best short side fit over every free rectangle, in both orientations when allowed.
         let mut best: Option<(f64, f64, Rect, bool)> = None;
         for f in &free {
@@ -145,8 +176,10 @@ fn max_rects(sizes: &[(f64, f64)], order: &[usize], size: f64, allow_turn: bool,
                 }
             }
         }
-        let (_, _, placed, turned) = best?;
-        *out.get_mut(i)? = (placed.x, placed.y, turned);
+        let Some((_, _, placed, turned)) = best else { return Ok(None) };
+        if let Some(o) = out.get_mut(i) {
+            *o = (placed.x, placed.y, turned);
+        }
         // Split every free rectangle the new one overlaps into its (up to four) maximal remainders.
         let mut next: Vec<Rect> = Vec::with_capacity(free.len() + 4);
         let mut pieces: Vec<Rect> = Vec::new();
@@ -171,6 +204,10 @@ fn max_rects(sizes: &[(f64, f64)], order: &[usize], size: f64, allow_turn: bool,
         // A new piece stays unless an older free rectangle or an earlier piece contains it (an
         // older rectangle can never sit inside a piece: pieces are parts of older rectangles).
         pieces.retain(|r| r.w > 1e-12 && r.h > 1e-12);
+        *work += (pieces.len() * (next.len() + 4)) as u64;
+        if *work > limit {
+            return Err(OutOfBudget);
+        }
         let mut kept: Vec<Rect> = Vec::with_capacity(pieces.len());
         for r in &pieces {
             if !next.iter().chain(kept.iter()).any(|o| o.contains(r)) {
@@ -179,6 +216,34 @@ fn max_rects(sizes: &[(f64, f64)], order: &[usize], size: f64, allow_turn: bool,
         }
         next.extend(kept);
         free = next;
+    }
+    Ok(Some(out))
+}
+
+struct OutOfBudget;
+
+/// Next-fit shelf packing, O(n): rectangles in the given order go left to right along a shelf, a
+/// new shelf starts when one does not fit. With `allow_turn` each rectangle lies with its longer
+/// side along the shelf. Much looser than MaxRects, but linear: it is used above
+/// [`MAX_RECTS_ISLANDS`] islands and when the MaxRects work budget runs out.
+fn shelves(sizes: &[(f64, f64)], order: &[usize], size: f64, allow_turn: bool) -> Option<Vec<(f64, f64, bool)>> {
+    let mut out = vec![(0.0, 0.0, false); sizes.len()];
+    let (mut x, mut y, mut row) = (0.0f64, 0.0f64, 0.0f64);
+    for &i in order {
+        let &(w0, h0) = sizes.get(i)?;
+        let turned = allow_turn && h0 > w0;
+        let (w, h) = if turned { (h0, w0) } else { (w0, h0) };
+        if x + w > size + 1e-12 && x > 0.0 {
+            x = 0.0;
+            y += row;
+            row = 0.0;
+        }
+        if x + w > size + 1e-12 || y + h > size + 1e-12 {
+            return None;
+        }
+        *out.get_mut(i)? = (x, y, turned);
+        x += w;
+        row = row.max(h);
     }
     Some(out)
 }
@@ -221,6 +286,11 @@ fn bounds(points: &[Vec2], m: Mat2) -> (Vec2, Vec2) {
 
 /// Pack `islands` into the unit square.
 pub fn pack(islands: &[PackIsland], opts: &PackOptions) -> Result<PackResult, PackError> {
+    pack_with_limit(islands, opts, MAX_WORK)
+}
+
+/// [`pack`] with an explicit work budget for the MaxRects search (see [`PackResult::work`]).
+pub fn pack_with_limit(islands: &[PackIsland], opts: &PackOptions, work_limit: u64) -> Result<PackResult, PackError> {
     if islands.len() > MAX_ISLANDS {
         return Err(PackError::TooLarge(islands.len()));
     }
@@ -229,7 +299,7 @@ pub fn pack(islands: &[PackIsland], opts: &PackOptions) -> Result<PackResult, Pa
         return Err(PackError::TooLarge(total));
     }
     if islands.is_empty() {
-        return Ok(PackResult { placements: Vec::new(), scale: 1.0, utilisation: 0.0 });
+        return Ok(PackResult { placements: Vec::new(), scale: 1.0, utilisation: 0.0, work: 0, shelf_fallback: false });
     }
     if islands.iter().any(|i| i.triangles.iter().flatten().any(|p| !p.is_finite())) {
         return Err(PackError::NonFinite);
@@ -297,12 +367,40 @@ pub fn pack(islands: &[PackIsland], opts: &PackOptions) -> Result<PackResult, Pa
     let mut by_area = by_side.clone();
     by_area.sort_by(|a, b| (preps[*b].w * preps[*b].h).total_cmp(&(preps[*a].w * preps[*a].h)).then(a.cmp(b)));
     // Several heuristics at each scale (each a different packing order and fit rule); the first
-    // that fits wins. Large sets try only the first, to bound the time.
-    let tries: &[(&[usize], bool)] =
-        if preps.len() > 400 { &[(&by_side, false)] } else { &[(&by_side, false), (&by_area, false), (&by_side, true), (&by_area, true)] };
+    // that fits wins. Large sets, and a search that has used up its work budget, use shelves.
+    let all_tries: [(&[usize], bool); 4] = [(&by_side, false), (&by_area, false), (&by_side, true), (&by_area, true)];
+    // Above 350 islands one heuristic is tried per scale, to stay within the work budget.
+    let tries: &[(&[usize], bool)] = if preps.len() > 350 { &all_tries[..1] } else { &all_tries };
+    // Shelves: tallest first, where an island's height is its shorter side when it may turn.
+    let by_height: Vec<usize> = {
+        let height = |p: &Prep| if allow_turn { p.h.min(p.w) } else { p.h };
+        let mut o = by_side.clone();
+        o.sort_by(|a, b| height(&preps[*b]).total_cmp(&height(&preps[*a])).then(a.cmp(b)));
+        o
+    };
+    let work = std::cell::Cell::new(0u64);
+    let fell_back = std::cell::Cell::new(preps.len() > MAX_RECTS_ISLANDS);
     let try_scale = |s: f64| -> Option<Vec<(f64, f64, bool)>> {
         let sizes: Vec<(f64, f64)> = preps.iter().map(|p| (p.w * s + margin, p.h * s + margin)).collect();
-        tries.iter().find_map(|(order, area_fit)| max_rects(&sizes, order, 1.0, allow_turn, *area_fit))
+        if !fell_back.get() {
+            for (order, area_fit) in tries {
+                let mut w = work.get();
+                let r = max_rects(&sizes, order, 1.0, allow_turn, *area_fit, &mut w, work_limit);
+                work.set(w);
+                match r {
+                    Ok(Some(p)) => return Some(p),
+                    Ok(None) => {}
+                    Err(OutOfBudget) => {
+                        fell_back.set(true);
+                        break;
+                    }
+                }
+            }
+        }
+        // The linear shelf layout is also a candidate at every scale: on some inputs it fits where
+        // MaxRects' greedy choices do not, and it is the only one when the budget is gone.
+        work.set(work.get() + sizes.len() as u64);
+        shelves(&sizes, &by_height, 1.0, allow_turn)
     };
     let area_sum: f64 = preps.iter().map(|p| p.w * p.h).sum();
     let biggest = preps.iter().map(|p| p.w.max(p.h)).fold(1e-9, f64::max);
@@ -345,5 +443,5 @@ pub fn pack(islands: &[PackIsland], opts: &PackOptions) -> Result<PackResult, Pa
         placements.push(Placement { matrix: m, offset: off });
     }
     let util: f64 = islands.iter().zip(&placements).map(|(i, pl)| f64::from(i.uv_area()) * f64::from(pl.matrix.determinant().abs())).sum();
-    Ok(PackResult { placements, scale: s as f32, utilisation: util as f32 })
+    Ok(PackResult { placements, scale: s as f32, utilisation: util as f32, work: work.get(), shelf_fallback: fell_back.get() })
 }

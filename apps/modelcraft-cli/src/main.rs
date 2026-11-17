@@ -252,7 +252,7 @@ fn control(project: Option<&str>) -> Result<(), String> {
 /// Pack N random rectangles (fixed seed) with the default options for each rotation mode.
 fn uv_pack_bench(n: usize) -> Result<(), String> {
     use modelcraft_engine::uvpack::{Density, PackIsland, PackOptions, Rotation, pack};
-    let n = n.clamp(1, 20_000);
+    let n = n.clamp(1, 100_000);
     let mut state = 0x9E37_79B9_7F4A_7C15u64;
     let mut rnd = move || {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -270,10 +270,19 @@ fn uv_pack_bench(n: usize) -> Result<(), String> {
             }
         })
         .collect();
+    // The margin is per island on every side, so many islands need a thinner one to fit at all.
+    let margin = if n <= 1000 { 0.004 } else { 0.0005 };
     for rotation in [Rotation::None, Rotation::Quarter, Rotation::Fit] {
         let t = Instant::now();
-        let r = pack(&islands, &PackOptions { margin: 0.004, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;
-        println!("{n} islands, rotation {rotation:?}: {:.0} ms, utilisation {:.1} %, scale {:.4}", ms(t), r.utilisation * 100.0, r.scale);
+        let r = pack(&islands, &PackOptions { margin, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;
+        println!(
+            "{n} islands, rotation {rotation:?}: {:.0} ms, utilisation {:.1} %, scale {:.4}, work {}{}",
+            ms(t),
+            r.utilisation * 100.0,
+            r.scale,
+            r.work,
+            if r.shelf_fallback { " (shelf packer)" } else { "" }
+        );
     }
     Ok(())
 }

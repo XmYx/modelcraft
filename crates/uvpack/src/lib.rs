@@ -15,7 +15,9 @@ mod pack;
 mod project;
 
 pub use islands::{island_densities, pack_islands, pack_mesh, uv_islands};
-pub use pack::{Density, MAX_ISLANDS, MAX_POINTS, PackIsland, PackOptions, PackResult, Placement, Rotation, pack};
+pub use pack::{
+    Density, MAX_ISLANDS, MAX_POINTS, MAX_RECTS_ISLANDS, MAX_WORK, PackIsland, PackOptions, PackResult, Placement, Rotation, pack, pack_with_limit,
+};
 pub use project::{Axis, Fit, ProjectOptions, Projection, project, project_mesh};
 
 use modelcraft_mesh::MeshError;
