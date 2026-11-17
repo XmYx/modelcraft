@@ -52,7 +52,7 @@ never estimated by hand.
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
 | Hair, fur and grooming | 4 (3 %) | 6 | 0 | 0 | 0 | 6 | 0 | 0 % | 0 % |
 | Volumes | 2 (2 %) | 2 | 0 | 0 | 0 | 2 | 0 | 0 % | 0 % |
-| Scripting and automation | 5 (4 %) | 10 | 2 | 1 | 2 | 5 | 1 | 40 % | 26 % |
+| Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 3 | 5 | 1 | 35 % | 21 % |
 | Pipeline formats and referencing | 6 (5 %) | 15 | 5 | 1 | 0 | 9 | 1 | 40 % | 19 % |
 | UI and workspaces | 4 (3 %) | 13 | 7 | 1 | 3 | 2 | 0 | 73 % | 62 % |
 | Stability and performance | 3 (2 %) | 6 | 4 | 1 | 0 | 1 | 0 | 83 % | 75 % |
