@@ -514,7 +514,6 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
     }
 }
 
-/// A drawn eye toggle (filled dot shown, hollow hidden) with an accessible name.
 // ---------------------------------------------------------------- properties
 
 /// Edit a value with live preview while dragging and one undo step at the end.

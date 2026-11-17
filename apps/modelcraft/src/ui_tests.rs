@@ -633,7 +633,7 @@ fn object_manager_search_lock_sets_paste_and_multi_edit() {
     assert!(!h.state().doc.scene.get(ids[0]).unwrap().locked, "{} {:?}", h.state().status, h.state().selection);
     // Template from the palette.
     h.state_mut().selection = vec![ids[2]];
-    palette(&mut h, "Template On or Off");
+    palette(&mut h, "Reference Only On or Off");
     assert!(h.state().doc.scene.get(ids[2]).unwrap().template);
     // Multi-edit: both selected, Position Y on the active one moves both, in one undo step.
     h.state_mut().selection = vec![ids[0], ids[1]];

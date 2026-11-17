@@ -28,7 +28,7 @@ impl Op {
             Op::CopyAttributes => tl!("Copy Attributes"),
             Op::PasteAttributes => tl!("Paste Attributes"),
             Op::ToggleLock => tl!("Lock or Unlock"),
-            Op::ToggleTemplate => tl!("Template On or Off"),
+            Op::ToggleTemplate => tl!("Reference Only On or Off"),
             Op::SaveSelectionSet => tl!("Save Selection as Set"),
         }
     }
@@ -257,7 +257,7 @@ pub fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
             if toggle(ui, o.locked, crate::tlf!("Locked: {name}", name = name), padlock).clicked() {
                 toggle_lock = Some((*id, !o.locked));
             }
-            if toggle(ui, o.template, crate::tlf!("Template: {name}", name = name), template_mark).clicked() {
+            if toggle(ui, o.template, crate::tlf!("Reference only: {name}", name = name), template_mark).clicked() {
                 toggle_template = Some((*id, !o.template));
             }
             crate::panels::kind_badge(ui, &o);
@@ -339,7 +339,7 @@ pub fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
                     toggle_lock = Some((*id, !o.locked));
                     ui.close();
                 }
-                if ui.button(if o.template { tl!("Template Off") } else { tl!("Template On") }).clicked() {
+                if ui.button(if o.template { tl!("Reference Only Off") } else { tl!("Reference Only On") }).clicked() {
                     toggle_template = Some((*id, !o.template));
                     ui.close();
                 }

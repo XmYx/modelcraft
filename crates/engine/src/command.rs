@@ -341,7 +341,7 @@ impl Command {
             Command::Collapse { .. } => "Collapse history".into(),
             Command::SetLocked { locked: true, .. } => "Lock".into(),
             Command::SetLocked { .. } => "Unlock".into(),
-            Command::SetTemplate { .. } => "Template".into(),
+            Command::SetTemplate { .. } => "Reference only".into(),
             Command::AddSelectionSet { .. } => "Add selection set".into(),
             Command::RemoveSelectionSet { .. } => "Remove selection set".into(),
             Command::Import { .. } => "Import".into(),
