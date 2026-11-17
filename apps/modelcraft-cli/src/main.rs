@@ -361,5 +361,52 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
     let faces = d.eval.evaluate(&d.scene, id).mesh.face_count();
     println!("history: {}-quad base + 1 subdivision level = {} quads in {:.0} ms", 6 * (seg / 2) * (seg / 2), faces, ms(t));
     let _ = (Scene::new(), ObjectKind::Group);
+    detail_bench(&mut d, id)
+}
+
+/// Detail levels and shape layers on the bench object: sculpt, step up to the full density,
+/// sculpt there, step down and up again, and report the times and the round-trip error.
+fn detail_bench(d: &mut Document, id: modelcraft_engine::scene::ObjectId) -> Result<(), String> {
+    use modelcraft_engine::{DetailOp, ShapeOp};
+    let run = |d: &mut Document, c: Command| d.execute(c).map(|_| ()).map_err(|e| e.to_string());
+    run(d, Command::RemoveStep { id, index: 0 })?;
+    run(d, Command::BeginSculpt { id })?;
+    let stroke = |kind: BrushKind| {
+        let mut b = BrushSettings::new(kind, 0.3);
+        b.symmetry.x = true;
+        let dabs = (0..40).map(|i| {
+            let a = i as f32 * 0.05;
+            let c = Vec3::new(a.cos() * 0.6, 0.55, a.sin() * 0.6).normalize();
+            Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO }
+        });
+        modelcraft_engine::sculpt::Stroke { brush: b, dabs: dabs.collect() }
+    };
+    let count = |d: &Document| d.sculpt.as_ref().map(|s| s.mesh.vertex_count()).unwrap_or(0);
+    let coarse = count(d);
+    let t = Instant::now();
+    run(d, Command::SculptDetail { id, op: DetailOp::Up })?;
+    let up_ms = ms(t);
+    run(d, Command::SculptStroke { id, stroke: stroke(BrushKind::Draw) })?;
+    let fine: Vec<Vec3> = d.sculpt.as_ref().map(|s| s.mesh.positions.clone()).unwrap_or_default();
+    let t = Instant::now();
+    run(d, Command::SculptDetail { id, op: DetailOp::Down })?;
+    let down_ms = ms(t);
+    run(d, Command::SculptStroke { id, stroke: stroke(BrushKind::Inflate) })?;
+    run(d, Command::Undo)?;
+    let t = Instant::now();
+    run(d, Command::SculptDetail { id, op: DetailOp::Up })?;
+    let again_ms = ms(t);
+    let err = d.sculpt.as_ref().map(|s| s.mesh.positions.iter().zip(&fine).map(|(a, b)| a.distance(*b)).fold(0.0f32, f32::max)).unwrap_or(f32::NAN);
+    println!(
+        "detail levels: {coarse} -> {} vertices: up {up_ms:.0} ms, down {down_ms:.0} ms, up with stored detail {again_ms:.0} ms; round-trip error {err:.2e} (unit sphere)",
+        count(d)
+    );
+    let t = Instant::now();
+    run(d, Command::SculptShape { id, op: ShapeOp::Add { name: None } })?;
+    let add_ms = ms(t);
+    run(d, Command::SculptStroke { id, stroke: stroke(BrushKind::Inflate) })?;
+    let t = Instant::now();
+    run(d, Command::SculptShape { id, op: ShapeOp::Strength { index: 0, strength: 0.5 } })?;
+    println!("shape layers at {} vertices: add {add_ms:.0} ms, change strength {:.0} ms", count(d), ms(t));
     Ok(())
 }

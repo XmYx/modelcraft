@@ -44,6 +44,8 @@ Object ids are numbers (`info` prints them).
 | `end_sculpt` | — |
 | `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}}, dabs [{center, view_dir, pressure, grab_delta}]} |
 | `sculpt_mask` | `id`, `op`: clear, fill, invert, {patch: {triangle}} |
+| `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
+| `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
 | `undo`, `redo` | — |
 
 ## Rendering

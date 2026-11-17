@@ -14,7 +14,8 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Properties (panel) | the attribute manager / channel box | Generic | Use |
 | Patches | polygon groups / face sets | Generic geometry term in this sense; product terms avoided | Use |
 | Stamp | brush alpha | Generic | Use |
-| Detail levels (planned) | multiresolution / subdivision levels in sculpting | Generic words | Use |
+| Detail levels | multiresolution / subdivision levels in sculpting | Generic words | Use |
+| Shape layers | sculpt layers / 3D layers with an intensity | Generic words; the reference product's layer names avoided | Use |
 | Live detail (planned) | dynamic topology | No live software mark found | Use |
 | Even remesh (planned) | voxel remeshing products | Generic words; product names avoided | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |

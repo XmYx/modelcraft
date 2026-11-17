@@ -239,3 +239,52 @@ fn incremental_save_names() {
     let _ = std::fs::remove_dir_all(&d);
     let _ = Path::new("");
 }
+
+#[test]
+fn detail_levels_and_shape_layers_by_keyboard() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let id = h.state().selection[0];
+    let base = h.state().doc.sculpt.as_ref().unwrap().mesh.vertex_count();
+    h.get_by_label_contains("Level 0,");
+    h.key_press(Key::PageUp);
+    h.run();
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().level, 1);
+    assert!(h.state().doc.sculpt.as_ref().unwrap().mesh.vertex_count() > base * 3);
+    h.get_by_label_contains("Level 1,");
+    assert_eq!(h.state().status, "Detail level up", "the status bar (a live region) announces the change");
+    h.key_press(Key::PageDown);
+    h.run();
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().level, 0);
+    h.get_by_label("1 finer levels kept");
+    // Shape layers: add from the palette, set the strength by value, select, remove.
+    palette(&mut h, "Add Shape Layer");
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes.len(), 1);
+    let radio = h.get_by_role_and_label(Role::RadioButton, "Shape 1, shape layer");
+    assert_eq!(radio.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "the new layer records strokes");
+    let before = h.state().doc.undo.len();
+    h.get_by_label("Strength of Shape 1").set_value_accesskit(0.25);
+    h.run();
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes[0].strength, 0.25);
+    assert_eq!(h.state().doc.undo.len(), before + 1, "one undo step per edit");
+    h.get_by_role_and_label(Role::RadioButton, "Base sculpt").click();
+    h.run();
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().active_shape, None);
+    // Stepping down is refused while shape layers exist, and says why.
+    h.key_press(Key::PageUp);
+    h.run();
+    h.key_press(Key::PageDown);
+    h.run();
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().level, 1);
+    assert!(h.state().status.contains("merge or remove the shape layers"), "{}", h.state().status);
+    h.get_by_label("Remove Shape 1").click();
+    h.run();
+    assert!(h.state().doc.sculpt_layer(id).unwrap().shapes.is_empty());
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes.len(), 1);
+    assert!(h.state().doc.sculpt.is_some(), "undo keeps the sculpt session");
+}

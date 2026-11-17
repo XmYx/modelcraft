@@ -17,6 +17,7 @@ mod keys;
 mod panels;
 mod prefs;
 mod render_view;
+mod sculpt_ui;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

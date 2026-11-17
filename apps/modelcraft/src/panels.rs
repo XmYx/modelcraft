@@ -118,6 +118,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for a in [Action::Symmetry, Action::MaskClear, Action::MaskInvert, Action::MaskFill, Action::BrushBigger, Action::BrushSmaller] {
                     action_button(app, ui, a);
                 }
+                ui.separator();
+                for a in [Action::DetailUp, Action::DetailDown, Action::ShapeAdd] {
+                    action_button(app, ui, a);
+                }
             });
             ui.menu_button(tl!("View"), |ui| {
                 for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
@@ -990,6 +994,7 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
             }
         });
     }
+    crate::sculpt_ui::layers(app, ui);
 }
 
 fn falloff_label(f: Falloff) -> String {

@@ -1,0 +1,2 @@
+- Sculpting has detail levels: step up to add resolution, step down to change the big shapes, and the fine detail follows (Page Up / Page Down in the Sculpt workspace).
+- Shape layers record strokes into named layers whose strength you can turn down, flip, merge or remove.

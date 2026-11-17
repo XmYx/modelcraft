@@ -37,6 +37,25 @@ X symmetry on (two passes per dab).
 End of stroke: BVH refit 9.3 ms. A 250 k-quad primitive plus one subdivision step (≈1 M quads)
 evaluates through the history in 1.1 s.
 
+## Detail levels and shape layers (`modelcraft-cli bench --polys 1000000`, last two lines)
+
+Measured 2026-11-17 while three other builds shared the machine. A 249,698-vertex quad sphere
+with a sculpt layer, stepped up to 998,786 vertices (≈ 2 M triangles), sculpted, stepped down and
+up again. Every time includes rebuilding the sculpt session (normals, adjacency, BVH: ≈ 0.8 s at
+this size) and the undo snapshot.
+
+| Step | Time |
+|---|---|
+| Level up, 250 k → 1 M vertices | 3.8 s |
+| Level down, 1 M → 250 k (fit the coarse level, store the displacement) | 1.7 s |
+| Level up again with the stored displacement | 4.0 s |
+| Round-trip error (down, then up) on a unit sphere | 1.0 × 10⁻⁷ |
+| Add a shape layer at 1 M vertices | 25 ms |
+| Change a shape layer's strength at 1 M vertices | 28 ms |
+
+Level changes build the level topology twice through the validated mesh builder; that, not the
+linear refinement itself, is most of the time, and it is single-threaded.
+
 **Input-to-photon estimate while sculpting 2 M triangles**: one dab (≈1.2 ms in the app, including
 symmetry and normals) + chunk upload (≈0.5 ms) + one frame (≈3.5 ms uncapped) ≈ **5 ms** before
 display latency.
