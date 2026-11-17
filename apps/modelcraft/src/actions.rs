@@ -79,6 +79,7 @@ pub enum Action {
     KeyboardShortcuts,
     RenderView,
     Anim(crate::anim_ui::AnimAction),
+    Rig(crate::rig_ui::RigAction),
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -148,6 +149,7 @@ pub fn all() -> Vec<Action> {
         About,
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
+    v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
     v
 }
 
@@ -303,6 +305,7 @@ impl Action {
             ToggleSnap => tl!("Toggle Snapping"),
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
+            Rig(a) => a.label(),
         }
     }
 
@@ -382,6 +385,7 @@ impl Action {
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
+            Rig(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
         };
@@ -470,6 +474,7 @@ impl Action {
             KeyboardShortcuts => "Cmd+Alt+K",
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
+            Rig(a) => return a.default_binding(),
             _ => return None,
         })
     }
@@ -488,6 +493,7 @@ impl Action {
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
             Anim(_) => "Animate",
+            Rig(_) => "Rig",
             _ => "View",
         }
     }

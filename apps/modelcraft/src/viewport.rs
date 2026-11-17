@@ -814,6 +814,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right {
         out.clear();
     }
+    for (a, b, color) in crate::rig_ui::bone_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
     for (a, b, color) in crate::anim_ui::path_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }

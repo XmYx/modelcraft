@@ -1,0 +1,1 @@
+- Rigging: build joint chains, mirror and orient them, bind a mesh with automatic weights, and pose it with linear or volume-preserving skinning; tidy weights with normalize, prune and mirror.

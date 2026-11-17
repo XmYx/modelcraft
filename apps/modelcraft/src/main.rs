@@ -24,6 +24,9 @@ mod material_ui;
 mod panels;
 mod prefs;
 mod render_view;
+mod rig_ui;
+#[cfg(test)]
+mod rig_ui_tests;
 mod sculpt_ui;
 mod theme;
 #[cfg(test)]

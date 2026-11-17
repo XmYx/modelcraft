@@ -250,6 +250,17 @@ pub struct ModelApp {
     pub anim: crate::anim_ui::AnimUi,
 }
 
+/// The engine's note about a restored or dropped undo history, in the interface language.
+fn history_note(n: &str) -> String {
+    if let Some(count) = n.strip_prefix("Restored ").and_then(|r| r.split(' ').next()) {
+        return crate::tlf!("Restored {count} undo steps from the last session.", count = count);
+    }
+    if n.contains("left out") || n.contains("could not be read") {
+        return tl!("The saved undo history could not be rebuilt; undo starts here.");
+    }
+    n.to_string()
+}
+
 pub fn recovery_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
@@ -392,6 +403,7 @@ impl ModelApp {
             .take(modelcraft_engine::sculpt::preset::MAX_PRESETS)
             .map(|b| modelcraft_engine::sculpt::preset::BrushPreset::new(&b.name, &b.brush))
             .collect();
+        self.doc.keep_history = p.keep_history;
         self.keymap = crate::keys::keymap(p.shortcuts);
     }
 
@@ -402,10 +414,11 @@ impl ModelApp {
             NavPreset::MiddleMouse => "middle",
             NavPreset::RightMouse => "right",
         };
-        let (recent, snap, brush_px) = (self.recent.clone(), self.snap, self.brush_px);
+        let (recent, snap, brush_px, keep_history) = (self.recent.clone(), self.snap, self.brush_px, self.doc.keep_history);
         let presets = self.user_presets.clone();
         if let Some(store) = &mut self.prefs {
             store.update(|p| {
+                p.keep_history = keep_history;
                 p.navigation = nav.into();
                 p.recent = recent;
                 p.snap = snap;
@@ -434,7 +447,9 @@ impl ModelApp {
     pub fn run_pending(&mut self, p: Pending) {
         match p {
             Pending::New => {
+                let keep = self.doc.keep_history;
                 self.doc = Document::new();
+                self.doc.keep_history = keep;
                 self.selection.clear();
                 self.components.clear();
                 self.start_autosave();
@@ -641,6 +656,7 @@ impl ModelApp {
                 self.status = tl!("Redo");
             }
             Anim(a) => crate::anim_ui::act(self, a),
+            Rig(a) => crate::rig_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
@@ -945,12 +961,17 @@ impl ModelApp {
         let is_project = path.extension().is_some_and(|e| e == modelcraft_engine::formats::project::EXTENSION);
         if is_project {
             match Document::open(&path) {
-                Ok(doc) => {
+                Ok(mut doc) => {
                     let pending = doc.pending_recovery;
+                    doc.keep_history = self.doc.keep_history;
+                    let note = doc.history_note.take();
                     self.doc = doc;
                     self.selection.clear();
                     self.components.clear();
-                    self.status = crate::tlf!("Opened {file}", file = path.display());
+                    self.status = match note {
+                        Some(n) => crate::tlf!("Opened {file}. {note}", file = path.display(), note = history_note(&n)),
+                        None => crate::tlf!("Opened {file}", file = path.display()),
+                    };
                     if pending > 0 {
                         self.recovery = Some(path);
                     }

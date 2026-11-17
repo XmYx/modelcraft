@@ -11,7 +11,8 @@
 //! | `material.metallic`, `material.base_color.0` … | the material, as it is saved |
 //! | `primitive.radius` … | a primitive's parameters |
 //! | `step.<step id>.distance` …, `step.<step id>.enabled` | a build-history step |
-//! | `levels`, `deformer.angle` … | every other kind, as it is saved |
+//! | `dual_quaternion` | a skin's blending switch |
+//! | `levels`, `deformer.angle`, `radius` … | every other kind, as it is saved |
 //!
 //! Paths other than the transform and `visible` follow the saved JSON of the part they name:
 //! object fields by name, list items by index. Whole numbers stay whole and switches flip at 0.5.
@@ -64,6 +65,8 @@ pub fn list(o: &Object) -> Vec<(String, f64)> {
                 }
             }
         }
+        // A skin's weights are data, not attributes; its one switch is.
+        ObjectKind::Skin { skin } => out.push(("dual_quaternion".into(), if skin.dual_quaternion { 1.0 } else { 0.0 })),
         kind => collect(kind, "", &mut out),
     }
     out
@@ -93,6 +96,7 @@ pub fn get(o: &Object, path: &str) -> Option<f64> {
                 }
                 _ => None,
             },
+            ObjectKind::Skin { skin } => (path == "dual_quaternion").then_some(if skin.dual_quaternion { 1.0 } else { 0.0 }),
             kind => read(kind, path),
         },
     }
@@ -143,6 +147,15 @@ pub fn set(o: &mut Object, path: &str, value: f64) -> Result<bool, SceneError> {
                 }
                 _ => Err(invalid(path)),
             },
+            ObjectKind::Skin { skin } if path == "dual_quaternion" => {
+                let on = value >= 0.5;
+                let changed = skin.dual_quaternion != on;
+                if changed {
+                    std::sync::Arc::make_mut(skin).dual_quaternion = on;
+                }
+                Ok(changed)
+            }
+            ObjectKind::Skin { .. } => Err(invalid(path)),
             kind => write(kind, path, value).ok_or_else(|| invalid(path)),
         },
     }

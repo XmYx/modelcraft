@@ -195,6 +195,36 @@ without SIMD packets or wide nodes, so it is certainly slower per ray than their
 GPU path traverses the BVH in a compute shader rather than through hardware ray queries. A fair
 comparison needs the same scene, hardware and noise level in both renderers; until someone runs
 that, the honest statement is the absolute rates above.
+## Undo history on open
+
+A project whose history holds 502 steps (a sphere, a subdivision step and 500 transforms) is
+2.8 KB on disk and opens with its history rebuilt and checked in **62 ms** in total, mesh
+evaluation included (`modelcraft-cli info`, release build, Core i9-12900K). Reproduce: run the
+502-line script with `modelcraft-cli run h.modelcraft h.jsonl`, then `time modelcraft-cli info
+h.modelcraft`. Sculpt strokes replay at their dab cost (table above), so a history with many long
+strokes on a dense mesh opens proportionally slower.
+
+## Skinned character (engine, `modelcraft-cli bench-skin --verts 100000 --joints 60 --frames 120`)
+
+A procedurally generated stand-in for a character: a tube of 100,000 vertices (100 sides ×
+1,000 rings) with a chain of 60 joints up its middle, bound with heat weights (4 influences per
+point), every joint keyed on two rotation channels (180 curves) so that every point moves on
+every frame. Each frame goes to the frame (curves → joint transforms) and evaluates the mesh
+through the dependency graph (the primitive and history are cached; only the skin runs). Two runs,
+measured while three other builds shared the machine; single-threaded.
+
+| | Linear blend | Dual quaternion |
+|---|---|---|
+| Pose: curves → 60 joints | 0.10 ms | 0.11 ms |
+| Evaluate the skinned mesh, mean | 6.1–6.6 ms | 6.4–6.5 ms |
+| Evaluate, p95 | 9.5 ms | 7.6–8.2 ms |
+| **Evaluated frames per second** | **150–162** | **151–155** |
+| Skinning kernel alone, 100,000 points | 1.0 ms | 3.3 ms |
+
+Binding (automatic heat weights: 60 conjugate-gradient solves over the surface): 10.6–11.4 s, once.
+The gap between the kernel and the evaluation (≈ 5 ms) is copying the mesh and rebuilding its
+positions for the new pose. These are engine numbers; playback in the app adds a full vertex
+upload and normals for the changed mesh each frame, which has not been measured yet.
 
 ## How the numbers stay low
 
