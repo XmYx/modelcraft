@@ -246,6 +246,8 @@ pub struct ModelApp {
     pub last_frame: Option<std::time::Instant>,
     pub autosave_at: Option<std::time::Instant>,
     pub recovery_dir: Option<PathBuf>,
+    /// The Animation panel: playback, key selection, views.
+    pub anim: crate::anim_ui::AnimUi,
 }
 
 pub fn recovery_dir() -> Option<PathBuf> {
@@ -330,6 +332,7 @@ impl ModelApp {
             last_frame: None,
             autosave_at: None,
             recovery_dir: None,
+            anim: Default::default(),
         };
         if let Some(n) = cli.bench_frames {
             let polys = cli.bench_polys.unwrap_or(1_000_000);
@@ -637,6 +640,7 @@ impl ModelApp {
                 self.run(Command::Redo);
                 self.status = tl!("Redo");
             }
+            Anim(a) => crate::anim_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
@@ -1142,6 +1146,7 @@ impl ModelApp {
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
         crate::panels::status_bar(self, ui);
+        crate::anim_ui::bottom_panel(self, ui);
         for side in [Dock::Left, Dock::Right] {
             let panels: Vec<PanelId> = PanelId::ALL.iter().copied().filter(|p| self.layout.dock(self.workspace, *p) == side).collect();
             if panels.is_empty() {
@@ -1173,7 +1178,7 @@ impl ModelApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL_DEEP)).show(ui, |ui| crate::viewport::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         self.screenshot_tick(&ctx);
-        if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() {
+        if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {
             ctx.request_repaint();
         }
     }

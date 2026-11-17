@@ -180,7 +180,9 @@ Brush depth (**S3**) is mostly in: ten more brushes, hardness, five stroke modes
 
 ## Animation and rigging
 
-Not started. **A1** comes first because rigging, simulation, Alembic and point caches all need a time model; design keys as data on attributes so the journal, CLI and undo cover them like every other command. **A3** skinning and **A4** constraints are the gate for character work; the muscle systems (**A8**) sit last.
+**A1** has its core: keys on any numeric attribute, curves, the timeline, auto-key, the Key Sheet
+and the Curve Editor (see the limits below). Still open in A1: preview capture, following a spline,
+audio and the sculpt turntable. Everything else is not started. **A1** came first because rigging, simulation, Alembic and point caches all need a time model; design keys as data on attributes so the journal, CLI and undo cover them like every other command. **A3** skinning and **A4** constraints are the gate for character work; the muscle systems (**A8**) sit last.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -192,6 +194,19 @@ Not started. **A1** comes first because rigging, simulation, Alembic and point c
 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | 6 | 65 | 2.71 | 7 | A1 |
 | **A7** Characters: rig templates, retargeting, motion capture, pose library, facial tools | 5 | 86 | 1.76 | 51 | A3, A4 |
 | **A8** Muscle and skin-sliding systems | 1 | 60 | 0.85 | 69 | A3 |
+
+Limits of what exists:
+- Rotation is keyed as XYZ Euler angles; there are no other rotation orders, no quaternion
+  interpolation and no Euler filter. A rotation with only some angles keyed reads the others back
+  from the quaternion, which is ambiguous past ±90° on Y: key all three (Key Transform and auto-key do).
+- No box selection or copy/paste of keys.
+- The Curve Editor fits its value axis to the shown curves; hide curves to see small ones next to
+  large ones.
+- Playback shows whole frames at the scene rate on the UI thread.
+- Duplicating an object does not copy its curves.
+- The app's shortcut handler gives every key to a focused widget, so with keyboard focus on a
+  button or a tree row single-key shortcuts do not run; the Animation panel handles Undo, Redo and
+  Delete itself while its ruler or a key has focus.
 
 ## Modeling
 

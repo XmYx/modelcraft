@@ -157,6 +157,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     }
                 });
             });
+            crate::anim_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
                 action_button(app, ui, Action::KeyboardShortcuts);

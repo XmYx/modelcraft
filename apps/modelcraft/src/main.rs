@@ -9,6 +9,9 @@
 #[macro_use]
 mod i18n;
 mod actions;
+mod anim_ui;
+#[cfg(test)]
+mod anim_ui_tests;
 mod app;
 mod args;
 mod demo;
