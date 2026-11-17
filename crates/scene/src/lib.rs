@@ -27,7 +27,7 @@ pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 use serde::{Deserialize, Serialize};
 
-pub use anim::{Animation, Track};
+pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
 pub use eval::{Evaluated, Evaluator, StepError};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).

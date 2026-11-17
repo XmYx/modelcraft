@@ -30,10 +30,19 @@ load (unique ids, parents exist, no cycles, depth ≤ 64, finite transforms).
 `scene.anim` (left out when the scene has none) holds `fps`, `start`, `end` (the playback range in
 frames), `frame` (the current frame), `auto_key` and `tracks`: `{target, path, curve}` with
 `curve.keys` = `[{t, v, interp?, tangent?, in_slope?, out_slope?, in_weight?, out_weight?}]`
-sorted by `t` (frames), plus `pre` / `post` extrapolation. Defaults are left out. The attribute
+sorted by `t` (frames), plus `pre` / `post` extrapolation. A track's `layer` (left out for the
+base, 0) names an entry of `layers`: `{id, name, mode (add | override), weight, mute}`, bottom
+first; `active_layer` is the layer keys go to. Defaults are left out. The attribute
 `path` grammar is in [cli.md](cli.md#animation). On load, non-finite keys are dropped, keys are
 sorted and de-duplicated, counts are capped (2²⁰ keys per curve, 200 000 tracks) and tracks on
 missing objects are removed. Builds from before animation ignore the block.
+
+## Point cache (`.mcpc`)
+
+`modelcraft-cli bake` writes the vertices of one object at a run of frames (little-endian):
+`"MCPC"`, `u32` version 1, `u32` vertices, `u32` frames, `f64` fps, `f64` start frame, `f64` step,
+then frames × vertices × `f32[3]`. Sample `i` is at frame `start + i·step`; vertex order is the
+baked mesh's. Readers check the counts against the bytes present and refuse non-finite headers.
 
 ## Journal
 

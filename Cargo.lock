@@ -2454,6 +2454,7 @@ dependencies = [
 name = "modelcraft-cli"
 version = "0.1.0"
 dependencies = [
+ "craft-atomic",
  "craft-image-codecs",
  "glam",
  "modelcraft-engine",

@@ -1,0 +1,1 @@
+- Animation: layers that adjust or replace the animation below with a weight, motion paths for selected objects, a Turntable command, Smooth Rotation Keys to clean up spinning rotations, and `modelcraft-cli bake` to write an object's animated vertices to a point cache.
