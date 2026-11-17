@@ -20,6 +20,10 @@ struct Node {
 pub struct Bvh {
     nodes: Vec<Node>,
     order: Vec<u32>,
+    /// The leaf node holding each triangle.
+    tri_leaf: Vec<u32>,
+    /// Triangles added to a leaf after the build (live detail), by leaf node.
+    extra: std::collections::HashMap<u32, Vec<u32>>,
 }
 
 fn tri_bounds(p: &[Vec3], t: &[u32; 3]) -> (Vec3, Vec3) {
@@ -77,23 +81,52 @@ impl Bvh {
             stack.push(left as usize);
             stack.push(left as usize + 1);
         }
-        Bvh { nodes, order }
+        let mut tri_leaf = vec![0u32; tris.len()];
+        for (i, n) in nodes.iter().enumerate() {
+            if n.count > 0 {
+                for t in order.get(n.first as usize..(n.first + n.count) as usize).unwrap_or_default() {
+                    if let Some(x) = tri_leaf.get_mut(*t as usize) {
+                        *x = i as u32;
+                    }
+                }
+            }
+        }
+        Bvh { nodes, order, tri_leaf, extra: Default::default() }
+    }
+
+    /// Put the new triangle `child` into the leaf of `parent`. The caller guarantees the child
+    /// lies inside the parent (it came from splitting it), so the leaf's box still holds.
+    pub fn add_child(&mut self, parent: u32, child: u32) {
+        let leaf = self.tri_leaf.get(parent as usize).copied().unwrap_or(0);
+        if self.tri_leaf.len() <= child as usize {
+            self.tri_leaf.resize(child as usize + 1, 0);
+        }
+        if let Some(x) = self.tri_leaf.get_mut(child as usize) {
+            *x = leaf;
+        }
+        self.extra.entry(leaf).or_default().push(child);
+    }
+
+    /// Triangles added since the build.
+    pub fn added(&self) -> usize {
+        self.extra.values().map(Vec::len).sum()
+    }
+
+    fn leaf_tris(&self, i: usize, n: &Node) -> impl Iterator<Item = u32> + '_ {
+        let own = self.order.get(n.first as usize..(n.first + n.count) as usize).unwrap_or_default();
+        own.iter().copied().chain(self.extra.get(&(i as u32)).map(Vec::as_slice).unwrap_or_default().iter().copied())
     }
 
     pub fn heap_bytes(&self) -> usize {
-        self.nodes.len() * std::mem::size_of::<Node>() + self.order.len() * 4
+        self.nodes.len() * std::mem::size_of::<Node>() + self.order.len() * 4 + self.tri_leaf.len() * 4 + self.added() * 4
     }
 
     pub fn refit(&mut self, p: &[Vec3], tris: &[[u32; 3]]) {
         for i in (0..self.nodes.len()).rev() {
             let Some(node) = self.nodes.get(i).copied() else { continue };
             let (lo, hi) = if node.count > 0 {
-                let (s, n) = (node.first as usize, node.count as usize);
-                self.order
-                    .get(s..s + n)
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|t| tris.get(*t as usize))
+                self.leaf_tris(i, &node)
+                    .filter_map(|t| tris.get(t as usize))
                     .map(|t| tri_bounds(p, t))
                     .fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
             } else {
@@ -121,8 +154,8 @@ impl Bvh {
                 continue;
             }
             if n.count > 0 {
-                for t in self.order.get(n.first as usize..(n.first + n.count) as usize).unwrap_or_default() {
-                    f(*t);
+                for t in self.leaf_tris(i, n) {
+                    f(t);
                 }
             } else {
                 stack.push(n.first as usize);
@@ -149,13 +182,13 @@ impl Bvh {
                 continue;
             }
             if n.count > 0 {
-                for t in self.order.get(n.first as usize..(n.first + n.count) as usize).unwrap_or_default() {
-                    let Some(tri) = tris.get(*t as usize) else { continue };
+                for t in self.leaf_tris(i, n) {
+                    let Some(tri) = tris.get(t as usize) else { continue };
                     let g = |i: u32| p.get(i as usize).copied().unwrap_or_default();
                     if let Some(h) = ray_tri(o, d, g(tri[0]), g(tri[1]), g(tri[2]))
                         && best.is_none_or(|(b, _)| h < b)
                     {
-                        best = Some((h, *t));
+                        best = Some((h, t));
                     }
                 }
             } else {

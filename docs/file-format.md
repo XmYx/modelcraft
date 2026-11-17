@@ -8,6 +8,7 @@ A ZIP archive (written by craft-zip, saved atomically by craft-atomic):
 | `project.json` | `{ "format": "modelcraft.project", "schema_version": 2, "generator", "saved_at" (RFC 3339, UTC), "scene", "blobs" }` |
 | `blobs/<object>-source.bin` | a stored mesh (`MCMB` encoding) |
 | `blobs/<object>-<step>.bin` | a sculpt layer (`MCSL` encoding) |
+| `blobs/<object>-<step>-topology.bin` | the triangles of a sculpt layer changed by live detail (`MCMB` encoding) |
 
 `scene` is the serde form of `modelcraft_scene::Scene`: `objects` (id, name, parent, transform
 {translation, rotation quaternion xyzw, scale}, visible, material, kind) and `next_id`. Large arrays

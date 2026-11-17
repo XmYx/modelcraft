@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 71 / 7 / 33 / 219 | counted |
+| Done / exceeds / partial / missing | 72 / 7 / 34 / 217 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **28.6 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **19.6 %** | counted |
-| Size-weighted parity over all rows, no area weights | 19.9 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **29.1 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **20.5 %** | counted |
+| Size-weighted parity over all rows, no area weights | 20.7 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -41,7 +41,7 @@ never estimated by hand.
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
 | UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
 | Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 7 | 1 | 2 | 12 | 0 | 41 % | 28 % |
-| Sculpting: resolution and topology | 6 (5 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 15 % |
+| Sculpting: resolution and topology | 6 (5 %) | 9 | 2 | 0 | 2 | 5 | 0 | 33 % | 35 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
 | Materials and shading | 5 (4 %) | 9 | 2 | 0 | 3 | 4 | 0 | 39 % | 30 % |
 | Render engine: core | 8 (6 %) | 17 | 5 | 0 | 5 | 7 | 2 | 44 % | 53 % |
@@ -362,8 +362,8 @@ Weight: 6
 |---|---|---|---|---|
 | Multiresolution subdivision levels | C M Z | D | L | "Detail levels": step up and down, a displacement per level in a surface frame, detail follows coarse edits; the object shows the level being worked on |
 | Reconstruct lower levels from a dense mesh | Z | M | M | |
-| Dynamic topology | Z | M | L | Planned as "Live detail" |
-| Voxel / even remesh | Z | M | L | Planned as "Even remesh" |
+| Dynamic topology | Z | P | L | "Live detail": strokes split the triangles under the brush down to a detail size, with exact undo and journal replay. Splits only (no collapsing or edge flips yet); base detail level only; each split re-uploads the whole mesh to the GPU |
+| Voxel / even remesh | Z | D | L | "Even remesh": a history step that rebuilds a closed mesh as even quads; volume kept within 0.05 % (measured). Closed meshes only; loses UVs and patches |
 | Automatic quad retopology with guides and density | C M Z | M | XL | |
 | Decimation that keeps UVs and vertex colour | Z | M | L | |
 | Project detail from one mesh to another | M Z | M | M | |

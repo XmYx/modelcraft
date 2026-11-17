@@ -16,8 +16,8 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Stamp | brush alpha | Generic | Use |
 | Detail levels | multiresolution / subdivision levels in sculpting | Generic words | Use |
 | Shape layers | sculpt layers / 3D layers with an intensity | Generic words; the reference product's layer names avoided | Use |
-| Live detail (planned) | dynamic topology | No live software mark found | Use |
-| Even remesh (planned) | voxel remeshing products | Generic words; product names avoided | Use |
+| Live detail | dynamic topology | No live software mark found | Use |
+| Even remesh | voxel remeshing products | Generic words; product names avoided | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |

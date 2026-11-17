@@ -512,14 +512,31 @@ mod tests {
     use craft_render_core::{Material, mean_rgb, render_image, scenes};
     use std::sync::Arc;
 
+    /// One GPU test at a time: several devices opened at once from one process have crashed
+    /// inside a vendor driver on a busy machine.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct TestGpu {
+        ctx: GpuContext,
+        _turn: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl std::ops::Deref for TestGpu {
+        type Target = GpuContext;
+        fn deref(&self) -> &GpuContext {
+            &self.ctx
+        }
+    }
+
     /// The GPU for a test, or `None` (with a note) on machines without an adapter.
-    fn gpu() -> Option<GpuContext> {
+    fn gpu() -> Option<TestGpu> {
+        let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
         let ctx = GpuContext::new();
         match &ctx {
             Some(c) => eprintln!("GPU test on {} ({}, software: {})", c.caps.adapter, c.caps.backend, c.caps.software),
             None => eprintln!("skipped: no GPU adapter on this machine; the CPU reference covers this path"),
         }
-        ctx
+        ctx.map(|ctx| TestGpu { ctx, _turn: turn })
     }
 
     fn both(scene: Scene, size: u32, spp: u32, integrator: IntegratorSettings) -> Option<(Film, Film)> {

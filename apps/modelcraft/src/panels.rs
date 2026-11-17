@@ -119,7 +119,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 ui.separator();
-                for a in [Action::DetailUp, Action::DetailDown, Action::ShapeAdd] {
+                for a in [Action::DetailUp, Action::DetailDown, Action::ShapeAdd, Action::LiveDetail, Action::EvenRemesh] {
                     action_button(app, ui, a);
                 }
             });
@@ -794,6 +794,7 @@ fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op
                 set_name(ui, &r, tl!("Cuts"));
                 Some(r)
             }
+            StepOp::EvenRemesh { cell } => Some(drag(ui, cell, 0.001, 0.0001..=1000.0, tl!("Cell size"))),
             StepOp::Subdivide { levels } => {
                 ui.label(tl!("Levels"));
                 let r = ui.add(egui::DragValue::new(levels).range(1..=4));

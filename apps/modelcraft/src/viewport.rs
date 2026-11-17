@@ -645,6 +645,8 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
         let scale = w.to_scale_rotation_translation().0.abs().max_element().max(1e-6);
         brush.radius = app.brush_px * cam.world_per_pixel(w.transform_point3(hit), rect.height()) / scale;
         app.brush.radius = brush.radius;
+        // The app keeps the live-detail size as a share of the brush radius.
+        brush.live_detail = crate::sculpt_ui::live_detail_edge(app, brush.radius);
         let object = app.doc.sculpt.as_ref().map(|s| s.id).unwrap_or_default();
         app.doc.stroke_begin(brush);
         let world_hit = w.transform_point3(hit);
