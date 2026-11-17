@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod bench_cmd;
 mod render_cmd;
 
 use std::io::{BufRead, Write};
@@ -31,13 +32,16 @@ Commands:
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
                                     one command per line in, {\"ok\":…} per line out
+  bake <project> <object id or name> <out.mcpc> [--start F] [--end F] [--step F] [--world]
+                                    bake an object's vertices over the frames into a point cache
+  cache-info <file.mcpc>            print a point cache's header and bounds
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
   uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   -h, --help | -V, --version
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nRendering:\n{}\n", render_cmd::USAGE)
+    format!("{USAGE}\nRendering:\n{}\n{}\n", render_cmd::USAGE, bench_cmd::USAGE)
 }
 
 fn main() -> ExitCode {
@@ -145,8 +149,21 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             println!("replayed {n} commands into {}", p.display());
             Ok(())
         }
+        "bake" => bake(a),
+        "cache-info" => {
+            let p = arg(a, 0, "point cache")?;
+            let bytes = std::fs::read(p).map_err(|e| format!("{p}: {e}"))?;
+            let c = modelcraft_engine::formats::pointcache::PointCache::from_bytes(&bytes).map_err(|e| e.to_string())?;
+            let (lo, hi) = c.positions.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            println!("{} frames of {} vertices, from frame {} every {} frames at {} fps", c.frames(), c.vertices, c.start, c.step, c.fps);
+            if !c.positions.is_empty() {
+                println!("bounds {lo} .. {hi}");
+            }
+            Ok(())
+        }
         "control" => control(a.first().map(String::as_str)),
         "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
+        "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
@@ -156,6 +173,34 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
+}
+
+/// `bake`: write the vertices of one object at every sampled frame to a `.mcpc` point cache.
+fn bake(a: &[String]) -> Result<(), String> {
+    let mut d = load(arg(a, 0, "project")?)?;
+    let which = arg(a, 1, "object id or name")?;
+    let out = arg(a, 2, "output .mcpc")?;
+    let id = d
+        .scene
+        .objects()
+        .iter()
+        .find(|o| which.parse::<u64>().is_ok_and(|n| n == o.id.0) || o.name == which)
+        .map(|o| o.id)
+        .ok_or_else(|| format!("no object {which:?}"))?;
+    let num = |name: &str, default: f64| -> Result<f64, String> {
+        match flag(a, name) {
+            Some(v) => v.parse::<f64>().map_err(|_| format!("{name} needs a number, got {v:?}")),
+            None => Ok(default),
+        }
+    };
+    let time = d.scene.anim.time;
+    let (start, end, step) = (num("--start", time.start)?, num("--end", time.end)?, num("--step", 1.0)?);
+    let world = a.iter().any(|x| x == "--world");
+    let cache = d.bake_points(id, start, end, step, world).map_err(|e| e.to_string())?;
+    let bytes = cache.to_bytes().map_err(|e| e.to_string())?;
+    craft_atomic::atomic_write(Path::new(out), &bytes).map_err(|e| format!("{out}: {e}"))?;
+    println!("{} frames of {} vertices written to {out}", cache.frames(), cache.vertices);
+    Ok(())
 }
 
 fn info(d: &mut Document) {

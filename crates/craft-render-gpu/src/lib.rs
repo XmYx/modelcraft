@@ -134,6 +134,9 @@ struct Params {
     node_count: u32,
     clamp_indirect: f32,
     strategy: u32,
+    /// Index bits of the z-curve pixel order; 255 for independent pixels.
+    z_bits: u32,
+    pad: [u32; 3],
 }
 
 #[repr(C)]
@@ -404,6 +407,11 @@ impl GpuRenderer {
                 Strategy::LightOnly => 1,
                 Strategy::BsdfOnly => 2,
             },
+            z_bits: match settings.pixel_order {
+                craft_render_core::PixelOrder::ZCurve => craft_render_core::sampler::z_order_bits(w, h),
+                craft_render_core::PixelOrder::Independent => 255,
+            },
+            pad: [0; 3],
         };
 
         scoped(ctx, || {
@@ -543,7 +551,7 @@ mod tests {
         let ctx = gpu()?;
         // The GPU chooses lights by power; ask the CPU for the same so the samples coincide.
         let integrator = IntegratorSettings { light_sampling: craft_render_core::LightSampling::Power, ..integrator };
-        let settings = RenderSettings { width: size, height: size, integrator, seed: 5 };
+        let settings = RenderSettings { width: size, height: size, integrator, seed: 5, ..RenderSettings::default() };
         let mut r = GpuRenderer::new(&ctx, &scene, settings).unwrap();
         r.render(&ctx, spp).unwrap();
         let g = r.film(&ctx).unwrap();

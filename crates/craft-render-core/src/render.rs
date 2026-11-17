@@ -7,7 +7,7 @@ use glam::Vec2;
 use rayon::prelude::*;
 
 use crate::camera::PreparedCamera;
-use crate::integrator::{IntegratorSettings, radiance};
+use crate::integrator::{IntegratorSettings, radiance_and_features};
 use crate::sampler::Sampler;
 use crate::scene::{Scene, SceneError};
 
@@ -23,11 +23,25 @@ pub struct RenderSettings {
     pub integrator: IntegratorSettings,
     /// Changes every random choice of the render; the same seed gives the same image.
     pub seed: u32,
+    /// How pixels share the sample sequence.
+    pub pixel_order: PixelOrder,
+    /// The camera of the previous frame, for the motion feature image (`None`: no motion).
+    pub previous_camera: Option<crate::camera::Camera>,
+}
+
+/// How pixels draw from the sample sequence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PixelOrder {
+    /// One sequence shared along the z-curve: neighbouring pixels get complementary samples.
+    #[default]
+    ZCurve,
+    /// Every pixel scrambles the sequence on its own (white-noise error).
+    Independent,
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
-        RenderSettings { width: 640, height: 360, integrator: IntegratorSettings::default(), seed: 0 }
+        RenderSettings { width: 640, height: 360, integrator: IntegratorSettings::default(), seed: 0, pixel_order: PixelOrder::ZCurve, previous_camera: None }
     }
 }
 
@@ -40,6 +54,15 @@ pub struct Film {
     pub sum: Vec<[f32; 3]>,
     /// Samples accumulated in every pixel.
     pub samples: u32,
+    /// Sums of the first-hit features, for denoising and compositing: base colour, world-space
+    /// shading normal, distance from the camera, and screen motion in pixels since the previous
+    /// frame's camera.
+    pub albedo: Vec<[f32; 3]>,
+    pub normal: Vec<[f32; 3]>,
+    pub depth: Vec<f32>,
+    pub motion: Vec<[f32; 2]>,
+    /// Sum of the squared luminance of the samples (with `sum`, the per-pixel variance).
+    pub luminance_sq: Vec<f32>,
 }
 
 /// The transfer function of sRGB displays (IEC 61966-2-1).
@@ -54,13 +77,46 @@ impl Film {
         if width == 0 || height == 0 || width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
             return Err(SceneError::BadImageSize(width, height));
         }
-        Ok(Film { width, height, sum: vec![[0.0; 3]; width as usize * height as usize], samples: 0 })
+        let n = width as usize * height as usize;
+        Ok(Film {
+            width,
+            height,
+            sum: vec![[0.0; 3]; n],
+            samples: 0,
+            albedo: vec![[0.0; 3]; n],
+            normal: vec![[0.0; 3]; n],
+            depth: vec![0.0; n],
+            motion: vec![[0.0; 2]; n],
+            luminance_sq: vec![0.0; n],
+        })
     }
 
     /// Mean radiance per pixel (linear RGB).
     pub fn mean(&self) -> Vec<[f32; 3]> {
         let k = if self.samples > 0 { 1.0 / self.samples as f32 } else { 0.0 };
         self.sum.iter().map(|p| [p[0] * k, p[1] * k, p[2] * k]).collect()
+    }
+
+    /// Variance of each pixel's mean luminance, estimated from its samples (zero below two samples).
+    pub fn variance(&self) -> Vec<f32> {
+        let n = self.samples as f32;
+        if self.samples < 2 {
+            return vec![0.0; self.sum.len()];
+        }
+        self.sum
+            .iter()
+            .zip(&self.luminance_sq)
+            .map(|(s, sq)| {
+                let mean = crate::math::luminance(glam::Vec3A::from_array(*s)) / n;
+                ((sq / n - mean * mean).max(0.0)) / (n - 1.0)
+            })
+            .collect()
+    }
+
+    /// A feature image divided by the sample count.
+    pub fn mean_of(&self, sums: &[[f32; 3]]) -> Vec<[f32; 3]> {
+        let k = if self.samples > 0 { 1.0 / self.samples as f32 } else { 0.0 };
+        sums.iter().map(|p| [p[0] * k, p[1] * k, p[2] * k]).collect()
     }
 
     /// The image as 8-bit sRGB with opaque alpha, after scaling by `2^exposure`.
@@ -84,15 +140,28 @@ pub struct Renderer {
     settings: RenderSettings,
     camera: PreparedCamera,
     film: Film,
-    scratch: Vec<[f32; 3]>,
+    previous: Option<PreparedCamera>,
+    scratch: Vec<PixelSums>,
+}
+
+/// What one pass adds to one pixel.
+#[derive(Clone, Copy, Default)]
+struct PixelSums {
+    radiance: [f32; 3],
+    albedo: [f32; 3],
+    normal: [f32; 3],
+    depth: f32,
+    motion: [f32; 2],
+    luminance_sq: f32,
 }
 
 impl Renderer {
     pub fn new(scene: Arc<Scene>, settings: RenderSettings) -> Result<Renderer, SceneError> {
         let film = Film::new(settings.width, settings.height)?;
         let camera = scene.camera.prepare(settings.width as f32 / settings.height as f32);
-        let scratch = vec![[0.0; 3]; film.sum.len()];
-        Ok(Renderer { scene, settings, camera, film, scratch })
+        let scratch = vec![PixelSums::default(); film.sum.len()];
+        let previous = settings.previous_camera.map(|c| c.prepare(settings.width as f32 / settings.height as f32));
+        Ok(Renderer { scene, settings, camera, film, previous, scratch })
     }
 
     pub fn film(&self) -> &Film {
@@ -114,31 +183,57 @@ impl Renderer {
         }
         let (w, h) = (self.film.width as usize, self.film.height as usize);
         let first = self.film.samples;
-        let (scene, camera, settings) = (&*self.scene, &self.camera, &self.settings);
+        let (scene, camera, settings, previous) = (&*self.scene, &self.camera, &self.settings, &self.previous);
+        let z_bits = crate::sampler::z_order_bits(self.film.width, self.film.height);
         self.scratch.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             if cancel.load(Ordering::Relaxed) {
                 return;
             }
             for (x, px) in row.iter_mut().enumerate() {
                 let seed = Sampler::pixel_seed(x as u32, y as u32, settings.seed);
-                let mut acc = glam::Vec3A::ZERO;
+                let mut acc = PixelSums::default();
+                let mut rgb = glam::Vec3A::ZERO;
                 for s in first..first + samples {
-                    let mut sampler = Sampler::new(seed, s);
+                    let ordered =
+                        if settings.pixel_order == PixelOrder::ZCurve { Sampler::z_ordered(x as u32, y as u32, s, z_bits, settings.seed) } else { None };
+                    let mut sampler = ordered.unwrap_or_else(|| Sampler::new(seed, s));
                     let jitter = sampler.next2();
                     let lens = sampler.next2();
                     let ndc = Vec2::new((x as f32 + jitter.x) / w as f32 * 2.0 - 1.0, 1.0 - (y as f32 + jitter.y) / h as f32 * 2.0);
-                    acc += radiance(scene, camera.ray(ndc, lens), &mut sampler, &settings.integrator);
+                    let (l, f) = radiance_and_features(scene, camera.ray(ndc, lens), &mut sampler, &settings.integrator);
+                    rgb += l;
+                    let lum = crate::math::luminance(l);
+                    acc.luminance_sq += lum * lum;
+                    for k in 0..3 {
+                        acc.albedo[k] += f.albedo[k];
+                        acc.normal[k] += f.normal[k];
+                    }
+                    acc.depth += f.depth;
+                    if let (Some(p), Some(prev)) = (f.position, previous)
+                        && let Some(before) = prev.project(p)
+                    {
+                        acc.motion[0] += (ndc.x - before.x) * 0.5 * w as f32;
+                        acc.motion[1] += (before.y - ndc.y) * 0.5 * h as f32;
+                    }
                 }
-                *px = acc.to_array();
+                acc.radiance = rgb.to_array();
+                *px = acc;
             }
         });
         if cancel.load(Ordering::Relaxed) {
             return false;
         }
-        for (sum, add) in self.film.sum.iter_mut().zip(&self.scratch) {
+        let film = &mut self.film;
+        for (i, add) in self.scratch.iter().enumerate() {
             for k in 0..3 {
-                sum[k] += add[k];
+                film.sum[i][k] += add.radiance[k];
+                film.albedo[i][k] += add.albedo[k];
+                film.normal[i][k] += add.normal[k];
             }
+            film.depth[i] += add.depth;
+            film.motion[i][0] += add.motion[0];
+            film.motion[i][1] += add.motion[1];
+            film.luminance_sq[i] += add.luminance_sq;
         }
         self.film.samples += samples;
         true

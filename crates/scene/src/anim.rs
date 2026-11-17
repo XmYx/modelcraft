@@ -24,13 +24,54 @@ pub const MAX_TRACKS: usize = 200_000;
 pub const TRANSFORM_PATHS: [&str; 9] = ["translate.x", "translate.y", "translate.z", "rotate.x", "rotate.y", "rotate.z", "scale.x", "scale.y", "scale.z"];
 const ROTATE_PATHS: [&str; 3] = ["rotate.x", "rotate.y", "rotate.z"];
 
-/// A curve driving one attribute of one object.
+/// A curve driving one attribute of one object, in one layer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub target: ObjectId,
     /// Attribute path ([`crate::attr`]).
     pub path: String,
+    /// The layer the curve belongs to ([`BASE_LAYER`] or a [`Layer::id`]).
+    #[serde(default, skip_serializing_if = "is_base")]
+    pub layer: u32,
     pub curve: Arc<Curve>,
+}
+
+/// The layer every scene has: plain curves, always at full weight.
+pub const BASE_LAYER: u32 = 0;
+/// Most layers above the base.
+pub const MAX_LAYERS: usize = 64;
+
+fn is_base(l: &u32) -> bool {
+    *l == BASE_LAYER
+}
+fn full() -> f64 {
+    1.0
+}
+
+/// How a layer's curves combine with what lies below them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerMode {
+    /// The curve's value is added, scaled by the layer's weight.
+    #[default]
+    Add,
+    /// The curve's value replaces the value below, blended by the layer's weight.
+    Override,
+}
+
+/// An animation layer above the base: its curves adjust (or replace) the animation below
+/// without touching it, and can be faded with `weight` or switched off with `mute`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Layer {
+    /// Stable id, never [`BASE_LAYER`].
+    pub id: u32,
+    pub name: String,
+    #[serde(default)]
+    pub mode: LayerMode,
+    #[serde(default = "full")]
+    pub weight: f64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mute: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -52,6 +93,12 @@ pub struct Animation {
     pub auto_key: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tracks: Vec<Track>,
+    /// Layers above the base, bottom first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    layers: Vec<Layer>,
+    /// The layer keys are set and edited in.
+    #[serde(default, skip_serializing_if = "is_base")]
+    active_layer: u32,
 }
 
 impl Animation {
@@ -65,8 +112,83 @@ impl Animation {
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
     }
+    /// The track of an attribute in the active layer.
     pub fn track(&self, id: ObjectId, path: &str) -> Option<&Track> {
-        self.tracks.iter().find(|t| t.target == id && t.path == path)
+        self.track_in(id, path, self.active_layer)
+    }
+    pub fn track_in(&self, id: ObjectId, path: &str, layer: u32) -> Option<&Track> {
+        self.tracks.iter().find(|t| t.target == id && t.path == path && t.layer == layer)
+    }
+    /// True when the attribute has a curve in any layer.
+    pub fn has_curve(&self, id: ObjectId, path: &str) -> bool {
+        self.tracks.iter().any(|t| t.target == id && t.path == path)
+    }
+
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+    pub fn layer(&self, id: u32) -> Option<&Layer> {
+        self.layers.iter().find(|l| l.id == id)
+    }
+    pub fn layer_mut(&mut self, id: u32) -> Option<&mut Layer> {
+        self.layers.iter_mut().find(|l| l.id == id)
+    }
+    pub fn active_layer(&self) -> u32 {
+        self.active_layer
+    }
+    /// Choose the layer keys go to; `false` when there is no such layer.
+    pub fn set_active_layer(&mut self, id: u32) -> bool {
+        let ok = id == BASE_LAYER || self.layer(id).is_some();
+        if ok {
+            self.active_layer = id;
+        }
+        ok
+    }
+    /// Add a layer on top; returns its id.
+    pub fn add_layer(&mut self, name: &str, mode: LayerMode) -> Result<u32, SceneError> {
+        if self.layers.len() >= MAX_LAYERS {
+            return Err(SceneError::Invalid("too many animation layers".into()));
+        }
+        let id = self.layers.iter().map(|l| l.id).max().unwrap_or(BASE_LAYER) + 1;
+        let name: String = name.trim().chars().take(128).collect();
+        self.layers.push(Layer { id, name: if name.is_empty() { format!("Layer {id}") } else { name }, mode, weight: 1.0, mute: false });
+        Ok(id)
+    }
+    /// Remove a layer and its curves; the base layer becomes active if it was the active one.
+    pub fn remove_layer(&mut self, id: u32) -> bool {
+        let n = self.layers.len();
+        self.layers.retain(|l| l.id != id);
+        if self.layers.len() == n {
+            return false;
+        }
+        self.tracks.retain(|t| t.layer != id);
+        if self.active_layer == id {
+            self.active_layer = BASE_LAYER;
+        }
+        true
+    }
+
+    /// The value of an attribute at `frame` with every layer applied, bottom to top: the base
+    /// curve, then each layer that is not muted adds its curve (times its weight) or blends
+    /// towards it (by its weight). `None` when no layer has a curve with keys for it.
+    pub fn value_at(&self, id: ObjectId, path: &str, frame: f64) -> Option<f64> {
+        let mut v = self.track_in(id, path, BASE_LAYER).and_then(|t| t.curve.eval(frame));
+        for l in self.layers.iter().filter(|l| !l.mute) {
+            let Some(x) = self.track_in(id, path, l.id).and_then(|t| t.curve.eval(frame)) else { continue };
+            let w = if l.weight.is_finite() { l.weight.clamp(0.0, 1.0) } else { 1.0 };
+            v = Some(match (l.mode, v) {
+                (LayerMode::Add, below) => below.unwrap_or(0.0) + x * w,
+                (LayerMode::Override, Some(below)) => below + (x - below) * w,
+                (LayerMode::Override, None) => x,
+            });
+        }
+        v
+    }
+
+    /// Every animated attribute once: `(object, path)` in track order.
+    pub fn animated(&self) -> Vec<(ObjectId, &str)> {
+        let mut seen = std::collections::HashSet::new();
+        self.tracks.iter().filter(|t| seen.insert((t.target, t.path.as_str()))).map(|t| (t.target, t.path.as_str())).collect()
     }
     pub fn curve(&self, id: ObjectId, path: &str) -> Option<&Curve> {
         self.track(id, path).map(|t| &*t.curve)
@@ -78,9 +200,14 @@ impl Animation {
         self.tracks.iter().any(|t| t.target == id)
     }
 
-    /// The curve of an attribute, created empty when missing.
+    /// The curve of an attribute in the active layer, created empty when missing.
     pub fn curve_mut(&mut self, id: ObjectId, path: &str) -> Result<&mut Curve, SceneError> {
-        let i = match self.tracks.iter().position(|t| t.target == id && t.path == path) {
+        self.curve_mut_in(id, path, self.active_layer)
+    }
+
+    /// The curve of an attribute in a layer, created empty when missing.
+    pub fn curve_mut_in(&mut self, id: ObjectId, path: &str, layer: u32) -> Result<&mut Curve, SceneError> {
+        let i = match self.tracks.iter().position(|t| t.target == id && t.path == path && t.layer == layer) {
             Some(i) => i,
             None => {
                 if self.tracks.len() >= MAX_TRACKS || path.len() > attr::MAX_PATH {
@@ -95,7 +222,7 @@ impl Animation {
                     .map(|i| i + 1)
                     .or_else(|| self.tracks.iter().position(|t| t.target == id))
                     .unwrap_or(self.tracks.len());
-                self.tracks.insert(at, Track { target: id, path: path.to_string(), curve: Arc::new(Curve::new()) });
+                self.tracks.insert(at, Track { target: id, path: path.to_string(), layer, curve: Arc::new(Curve::new()) });
                 at
             }
         };
@@ -105,10 +232,16 @@ impl Animation {
         }
     }
 
-    /// Remove a track; `true` when it existed.
+    /// Remove an attribute's curve from the active layer; `true` when it existed.
     pub fn remove_track(&mut self, id: ObjectId, path: &str) -> bool {
-        let n = self.tracks.len();
-        self.tracks.retain(|t| !(t.target == id && t.path == path));
+        let (n, layer) = (self.tracks.len(), self.active_layer);
+        self.tracks.retain(|t| !(t.target == id && t.path == path && t.layer == layer));
+        self.tracks.len() != n
+    }
+    /// Remove an object's curves from the active layer; `true` when it had any there.
+    pub fn remove_object_tracks(&mut self, id: ObjectId) -> bool {
+        let (n, layer) = (self.tracks.len(), self.active_layer);
+        self.tracks.retain(|t| !(t.target == id && t.layer == layer));
         self.tracks.len() != n
     }
     /// Drop tracks without keys.
@@ -142,8 +275,24 @@ impl Animation {
     pub(crate) fn repair(&mut self, exists: impl Fn(ObjectId) -> bool) {
         self.time = self.time.sanitized();
         self.frame = clamp_frame(self.frame);
+        self.layers.truncate(MAX_LAYERS);
+        let mut ids = std::collections::HashSet::new();
+        self.layers.retain(|l| l.id != BASE_LAYER && ids.insert(l.id));
+        for l in &mut self.layers {
+            l.weight = if l.weight.is_finite() { l.weight.clamp(0.0, 1.0) } else { 1.0 };
+            l.name = l.name.chars().take(128).collect();
+        }
+        if !ids.contains(&self.active_layer) {
+            self.active_layer = BASE_LAYER;
+        }
         let mut seen = std::collections::HashSet::new();
-        self.tracks.retain(|t| exists(t.target) && !t.path.is_empty() && t.path.len() <= attr::MAX_PATH && seen.insert((t.target, t.path.clone())));
+        self.tracks.retain(|t| {
+            exists(t.target)
+                && (t.layer == BASE_LAYER || ids.contains(&t.layer))
+                && !t.path.is_empty()
+                && t.path.len() <= attr::MAX_PATH
+                && seen.insert((t.target, t.path.clone(), t.layer))
+        });
         self.tracks.truncate(MAX_TRACKS);
         for t in &mut self.tracks {
             Arc::make_mut(&mut t.curve).sanitize();
@@ -183,9 +332,9 @@ impl Scene {
         let frame = self.anim.frame;
         // Values per object; rotation is set as one triple.
         let mut per: BTreeMap<ObjectId, Vec<(&str, f64)>> = BTreeMap::new();
-        for t in &self.anim.tracks {
-            if let Some(v) = t.curve.eval(frame) {
-                per.entry(t.target).or_default().push((t.path.as_str(), v));
+        for (target, path) in self.anim.animated() {
+            if let Some(v) = self.anim.value_at(target, path, frame) {
+                per.entry(target).or_default().push((path, v));
             }
         }
         let mut changed = 0;
@@ -212,26 +361,156 @@ impl Scene {
         changed
     }
 
-    /// Key an attribute at `frame` with `value` (the attribute's current value when `None`).
+    /// Key an attribute at `frame` in the active layer, with `value` or, when `None`, with
+    /// whatever makes the result equal the attribute's current value.
+    ///
+    /// Keying one rotation angle keys all three: a rotation with only some angles keyed would
+    /// have to read the others back from the quaternion, and the same rotation reads back as
+    /// different triples (past ±90° on the middle axis), so the pose would jump. In a layer above
+    /// the base, an attribute without any curve first gets a base key with its current value, so
+    /// the layer always has something to adjust.
     pub fn set_key(&mut self, id: ObjectId, path: &str, frame: f64, value: Option<f64>) -> Result<(), SceneError> {
-        let current = self.attr(id, path).ok_or_else(|| SceneError::Invalid(format!("object {} has no numeric attribute {path:?}", id.0)))?;
-        let mut v = value.unwrap_or(current);
-        if !frame.is_finite() || !v.is_finite() {
+        let now = self.attr(id, path).ok_or_else(|| SceneError::Invalid(format!("object {} has no numeric attribute {path:?}", id.0)))?;
+        if !frame.is_finite() || value.is_some_and(|v| !v.is_finite()) {
             return Err(SceneError::Invalid("a key needs a finite frame and value".into()));
         }
-        if value.is_none()
-            && let Some(prev) = ROTATE_PATHS.iter().position(|p| *p == path).and_then(|_| self.anim.curve(id, path)).and_then(|c| nearest_key_value(c, frame))
-        {
-            v = unwrap_angle(v, prev);
+        let frame = clamp_frame(frame);
+        let layer = self.anim.active_layer;
+        let wanted: Vec<(&str, f64)> = match ROTATE_PATHS.iter().position(|p| *p == path) {
+            Some(axis) => ROTATE_PATHS.iter().copied().zip(self.rotation_triple(id, frame, axis)).collect(),
+            None => vec![(path, now)],
+        };
+        for (p, now) in wanted {
+            let target = p == path;
+            if layer != BASE_LAYER && !self.anim.has_curve(id, p) {
+                self.anim.curve_mut_in(id, p, BASE_LAYER)?.set_key(frame, now);
+            }
+            if !target && self.anim.track(id, p).is_some() {
+                continue;
+            }
+            let v = match (target, value) {
+                (true, Some(v)) => v,
+                _ => self.layer_value(id, p, frame, now),
+            };
+            self.anim.curve_mut(id, p)?.set_key(frame, v).ok_or_else(|| SceneError::Invalid("the curve is full".into()))?;
         }
-        self.anim.curve_mut(id, path)?.set_key(clamp_frame(frame), v).ok_or_else(|| SceneError::Invalid("the curve is full".into()))?;
         Ok(())
+    }
+
+    /// The value a key in the active layer needs at `frame` for the layered result to be `result`.
+    fn layer_value(&self, id: ObjectId, path: &str, frame: f64, result: f64) -> f64 {
+        let layer = self.anim.active_layer;
+        let Some(l) = self.anim.layer(layer) else { return result };
+        let (mode, w) = (l.mode, if l.weight.is_finite() { l.weight.clamp(0.0, 1.0) } else { 1.0 });
+        // What the layers give without this layer's curve. Layers above it are ignored: the key
+        // makes the result right as seen from this layer.
+        let mut below = self.anim.clone();
+        let at = below.layers.iter().position(|x| x.id == layer).unwrap_or(0);
+        below.layers.truncate(at);
+        let under = below.value_at(id, path, frame).unwrap_or(result);
+        match mode {
+            LayerMode::Add if w > 1e-6 => (result - under) / w,
+            LayerMode::Add => 0.0,
+            LayerMode::Override if w > 1e-6 => under + (result - under) / w,
+            LayerMode::Override => result,
+        }
+    }
+
+    /// The object's current rotation as XYZ Euler degrees, as the triple that continues its
+    /// rotation curves at `frame` (nearest whole turns, flipped or not); without curves, the
+    /// plain triple for `axis` ([`plain_euler`]).
+    fn rotation_triple(&self, id: ObjectId, frame: f64, axis: usize) -> [f64; 3] {
+        let e = self.get(id).map(|o| o.transform.euler_degrees().to_array().map(f64::from)).unwrap_or_default();
+        let curves = ROTATE_PATHS.map(|p| self.anim.value_at(id, p, frame));
+        if curves.iter().all(Option::is_none) {
+            return plain_euler(e, axis);
+        }
+        let fit = |c: [f64; 3]| {
+            let mut out = c;
+            let mut dist = 0.0;
+            for ((o, a), curve) in out.iter_mut().zip(c).zip(curves) {
+                *o = unwrap_angle(a, curve.unwrap_or(0.0));
+                dist += curve.map_or(0.0, |k| (*o - k).abs());
+            }
+            (out, dist)
+        };
+        let (a, da) = fit(e);
+        let (b, db) = fit([e[0] + 180.0, 180.0 - e[1], e[2] + 180.0]);
+        if db + 1e-6 < da { b } else { a }
     }
 }
 
-/// The value of the key nearest to `frame`.
-fn nearest_key_value(c: &Curve, frame: f64) -> Option<f64> {
-    c.keys.iter().min_by(|a, b| (a.t - frame).abs().total_cmp(&(b.t - frame).abs())).map(|k| k.v)
+/// Most samples one motion path holds.
+pub const MAX_PATH_SAMPLES: usize = 4000;
+
+impl Scene {
+    /// An object's transform at `frame`: its stored transform with every keyed transform channel
+    /// replaced by its layered curve value. The scene is not changed.
+    pub fn transform_at(&self, id: ObjectId, frame: f64) -> Option<crate::Transform> {
+        let o = self.get(id)?;
+        let mut t = o.transform;
+        let mut rot: [Option<f32>; 3] = [None; 3];
+        for (i, path) in TRANSFORM_PATHS.iter().enumerate() {
+            let Some(v) = self.anim.value_at(id, path, frame) else { continue };
+            let v = v as f32;
+            match i / 3 {
+                0 => t.translation[i % 3] = v,
+                1 => rot[i % 3] = Some(v),
+                _ => t.scale[i % 3] = v,
+            }
+        }
+        if rot.iter().any(Option::is_some) {
+            let e = t.euler_degrees();
+            t.set_euler_degrees(Vec3::new(rot[0].unwrap_or(e.x), rot[1].unwrap_or(e.y), rot[2].unwrap_or(e.z)));
+        }
+        Some(t.sanitized())
+    }
+
+    /// Object → world matrix at `frame`, following the animated transforms of the ancestors.
+    pub fn world_matrix_at(&self, id: ObjectId, frame: f64) -> glam::Mat4 {
+        let mut m = glam::Mat4::IDENTITY;
+        let mut c = Some(id);
+        for _ in 0..crate::MAX_DEPTH {
+            let Some(cur) = c else { break };
+            let Some(t) = self.transform_at(cur, frame) else { break };
+            m = t.matrix() * m;
+            c = self.get(cur).and_then(|o| o.parent);
+        }
+        m
+    }
+
+    /// True when the object or one of its ancestors has a keyed transform channel.
+    pub fn moves(&self, id: ObjectId) -> bool {
+        let mut c = Some(id);
+        for _ in 0..crate::MAX_DEPTH {
+            let Some(cur) = c else { break };
+            if self.anim.tracks_of(cur).any(|t| TRANSFORM_PATHS.contains(&t.path.as_str())) {
+                return true;
+            }
+            c = self.get(cur).and_then(|o| o.parent);
+        }
+        false
+    }
+
+    /// The world position of an object's origin at every `step` frames from `start` to `end`:
+    /// `(frame, position)` pairs, at most [`MAX_PATH_SAMPLES`].
+    pub fn motion_path(&self, id: ObjectId, start: f64, end: f64, step: f64) -> Vec<(f64, Vec3)> {
+        if !(start.is_finite() && end.is_finite() && step.is_finite()) || end < start || self.get(id).is_none() {
+            return Vec::new();
+        }
+        let step = step.max((end - start) / (MAX_PATH_SAMPLES as f64 - 1.0)).max(1e-3);
+        let n = (((end - start) / step).floor() as usize).min(MAX_PATH_SAMPLES - 1);
+        (0..=n).map(|i| start + i as f64 * step).map(|f| (f, self.world_matrix_at(id, f).transform_point3(Vec3::ZERO))).collect()
+    }
+}
+
+/// Of the two Euler triples (degrees) for one rotation, the one whose angles other than `axis`
+/// are smallest: a turn of 170° about Y reads back as (180, 10, 180) and is returned as
+/// (0, 170, 0), so changing the `axis` angle turns the object the plain way.
+pub fn plain_euler(e: [f64; 3], axis: usize) -> [f64; 3] {
+    let flipped = [unwrap_angle(e[0] + 180.0, 0.0), unwrap_angle(180.0 - e[1], 0.0), unwrap_angle(e[2] + 180.0, 0.0)];
+    let others = |c: &[f64; 3]| c.iter().enumerate().filter(|(i, _)| *i != axis).map(|(_, v)| v.abs()).sum::<f64>();
+    if others(&flipped) + 1e-6 < others(&e) { flipped } else { e }
 }
 
 /// The angle equal to `degrees` (mod 360) that is nearest to `near`: an angle read back from a
@@ -264,14 +543,14 @@ pub fn auto_key(before: &Scene, after: &mut Scene) -> usize {
         if a.rotation.dot(b.rotation).abs() < 1.0 - 1e-7 {
             keys.extend(ROTATE_PATHS.iter().map(|p| (o.id, p.to_string())));
         }
-        for t in after.anim.tracks_of(o.id) {
-            if TRANSFORM_PATHS.contains(&t.path.as_str()) {
+        for (target, path) in after.anim.animated() {
+            if target != o.id || TRANSFORM_PATHS.contains(&path) {
                 continue;
             }
-            if let (Some(now), Some(was)) = (attr::get(o, &t.path), attr::get(old, &t.path))
+            if let (Some(now), Some(was)) = (attr::get(o, path), attr::get(old, path))
                 && (now - was).abs() > 1e-9
             {
-                keys.push((o.id, t.path.clone()));
+                keys.push((o.id, path.to_string()));
             }
         }
     }
@@ -382,6 +661,29 @@ mod tests {
     }
 
     #[test]
+    fn keying_one_angle_keys_all_three_so_the_pose_never_flips() {
+        let mut s = Scene::new();
+        let id = cube(&mut s);
+        s.set_key(id, "rotate.y", 0.0, Some(0.0)).unwrap();
+        s.set_key(id, "rotate.y", 20.0, Some(340.0)).unwrap();
+        assert_eq!(s.anim.tracks().len(), 3);
+        s.anim.curve_mut(id, "rotate.y").unwrap().keys[0].interp = Interp::Linear;
+        // Scrub through 90°, 180° and 270° and back: always a pure turn about Y.
+        for f in [1.0, 5.0, 6.0, 10.0, 11.0, 16.0, 20.0, 15.0, 9.0, 5.5, 0.0] {
+            s.set_frame(f);
+            let want = glam::Quat::from_rotation_y((f as f32 * 17.0).to_radians());
+            let q = s.get(id).unwrap().transform.rotation;
+            assert!(q.dot(want).abs() > 0.9999, "frame {f}: {q:?}");
+        }
+        // Keying an angle on an object that is already turned starts from the matching triple.
+        let other = cube(&mut s);
+        s.edit(other).unwrap().transform.rotation = glam::Quat::from_rotation_y(170f32.to_radians());
+        s.set_key(other, "rotate.y", 0.0, Some(170.0)).unwrap();
+        let x = s.anim.curve(other, "rotate.x").unwrap().eval(0.0).unwrap();
+        assert!(x.abs() < 1e-3, "not the flipped triple (180, 10, 180): {x}");
+    }
+
+    #[test]
     fn auto_key_keys_changed_channels_and_animated_attributes() {
         let mut s = Scene::new();
         let id = cube(&mut s);
@@ -399,6 +701,36 @@ mod tests {
         assert!((s.anim.curve(id, "material.roughness").unwrap().eval(12.0).unwrap() - 0.9).abs() < 1e-6);
         assert!(s.anim.track(id, "material.metallic").is_none(), "an attribute without a curve is not keyed");
         assert!(s.anim.track(id, "translate.x").is_none(), "an unchanged channel is not keyed");
+    }
+
+    #[test]
+    fn motion_paths_follow_animated_parents_without_changing_the_scene() {
+        let mut s = Scene::new();
+        let parent = s.add("P", ObjectKind::Group, None).unwrap();
+        let child = cube(&mut s);
+        s.reparent(child, Some(parent)).unwrap();
+        s.edit(child).unwrap().transform.translation = Vec3::new(1.0, 0.0, 0.0);
+        for (f, deg) in [(0.0, 0.0), (10.0, 90.0)] {
+            for p in ["rotate.x", "rotate.y", "rotate.z"] {
+                s.set_key(parent, p, f, Some(if p == "rotate.y" { deg } else { 0.0 })).unwrap();
+            }
+        }
+        s.anim.curve_mut(parent, "rotate.y").unwrap().keys[0].interp = Interp::Linear;
+        assert!(s.moves(child) && s.moves(parent));
+        let before = s.clone();
+        let path = s.motion_path(child, 0.0, 10.0, 1.0);
+        assert_eq!(s, before);
+        assert_eq!(path.len(), 11);
+        assert!((path[0].1 - Vec3::X).length() < 1e-5);
+        assert!((path[10].1 - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5, "{:?}", path[10]);
+        assert!(path.iter().all(|(_, p)| (p.length() - 1.0).abs() < 1e-5), "a quarter circle");
+        // Bounded and safe on bad input.
+        assert_eq!(s.motion_path(child, 0.0, 1e9, 1.0).len(), MAX_PATH_SAMPLES);
+        assert!(s.motion_path(child, 5.0, 1.0, 1.0).is_empty());
+        assert!(s.motion_path(child, 0.0, f64::NAN, 1.0).is_empty());
+        assert!(s.motion_path(ObjectId(99), 0.0, 1.0, 1.0).is_empty());
+        let still = cube(&mut s);
+        assert!(!s.moves(still));
     }
 
     #[test]
@@ -421,6 +753,15 @@ mod tests {
         // A track on an attribute that does not exist is skipped when posing.
         s.set_frame(5.0);
         assert_eq!(s.get(ObjectId(1)).unwrap().transform.translation.x, 2.0);
+        // Layers: duplicate and base ids go, weights are clamped, tracks on unknown layers go.
+        let json = r#"{"objects":[{"id":1,"name":"G","kind":{"type":"group"}}],"anim":{"active_layer":9,
+            "layers":[{"id":2,"name":"A","weight":7},{"id":2,"name":"B"},{"id":0,"name":"C"}],"tracks":[
+            {"target":1,"path":"translate.x","layer":2,"curve":{"keys":[{"t":0,"v":4}]}},
+            {"target":1,"path":"translate.x","layer":5,"curve":{"keys":[{"t":0,"v":9}]}}]}}"#;
+        let mut l = serde_json::from_str::<Scene>(json).unwrap().repaired().unwrap();
+        assert_eq!((l.anim.layers().len(), l.anim.layers()[0].weight, l.anim.active_layer(), l.anim.tracks().len()), (1, 1.0, BASE_LAYER, 1));
+        l.set_frame(0.0);
+        assert_eq!(l.get(ObjectId(1)).unwrap().transform.translation.x, 4.0, "an adding layer without a base adds to zero");
         // A scene without animation saves no animation block, and old files still load.
         let plain = Scene::new();
         assert!(!serde_json::to_string(&plain).unwrap().contains("anim"));

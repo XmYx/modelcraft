@@ -86,8 +86,25 @@ pub struct EnvMap {
 }
 
 impl EnvMap {
-    /// `None` when the image has no light in it.
-    pub fn new(image: Image, rotation: f32) -> Option<EnvMap> {
+    /// `None` when the image has no light in it. With `compensated`, the sampling table holds
+    /// each pixel's brightness above the image's mean instead of its brightness: directions the
+    /// surface's own sampling already covers well get no light samples, which lowers the variance
+    /// of the combined estimator (Karlík et al., "MIS Compensation: Optimizing Sampling Techniques
+    /// in Multiple Importance Sampling", 2019). A compensated table is only correct together with
+    /// BSDF sampling ([`crate::Strategy::Mis`]).
+    pub fn new(image: Image, rotation: f32, compensated: bool) -> Option<EnvMap> {
+        let plain = EnvMap::tabulate(image.clone(), rotation, 0.0)?;
+        if !compensated {
+            return Some(plain);
+        }
+        let mean = plain.mean_luminance;
+        Some(EnvMap::tabulate(image, rotation, mean).map_or(plain, |mut m| {
+            m.mean_luminance = mean;
+            m
+        }))
+    }
+
+    fn tabulate(image: Image, rotation: f32, subtract: f32) -> Option<EnvMap> {
         let (w, h) = (image.width() as usize, image.height() as usize);
         if w == 0 || h == 0 {
             return None;
@@ -101,7 +118,7 @@ impl EnvMap {
             for x in 0..w {
                 let p = image.get(x as i64, y as i64, true);
                 let l = luminance(Vec3A::new(p[0], p[1], p[2]));
-                row += f64::from(if l.is_finite() { l.max(0.0) } else { 0.0 });
+                row += f64::from(if l.is_finite() { (l - subtract).max(0.0) } else { 0.0 });
                 conditional.push(row as f32);
             }
             total += row * f64::from(sin);

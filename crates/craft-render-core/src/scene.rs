@@ -272,7 +272,13 @@ impl SceneBuilder {
     /// radiance), turned by `rotation` radians about the vertical axis. Replaces the constant
     /// environment.
     pub fn set_environment_map(&mut self, image: Image, rotation: f32) {
-        self.scene.lights.env_map = EnvMap::new(image, rotation);
+        self.scene.lights.env_map = EnvMap::new(image, rotation, true);
+    }
+
+    /// [`SceneBuilder::set_environment_map`] with the plain sampling table (brightness, not
+    /// brightness above the mean), which is also correct for light sampling on its own.
+    pub fn set_environment_map_uncompensated(&mut self, image: Image, rotation: f32) {
+        self.scene.lights.env_map = EnvMap::new(image, rotation, false);
     }
 
     pub fn set_camera(&mut self, camera: Camera) {

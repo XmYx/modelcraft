@@ -28,7 +28,7 @@ pub use modelcraft_ops::primitives::Primitive;
 pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
-pub use anim::{Animation, Track};
+pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
 pub use eval::{Evaluated, Evaluator, StepError};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).

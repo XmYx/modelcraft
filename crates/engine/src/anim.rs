@@ -4,7 +4,7 @@
 use modelcraft_anim::clock::clamp_frame;
 use modelcraft_anim::curve::TIME_EPSILON;
 use modelcraft_anim::{Curve, Extrapolation, Interp, Tangent};
-use modelcraft_scene::anim::TRANSFORM_PATHS;
+use modelcraft_scene::anim::{BASE_LAYER, LayerMode, TRANSFORM_PATHS};
 use modelcraft_scene::{ObjectId, Scene, SceneError};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,9 @@ fn yes() -> bool {
 }
 fn one() -> f64 {
     1.0
+}
+fn axis_y() -> String {
+    "y".into()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -132,6 +135,58 @@ pub enum AnimCommand {
         path: String,
         tolerance: f64,
     },
+    /// Rewrite keyed rotations as the equal angles nearest to the key before: removes whole-turn
+    /// and flip jumps.
+    EulerFilter {
+        ids: Vec<ObjectId>,
+    },
+    /// Spin objects around an axis (`x`, `y` or `z`): `turns` whole turns over the span, linear,
+    /// repeating before and after. Replaces the objects' rotation curves.
+    Turntable {
+        ids: Vec<ObjectId>,
+        #[serde(default = "axis_y")]
+        axis: String,
+        #[serde(default = "one")]
+        turns: f64,
+        #[serde(default)]
+        start: Option<f64>,
+        #[serde(default)]
+        end: Option<f64>,
+    },
+    /// Add an animation layer on top and make it the active one. `mode`: `add` (its curves are
+    /// added to what is below) or `override` (they replace it).
+    AddLayer {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        mode: LayerMode,
+    },
+    /// Remove a layer and its curves.
+    RemoveLayer {
+        layer: u32,
+    },
+    /// Change a layer: any of its name, weight (0..1), mute switch and mode.
+    SetLayer {
+        layer: u32,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        weight: Option<f64>,
+        #[serde(default)]
+        mute: Option<bool>,
+        #[serde(default)]
+        mode: Option<LayerMode>,
+    },
+    /// Choose the layer that keys are set and edited in (0 is the base).
+    SetActiveLayer {
+        layer: u32,
+    },
+    /// Bake every layer into the base curves (one linear key every `step` frames where layers
+    /// overlap an attribute) and remove the layers.
+    FlattenLayers {
+        #[serde(default = "one")]
+        step: f64,
+    },
     /// Go to a frame (not an undo step).
     SetTime {
         frame: f64,
@@ -169,6 +224,13 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("remove_track", "Remove an object's curves: id, path? (all without it)"),
     ("bake_track", "Sample a curve into linear keys: id, path, start?, end?, step"),
     ("simplify_track", "Remove keys a curve does not need: id, path, tolerance"),
+    ("euler_filter", "Remove whole-turn and flip jumps from keyed rotations: ids"),
+    ("turntable", "Spin objects around an axis over a span, repeating: ids, axis (x, y, z; default y), turns (default 1), start?, end?"),
+    ("add_layer", "Add an animation layer on top and make it active: name?, mode? (add, override)"),
+    ("remove_layer", "Remove a layer and its curves: layer"),
+    ("set_layer", "Change a layer: layer, name?, weight? (0..1), mute?, mode?"),
+    ("set_active_layer", "Choose the layer keys are set and edited in: layer (0 is the base)"),
+    ("flatten_layers", "Bake every layer into the base curves and remove the layers: step (default 1)"),
     ("set_time", "Go to a frame: frame"),
     ("set_time_range", "Set the playback range and frame rate: start?, end?, fps?"),
     ("set_auto_key", "Key edits automatically: on"),
@@ -188,6 +250,13 @@ impl AnimCommand {
             AnimCommand::RemoveTrack { .. } => "Remove animation",
             AnimCommand::BakeTrack { .. } => "Bake curve",
             AnimCommand::SimplifyTrack { .. } => "Simplify curve",
+            AnimCommand::EulerFilter { .. } => "Euler filter",
+            AnimCommand::Turntable { .. } => "Turntable",
+            AnimCommand::AddLayer { .. } => "Add animation layer",
+            AnimCommand::RemoveLayer { .. } => "Remove animation layer",
+            AnimCommand::SetLayer { .. } => "Layer settings",
+            AnimCommand::SetActiveLayer { .. } => "Active layer",
+            AnimCommand::FlattenLayers { .. } => "Flatten layers",
             AnimCommand::SetTime { .. } => "Go to frame",
             AnimCommand::SetTimeRange { .. } => "Time range",
             AnimCommand::SetAutoKey { .. } => "Auto-key",
@@ -336,10 +405,9 @@ pub fn apply(scene: &mut Scene, cmd: &AnimCommand, out: &mut Outcome) -> Result<
                 }
             }
             None => {
-                if !scene.anim.is_animated(*id) {
-                    return invalid(format!("object {} is not animated", id.0));
+                if !scene.anim.remove_object_tracks(*id) {
+                    return invalid(format!("object {} has no curves in the active layer", id.0));
                 }
-                scene.anim.remove_object(*id);
             }
         },
         AnimCommand::BakeTrack { id, path, start, end, step } => {
@@ -355,6 +423,128 @@ pub fn apply(scene: &mut Scene, cmd: &AnimCommand, out: &mut Outcome) -> Result<
         AnimCommand::SimplifyTrack { id, path, tolerance } => {
             let removed = curve_mut(scene, *id, path)?.simplify(*tolerance);
             out.warnings.push(format!("{removed} keys removed"));
+        }
+        AnimCommand::EulerFilter { ids } => {
+            if ids.is_empty() {
+                return invalid("nothing to filter");
+            }
+            let mut changed = 0;
+            for id in ids {
+                if scene.get(*id).is_none() {
+                    return Err(SceneError::NoObject(*id).into());
+                }
+                let take = |scene: &Scene, p: &str| scene.anim.curve(*id, p).cloned().unwrap_or_default();
+                let (mut x, mut y, mut z) = (take(scene, "rotate.x"), take(scene, "rotate.y"), take(scene, "rotate.z"));
+                let n = modelcraft_anim::euler::euler_filter(&mut x, &mut y, &mut z);
+                if n > 0 {
+                    for (p, c) in [("rotate.x", x), ("rotate.y", y), ("rotate.z", z)] {
+                        if !c.is_empty() {
+                            *scene.anim.curve_mut(*id, p)? = c;
+                        }
+                    }
+                }
+                changed += n;
+            }
+            out.warnings.push(format!("{changed} keys changed"));
+        }
+        AnimCommand::Turntable { ids, axis, turns, start, end } => {
+            let (a, b) = (start.unwrap_or(scene.anim.time.start), end.unwrap_or(scene.anim.time.end));
+            if !["x", "y", "z"].contains(&axis.as_str()) {
+                return invalid("the axis is x, y or z");
+            }
+            if !(a.is_finite() && b.is_finite() && turns.is_finite()) || b <= a || turns.abs() > 10_000.0 || ids.is_empty() {
+                return invalid("a turntable needs objects, start < end and a finite number of turns");
+            }
+            let spin = ["x", "y", "z"].iter().position(|x| *x == axis).unwrap_or(1);
+            let paths = ["rotate.x", "rotate.y", "rotate.z"];
+            for id in ids {
+                // The rotation at the start, as the Euler triple whose other two angles are
+                // smallest, so that raising the spin angle turns the object the same way whatever
+                // triple the rotation happened to be read back as.
+                let t = scene.transform_at(*id, a).ok_or(SceneError::NoObject(*id))?;
+                let e = t.euler_degrees().to_array().map(f64::from);
+                let from = modelcraft_scene::anim::plain_euler(e, spin);
+                for (p, v) in paths.iter().zip(from) {
+                    scene.anim.remove_track(*id, p);
+                    scene.set_key(*id, p, clamp_frame(a), Some(v))?;
+                }
+                let path = paths.get(spin).copied().unwrap_or("rotate.y");
+                scene.set_key(*id, path, clamp_frame(b), Some(from.get(spin).copied().unwrap_or(0.0) + 360.0 * turns))?;
+                let c = scene.anim.curve_mut(*id, path)?;
+                for k in &mut c.keys {
+                    k.interp = Interp::Linear;
+                }
+                c.pre = Extrapolation::CycleOffset;
+                c.post = Extrapolation::CycleOffset;
+                c.retangent();
+            }
+        }
+        AnimCommand::AddLayer { name, mode } => {
+            let id = scene.anim.add_layer(name.as_deref().unwrap_or(""), *mode)?;
+            scene.anim.set_active_layer(id);
+        }
+        AnimCommand::RemoveLayer { layer } => {
+            if !scene.anim.remove_layer(*layer) {
+                return invalid(format!("no animation layer {layer}"));
+            }
+        }
+        AnimCommand::SetLayer { layer, name, weight, mute, mode } => {
+            if weight.is_some_and(|w| !w.is_finite()) {
+                return invalid("a weight is a number from 0 to 1");
+            }
+            let l = scene.anim.layer_mut(*layer).ok_or_else(|| EngineError::Invalid(format!("no animation layer {layer}")))?;
+            if let Some(n) = name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+                l.name = n.chars().take(128).collect();
+            }
+            l.weight = weight.map_or(l.weight, |w| w.clamp(0.0, 1.0));
+            l.mute = mute.unwrap_or(l.mute);
+            l.mode = mode.unwrap_or(l.mode);
+        }
+        AnimCommand::SetActiveLayer { layer } => {
+            if !scene.anim.set_active_layer(*layer) {
+                return invalid(format!("no animation layer {layer}"));
+            }
+        }
+        AnimCommand::FlattenLayers { step } => {
+            if !step.is_finite() || *step <= 0.0 {
+                return invalid("the step must be positive");
+            }
+            if scene.anim.layers().is_empty() {
+                return invalid("there are no layers to flatten");
+            }
+            let mut baked: Vec<(ObjectId, String, Curve)> = Vec::new();
+            for (id, path) in scene.anim.animated() {
+                let tracks: Vec<_> = scene.anim.tracks().iter().filter(|t| t.target == id && t.path == path).collect();
+                if tracks.iter().all(|t| t.layer == BASE_LAYER) {
+                    continue;
+                }
+                let span = tracks
+                    .iter()
+                    .filter_map(|t| t.curve.time_range())
+                    .fold(None, |r: Option<(f64, f64)>, (a, b)| Some(r.map_or((a, b), |(lo, hi)| (lo.min(a), hi.max(b)))));
+                let Some((a, b)) = span else { continue };
+                if (b - a) / step > 1_000_000.0 {
+                    return invalid("too many samples");
+                }
+                let n = ((b - a) / step).ceil() as usize;
+                let mut c = Curve::new();
+                for i in 0..=n {
+                    let t = (a + i as f64 * step).min(b);
+                    if let Some(v) = scene.anim.value_at(id, path, t) {
+                        c.keys.push(modelcraft_anim::Key::new(t, v).with_interp(Interp::Linear));
+                    }
+                }
+                c.sanitize();
+                baked.push((id, path.to_string(), c));
+            }
+            let layers: Vec<u32> = scene.anim.layers().iter().map(|l| l.id).collect();
+            for l in layers {
+                scene.anim.remove_layer(l);
+            }
+            scene.anim.set_active_layer(BASE_LAYER);
+            for (id, path, c) in baked {
+                *scene.anim.curve_mut(id, &path)? = c;
+            }
         }
         AnimCommand::SetTimeRange { start, end, fps } => {
             let mut t = scene.anim.time;

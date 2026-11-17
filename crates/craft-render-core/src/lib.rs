@@ -36,7 +36,7 @@ pub use craft_texture as texture;
 pub use integrator::{IntegratorSettings, Strategy};
 pub use light::{Light, LightSampling};
 pub use material::Material;
-pub use render::{Film, RenderSettings, Renderer, mean_rgb, mse, relative_mse, render_image};
+pub use render::{Film, PixelOrder, RenderSettings, Renderer, mean_rgb, mse, relative_mse, render_image};
 pub use scene::{Scene, SceneBuilder, SceneError};
 pub use shapes::MeshData;
 

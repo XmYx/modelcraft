@@ -217,6 +217,70 @@ fn playback_and_transport_from_the_keyboard_and_the_palette() {
 }
 
 #[test]
+fn motion_paths_turntable_and_rotation_cleanup() {
+    let mut h = animated_cube();
+    let id = h.state().selection[0];
+    // The selected cube moves, so its path is drawn: segments, frame ticks, key marks.
+    let lines = crate::anim_ui::path_lines(h.state());
+    assert!(lines.len() > 120 * 3, "{}", lines.len());
+    assert!(lines.iter().all(|(a, b, _)| a.iter().chain(b).all(|v| v.is_finite())));
+    let far = lines.iter().map(|(a, _, _)| a[0]).fold(f32::MIN, f32::max);
+    assert!((far - 6.0).abs() < 0.3, "the path reaches the last key: {far}");
+    // The switch is a checkbox and a palette command.
+    h.get_by_role_and_label(Role::CheckBox, "Motion Paths").click();
+    h.run();
+    assert!(crate::anim_ui::path_lines(h.state()).is_empty());
+    palette(&mut h, "Show Motion Paths");
+    assert!(h.state().anim.show_paths);
+    // Turntable from the palette: one linear turn about Y that repeats.
+    palette(&mut h, "Turntable");
+    let c = h.state().doc.scene.anim.curve(id, "rotate.y").unwrap().clone();
+    assert_eq!((c.len(), c.eval(120.0).unwrap() - c.eval(0.0).unwrap()), (2, 360.0));
+    assert!(h.state_mut().run(Command::Anim(AnimCommand::EditKey {
+        key: modelcraft_engine::KeyRef { id, path: "rotate.y".into(), frame: 120.0 },
+        value: Some(-360.0 * 3.0 + 10.0),
+        interp: None,
+        tangent: None,
+        in_slope: None,
+        out_slope: None,
+        in_weight: None,
+        out_weight: None,
+    })));
+    palette(&mut h, "Smooth Rotation Keys");
+    let v = h.state().doc.scene.anim.curve(id, "rotate.y").unwrap().eval(120.0).unwrap();
+    assert!((v - 10.0).abs() < 1e-6, "whole turns removed: {v}");
+}
+
+#[test]
+fn layers_from_the_panel() {
+    let mut h = animated_cube();
+    let id = h.state().selection[0];
+    h.get_by_label("Add Layer").click();
+    h.run();
+    assert_eq!(h.state().doc.scene.anim.active_layer(), 1);
+    // The new layer is empty: the sheet says so and the base keys are not listed.
+    h.get_by_label("This layer has no keys yet. Keys you set now go to this layer and adjust the animation below it.");
+    assert!(h.query_by_role_and_label(Role::Button, "Cube · Position X key, frame 0, value 0").is_none());
+    // Key an offset of 3 in the layer at frame 12; fade the layer to half by typing.
+    assert!(h.state_mut().run(Command::Anim(AnimCommand::SetKey { id, path: "translate.x".into(), frame: Some(12.0), value: Some(3.0) })));
+    spin(&mut h, "Frame", 12.0);
+    assert!((x(&h) - 6.0).abs() < 1e-4, "3 from the base + 3 from the layer");
+    h.get_by_role_and_label(Role::Button, "Cube · Position X key, frame 12, value 3");
+    spin(&mut h, "Layer weight", 0.5);
+    assert!((x(&h) - 4.5).abs() < 1e-4);
+    h.get_by_role_and_label(Role::CheckBox, "Mute Layer").click();
+    h.run();
+    assert!((x(&h) - 3.0).abs() < 1e-4);
+    h.get_by_role_and_label(Role::CheckBox, "Mute Layer").click();
+    h.run();
+    h.get_by_label("Flatten Layers").click();
+    h.run();
+    assert!(h.state().doc.scene.anim.layers().is_empty());
+    assert!((x(&h) - 4.5).abs() < 1e-4, "the motion is kept");
+    assert!(h.query_by_label("Layer weight").is_none(), "the base layer has no weight");
+}
+
+#[test]
 fn any_attribute_can_be_keyed_from_the_panel() {
     let mut h = harness();
     h.run();
