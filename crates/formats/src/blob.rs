@@ -4,8 +4,14 @@
 //! mesh:  "MCMB" u32:version=1 u32:verts u32:faces u32:corners u32:has_uvs
 //!        verts × f32[3]  faces × u32 (corner count)  corners × u32 (vertex)
 //!        [corners × f32[2] if has_uvs]  faces × u32 (patch)
-//! layer: "MCSL" u32:version=1 u32:count  count × f32[3]  u32:mask_count  mask_count × f32
+//! layer: "MCSL" u32:version u32:count  count × f32[3]  u32:mask_count  mask_count × f32
+//!        version 2 adds:  u32:finer  finer × points   (displacements of the detail levels above)
+//!                         u32:shapes shapes × points  (shape-layer offsets, in order)
+//!                         points                      (the active shape layer's anchor)
+//!        points = u32:count  count × f32[3]
 //! ```
+//!
+//! Version 1 layer blobs (project schema 1) still read.
 //!
 //! Readers check every count against the bytes actually present before allocating.
 
@@ -135,28 +141,31 @@ pub fn read_mesh(b: &[u8]) -> Result<PolyMesh> {
     Ok(PolyMesh::build(pos, polys).map_err(|e| FormatError::Malformed(e.to_string()))?.0)
 }
 
-pub fn write_layer(positions: &[Vec3], mask: &[f32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16 + positions.len() * 12 + mask.len() * 4);
-    out.extend_from_slice(b"MCSL");
-    put(&mut out, 1);
-    put(&mut out, positions.len() as u32);
-    for p in positions {
-        for c in p.to_array() {
-            putf(&mut out, c);
-        }
-    }
-    put(&mut out, mask.len() as u32);
-    for m in mask {
-        putf(&mut out, *m);
-    }
-    out
+/// The bulk arrays of a sculpt layer (everything `project.json` leaves empty).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LayerBlob {
+    pub positions: Vec<Vec3>,
+    pub mask: Vec<f32>,
+    /// Displacements of the detail levels above the shown one.
+    pub finer: Vec<Vec<Vec3>>,
+    /// Offsets of the shape layers, in their order.
+    pub shapes: Vec<Vec<Vec3>>,
+    pub anchor: Vec<Vec3>,
 }
 
-pub fn read_layer(b: &[u8]) -> Result<(Vec<Vec3>, Vec<f32>)> {
-    let mut r = Rd { b, at: 0 };
-    if r.take(4)? != b"MCSL" || r.u32()? != 1 {
-        return Err(FormatError::Malformed("not a sculpt layer blob".into()));
+/// Most point arrays one layer blob may list (detail levels plus shape layers).
+const MAX_LAYER_ARRAYS: u32 = 4096;
+
+fn put_points(out: &mut Vec<u8>, pts: &[Vec3]) {
+    put(out, pts.len() as u32);
+    for p in pts {
+        for c in p.to_array() {
+            putf(out, c);
+        }
     }
+}
+
+fn read_points(r: &mut Rd) -> Result<Vec<Vec3>> {
     let n = r.u32()?;
     let n = r.fits(n, 12)?;
     let mut pos = Vec::with_capacity(n);
@@ -164,6 +173,51 @@ pub fn read_layer(b: &[u8]) -> Result<(Vec<Vec3>, Vec<f32>)> {
         let p = Vec3::new(r.f32()?, r.f32()?, r.f32()?);
         pos.push(if p.is_finite() { p } else { Vec3::ZERO });
     }
+    Ok(pos)
+}
+
+fn read_point_arrays(r: &mut Rd) -> Result<Vec<Vec<Vec3>>> {
+    let n = r.u32()?;
+    if n > MAX_LAYER_ARRAYS {
+        return Err(FormatError::Malformed("too many arrays in a sculpt layer blob".into()));
+    }
+    let n = r.fits(n, 4)?;
+    (0..n).map(|_| read_points(r)).collect()
+}
+
+/// Version 2 adds the detail-level displacements, the shape-layer offsets and the anchor after
+/// the version 1 body (positions, mask).
+pub fn write_layer(l: &modelcraft_scene::SculptLayer) -> Vec<u8> {
+    let mut out = Vec::with_capacity(32 + l.positions.len() * 12 + l.mask.len() * 4);
+    out.extend_from_slice(b"MCSL");
+    put(&mut out, 2);
+    put_points(&mut out, &l.positions);
+    put(&mut out, l.mask.len() as u32);
+    for m in l.mask.iter() {
+        putf(&mut out, *m);
+    }
+    put(&mut out, l.finer.len() as u32);
+    for pts in &l.finer {
+        put_points(&mut out, pts);
+    }
+    put(&mut out, l.shapes.len() as u32);
+    for sh in &l.shapes {
+        put_points(&mut out, &sh.delta);
+    }
+    put_points(&mut out, &l.anchor);
+    out
+}
+
+pub fn read_layer(b: &[u8]) -> Result<LayerBlob> {
+    let mut r = Rd { b, at: 0 };
+    if r.take(4)? != b"MCSL" {
+        return Err(FormatError::Malformed("not a sculpt layer blob".into()));
+    }
+    let version = r.u32()?;
+    if !(1..=2).contains(&version) {
+        return Err(FormatError::Malformed("not a sculpt layer blob".into()));
+    }
+    let positions = read_points(&mut r)?;
     let k = r.u32()?;
     let k = r.fits(k, 4)?;
     let mut mask = Vec::with_capacity(k);
@@ -171,7 +225,13 @@ pub fn read_layer(b: &[u8]) -> Result<(Vec<Vec3>, Vec<f32>)> {
         let m = r.f32()?;
         mask.push(if m.is_finite() { m.clamp(0.0, 1.0) } else { 0.0 });
     }
-    Ok((pos, mask))
+    let mut out = LayerBlob { positions, mask, ..LayerBlob::default() };
+    if version >= 2 {
+        out.finer = read_point_arrays(&mut r)?;
+        out.shapes = read_point_arrays(&mut r)?;
+        out.anchor = read_points(&mut r)?;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -185,7 +245,24 @@ mod tests {
         let m = Primitive::Torus { radius: 1.0, tube: 0.3, segments: 12, sides: 8 }.build().unwrap();
         assert_eq!(read_mesh(&write_mesh(&m)).unwrap(), m);
         let p = vec![Vec3::X, Vec3::Y];
-        assert_eq!(read_layer(&write_layer(&p, &[0.5])).unwrap(), (p, vec![0.5]));
+        let l = LayerBlob { positions: p.clone(), mask: vec![0.5], finer: vec![vec![Vec3::Z; 3], vec![]], shapes: vec![p.clone()], anchor: p.clone() };
+        let layer = modelcraft_scene::SculptLayer {
+            positions: p.clone().into(),
+            mask: vec![0.5].into(),
+            level: 1,
+            finer: l.finer.iter().cloned().map(Into::into).collect(),
+            shapes: vec![modelcraft_scene::ShapeLayer { name: "A".into(), strength: 1.0, delta: p.clone().into() }],
+            active_shape: None,
+            anchor: p.clone().into(),
+        };
+        assert_eq!(read_layer(&write_layer(&layer)).unwrap(), l);
+        // A version 1 blob (positions and mask only) still reads.
+        let mut v1 = b"MCSL".to_vec();
+        put(&mut v1, 1);
+        put_points(&mut v1, &p);
+        put(&mut v1, 1);
+        putf(&mut v1, 0.5);
+        assert_eq!(read_layer(&v1).unwrap(), LayerBlob { positions: p, mask: vec![0.5], ..LayerBlob::default() });
     }
 
     proptest! {

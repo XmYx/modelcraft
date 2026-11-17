@@ -199,7 +199,7 @@ fn same_source(a: &Source, b: &Source) -> bool {
 fn same_step(a: &Step, b: &Step) -> bool {
     match (&a.op, &b.op) {
         (StepOp::Sculpt { layer: x }, StepOp::Sculpt { layer: y }) => {
-            a.id == b.id && a.enabled == b.enabled && Arc::ptr_eq(&x.positions, &y.positions) && Arc::ptr_eq(&x.mask, &y.mask)
+            a.id == b.id && a.enabled == b.enabled && x.level == y.level && Arc::ptr_eq(&x.positions, &y.positions) && Arc::ptr_eq(&x.mask, &y.mask)
         }
         _ => a == b,
     }
@@ -260,10 +260,11 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
         StepOp::Sculpt { layer } => {
+            let mut out = if layer.level == 0 { m.clone() } else { modelcraft_ops::subdivide::catmull_clark(m, u32::from(layer.level))? };
+            let nv = out.vertex_count();
             if layer.positions.len() != nv {
                 return Err(OpError::Invalid(format!("the sculpt layer has {} points but the mesh now has {nv}", layer.positions.len())));
             }
-            let mut out = m.clone();
             out.set_positions(&layer.positions)?;
             Ok(out)
         }

@@ -23,7 +23,7 @@ pub enum EngineError {
     Invalid(String),
 }
 
-fn invalid<T>(m: impl Into<String>) -> Result<T, EngineError> {
+pub(crate) fn invalid<T>(m: impl Into<String>) -> Result<T, EngineError> {
     Err(EngineError::Invalid(m.into()))
 }
 
@@ -223,11 +223,30 @@ impl Document {
         };
         let (step_id, layer) = (*step_id, layer.clone());
         let input = self.eval.steps_output(&self.scene, id, last).mesh;
+        let input = crate::layers::level_mesh(&input, layer.level)?;
         if layer.positions.len() != input.vertex_count() {
             return invalid("the sculpt layer no longer matches the mesh (an earlier step changed the vertex count)");
         }
         let mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
         self.sculpt = Some(SculptSession { id, step_id, mesh, unsynced: false });
+        Ok(())
+    }
+
+    /// After the scene's sculpt layer changed under the session: reuse the session when only
+    /// positions moved, rebuild it when the detail level (the topology) changed.
+    fn refresh_session(&mut self, id: ObjectId) -> Result<(), EngineError> {
+        let positions = self.sculpt_layer(id).map(|l| Arc::clone(&l.positions));
+        let same = match (&mut self.sculpt, positions) {
+            (Some(s), Some(p)) if s.id == id => {
+                s.unsynced = false;
+                s.mesh.set_positions(&p)
+            }
+            _ => false,
+        };
+        if !same {
+            self.sculpt = None;
+            self.ensure_session(id)?;
+        }
         Ok(())
     }
 
@@ -284,7 +303,7 @@ impl Document {
                 }
                 if needs_layer {
                     let input = self.eval.steps_output(&self.scene, id, usize::MAX).mesh;
-                    let layer = SculptLayer { positions: Arc::new(input.positions().to_vec()), mask: Arc::new(vec![0.0; input.vertex_count()]) };
+                    let layer = SculptLayer::new(input.positions().to_vec());
                     self.scene_change(&cmd, |doc| {
                         let sid = doc.scene.fresh_id();
                         if let ObjectKind::Mesh { steps, .. } = &mut doc.scene.edit(id)?.kind {
@@ -324,6 +343,21 @@ impl Document {
                 if !change.is_empty() {
                     self.undo.push(UndoEntry::Sculpt { label: cmd.label(), id: *id, change });
                 }
+                Outcome::default()
+            }
+            Command::SculptDetail { id, .. } | Command::SculptShape { id, .. } => {
+                let id = *id;
+                self.ensure_session(id)?;
+                if self.sculpt.as_ref().is_some_and(|s| s.mesh.in_stroke()) {
+                    return invalid("finish the stroke first");
+                }
+                let c = cmd.clone();
+                self.scene_change(&cmd, move |doc| match &c {
+                    Command::SculptDetail { op, .. } => doc.apply_detail(id, *op).map(|()| Outcome::default()),
+                    Command::SculptShape { op, .. } => doc.apply_shape(id, op).map(|()| Outcome::default()),
+                    _ => Ok(Outcome::default()),
+                })?;
+                self.refresh_session(id)?;
                 Outcome::default()
             }
             _ => {
@@ -373,8 +407,12 @@ impl Document {
         match &e {
             UndoEntry::Scene { before, .. } => {
                 self.sync_sculpt();
-                self.sculpt = None;
+                let sculpting = self.sculpt.take().map(|s| s.id);
                 self.scene = (**before).clone().repaired_or(before);
+                // Keep sculpting the same object when it still has its sculpt layer.
+                if let Some(id) = sculpting {
+                    let _ = self.ensure_session(id);
+                }
             }
             UndoEntry::Sculpt { id, change, .. } => {
                 if self.ensure_session(*id).is_ok()
@@ -394,8 +432,12 @@ impl Document {
         match &e {
             UndoEntry::Scene { after, .. } => {
                 self.sync_sculpt();
-                self.sculpt = None;
+                let sculpting = self.sculpt.take().map(|s| s.id);
                 self.scene = (**after).clone().repaired_or(after);
+                // Keep sculpting the same object when it still has its sculpt layer.
+                if let Some(id) = sculpting {
+                    let _ = self.ensure_session(id);
+                }
             }
             UndoEntry::Sculpt { id, change, .. } => {
                 if self.ensure_session(*id).is_ok()
@@ -570,7 +612,14 @@ impl Document {
                 }
                 out.created.extend(ids);
             }
-            Command::Undo | Command::Redo | Command::BeginSculpt { .. } | Command::EndSculpt | Command::SculptStroke { .. } | Command::SculptMask { .. } => {
+            Command::Undo
+            | Command::Redo
+            | Command::BeginSculpt { .. }
+            | Command::EndSculpt
+            | Command::SculptStroke { .. }
+            | Command::SculptMask { .. }
+            | Command::SculptDetail { .. }
+            | Command::SculptShape { .. } => {
                 return invalid("not a scene command");
             }
         }

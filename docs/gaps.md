@@ -164,7 +164,7 @@ The biggest single gap: two whole areas (weights 8 and 6) and the materials area
 
 ## Sculpting
 
-**S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
+Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

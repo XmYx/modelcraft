@@ -752,6 +752,9 @@ impl ModelApp {
             MaskFill => self.mask(modelcraft_engine::MaskOp::Fill),
             BrushBigger => self.brush_px = (self.brush_px * 1.15).min(800.0),
             BrushSmaller => self.brush_px = (self.brush_px / 1.15).max(4.0),
+            DetailUp => self.sculpt_layer_command(|id| Command::SculptDetail { id, op: modelcraft_engine::DetailOp::Up }),
+            DetailDown => self.sculpt_layer_command(|id| Command::SculptDetail { id, op: modelcraft_engine::DetailOp::Down }),
+            ShapeAdd => self.sculpt_layer_command(|id| Command::SculptShape { id, op: modelcraft_engine::ShapeOp::Add { name: None } }),
             ViewPerspective => self.set_view(ViewPreset::Perspective),
             ViewFront => self.set_view(ViewPreset::Front),
             ViewRight => self.set_view(ViewPreset::Right),
@@ -798,6 +801,14 @@ impl ModelApp {
         };
         self.components = new;
         self.status = crate::tlf!("{count} components selected", count = self.components.len());
+    }
+
+    fn sculpt_layer_command(&mut self, cmd: impl FnOnce(ObjectId) -> Command) {
+        if let Some(id) = self.doc.sculpt.as_ref().map(|s| s.id) {
+            self.run(cmd(id));
+        } else {
+            self.status = tl!("Detail levels and shape layers work in the Sculpt workspace");
+        }
     }
 
     fn mask(&mut self, op: modelcraft_engine::MaskOp) {

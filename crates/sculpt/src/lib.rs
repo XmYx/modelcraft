@@ -11,6 +11,7 @@
 
 pub mod brush;
 mod bvh;
+pub mod detail;
 
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
@@ -237,6 +238,23 @@ impl SculptMesh {
             }
         }
         out
+    }
+
+    /// Replace every position (same topology). Returns false, changing nothing, when the count
+    /// differs or a stroke is in progress.
+    pub fn set_positions(&mut self, positions: &[Vec3]) -> bool {
+        if positions.len() != self.positions.len() || self.stroke.is_some() {
+            return false;
+        }
+        for (dst, src) in self.positions.iter_mut().zip(positions) {
+            if src.is_finite() {
+                *dst = *src;
+            }
+        }
+        self.recompute_all_normals();
+        self.refit();
+        self.mark_all_dirty();
+        true
     }
 
     /// Mark everything dirty (after an undo that replaced positions wholesale).

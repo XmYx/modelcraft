@@ -104,13 +104,60 @@ pub enum Source {
     Mesh { mesh: Arc<PolyMesh> },
 }
 
-/// Sculpted positions (and mask) for every vertex of the step's input. Stays valid while the
-/// steps before it keep the vertex count.
+/// Sculpted positions (and mask) for every vertex of the step's input, subdivided `level` times
+/// (detail levels). Stays valid while the steps before it keep the topology.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SculptLayer {
     pub positions: Arc<Vec<Vec3>>,
     #[serde(default)]
     pub mask: Arc<Vec<f32>>,
+    /// The detail level being shown: how many times the input is subdivided.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub level: u8,
+    /// Displacements of the levels above `level` (first: `level + 1`), kept while working lower.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finer: Vec<Arc<Vec<Vec3>>>,
+    /// Shape layers blended into `positions`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shapes: Vec<ShapeLayer>,
+    /// The shape layer new strokes are recorded into (none: the base sculpt).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_shape: Option<u32>,
+    /// `positions` when the active shape layer last had its offsets brought up to date; the
+    /// difference to `positions` is what has been sculpted into it since.
+    #[serde(default, skip_serializing_if = "arc_is_empty")]
+    pub anchor: Arc<Vec<Vec3>>,
+}
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+fn arc_is_empty(v: &Arc<Vec<Vec3>>) -> bool {
+    v.is_empty()
+}
+
+/// A named offset per vertex, blended over the sculpt with its own strength.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShapeLayer {
+    pub name: String,
+    pub strength: f32,
+    #[serde(default)]
+    pub delta: Arc<Vec<Vec3>>,
+}
+
+impl SculptLayer {
+    /// A fresh layer over `positions` at the base level.
+    pub fn new(positions: Vec<Vec3>) -> SculptLayer {
+        let mask = Arc::new(vec![0.0; positions.len()]);
+        SculptLayer { positions: Arc::new(positions), mask, ..SculptLayer::default() }
+    }
+    pub fn heap_bytes(&self) -> usize {
+        let v3 = self.positions.len()
+            + self.anchor.len()
+            + self.finer.iter().map(|f| f.len()).sum::<usize>()
+            + self.shapes.iter().map(|s| s.delta.len()).sum::<usize>();
+        v3 * 12 + self.mask.len() * 4
+    }
 }
 
 /// One entry of the build history.
@@ -210,7 +257,7 @@ impl StepOp {
     }
     pub fn heap_bytes(&self) -> usize {
         match self {
-            StepOp::Sculpt { layer } => layer.positions.len() * 12 + layer.mask.len() * 4,
+            StepOp::Sculpt { layer } => layer.heap_bytes(),
             StepOp::Extrude { faces, .. }
             | StepOp::Inset { faces, .. }
             | StepOp::DeleteFaces { faces }
