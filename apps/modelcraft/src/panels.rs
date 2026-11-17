@@ -1018,7 +1018,9 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.label(RichText::new(tl!("Ctrl inverts, Shift smooths. Pen pressure scales strength (and size when enabled).")).color(theme::TEXT_DIM).small());
     if app.doc.sculpt.is_some() && app.brush.kind == BrushKind::Mask {
         ui.horizontal_wrapped(|ui| {
-            for a in [Action::MaskClear, Action::MaskInvert, Action::MaskFill] {
+            use modelcraft_engine::MaskOp as M;
+            let more = [M::Blur, M::Sharpen, M::Grow, M::Shrink, M::Hollows, M::Ridges].map(Action::MaskOp);
+            for a in [Action::MaskClear, Action::MaskInvert, Action::MaskFill].into_iter().chain(more) {
                 if ui.button(a.label()).clicked() {
                     app.act(&ctx, a);
                 }

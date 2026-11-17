@@ -338,7 +338,7 @@ Weight: 7
 | Flatten, crease | C M Z | D | S | |
 | Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | P | L | Ten more, nineteen in all: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge. No rotate, elastic move or scrape yet |
 | Mask brush; clear, invert, fill; mask by patch | C M Z | D | S | |
-| Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | M | M | |
+| Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | P | M | Mask hollows, mask ridges, blur, sharpen, grow, shrink; no occlusion mask |
 | Lasso and rectangle masks; clip, trim and slice brushes | Z | M | M | |
 | X, Y, Z symmetry | C M Z | D | S | |
 | Radial and topological symmetry | C Z | M | M | |
@@ -354,7 +354,7 @@ Weight: 7
 | Insert-mesh brushes and curve brushes | Z | M | L | |
 | Live booleans between sculpted parts | Z | M | L | |
 | 1 M+ polygons interactive | C M Z | D | M | 2.0 M triangles at ~280 fps while sculpting (measured) |
-| 20 M+ polygons interactive | Z | M | XL | Not measured above 2 M |
+| 20 M+ polygons interactive | Z | M | XL | Not reached: measured at 12.6 M triangles in the engine only (3–5 ms per dab with ~10 k vertices under the brush); 20 M and the app window at that size are not measured, and a session takes 6–10 s to start there |
 | Strokes are data: per-stroke undo, bit-exact replay after a crash | C M Z | X | S | Journaled |
 
 ## Sculpting: resolution and topology

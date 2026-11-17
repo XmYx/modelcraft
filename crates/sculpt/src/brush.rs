@@ -3,6 +3,7 @@
 //! mirrored across the chosen object axes.
 
 use glam::Vec3;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{SculptMesh, StrokeState};
@@ -384,12 +385,8 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
             continue;
         }
         // Weights and the area normal.
-        let mut weights = Vec::with_capacity(verts.len());
-        let mut area_n = Vec3::ZERO;
-        let mut area_c = Vec3::ZERO;
-        let mut wsum = 0.0;
         let (tu, tv) = tangent_basis(view);
-        for v in &verts {
+        let weigh = |v: &u32| {
             let p = m.positions.get(*v as usize).copied().unwrap_or_default();
             let d = p - center;
             let mut w = b.weight(d.length() / radius);
@@ -399,11 +396,20 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
             if b.kind != crate::BrushKind::Mask {
                 w *= 1.0 - m.mask.get(*v as usize).copied().unwrap_or(0.0).clamp(0.0, 1.0);
             }
+            w
+        };
+        // The weights are worked out on several threads for a large dab; the sums below stay
+        // in vertex order, so the result is the same with any number of threads.
+        let weights: Vec<f32> = if verts.len() >= crate::PARALLEL_FROM { verts.par_iter().map(weigh).collect() } else { verts.iter().map(weigh).collect() };
+        let mut area_n = Vec3::ZERO;
+        let mut area_c = Vec3::ZERO;
+        let mut wsum = 0.0;
+        for (v, w) in verts.iter().zip(&weights) {
+            let p = m.positions.get(*v as usize).copied().unwrap_or_default();
             let n = m.normals.get(*v as usize).copied().unwrap_or(Vec3::Y);
-            area_n += n * w;
-            area_c += p * w;
-            wsum += w;
-            weights.push(w);
+            area_n += n * *w;
+            area_c += p * *w;
+            wsum += *w;
         }
         let mut n = area_n.normalize_or_zero();
         if n == Vec3::ZERO {

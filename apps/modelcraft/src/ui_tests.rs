@@ -415,6 +415,40 @@ fn undo_history_reaches_back_into_the_last_session() {
     h.run();
     assert_eq!(h.state().doc.scene.len(), 1);
     let _ = std::fs::remove_dir_all(&d);
+
+fn mask_tools_by_keyboard_and_buttons() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let count = |h: &Harness<'static, ModelApp>| h.state().doc.sculpt.as_ref().unwrap().mesh.mask.iter().filter(|m| **m > 0.0).count();
+    h.key_press(Key::M);
+    h.run();
+    // Mask one patch from the engine, then grow it from the keyboard and blur it from a button.
+    let id = h.state().selection[0];
+    h.state_mut().run(modelcraft_engine::Command::SculptMask { id, op: modelcraft_engine::MaskOp::Patch { triangle: 0 } });
+    h.run();
+    let start = count(&h);
+    assert!(start > 0);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::CloseBracket);
+    h.run();
+    let grown = count(&h);
+    assert!(grown > start);
+    assert_eq!(h.state().status, "Mask");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::OpenBracket);
+    h.run();
+    assert_eq!(count(&h), start);
+    h.get_by_role_and_label(Role::Button, "Blur Mask").click();
+    h.run();
+    assert!(count(&h) > start);
+    for name in ["Sharpen Mask", "Grow Mask", "Shrink Mask", "Mask Hollows", "Mask Ridges"] {
+        h.get_by_role_and_label(Role::Button, name);
+    }
+    palette(&mut h, "Mask Ridges");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!(count(&h) > start, "undo brings the blurred mask back");
 }
 
 #[test]
