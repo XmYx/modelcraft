@@ -548,14 +548,14 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Embedded scripting language | C M Z | P | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant ([scripting.md](scripting.md)); runs from `modelcraft-cli run-script`, no in-app way to run a script yet |
+| Embedded scripting language | C M Z | D | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant; runs in the app's Scripts window and from `modelcraft-cli run-script` ([scripting.md](scripting.md)) |
 | Object-model API over every command | C M Z | D | M | `cmd::<name>` for every registry command, scene queries, dependency graph, history-node evaluation, mesh handles, undo groups |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
 | Headless scene API (batch interpreter) | C M | D | S | `modelcraft-cli run-script`: queries, control flow and commands over a project |
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
-| Script editor with a console | C M | M | M | |
-| User tools, shelves and recorded macros | C M Z | M | M | |
+| Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
+| User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder; no scripted tool registration or recorded macros yet |
 | Event callbacks (scene changed, selection changed) | C M | M | M | |
 | Plugin SDK for native extensions | C M Z | M | L | |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |

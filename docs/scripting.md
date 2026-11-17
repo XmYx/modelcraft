@@ -56,6 +56,32 @@ house rules allow for unmodified third-party use), `thin-vec`, `ahash`, `once_ce
 `num-traits` and their dependencies, all `MIT OR Apache-2.0` except `smartstring` and
 `tiny-keccak` (`CC0-1.0`). `cargo xtask licenses` checks them.
 
+## The Scripts window
+
+Scripts menu, or Ctrl+J. The editor colours keywords, the script API's function names, strings,
+numbers and comments (the tokenizer is `modelcraft_script::highlight`, UI-free and tested to cover
+any text exactly), numbers the lines and marks the line of the last error.
+
+| Key (in the editor) | Does |
+|---|---|
+| Ctrl+Enter | Run the script |
+| Ctrl+Shift+Enter | Run the selection; errors keep the line numbers of the file |
+| Ctrl+S | Save the script file |
+| Esc | Close the window and return to the viewport |
+
+The Output panel lists `print` and `debug` lines, command warnings and errors as
+`file:line:column: message`; an error is a button that moves the cursor to its line. A run happens
+on the UI thread and is bounded by the limits below, so a runaway script cannot freeze the window
+for more than the time limit; Undo reverts what it did. Unsaved edits are never discarded without
+a prompt (New, Open and choosing a file ask first).
+
+**Files.** The scripts folder is `<user data folder>/modelcraft/scripts`. Its `*.rhai` files and
+one level of subfolders become the Scripts menu (the first comment line is the tooltip); the
+`quick` subfolder becomes the Quick Scripts strip under the tool options; `startup.rhai` runs once
+when the app starts. A script run from the window may read the script's folder, the project's
+folder and the scripts folder, and write nowhere unless "Allow writing files" is on, and then only
+the project's folder and the scripts folder.
+
 ## The model
 
 - **Everything a script changes is a command.** Every entry of

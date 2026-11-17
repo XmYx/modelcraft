@@ -47,6 +47,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
+| Scripts (window and menu), Run Script, Run Selection, Output, Quick Scripts | script editors, script consoles and shelves of the references (their product names for them are avoided) | Generic words. A web search (2026-11-17) found no 3D software mark for "Quick Scripts"; the USPTO register itself was not queried, so treat this row as unconfirmed until a maintainer checks it | Use, pending that check |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
 | Clone modifiers (planned) | effectors | "Effector" is the reference's term, so it is not used | Use |
