@@ -7,6 +7,11 @@
 //! | `blobs/<object>-source.bin` | a stored mesh ([`crate::blob`]) |
 //! | `blobs/<object>-<step>.bin` | a sculpt layer |
 //! | `blobs/<object>-<step>-topology.bin` | the triangles of a sculpt layer changed by live detail (a mesh blob) |
+//! | `history/base.modelcraft` | optional: the scene before the oldest kept undo step, itself a project (without history) |
+//! | `history/commands.json` | optional: `{format, version, done, undone}`, the commands of the undo history ([`History`]) |
+//!
+//! The two `history/` entries come together or not at all; a reader that does not know them
+//! still opens the scene. They let undo reach back across sessions.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -63,8 +68,48 @@ fn zip_err(e: craft_zip::Error) -> FormatError {
     FormatError::Malformed(e.to_string())
 }
 
+pub const HISTORY_FORMAT_ID: &str = "modelcraft.history";
+pub const HISTORY_VERSION: u32 = 1;
+const BASE_ENTRY: &str = "history/base.modelcraft";
+const COMMANDS_ENTRY: &str = "history/commands.json";
+/// Largest command list read back.
+pub const MAX_HISTORY_JSON_BYTES: u64 = 1 << 30;
+/// Most history entries read back.
+pub const MAX_HISTORY_ENTRIES: usize = 1_000_000;
+
+/// The undo history stored in a project: replaying `done` on `base` gives the saved scene;
+/// `undone` are the steps redo would bring back, the next one first.
+#[derive(Clone, Debug, PartialEq)]
+pub struct History<T> {
+    pub base: Scene,
+    pub done: Vec<T>,
+    pub undone: Vec<T>,
+}
+
+#[derive(Serialize)]
+struct HistoryOut<'a, T> {
+    format: &'a str,
+    version: u32,
+    done: &'a [T],
+    undone: &'a [T],
+}
+
+#[derive(Deserialize)]
+struct HistoryIn<T> {
+    format: String,
+    version: u32,
+    done: Vec<T>,
+    #[serde(default = "Vec::new")]
+    undone: Vec<T>,
+}
+
 /// Encode a scene as `.modelcraft` bytes.
 pub fn to_bytes(scene: &Scene) -> Result<Vec<u8>> {
+    to_bytes_with_history::<()>(scene, None)
+}
+
+/// Encode a scene and, when given, its undo history.
+pub fn to_bytes_with_history<T: Serialize>(scene: &Scene, history: Option<&History<T>>) -> Result<Vec<u8>> {
     let mut light = scene.clone();
     let mut blobs: BTreeMap<String, String> = BTreeMap::new();
     let mut data: Vec<(String, Vec<u8>)> = Vec::new();
@@ -115,11 +160,25 @@ pub fn to_bytes(scene: &Scene) -> Result<Vec<u8>> {
     for (name, bytes) in data {
         w.add(&name, &bytes, craft_zip::Compression::Deflated).map_err(zip_err)?;
     }
+    if let Some(h) = history {
+        // The base is a whole project of its own; its blobs are already compressed.
+        let base = to_bytes(&h.base)?;
+        let json = serde_json::to_vec(&HistoryOut { format: HISTORY_FORMAT_ID, version: HISTORY_VERSION, done: &h.done, undone: &h.undone })
+            .map_err(|e| FormatError::Malformed(e.to_string()))?;
+        w.add(BASE_ENTRY, &base, craft_zip::Compression::Stored).map_err(zip_err)?;
+        w.add(COMMANDS_ENTRY, &json, craft_zip::Compression::Deflated).map_err(zip_err)?;
+    }
     w.finish().map_err(zip_err)
 }
 
 /// Decode `.modelcraft` bytes (hostile input: bounded, validated, repaired).
 pub fn from_bytes(bytes: &[u8]) -> Result<Scene> {
+    Ok(from_bytes_with_history::<serde::de::IgnoredAny>(bytes, false)?.0)
+}
+
+/// Decode a project and, when `with_history`, its stored undo history. A damaged or newer
+/// history is dropped (the scene still opens); the string says why.
+pub fn from_bytes_with_history<T: for<'de> Deserialize<'de>>(bytes: &[u8], with_history: bool) -> Result<(Scene, HistoryRead<T>)> {
     let mut zip = craft_zip::Archive::open(bytes, craft_zip::Limits { max_entries: MAX_ENTRIES, max_total_bytes: MAX_TOTAL_BYTES }).map_err(zip_err)?;
     if zip.has_duplicate_names() {
         return Err(FormatError::Malformed("two archive entries share a name".into()));
@@ -169,22 +228,78 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Scene> {
             }
         }
     }
-    Ok(scene)
+    let history = if with_history { read_history(&mut zip) } else { HistoryRead::None };
+    Ok((scene, history))
+}
+
+/// What [`from_bytes_with_history`] found.
+#[derive(Debug)]
+pub enum HistoryRead<T> {
+    /// The file stores no history.
+    None,
+    Found(History<T>),
+    /// The file stores a history that could not be read; the reason.
+    Dropped(String),
+}
+
+fn read_history<T: for<'de> Deserialize<'de>>(zip: &mut craft_zip::Archive<'_>) -> HistoryRead<T> {
+    let base = match zip.read(BASE_ENTRY, MAX_BLOB_BYTES) {
+        Ok(Some(b)) => b,
+        Ok(None) => return HistoryRead::None,
+        Err(e) => return HistoryRead::Dropped(e.to_string()),
+    };
+    let json = match zip.read(COMMANDS_ENTRY, MAX_HISTORY_JSON_BYTES) {
+        Ok(Some(j)) => j,
+        Ok(None) => return HistoryRead::Dropped(format!("{COMMANDS_ENTRY} is missing")),
+        Err(e) => return HistoryRead::Dropped(e.to_string()),
+    };
+    // The base is decoded without its own history: no nesting.
+    let base = match from_bytes_with_history::<serde::de::IgnoredAny>(&base, false) {
+        Ok((s, _)) => s,
+        Err(e) => return HistoryRead::Dropped(format!("history base: {e}")),
+    };
+    let h: HistoryIn<T> = match serde_json::from_slice(&json) {
+        Ok(h) => h,
+        Err(e) => return HistoryRead::Dropped(format!("{COMMANDS_ENTRY}: {e}")),
+    };
+    if h.format != HISTORY_FORMAT_ID {
+        return HistoryRead::Dropped(format!("history format is {:?}", h.format));
+    }
+    if h.version > HISTORY_VERSION || h.version == 0 {
+        return HistoryRead::Dropped(format!("history version {} is not supported", h.version));
+    }
+    if h.done.len().saturating_add(h.undone.len()) > MAX_HISTORY_ENTRIES {
+        return HistoryRead::Dropped("the history is too long".into());
+    }
+    HistoryRead::Found(History { base, done: h.done, undone: h.undone })
 }
 
 /// Save atomically: the old file stays whole until the new one is complete on disk.
 pub fn save(scene: &Scene, path: &Path) -> Result<()> {
-    let bytes = to_bytes(scene)?;
+    save_with_history::<()>(scene, None, path)
+}
+
+/// Save a scene with its undo history, atomically.
+pub fn save_with_history<T: Serialize>(scene: &Scene, history: Option<&History<T>>, path: &Path) -> Result<()> {
+    let bytes = to_bytes_with_history(scene, history)?;
     craft_atomic::atomic_write(path, &bytes).map_err(|e| FormatError::io(path, e))
 }
 
-pub fn open(path: &Path) -> Result<Scene> {
+fn read_file(path: &Path) -> Result<Vec<u8>> {
     let meta = std::fs::metadata(path).map_err(|e| FormatError::io(path, e))?;
     if meta.len() > MAX_TOTAL_BYTES {
         return Err(FormatError::Malformed("file is too large".into()));
     }
-    let bytes = std::fs::read(path).map_err(|e| FormatError::io(path, e))?;
-    from_bytes(&bytes)
+    std::fs::read(path).map_err(|e| FormatError::io(path, e))
+}
+
+pub fn open(path: &Path) -> Result<Scene> {
+    from_bytes(&read_file(path)?)
+}
+
+/// Open a project with its stored undo history.
+pub fn open_with_history<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<(Scene, HistoryRead<T>)> {
+    from_bytes_with_history(&read_file(path)?, true)
 }
 
 #[cfg(test)]
@@ -262,8 +377,52 @@ mod tests {
         assert!(from_bytes(b"PK\x03\x04junk").is_err());
     }
 
+    #[test]
+    fn history_round_trips_and_damage_only_drops_it() {
+        let h = History { base: Scene::new(), done: vec!["a".to_string(), "b".to_string()], undone: vec!["c".to_string()] };
+        let bytes = to_bytes_with_history(&sample(), Some(&h)).unwrap();
+        // Readers that ignore history still see the scene.
+        assert_eq!(from_bytes(&bytes).unwrap().len(), 3);
+        let (scene, got) = from_bytes_with_history::<String>(&bytes, true).unwrap();
+        assert_eq!(scene.len(), 3);
+        match got {
+            HistoryRead::Found(g) => {
+                assert_eq!(g.done, h.done);
+                assert_eq!(g.undone, h.undone);
+                assert!(g.base.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+        // A file without history reports none.
+        let plain = to_bytes(&sample()).unwrap();
+        assert!(matches!(from_bytes_with_history::<String>(&plain, true).unwrap().1, HistoryRead::None));
+        // Commands of another type are dropped, not fatal.
+        assert!(matches!(from_bytes_with_history::<u32>(&bytes, true).unwrap().1, HistoryRead::Dropped(_)));
+        // A newer history version is dropped too.
+        let mut w = craft_zip::Writer::new();
+        // An empty scene has no blobs, so these are all its entries.
+        let empty = to_bytes_with_history(&Scene::new(), Some(&h)).unwrap();
+        let mut a = craft_zip::Archive::open(&empty, craft_zip::Limits { max_entries: 100, max_total_bytes: 1 << 30 }).unwrap();
+        for name in ["mimetype", "project.json", BASE_ENTRY] {
+            let b = a.read(name, 1 << 30).unwrap().unwrap();
+            w.add(name, &b, craft_zip::Compression::Stored).unwrap();
+        }
+        w.add(COMMANDS_ENTRY, br#"{"format":"modelcraft.history","version":9,"done":[]}"#, craft_zip::Compression::Stored).unwrap();
+        let newer = w.finish().unwrap();
+        assert!(matches!(from_bytes_with_history::<String>(&newer, true).unwrap().1, HistoryRead::Dropped(_)));
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(64))]
+        #[test]
+        fn corrupted_histories_never_panic(flips in prop::collection::vec((any::<usize>(), any::<u8>()), 1..20)) {
+            let h = History { base: sample(), done: vec!["a".to_string()], undone: vec![] };
+            let mut b = to_bytes_with_history(&sample(), Some(&h)).unwrap();
+            let n = b.len();
+            for (i, x) in flips { if let Some(v) = b.get_mut(i % n) { *v ^= x | 1; } }
+            let _ = from_bytes_with_history::<String>(&b, true);
+        }
+
         #[test]
         fn corrupted_projects_never_panic(flips in prop::collection::vec((any::<usize>(), any::<u8>()), 1..20)) {
             let mut b = to_bytes(&sample()).unwrap();

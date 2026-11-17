@@ -83,6 +83,9 @@ fn load(path: &str) -> Result<Document, String> {
     let p = Path::new(path);
     if is_project(p) {
         let mut d = Document::open(p).map_err(|e| e.to_string())?;
+        if let Some(n) = d.history_note.take() {
+            eprintln!("note: {n}");
+        }
         if d.pending_recovery > 0 {
             eprintln!("note: {} unsaved commands wait in the crash journal; `modelcraft-cli recover` replays them", d.pending_recovery);
         }

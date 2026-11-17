@@ -12,8 +12,8 @@ landed).
 
 | | Value | Kind |
 |---|---|---|
-| Weighted parity today | 14.2 % | counted by `cargo xtask parity` |
-| Row parity today | 24.5 % of 330 in-scope rows | counted |
+| Weighted parity today | 21.7 % | counted by `cargo xtask parity` |
+| Row parity today | 30.5 % of 330 in-scope rows | counted |
 | Hours to 90 % weighted parity, in the order below | ≈ 2,760 | estimated from row sizes |
 | Hours to 100 % | ≈ 3,425 | estimated from row sizes |
 
@@ -53,7 +53,7 @@ formats, UI/UX.
 
 | Rank | Item | Workstream | Hours | Gain (points) | Gain per 100 h |
 |---|---|---|---|---|---|
-| 1 | **X7** Undo history kept across sessions | UI/UX | 8 | 0.58 | 7.3 |
+| 1 | ~~**X7** Undo history kept across sessions~~ (done) | UI/UX | 8 | 0.58 | 7.3 |
 | 2 | **A1** Keyframes and timeline: key any attribute, auto key, timeline, dope sheet, playblast, follow spline, audio, turntable | Animation and rigging | 36 | 1.94 | 5.4 |
 | 3 | **U3** Vertex colour painting and conversion to textures | UV and paint | 17.5 | 0.83 | 4.7 |
 | 4 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | UI/UX | 25.5 | 1.19 | 4.6 |
@@ -74,7 +74,7 @@ users and sit lower only because they are expensive.
 
 | # | Item | Workstream | Rows | Hours | Gain (points) | Gain per 100 h | Needs | Parity after | Hours so far |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | **X7** Undo history kept across sessions | UI/UX | 1 | 8 | 0.58 | 7.3 | — | 14.8 % | 8 |
+| 1 | ~~**X7** Undo history kept across sessions~~ (done) | UI/UX | 1 | 8 | 0.58 | 7.3 | — | 14.8 % | 8 |
 | 2 | **A1** Keyframes and timeline: key any attribute, auto key, timeline, dope sheet, playblast, follow spline, audio, turntable | Animation and rigging | 7 | 36 | 1.94 | 5.4 | — | 16.8 % | 44 |
 | 3 | **U3** Vertex colour painting and conversion to textures | UV and paint | 3 | 17.5 | 0.83 | 4.7 | — | 17.6 % | 61.5 |
 | 4 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | UI/UX | 5 | 25.5 | 1.19 | 4.6 | — | 18.8 % | 87 |
@@ -284,7 +284,7 @@ craft-mesh already reads FBX, so **F1** is mostly wiring plus a writer; FBX is p
 
 ## UI/UX
 
-**X7** replays the journal into undo on open, which is the cheapest point in the plan. **X3** builds on craft-ui `docking` for tabs and splits. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
+Undo history now survives save and open (X7, done). **X3** builds on craft-ui `docking` for tabs and splits. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -294,7 +294,6 @@ craft-mesh already reads FBX, so **F1** is mostly wiring plus a writer; FBX is p
 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | 11 | 54 | 2.24 | 8 | — |
 | **X5** Scene overrides (takes) | 1 | 25 | 0.60 | 39 | — |
 | **X6** Large-scene drawing: culling, level of detail, proxies | 1 | 12.5 | 0.23 | 57 | — |
-| **X7** Undo history kept across sessions | 1 | 8 | 0.58 | 1 | — |
 
 ## Known defects outside the map
 

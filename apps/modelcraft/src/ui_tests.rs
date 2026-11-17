@@ -391,3 +391,28 @@ fn brush_presets_stroke_modes_and_new_brushes_by_keyboard() {
     assert!(h.state().user_presets.is_empty());
     assert_eq!(h.state().status, "Removed the preset Rock chips");
 }
+
+#[test]
+fn undo_history_reaches_back_into_the_last_session() {
+    let d = std::env::temp_dir().join(format!("mc-ui-history-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    let file = d.join("kept.modelcraft");
+    {
+        let mut h = harness();
+        h.run();
+        palette(&mut h, "Add Cube");
+        palette(&mut h, "Add Sphere");
+        h.state_mut().doc.save_as(&file).unwrap();
+    }
+    let mut h = harness();
+    h.run();
+    h.state_mut().open_path(file.clone());
+    h.run();
+    assert!(h.state().status.contains("Restored 2 undo steps"), "{}", h.state().status);
+    // The history panel lists the earlier session's steps, and the keyboard undoes them.
+    assert!(h.query_by_label("History step 2: Add sphere").is_some());
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 1);
+    let _ = std::fs::remove_dir_all(&d);
+}
