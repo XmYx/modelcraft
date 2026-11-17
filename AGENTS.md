@@ -151,6 +151,11 @@ A pull request never edits `ROADMAP.md`'s status line or `## Progress log`: it a
 `cargo xtask ci` checks the fragments. Maintainers cut releases (craft-common-actions
 `scripts/cut_release.py`); never create release branches or tags.
 
+**Parity table.** A feature PR flips rows in `docs/target-app-parity.md` (D/P/M, size) and nothing
+else there: it must not commit the generated block between the `parity:` markers. `cargo xtask ci`
+validates the rows strictly but only warns when the block is stale. A maintainer refreshes it with
+`cargo xtask parity --write` in a separate PR.
+
 ## 6. Engineering
 
 - **Everything is a command.** Document changes are `modelcraft_engine::Command`s (JSON with a
