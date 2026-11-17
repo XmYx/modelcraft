@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 70 / 7 / 34 / 219 | counted |
+| Done / exceeds / partial / missing | 70 / 7 / 36 / 217 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **28.5 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **20.1 %** | counted |
-| Size-weighted parity over all rows, no area weights | 20.1 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **28.8 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **20.4 %** | counted |
+| Size-weighted parity over all rows, no area weights | 20.4 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
