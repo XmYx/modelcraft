@@ -52,7 +52,7 @@ pub enum Launch {
     Print(String),
 }
 
-/// `ModelCraft <version>`, plus the commit and date `packaging/env.sh` exports for release builds.
+/// `ModelCraft <version>`, plus the commit and date `packaging/common.sh` exports for release builds.
 pub fn version() -> String {
     let mut v = modelcraft_engine::formats::GENERATOR.to_string();
     if let Some(sha) = option_env!("MODELCRAFT_BUILD_SHA").filter(|s| !s.is_empty()) {

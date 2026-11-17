@@ -1,24 +1,31 @@
-# .deb and .rpm packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages the
-# file tree, substitutes its path for ${STAGE} and exports VERSION, NFPM_ARCH and
-# MODELCRAFT_MAINTAINER.
+# .deb and .rpm packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages
+# the file tree, substitutes its path for ${STAGE} (nfpm doesn't expand env vars in `src`) and
+# exports VERSION and NFPM_ARCH.
+#
+#   nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/release/
 name: modelcraft
 arch: ${NFPM_ARCH}
 platform: linux
 version: ${VERSION}
+# semver: 0.2.0-rc.1 becomes 0.2.0~rc.1 in deb/rpm, so pre-releases sort before the release.
 version_schema: semver
 release: 1
 section: graphics
 priority: optional
 maintainer: ${MODELCRAFT_MAINTAINER}
 vendor: Learning Machines LLC
-homepage: https://github.com/storytold/modelcraft
+homepage: https://getartcraft.com/apps/modelcraft
 license: MIT OR Apache-2.0
 description: |-
-  Open-source 3D modeling and sculpting.
-  Parametric primitives with an editable build history, smooth cages, deformers, polygon tools
-  and million-polygon sculpting with symmetric brushes and masks. glTF/GLB, OBJ and STL exchange;
-  crash-safe journaled saves. Includes modelcraft-cli for scripts and agents.
+  Open-source 3D modeling and sculpting. Parametric primitives with an editable
+  build history, smooth cages, deformers, polygon tools and million-polygon
+  sculpting with symmetric brushes and masks; glTF/GLB, OBJ and STL exchange;
+  crash-safe journaled saves; GPU rendering (wgpu).
+  Includes modelcraft-cli, a command runner, converter and benchmark.
 
+# The binaries link only glibc and libgcc_s directly. Windowing (X11/Wayland, xkbcommon) and the
+# GPU (Vulkan, EGL/GL) are loaded at runtime, so they are dependencies/recommendations here
+# rather than ELF NEEDED entries.
 overrides:
   deb:
     depends:
@@ -29,15 +36,23 @@ overrides:
     recommends:
       - libwayland-client0
       - libx11-6
+      - libx11-xcb1
+      - libxcursor1
+      - libxi6
+      - libxrandr2
+      - mesa-vulkan-drivers
       - xdg-desktop-portal
   rpm:
     depends:
-      - glibc >= 2.35
       - libxkbcommon
       - (vulkan-loader or libglvnd-egl)
     recommends:
       - libwayland-client
       - libX11
+      - libXcursor
+      - libXi
+      - libXrandr
+      - mesa-vulkan-drivers
       - xdg-desktop-portal
 
 contents:
@@ -50,3 +65,7 @@ contents:
   - src: ${STAGE}/usr/share/
     dst: /usr/share/
     type: tree
+
+scripts:
+  postinstall: packaging/linux/postinst.sh
+  postremove: packaging/linux/postinst.sh

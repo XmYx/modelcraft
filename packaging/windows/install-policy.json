@@ -1,0 +1,105 @@
+{
+  "id": "modelcraft",
+  "name": "ModelCraft",
+  "upgradeCode": "6071D951-F9B6-41DF-A41E-D3196F5D8256",
+  "sources": [
+    "modelcraft.wxs"
+  ],
+  "icon": "assets/app-icon/modelcraft.ico",
+  "localization": [],
+  "extensions": [
+    "UI"
+  ],
+  "payloads": [
+    "NOTICE",
+    "modelcraft-cli.exe",
+    "modelcraft.exe"
+  ],
+  "registry": [
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe",
+      "FriendlyAppName",
+      "ModelCraft"
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\shell\\open\\command",
+      "",
+      "\"[#ModelcraftExe]\" \"%1\""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\SupportedTypes",
+      ".modelcraft",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\SupportedTypes",
+      ".glb",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\SupportedTypes",
+      ".gltf",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\SupportedTypes",
+      ".obj",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\SupportedTypes",
+      ".stl",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\modelcraft.exe\\SupportedTypes",
+      ".ply",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\.glb\\OpenWithProgids",
+      "ModelCraft.Scene",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\.gltf\\OpenWithProgids",
+      "ModelCraft.Scene",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\.obj\\OpenWithProgids",
+      "ModelCraft.Scene",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\.stl\\OpenWithProgids",
+      "ModelCraft.Scene",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\.ply\\OpenWithProgids",
+      "ModelCraft.Scene",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\modelcraft.exe",
+      "",
+      "[#ModelcraftExe]"
+    ]
+  ],
+  "mode": "dualScope"
+}

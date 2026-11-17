@@ -116,6 +116,19 @@ Not started: joints, skinning, keyframes, timeline, blend shapes.
 
 ## Release
 
+### macOS DMG background
+`packaging/macos/dmg/` has the generator but no ModelCraft art yet: draw `background.svg` in the
+suite style, then render `background.tiff` and `dmg-layout.DS_Store` with `generate.py` (needs
+resvg, Pillow, ds_store and mac_alias). The DMG opens with Finder's default window meanwhile.
+
+### Nix flake
+The suite's `nix.yml` workflow is left out until a flake (`flake.nix`, `flake.lock`,
+`nix/package.nix`) is added the way a sibling that has one does.
+
+### Windows executable icon
+The installer copies DeckCraft's convention of taking the shortcut icon from the exe, but
+`apps/modelcraft/build.rs` does not embed `assets/app-icon/modelcraft.ico` yet (winresource).
+
 The icon (a contributor draft) is rendered to every size; the Linux recipe (nfpm, desktop file,
 metainfo, MIME) follows BoardCraft. macOS, Windows and Flatpak recipes and the launcher catalog entry
 need the maintainers' signing setup and assets.

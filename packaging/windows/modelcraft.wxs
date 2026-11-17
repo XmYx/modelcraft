@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <?ifndef HasCraftFontLicences ?>
+  <?define HasCraftFontLicences=0 ?>
+  <?endif?>
+  <Package Name="ModelCraft" Manufacturer="Learning Machines LLC" Version="$(var.Version)" UpgradeCode="6071D951-F9B6-41DF-A41E-D3196F5D8256" Scope="perUserOrMachine" Compressed="yes" Language="1033">
+    <SummaryInformation Description="ModelCraft 3D modeling and sculpting" Manufacturer="Learning Machines LLC" />
+    <?include $(sys.SOURCEFILEDIR)install-policy.wxi?>
+    <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other
+         (MSI versions are numeric, so 1.2.3-rc.1 and 1.2.3-rc.2 are both 1.2.3). -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of ModelCraft is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="ModelcraftIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="ModelcraftIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://getartcraft.com/apps/modelcraft" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://getartcraft.com/apps/modelcraft" />
+    <Property Id="ARPHELPLINK" Value="https://discord.gg/artcraft" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="CraftSuiteFolder" Name="ArtCraft">
+        <Directory Id="INSTALLFOLDER" Name="ModelCraft" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="ModelCraft" Level="1">
+      <?if $(var.HasCraftFontLicences) = 1 ?>
+      <ComponentGroupRef Id="CraftFontLicences" />
+      <?endif?>
+      <ComponentGroupRef Id="ModelcraftFiles" />
+    </Feature>
+  <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="NOT Installed" />
+    </UI>
+  </Package>
+
+  <Fragment>
+    <?if $(var.HasCraftFontLicences) = 1 ?>
+    <ComponentGroup Id="CraftFontLicences" Directory="INSTALLFOLDER">
+      <Files Include="$(var.DocsDir)\**" />
+    </ComponentGroup>
+    <?endif?>
+    <ComponentGroup Id="ModelcraftFiles" Directory="INSTALLFOLDER">
+      <Component Id="ModelcraftApp" Guid="29F9D7A5-122A-44ED-8958-0E66B0B499E6">
+        <File Id="ModelcraftNotice" Source="$(var.BinDir)\NOTICE" KeyPath="no" />
+        <File Id="ModelcraftExe" Source="$(var.BinDir)\modelcraft.exe" KeyPath="yes">
+          <!-- No Icon here, so the shortcut shows the icon embedded in modelcraft.exe (build.rs). An
+               MSI Icon is cached under %APPDATA%\Microsoft\Installer\{ProductCode}\, and every
+               update is a major upgrade with a new ProductCode that deletes the old folder. A
+               taskbar pin is a copy of this shortcut that the update never touches, so it kept
+               pointing at the deleted file and lost its icon (#1114). The exe's path survives
+               updates; the shortcut is not advertised, so it targets that path and its icon is the
+               exe's own. The Icon above stays for ARPPRODUCTICON (Apps and features). -->
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="ModelCraft" Description="ModelCraft 3D modeling and sculpting" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+        </File>
+
+        <!-- .modelcraft: ModelCraft's own format. -->
+        <ProgId Id="ModelCraft.Scene" Description="ModelCraft Scene" Icon="ModelcraftExe" IconIndex="0">
+          <Extension Id="modelcraft" ContentType="application/vnd.storytold.modelcraft+zip">
+            <Verb Id="open" Command="Open" TargetFile="ModelcraftExe" Argument="&quot;%1&quot;" />
+          </Extension>
+        </ProgId>
+
+        <!-- "Open with" for 3D exchange formats, without becoming the default. -->
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe" Name="FriendlyAppName" Value="ModelCraft" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\shell\open\command" Value="&quot;[#ModelcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\SupportedTypes" Name=".modelcraft" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\SupportedTypes" Name=".glb" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\SupportedTypes" Name=".gltf" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\SupportedTypes" Name=".obj" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\SupportedTypes" Name=".stl" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\modelcraft.exe\SupportedTypes" Name=".ply" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.glb\OpenWithProgids" Name="ModelCraft.Scene" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.gltf\OpenWithProgids" Name="ModelCraft.Scene" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.obj\OpenWithProgids" Name="ModelCraft.Scene" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.stl\OpenWithProgids" Name="ModelCraft.Scene" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.ply\OpenWithProgids" Name="ModelCraft.Scene" Value="" Type="string" />
+
+        <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\modelcraft.exe" Value="[#ModelcraftExe]" Type="string" />
+      <RegistryValue Root="HKMU" Key="Software\ModelCraft" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" />
+      </Component>
+
+      <Component Id="ModelcraftCli">
+        <File Id="ModelcraftCliExe" Source="$(var.BinDir)\modelcraft-cli.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

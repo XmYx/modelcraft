@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.storytold.modelcraft+zip">
-    <sub-class-of type="application/zip"/>
     <comment>ModelCraft scene</comment>
+    <sub-class-of type="application/zip"/>
     <glob pattern="*.modelcraft"/>
+    <icon name="ai.storyteller.modelcraft"/>
   </mime-type>
 </mime-info>

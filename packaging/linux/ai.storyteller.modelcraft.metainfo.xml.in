@@ -1,21 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
+     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
 <component type="desktop-application">
   <id>ai.storyteller.modelcraft</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
   <name>ModelCraft</name>
   <summary>3D modeling and sculpting</summary>
+  <developer id="ai.storyteller">
+    <name>Learning Machines LLC</name>
+  </developer>
   <description>
-    <p>ModelCraft is an open-source 3D modeling and sculpting app, one of the Crafting Apps.</p>
-    <p>Build shapes from parametric primitives with an editable build history, smooth cages and
-    deformers, then sculpt high-resolution meshes with symmetric brushes and masks. Projects save
-    atomically with a crash journal; glTF/GLB and OBJ move models to and from the other Crafting Apps.</p>
+    <p>
+      ModelCraft builds 3D models from parametric primitives with an editable build history,
+      smooth cages and deformers, and sculpts million-polygon meshes with symmetric brushes and
+      masks. Projects save atomically with a crash journal; glTF/GLB, OBJ and STL move models to
+      and from other apps.
+    </p>
+    <p>
+      Every action is also a command that the command line and AI agents can drive.
+    </p>
   </description>
   <launchable type="desktop-id">ai.storyteller.modelcraft.desktop</launchable>
-  <url type="homepage">https://github.com/storytold/modelcraft</url>
-  <developer id="ai.storyteller">
-    <name>ArtCraft Team</name>
-  </developer>
+  <icon type="stock">ai.storyteller.modelcraft</icon>
+  <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
+  <url type="homepage">https://getartcraft.com/apps/modelcraft</url>
+  <url type="bugtracker">https://github.com/storytold/modelcraft/issues</url>
+  <url type="help">https://github.com/storytold/modelcraft</url>
+  <url type="contact">https://discord.gg/artcraft</url>
+  <categories>
+    <category>Graphics</category>
+    <category>3DGraphics</category>
+  </categories>
+  <keywords>
+    <keyword>3D</keyword>
+    <keyword>modeling</keyword>
+    <keyword>sculpting</keyword>
+    <keyword>glTF</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Modeling with a build history inside a smooth cage</caption>
+      <image type="source" width="2400" height="1500">https://raw.githubusercontent.com/storytold/modelcraft/main/docs/images/modelcraft-model.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Sculpting a two-million-triangle head</caption>
+      <image type="source" width="2400" height="1500">https://raw.githubusercontent.com/storytold/modelcraft/main/docs/images/modelcraft-sculpt.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#d6ccfb</color>
+    <color type="primary" scheme_preference="dark">#5a43c4</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <provides>
+    <binary>modelcraft</binary>
+    <mediatype>application/vnd.storytold.modelcraft+zip</mediatype>
+  </provides>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="@VERSION@" date="@DATE@"/>
