@@ -38,7 +38,7 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 }
 
 const CORE: &[&str] =
-    &["modelcraft-mesh", "modelcraft-ops", "modelcraft-scene", "modelcraft-sculpt", "modelcraft-formats", "modelcraft-engine", "modelcraft-render"];
+    &["modelcraft-mesh", "modelcraft-ops", "modelcraft-scene", "modelcraft-sculpt", "modelcraft-formats", "modelcraft-engine", "modelcraft-render", "craft-render-bvh", "craft-render-core", "craft-render-gpu"];
 
 fn layers() -> Result<(), String> {
     for krate in CORE {

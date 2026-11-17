@@ -896,6 +896,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-render-bvh"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "proptest",
+ "rayon",
+]
+
+[[package]]
+name = "craft-render-core"
+version = "0.1.0"
+dependencies = [
+ "craft-render-bvh",
+ "glam",
+ "proptest",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-render-gpu"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "craft-render-core",
+ "glam",
+ "log",
+ "pollster 0.4.0",
+ "thiserror 2.0.21",
+ "wgpu",
+]
+
+[[package]]
 name = "craft-settings"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
@@ -2381,6 +2415,7 @@ dependencies = [
 name = "modelcraft-cli"
 version = "0.1.0"
 dependencies = [
+ "craft-image-codecs",
  "glam",
  "modelcraft-engine",
  "modelcraft-formats",
@@ -2455,6 +2490,8 @@ name = "modelcraft-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "craft-render-core",
+ "craft-render-gpu",
  "glam",
  "log",
  "modelcraft-mesh",

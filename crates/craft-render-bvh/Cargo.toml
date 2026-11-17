@@ -1,0 +1,19 @@
+[package]
+name = "craft-render-bvh"
+description = "Bounding volume hierarchy for ray tracing: a binned surface-area-heuristic build (parallel), a flat GPU-ready node layout and closest-hit / any-hit triangle queries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glam = { workspace = true }
+bytemuck = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

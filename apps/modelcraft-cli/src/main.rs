@@ -3,6 +3,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod render_cmd;
+
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -33,11 +35,15 @@ Commands:
   -h, --help | -V, --version
 ";
 
+fn usage() -> String {
+    format!("{USAGE}\nRendering:\n{}\n", render_cmd::USAGE)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = match args.first().map(String::as_str) {
         None | Some("-h" | "--help") => {
-            print!("{USAGE}");
+            print!("{}", usage());
             Ok(())
         }
         Some("-V" | "--version") => {
@@ -136,6 +142,12 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             Ok(())
         }
         "control" => control(a.first().map(String::as_str)),
+        "render" => {
+            let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
+            let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
+            println!("{report}");
+            Ok(())
+        }
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }

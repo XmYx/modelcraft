@@ -71,6 +71,7 @@ pub enum Action {
     Mirror(u8),
     ToggleSnap,
     KeyboardShortcuts,
+    RenderView,
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -124,6 +125,7 @@ pub fn all() -> Vec<Action> {
         ViewFront,
         ViewRight,
         ViewTop,
+        RenderView,
         TransformDialog,
         Palette,
         KeyboardShortcuts,
@@ -242,6 +244,7 @@ impl Action {
             ViewRight => tl!("Right View"),
             ViewTop => tl!("Top View"),
             TransformDialog => tl!("Transform by Numbers…"),
+            RenderView => tl!("Render View"),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
@@ -326,6 +329,7 @@ impl Action {
             ViewRight => "view.right",
             ViewTop => "view.top",
             TransformDialog => "edit.transform_numbers",
+            RenderView => "view.render",
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             NextPanel => "view.next_panel",
@@ -402,6 +406,7 @@ impl Action {
             ViewRight => "Alt+3",
             ViewTop => "Alt+4",
             TransformDialog => "Cmd+T",
+            RenderView => "F9",
             Palette => "Cmd+K",
             KeyboardShortcuts => "Cmd+Alt+K",
             NextPanel => "F6",

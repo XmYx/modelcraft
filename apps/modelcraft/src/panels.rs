@@ -133,6 +133,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::RenderView,
                 ] {
                     action_button(app, ui, a);
                 }
@@ -1030,6 +1031,7 @@ pub struct Palette {
 
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
+    crate::render_view::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);

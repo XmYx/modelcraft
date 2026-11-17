@@ -12,6 +12,9 @@ workspace = true
 
 [dependencies]
 modelcraft-mesh = { workspace = true }
+modelcraft-scene = { workspace = true }
+craft-render-core = { workspace = true }
+craft-render-gpu = { workspace = true }
 glam = { workspace = true }
 bytemuck = { workspace = true }
 wgpu = { workspace = true }

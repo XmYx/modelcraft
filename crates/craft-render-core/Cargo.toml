@@ -1,0 +1,20 @@
+[package]
+name = "craft-render-core"
+description = "The Craft render engine: a physically based path tracer (scene description, cameras, materials, lights, sampling and the CPU reference integrator), with no UI and no GPU dependency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+craft-render-bvh = { workspace = true }
+glam = { workspace = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
