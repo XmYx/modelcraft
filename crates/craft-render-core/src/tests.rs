@@ -294,3 +294,101 @@ fn cutouts_textures_and_normal_maps_change_the_picture() {
     let f = render(scenes::showcase().unwrap(), 48, 32, 8, IntegratorSettings::default());
     assert!(f.sum.iter().all(|p| p.iter().all(|c| c.is_finite())) && mean_rgb(&f.mean())[1] > 0.02);
 }
+
+#[test]
+fn spot_sun_and_image_lighting_match_their_formulas() {
+    use crate::light::spot_falloff;
+    use craft_texture::{Image, Kind};
+    let albedo_over_pi = 0.5 / std::f64::consts::PI;
+    // A spot 2 m above the plane pointing down: full inside the cone, nothing outside it.
+    let spot = |cone: f32| {
+        lit_plane(move |b| {
+            b.add_light(Light::Spot { position: Vec3::new(0.0, 2.0, 0.0), direction: -Vec3::Y, intensity: Vec3::splat(10.0), cone_angle: cone, blend: 0.2 })
+                .unwrap()
+        })
+    };
+    let m = centre_mean(&render(spot(0.5), 16, 16, 16, IntegratorSettings::default()), 4.0);
+    assert!((m[0] - albedo_over_pi * 10.0 / 4.0).abs() < 2e-3, "spot {m:?}");
+    assert_eq!(spot_falloff(0.4f32.cos(), 0.5, 0.2), 1.0);
+    assert_eq!(spot_falloff(0.6f32.cos(), 0.5, 0.2), 0.0);
+    let half = spot_falloff(0.45f32.cos(), 0.5, 0.2);
+    assert!(half > 0.2 && half < 0.8, "{half}");
+    // A sun with a disk gives the same light as a directional light on open ground.
+    let dir = Vec3::new(0.5, 0.8, 0.2).normalize();
+    let sun = render(
+        lit_plane(|b| b.add_light(Light::Sun { direction: dir, irradiance: Vec3::splat(3.0), angular_radius: 0.05 }).unwrap()),
+        16,
+        16,
+        64,
+        IntegratorSettings::default(),
+    );
+    let m = centre_mean(&sun, 4.0);
+    assert!((m[0] - albedo_over_pi * 3.0 * f64::from(dir.y)).abs() < 5e-3, "sun {m:?}");
+
+    // An environment image that is uniformly 2 lights the plane like a uniform sky of 2.
+    let flat =
+        render(lit_plane(|b| b.set_environment_map(Image::filled(32, 16, Kind::Color, [2.0, 2.0, 2.0, 1.0]), 0.3)), 16, 16, 256, IntegratorSettings::default());
+    let m = centre_mean(&flat, 4.0);
+    assert!((m[0] - 1.0).abs() < 0.01, "flat image {m:?}");
+    // One very bright patch high in the sky (0.5 % of the image): sampling the image finds it
+    // far better than sampling the surface does, and both agree with the patch's formula.
+    // The patch covers latitudes 0..18° from the pole and one quarter turn: its cosine-weighted
+    // solid angle is (π/2)·sin²(18°)/2.
+    let patch = Image::generate(64, 32, Kind::Color, |x, y| if y < 3 && x < 16 { [400.0, 400.0, 400.0, 1.0] } else { [0.0, 0.0, 0.0, 1.0] });
+    let theta = 3.0 / 32.0 * std::f64::consts::PI;
+    let want = albedo_over_pi * 400.0 * (std::f64::consts::FRAC_PI_2) * theta.sin().powi(2) / 2.0;
+    let run = |strategy, spp| {
+        let p = patch.clone();
+        let f = render(
+            lit_plane(move |b| b.set_environment_map(p, 0.0)),
+            16,
+            16,
+            spp,
+            IntegratorSettings { max_depth: 1, strategy, ..IntegratorSettings::default() },
+        );
+        let img = f.mean();
+        let mean = mean_rgb(&img)[0];
+        let var = img.iter().map(|p| (f64::from(p[0]) - mean).powi(2)).sum::<f64>() / img.len() as f64;
+        (mean, var)
+    };
+    let (light_mean, light_var) = run(Strategy::LightOnly, 64);
+    let (bsdf_mean, bsdf_var) = run(Strategy::BsdfOnly, 64);
+    let (mis_mean, _) = run(Strategy::Mis, 64);
+    assert!((light_mean - want).abs() < 0.03 * want && (mis_mean - want).abs() < 0.03 * want, "light {light_mean} mis {mis_mean} want {want}");
+    assert!((bsdf_mean - want).abs() < 0.25 * want, "bsdf {bsdf_mean} want {want}");
+    assert!(light_var * 20.0 < bsdf_var, "importance sampling the image: variance {light_var} against {bsdf_var}");
+}
+
+#[test]
+fn the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights() {
+    use crate::light::LightSampling;
+    // A long corridor floor with 400 small lamps above it; each point is lit by the few nearest.
+    let scene = || {
+        let mut b = SceneBuilder::new();
+        let grey = b.add_material(Material::diffuse(Vec3::splat(0.5))).unwrap();
+        b.add_mesh(&quad(Vec3::new(-20.0, 0.0, -20.0), Vec3::Z * 40.0, Vec3::X * 40.0), Mat4::IDENTITY, grey).unwrap();
+        let lamp = b.add_material(Material::emitter(Vec3::splat(60.0))).unwrap();
+        for i in 0..20 {
+            for j in 0..20 {
+                let c = Vec3::new(i as f32 * 2.0 - 19.0, 0.4, j as f32 * 2.0 - 19.0);
+                b.add_mesh(&quad(c - Vec3::new(0.05, 0.0, 0.05), Vec3::X * 0.1, Vec3::Z * 0.1), Mat4::IDENTITY, lamp).unwrap();
+            }
+        }
+        b.set_camera(Camera { eye: Vec3::new(0.0, 30.0, 0.01), target: Vec3::ZERO, fov_y: 50f32.to_radians(), ..Camera::default() });
+        Arc::new(b.build())
+    };
+    let s = scene();
+    let run = |light_sampling, spp, seed| {
+        let settings =
+            RenderSettings { width: 48, height: 48, integrator: IntegratorSettings { max_depth: 1, light_sampling, ..IntegratorSettings::default() }, seed };
+        render_image(s.clone(), settings, spp).unwrap().mean()
+    };
+    let reference = run(LightSampling::Tree, 4096, 1);
+    let (tree, power) = (run(LightSampling::Tree, 16, 2), run(LightSampling::Power, 16, 2));
+    // Same answer…
+    let (rm, pm) = (mean_rgb(&reference)[0], mean_rgb(&run(LightSampling::Power, 1024, 3))[0]);
+    assert!((rm - pm).abs() < 0.02 * rm, "tree {rm} power {pm}");
+    // …with far less noise at equal samples.
+    let (et, ep) = (mse(&tree, &reference), mse(&power, &reference));
+    assert!(et * 3.0 < ep, "MSE with the tree {et}, by power {ep}");
+}

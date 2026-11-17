@@ -137,6 +137,19 @@ surfaces; a random-material property test bounds every albedo below 1.04 (Monte 
 point, directional, uniform-sky and rectangular-area lighting match their closed forms within
 1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002.
 
+### Light sampling (variance at equal samples)
+
+Measured by the tests that assert them (`cargo test -p craft-render-core`), 48×48 and 16×16
+images, error against a 4096-sample reference:
+
+| Scene | Estimator | Result |
+|---|---|---|
+| 400 small lamps over a floor (800 emissive triangles), direct light, 16 spp | light tree against choosing by power | MSE 0.0166 against 0.0821: 4.9× lower with the tree |
+| A panorama whose light is one patch of 0.5 % of the image, 64 spp | sampling the image against sampling the surface | variance more than 20× lower (the test's bound; both converge to the patch's closed form within 3 %) |
+
+The tree has no orientation cones and does not split, so lights that face away still take
+samples; the references' many-light samplers do both.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
