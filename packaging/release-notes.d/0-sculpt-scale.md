@@ -1,0 +1,2 @@
+- Mask tools: mask the hollows or the ridges of a surface, and blur, sharpen, grow or shrink the mask.
+- Finishing a stroke on a very dense model is quicker.

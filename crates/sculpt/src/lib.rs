@@ -19,16 +19,11 @@ pub mod stroke;
 
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
-use rayon::prelude::*;
 
 pub use alpha::Alpha;
 pub use brush::{BrushKind, BrushSettings, Dab, Falloff, Stamp, Stroke, Symmetry};
 pub use bvh::Bvh;
 pub use stroke::{DabMaker, DabOut, StrokeMode};
-
-/// Work on at least this many vertices is split across threads; below it the hand-over costs
-/// more than it saves.
-pub(crate) const PARALLEL_FROM: usize = 8192;
 
 /// Vertices per dirty chunk (a GPU upload unit).
 pub const CHUNK: usize = 4096;
@@ -210,8 +205,8 @@ impl SculptMesh {
 
     pub fn recompute_all_normals(&mut self) {
         // Each normal is the sum of its triangles' normals in triangle order, the same sum
-        // `update_normals` makes, so threads change the speed and not one bit of the result.
-        let n: Vec<Vec3> = (0..self.positions.len() as u32).into_par_iter().map(|v| self.vertex_normal(v)).collect();
+        // `update_normals` makes, so a full pass and a local update agree to the last bit.
+        let n: Vec<Vec3> = (0..self.positions.len() as u32).map(|v| self.vertex_normal(v)).collect();
         self.normals = n;
     }
 
@@ -238,9 +233,8 @@ impl SculptMesh {
                 }
             }
         }
-        let normals: Vec<Vec3> =
-            if ring.len() >= PARALLEL_FROM { ring.par_iter().map(|w| self.vertex_normal(*w)).collect() } else { ring.iter().map(|w| self.vertex_normal(*w)).collect() };
-        for (w, n) in ring.into_iter().zip(normals) {
+        for w in ring {
+            let n = self.vertex_normal(w);
             if let Some(x) = self.normals.get_mut(w as usize) {
                 *x = n;
             }

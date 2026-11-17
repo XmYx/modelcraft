@@ -1,0 +1,1 @@
+| 2026-11-17 | Sculpt mask tools (hollows, ridges, blur, sharpen, grow, shrink), stroke ends that refit only the moved part of the picking tree, and sculpting measured at 12.6 M triangles (dabs 3–5 ms in the engine); a thread pool for dabs was measured slower under load and not kept |

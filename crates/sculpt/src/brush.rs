@@ -3,7 +3,6 @@
 //! mirrored across the chosen object axes.
 
 use glam::Vec3;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{SculptMesh, StrokeState};
@@ -398,9 +397,7 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
             }
             w
         };
-        // The weights are worked out on several threads for a large dab; the sums below stay
-        // in vertex order, so the result is the same with any number of threads.
-        let weights: Vec<f32> = if verts.len() >= crate::PARALLEL_FROM { verts.par_iter().map(weigh).collect() } else { verts.iter().map(weigh).collect() };
+        let weights: Vec<f32> = verts.iter().map(weigh).collect();
         let mut area_n = Vec3::ZERO;
         let mut area_c = Vec3::ZERO;
         let mut wsum = 0.0;

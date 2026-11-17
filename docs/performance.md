@@ -56,6 +56,63 @@ this size) and the undo snapshot.
 Level changes build the level topology twice through the validated mesh builder; that, not the
 linear refinement itself, is most of the time, and it is single-threaded.
 
+<<<<<<< HEAD
+=======
+## The ten newer brushes (same bench, same mesh and radius)
+
+Measured 2026-11-17 while other builds shared the machine (the seven rows above re-measured in
+the same run at 0.26–0.47 ms, so read these as upper bounds).
+
+| Brush | Dab mean | Dab p95 |
+|---|---|---|
+| Pull | 0.58 ms | 0.78 ms |
+| Plateau | 0.48 ms | 0.76 ms |
+| Trim | 0.42 ms | 0.66 ms |
+| Fill | 0.31 ms | 0.53 ms |
+| Polish | 0.38 ms | 0.73 ms |
+| Buildup | 0.44 ms | 0.66 ms |
+| Gouge | 0.30 ms | 0.45 ms |
+| Slide | 0.31 ms | 0.52 ms |
+| Bulge | 0.34 ms | 0.56 ms |
+
+Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
+captured at the first dab, so its row there measures almost nothing.
+
+## 12.6 M triangles (`modelcraft-cli bench --polys 10000000 --dabs 200`)
+
+Measured 2026-11-17 with the machine's load average near 30 on 24 threads (other builds), so
+these are upper bounds and vary by a factor of two between runs. The mesh is the largest quad
+sphere the primitive makes: 6,291,456 quads, 12,582,912 triangles, 6,291,458 vertices. Same
+brush radius as above (0.08 on a unit sphere), which is about 10 k vertices per dab here, X
+symmetry on.
+
+| What | Time |
+|---|---|
+| Generate the mesh | 12–17 s |
+| Start a sculpt session (normals, adjacency, picking tree) | 6–10 s |
+| Dab: Draw, Clay, Smooth, Inflate, Pinch, Flatten, Crease | 3.0–4.9 ms mean, 4.7–7.7 ms p95 |
+| Dab: Grab, Mask | 1.7–2.0 ms mean |
+| Dab: Plateau, Trim, Polish | 5.8–9.6 ms mean, 11–20 ms p95 |
+| Upload of the dirty chunks (~150 k vertices) | 0.9–4.5 ms |
+| 1920×1080 draw + GPU wait | 1.3–20 ms (the GPU was shared; 1.3–1.7 ms in the quiet rows) |
+| End of a stroke (undo record, refit of what moved) | 12–46 ms |
+| Refit of the whole picking tree, for comparison | 110 ms |
+
+So a dab plus its upload stays under 10 ms for the common brushes at 12.6 M triangles in the
+engine. The app window was not measured at this size, 20 M was not measured at all, and a session
+takes several seconds to start: that is why the parity row stays Partial.
+
+The end of a stroke now refits only the leaves of the picking tree that hold moved triangles
+(and the boxes above them). At 2 M triangles a stroke end takes 2.3–7.3 ms where the full refit
+alone took 9–10 ms.
+
+**Threads, tried and not kept.** Working out a dab's weights and normals on a thread pool was
+measured on this machine while it was busy: with 12 threads Draw went from 6.1 ms to 15.0 ms per
+dab at 12.6 M triangles (p95 8.6 ms to 32 ms), and session start showed no gain outside the
+noise. A dab touches a few thousand vertices, too little to pay for the hand-over when the cores
+are contended. Dabs therefore stay on one thread until this is measured on an idle machine.
+
+>>>>>>> e166a55 (Scale: measured numbers, docs, parity rows)
 ## Live detail and even remesh (`modelcraft-cli bench`, last lines)
 
 Measured 2026-11-17 on the same machine while other builds were running, engine only (no GPU
@@ -236,5 +293,5 @@ upload and normals for the changed mesh each frame, which has not been measured 
 
 ## Not yet
 
-Everything above is single-threaded on the CPU. Multithreaded dabs and evaluation are in
-[gaps.md](gaps.md). Session start and subdivision of million-quad meshes take about a second.
+Everything above is single-threaded on the CPU (see "Threads, tried and not kept"). Multithreaded
+evaluation and session start are in [gaps.md](gaps.md). Session start and subdivision of million-quad meshes take about a second.

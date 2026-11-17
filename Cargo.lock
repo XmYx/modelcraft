@@ -2602,7 +2602,6 @@ dependencies = [
  "modelcraft-mesh",
  "modelcraft-ops",
  "proptest",
- "rayon",
  "serde",
  "thiserror 2.0.21",
 ]

@@ -564,7 +564,9 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                 }
             }
         }
+        let t = Instant::now();
         let undo = s.end_stroke().map(|(u, _)| u.indices.len()).unwrap_or(0);
+        let end_ms = ms(t);
         if kind == BrushKind::Mask {
             // Leave the surface free for the brushes that follow.
             s.mask_all(0.0);
@@ -572,19 +574,20 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
         }
         let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
         println!(
-            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts",
+            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts, stroke end {:.1} ms",
             kind.label(),
             mean(&dab_t),
             pct(&mut dab_t, 0.95),
             mean(&up_t),
             touched / dabs.max(1),
             mean(&draw_t),
-            undo
+            undo,
+            end_ms
         );
     }
     let t = Instant::now();
     s.refit();
-    println!("bvh refit {:.1} ms", ms(t));
+    println!("full bvh refit {:.1} ms (a stroke end refits only what moved)", ms(t));
     if polys > 2_000_000 {
         println!("(history, detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
         return Ok(());
