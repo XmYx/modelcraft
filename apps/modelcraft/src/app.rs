@@ -67,15 +67,6 @@ impl NavPreset {
     }
 }
 
-/// Where a panel lives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dock {
-    Left,
-    Right,
-    Float,
-    Hidden,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PanelId {
     Tree,
@@ -95,50 +86,6 @@ impl PanelId {
             PanelId::Paint => tl!("Paint"),
             PanelId::History => tl!("Undo History"),
         }
-    }
-}
-
-/// Panel placement per workspace (the workspace layouts).
-#[derive(Clone, Debug)]
-pub struct Layout {
-    pub docks: std::collections::HashMap<(Workspace, PanelId), Dock>,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        use Dock::*;
-        use PanelId::*;
-        use Workspace::*;
-        let mut d = std::collections::HashMap::new();
-        for (ws, panel, dock) in [
-            (Model, Tree, Left),
-            (Model, Properties, Right),
-            (Model, Brushes, Hidden),
-            (Model, PanelId::Paint, Hidden),
-            (Model, History, Left),
-            (Sculpt, History, Hidden),
-            (Workspace::Paint, History, Hidden),
-            (Sculpt, Tree, Hidden),
-            (Sculpt, Brushes, Left),
-            (Sculpt, Properties, Right),
-            (Sculpt, PanelId::Paint, Hidden),
-            (Workspace::Paint, Tree, Left),
-            (Workspace::Paint, Properties, Hidden),
-            (Workspace::Paint, Brushes, Hidden),
-            (Workspace::Paint, PanelId::Paint, Right),
-        ] {
-            d.insert((ws, panel), dock);
-        }
-        Layout { docks: d }
-    }
-}
-
-impl Layout {
-    pub fn dock(&self, ws: Workspace, p: PanelId) -> Dock {
-        self.docks.get(&(ws, p)).copied().unwrap_or(Dock::Hidden)
-    }
-    pub fn set(&mut self, ws: Workspace, p: PanelId, d: Dock) {
-        self.docks.insert((ws, p), d);
     }
 }
 
@@ -220,7 +167,7 @@ pub struct ModelApp {
     /// Brush radius in screen pixels.
     pub brush_px: f32,
     pub ops: OpParams,
-    pub layout: Layout,
+    pub layouts: crate::dock::Layouts,
     pub status: String,
     pub palette: Option<crate::panels::Palette>,
     pub numeric: Option<NumericTransform>,
@@ -303,7 +250,7 @@ impl ModelApp {
             brush: BrushSettings::new(BrushKind::Draw, 0.2),
             brush_px: 60.0,
             ops: OpParams::default(),
-            layout: Layout::default(),
+            layouts: Default::default(),
             status: tl!("Ready"),
             palette: None,
             numeric: None,
@@ -380,6 +327,7 @@ impl ModelApp {
         let pos = |v: f32, d: f32| if v.is_finite() && v > 0.0 { v } else { d };
         self.snap_steps = (pos(p.snap_move, 0.25), pos(p.snap_rotate_deg, 15.0), pos(p.snap_scale, 0.1));
         self.brush_px = p.brush_px.clamp(4.0, 800.0);
+        self.layouts = crate::dock::Layouts::from_saved(&p.layouts);
         self.keymap = crate::keys::keymap(p.shortcuts);
     }
 
@@ -390,9 +338,10 @@ impl ModelApp {
             NavPreset::MiddleMouse => "middle",
             NavPreset::RightMouse => "right",
         };
-        let (recent, snap, brush_px) = (self.recent.clone(), self.snap, self.brush_px);
+        let (recent, snap, brush_px, layouts) = (self.recent.clone(), self.snap, self.brush_px, self.layouts.to_saved());
         if let Some(store) = &mut self.prefs {
             store.update(|p| {
+                p.layouts = layouts;
                 p.navigation = nav.into();
                 p.recent = recent;
                 p.snap = snap;
@@ -765,11 +714,12 @@ impl ModelApp {
             Palette => self.palette = Some(crate::panels::Palette::default()),
             NextPanel => {
                 // Next panel that is shown in this workspace.
-                let shown: Vec<usize> =
-                    PanelId::ALL.iter().enumerate().filter(|(_, p)| self.layout.dock(self.workspace, **p) != Dock::Hidden).map(|(i, _)| i).collect();
+                let shown = self.layouts.shown_panels(self.workspace);
                 if !shown.is_empty() {
                     self.focus_panel = self.focus_panel.wrapping_add(1);
-                    let idx = shown.get(self.focus_panel % shown.len()).copied().unwrap_or(0);
+                    let p = shown.get(self.focus_panel % shown.len()).copied().unwrap_or(PanelId::Tree);
+                    self.layouts.raise(crate::dock::Pane::of(p));
+                    let idx = PanelId::ALL.iter().position(|x| *x == p).unwrap_or(0);
                     ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("panel-focus", idx))));
                 }
             }
@@ -1128,35 +1078,7 @@ impl ModelApp {
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
         crate::panels::status_bar(self, ui);
-        for side in [Dock::Left, Dock::Right] {
-            let panels: Vec<PanelId> = PanelId::ALL.iter().copied().filter(|p| self.layout.dock(self.workspace, *p) == side).collect();
-            if panels.is_empty() {
-                continue;
-            }
-            let id = if side == Dock::Left { "dock-left" } else { "dock-right" };
-            let panel = if side == Dock::Left { egui::Panel::left(id) } else { egui::Panel::right(id) };
-            panel.resizable(true).default_size(if side == Dock::Left { 240.0 } else { 300.0 }).min_size(180.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    for p in panels {
-                        crate::panels::dock_panel(self, ui, p);
-                    }
-                });
-            });
-        }
-        for p in PanelId::ALL {
-            if self.layout.dock(self.workspace, p) == Dock::Float {
-                let mut open = true;
-                egui::Window::new(p.label())
-                    .id(egui::Id::unique(("float", p as u8)))
-                    .open(&mut open)
-                    .default_width(280.0)
-                    .show(&ctx, |ui| crate::panels::panel_body(self, ui, p));
-                if !open {
-                    self.layout.set(self.workspace, p, Dock::Hidden);
-                }
-            }
-        }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL_DEEP)).show(ui, |ui| crate::viewport::show(self, ui));
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL)).show(ui, |ui| crate::dock::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         self.screenshot_tick(&ctx);
         if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() {

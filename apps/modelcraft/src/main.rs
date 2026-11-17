@@ -12,6 +12,7 @@ mod actions;
 mod app;
 mod args;
 mod demo;
+mod dock;
 mod gpu;
 mod keys;
 mod material_ui;

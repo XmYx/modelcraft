@@ -17,6 +17,8 @@ pub struct Prefs {
     pub snap_rotate_deg: f32,
     pub snap_scale: f32,
     pub brush_px: f32,
+    /// Panel layouts per workspace (`model`, `sculpt`, `paint`), as JSON.
+    pub layouts: std::collections::BTreeMap<String, String>,
     #[serde(with = "craft_keymap::keymap::overrides_list")]
     pub shortcuts: craft_keymap::Overrides,
 }
@@ -31,6 +33,7 @@ impl Default for Prefs {
             snap_rotate_deg: 15.0,
             snap_scale: 0.1,
             brush_px: 60.0,
+            layouts: Default::default(),
             shortcuts: Default::default(),
         }
     }
