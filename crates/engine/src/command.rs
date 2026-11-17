@@ -151,6 +151,12 @@ pub enum Command {
     /// Import a glTF/GLB/OBJ/STL/PLY file as new objects.
     Import {
         path: String,
+        /// The file's up axis (`auto`: what the file says, FBX only; else Y).
+        #[serde(default, skip_serializing_if = "is_auto")]
+        up: modelcraft_formats::exchange::Up,
+        /// Metres per file unit (`None`: what the file says, FBX only; else 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f32>,
     },
     /// Start sculpting a mesh object (adds a sculpt layer if its last step is not one).
     BeginSculpt {
@@ -209,7 +215,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
     ("remove_step", "Remove a history step: id, index"),
     ("collapse", "Bake an object's history into its mesh: id"),
-    ("import", "Import a glTF, GLB, OBJ, STL or PLY file: path"),
+    ("import", "Import a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file: path, up? (auto, y, z), scale? (metres per file unit)"),
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
     ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs}"),
@@ -222,6 +228,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("undo", "Undo the last change"),
     ("redo", "Redo the last undone change"),
 ];
+
+fn is_auto(u: &modelcraft_formats::exchange::Up) -> bool {
+    *u == modelcraft_formats::exchange::Up::Auto
+}
 
 impl Command {
     /// The English label for menus and the undo history.

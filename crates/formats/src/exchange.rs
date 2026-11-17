@@ -1,5 +1,9 @@
 //! Exchange formats through the shared `craft-mesh` crate: glTF 2.0 / GLB (read and write), OBJ
-//! (read and write), STL (read and write), PLY (read). Conventions match ArtCraft, TextureCraft
+//! (read and write), STL (read and write), PLY (read), FBX (read, binary and ASCII; written as
+//! ASCII by [`crate::fbx_write`]) and 3MF (read).
+//!
+//! [`Convert`] changes the up axis and the unit on the way in or out: FBX files say theirs, and
+//! the importer turns them into ModelCraft's Y up and metres unless told otherwise. Conventions match ArtCraft, TextureCraft
 //! and MaterialCraft: Y up, metres, UV origin at the top left.
 //!
 //! Imported meshes are welded (glTF splits vertices at UV seams; modeling wants them joined, with
@@ -21,6 +25,53 @@ pub enum Kind {
     Obj,
     Stl,
     Ply,
+    Fbx,
+    ThreeMf,
+}
+
+/// The up axis of a file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Up {
+    /// What the file says (FBX), else Y.
+    #[default]
+    Auto,
+    Y,
+    Z,
+}
+
+/// Axis and unit conversion between a file and the scene (Y up, metres).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Convert {
+    pub up: Up,
+    /// Metres per file unit; `None`: what the file says (FBX), else 1.
+    pub scale: Option<f32>,
+}
+
+impl Default for Convert {
+    fn default() -> Self {
+        Convert { up: Up::Auto, scale: None }
+    }
+}
+
+/// The turn from Z up to Y up (+Z becomes +Y, +Y becomes −Z).
+fn z_to_y() -> Mat4 {
+    Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+}
+
+/// Put `c` in front of every root item's transform.
+fn convert_roots(items: &mut [Item], c: Mat4) {
+    if c == Mat4::IDENTITY || !c.is_finite() {
+        return;
+    }
+    for it in items.iter_mut().filter(|i| i.parent.is_none()) {
+        let (scale, rotation, translation) = (c * it.transform.matrix()).to_scale_rotation_translation();
+        it.transform = Transform { translation, rotation, scale }.sanitized();
+    }
+}
+
+fn scale_ok(s: f32) -> Option<f32> {
+    (s.is_finite() && s > 1e-9 && s < 1e9).then_some(s)
 }
 
 impl Kind {
@@ -32,11 +83,13 @@ impl Kind {
             "obj" => Kind::Obj,
             "stl" => Kind::Stl,
             "ply" => Kind::Ply,
+            "fbx" => Kind::Fbx,
+            "3mf" => Kind::ThreeMf,
             _ => return None,
         })
     }
     pub fn can_write(self) -> bool {
-        matches!(self, Kind::Glb | Kind::Obj | Kind::Stl)
+        matches!(self, Kind::Glb | Kind::Obj | Kind::Stl | Kind::Fbx)
     }
 }
 
@@ -58,8 +111,36 @@ fn mesh_err(e: cm::Error) -> FormatError {
 /// Read a file's bytes. `resolve` supplies files the main one refers to (OBJ material
 /// libraries, glTF buffers); it may decline.
 pub fn import(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> Result<(Vec<Item>, Vec<String>)> {
+    import_with(bytes, kind, resolve, Convert::default())
+}
+
+/// [`import`] with an axis and unit conversion.
+pub fn import_with(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<Vec<u8>>, convert: Convert) -> Result<(Vec<Item>, Vec<String>)> {
     let limits = cm::Limits::default();
+    // What the file says about its axes and unit (FBX only).
+    let (file_axes, file_scale) = match kind {
+        Kind::Fbx => match cm::fbx::read_document(bytes, &limits) {
+            Ok(d) => (Some(DMat4::from_cols_array(&d.axes_to_y_up()).as_mat4()), d.unit_scale().map(|cm| (cm / 100.0) as f32)),
+            Err(_) => (None, None),
+        },
+        _ => (None, None),
+    };
+    let (mut items, warnings) = import_raw(bytes, kind, resolve, &limits)?;
+    let axes = match convert.up {
+        Up::Auto => file_axes.unwrap_or(Mat4::IDENTITY),
+        Up::Y => Mat4::IDENTITY,
+        Up::Z => z_to_y(),
+    };
+    let scale = convert.scale.or(file_scale).and_then(scale_ok).unwrap_or(1.0);
+    convert_roots(&mut items, Mat4::from_scale(Vec3::splat(scale)) * axes);
+    Ok((items, warnings))
+}
+
+fn import_raw(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<Vec<u8>>, limits: &cm::Limits) -> Result<(Vec<Item>, Vec<String>)> {
+    let limits = limits.clone();
     let scene = match kind {
+        Kind::Fbx => cm::fbx::read(bytes, &limits, resolve),
+        Kind::ThreeMf => cm::threemf::read(bytes, &limits),
         Kind::Glb | Kind::Gltf => cm::gltf::read(bytes, &limits, resolve),
         Kind::Obj => cm::obj::read(bytes, &limits, resolve),
         Kind::Stl => cm::stl::read(bytes, &limits),
@@ -210,8 +291,20 @@ fn neutral(items: &[Item]) -> cm::Scene {
 /// Write items as GLB, OBJ or STL bytes. OBJ and STL have no hierarchy: meshes are written in
 /// world space.
 pub fn export(items: &[Item], kind: Kind) -> Result<Vec<u8>> {
+    export_with(items, kind, Convert::default())
+}
+
+/// [`export`] into another up axis (`Up::Z`) or unit (`scale` file units per metre is
+/// `1 / scale`).
+pub fn export_with(items: &[Item], kind: Kind, convert: Convert) -> Result<Vec<u8>> {
+    let mut items = items.to_vec();
+    let axes = if convert.up == Up::Z { z_to_y().inverse() } else { Mat4::IDENTITY };
+    let scale = convert.scale.and_then(scale_ok).unwrap_or(1.0);
+    convert_roots(&mut items, Mat4::from_scale(Vec3::splat(1.0 / scale)) * axes);
+    let items = &items[..];
     let limits = cm::Limits::default();
     match kind {
+        Kind::Fbx => crate::fbx_write::write_in(items, convert.up == Up::Z, scale),
         Kind::Glb => cm::gltf::write_glb(&neutral(items), &limits).map_err(mesh_err),
         Kind::Obj | Kind::Stl => {
             let world = flatten(items);
@@ -299,8 +392,68 @@ mod tests {
     }
 
     #[test]
+    fn fbx_round_trip_keeps_quads_hierarchy_rotation_uvs_and_material() {
+        let mut its = items();
+        its[1].transform.rotation = Quat::from_euler(glam::EulerRot::XYZ, 0.3, -0.7, 1.1);
+        its[1].transform.scale = Vec3::new(1.0, 2.0, 0.5);
+        let bytes = export(&its, Kind::Fbx).unwrap();
+        assert!(bytes.starts_with(b"; FBX 7.4.0"));
+        let (back, warnings) = import(&bytes, Kind::Fbx, &mut |_| None).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[1].parent, Some(0));
+        assert!((back[0].transform.translation.y - 1.0).abs() < 1e-5, "{:?}", back[0].transform);
+        let m = back[1].mesh.as_ref().unwrap();
+        let src = its[1].mesh.as_ref().unwrap();
+        assert_eq!((m.vertex_count(), m.face_count()), (src.vertex_count(), src.face_count()), "quads are kept");
+        assert!(m.has_uvs());
+        for f in 0..m.face_count() as u32 {
+            for (a, b) in m.face_half_edges(f).zip(src.face_half_edges(f)) {
+                assert!((m.uv(a) - src.uv(b)).length() < 1e-5, "uv of face {f}");
+            }
+        }
+        assert!(back[1].transform.rotation.angle_between(its[1].transform.rotation) < 1e-4, "{:?}", back[1].transform.rotation);
+        assert!((back[1].transform.scale - its[1].transform.scale).length() < 1e-4);
+        assert_eq!(back[1].material.base_color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn up_axis_and_units_convert_both_ways() {
+        let its = items();
+        // Written Z up in centimetres, read back as such: the scene is unchanged.
+        let c = Convert { up: Up::Z, scale: Some(0.01) };
+        for kind in [Kind::Glb, Kind::Obj, Kind::Fbx] {
+            let bytes = export_with(&its, kind, c).unwrap();
+            let (raw, _) = import_with(&bytes, kind, &mut |_| None, Convert { up: Up::Y, scale: Some(1.0) }).unwrap();
+            let root_raw = raw.iter().find_map(|i| i.mesh.clone().map(|m| (m, i.transform))).unwrap();
+            let (lo, hi) = root_raw.0.bounds();
+            let size = root_raw.1.matrix().transform_vector3(hi - lo);
+            assert!((size.z.abs() - 100.0).abs() < 1e-2 || kind != Kind::Obj, "{kind:?} raw file is Z up in cm: {size:?}");
+            let (back, _) = import_with(&bytes, kind, &mut |_| None, c).unwrap();
+            let world = |items: &[Item]| -> Vec3 {
+                let i = items.iter().position(|i| i.mesh.is_some()).unwrap();
+                let mut m = items[i].transform.matrix();
+                let mut p = items[i].parent;
+                while let Some(k) = p {
+                    m = items[k].transform.matrix() * m;
+                    p = items[k].parent;
+                }
+                let (lo, hi) = items[i].mesh.as_ref().unwrap().bounds();
+                m.transform_point3((lo + hi) * 0.5)
+            };
+            let w = world(&back);
+            assert!((w - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-3, "{kind:?}: {w:?}");
+        }
+        // An FBX file says its axes and unit, so reading it with no settings gives the scene back.
+        let fbx = export_with(&its, Kind::Fbx, c).unwrap();
+        assert!(String::from_utf8_lossy(&fbx).contains("\"UpAxis\", \"int\", \"Integer\", \"\",2"));
+        let (auto, _) = import(&fbx, Kind::Fbx, &mut |_| None).unwrap();
+        assert!((auto[0].transform.translation - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-3, "{:?}", auto[0].transform.translation);
+    }
+
+    #[test]
     fn garbage_is_an_error() {
-        for kind in [Kind::Glb, Kind::Gltf, Kind::Obj, Kind::Stl, Kind::Ply] {
+        for kind in [Kind::Glb, Kind::Gltf, Kind::Obj, Kind::Stl, Kind::Ply, Kind::Fbx, Kind::ThreeMf] {
             let _ = import(b"\x00\x01garbage", kind, &mut |_| None);
         }
         assert!(import(b"", Kind::Glb, &mut |_| None).is_err());

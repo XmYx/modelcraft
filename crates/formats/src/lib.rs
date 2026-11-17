@@ -13,6 +13,7 @@
 
 pub mod blob;
 pub mod exchange;
+pub mod fbx_write;
 pub mod journal;
 pub mod pointcache;
 pub mod project;

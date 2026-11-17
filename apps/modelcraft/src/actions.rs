@@ -15,6 +15,7 @@ pub enum Action {
     ExportGlb,
     ExportObj,
     ExportStl,
+    ExportFbx,
     Undo,
     Redo,
     Delete,
@@ -96,6 +97,7 @@ pub fn all() -> Vec<Action> {
         ExportGlb,
         ExportObj,
         ExportStl,
+    ExportFbx,
         Undo,
         Redo,
         Delete,
@@ -233,6 +235,7 @@ impl Action {
             ExportGlb => tl!("Export glTF Binary (.glb)…"),
             ExportObj => tl!("Export OBJ…"),
             ExportStl => tl!("Export STL…"),
+            ExportFbx => tl!("Export FBX…"),
             Undo => tl!("Undo"),
             Redo => tl!("Redo"),
             Delete => tl!("Delete"),
@@ -317,6 +320,7 @@ impl Action {
             ExportGlb => "file.export_glb",
             ExportObj => "file.export_obj",
             ExportStl => "file.export_stl",
+            ExportFbx => "file.export_fbx",
             Undo => "edit.undo",
             Redo => "edit.redo",
             Delete => "edit.delete",
@@ -477,7 +481,7 @@ impl Action {
     pub fn menu(self) -> &'static str {
         use Action::*;
         match self {
-            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl => "File",
+            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
             AddPrimitive(_) | AddCage | AddDeformer(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",

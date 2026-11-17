@@ -16,6 +16,7 @@ mod anim_ui_tests;
 mod app;
 mod args;
 mod demo;
+mod exchange_ui;
 mod gpu;
 mod keys;
 mod material_ui;

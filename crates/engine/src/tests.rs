@@ -149,11 +149,11 @@ fn import_export_round_trip_and_hostile_paths() {
         let p = dir.join(format!("out.{ext}"));
         d.export(&p).unwrap();
         let mut e = Document::new();
-        let out = e.execute(Command::Import { path: p.display().to_string() }).unwrap();
+        let out = e.execute(Command::Import { path: p.display().to_string(), up: Default::default(), scale: None }).unwrap();
         assert!(!out.created.is_empty(), "{ext}");
     }
-    assert!(d.execute(Command::Import { path: dir.join("nope.glb").display().to_string() }).is_err());
-    assert!(d.execute(Command::Import { path: "/etc/passwd".into() }).is_err());
+    assert!(d.execute(Command::Import { path: dir.join("nope.glb").display().to_string(), up: Default::default(), scale: None }).is_err());
+    assert!(d.execute(Command::Import { path: "/etc/passwd".into(), up: Default::default(), scale: None }).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
 

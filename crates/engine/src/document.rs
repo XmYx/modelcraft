@@ -732,9 +732,9 @@ impl Document {
                 steps.remove(*index);
             }
             Command::Collapse { id } => self.scene.collapse(*id, &mut self.eval)?,
-            Command::Import { path } => {
+            Command::Import { path, up, scale } => {
                 let p = Path::new(path);
-                let kind = Kind::from_path(p).ok_or_else(|| EngineError::Invalid(format!("{path}: not a glTF, GLB, OBJ, STL or PLY file")))?;
+                let kind = Kind::from_path(p).ok_or_else(|| EngineError::Invalid(format!("{path}: not a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file")))?;
                 let meta = std::fs::metadata(p).map_err(|e| FormatError::io(p, e))?;
                 if meta.len() > MAX_IMPORT_BYTES {
                     return invalid(format!("{path} is too large"));
@@ -750,7 +750,7 @@ impl Document {
                     let q = dir.join(file);
                     (std::fs::metadata(&q).ok()?.len() <= MAX_IMPORT_BYTES).then(|| std::fs::read(q).ok()).flatten()
                 };
-                let (items, warnings) = exchange::import(&bytes, kind, &mut resolve)?;
+                let (items, warnings) = exchange::import_with(&bytes, kind, &mut resolve, exchange::Convert { up: *up, scale: *scale })?;
                 out.warnings = warnings;
                 let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Import").to_string();
                 let root = if items.len() > 1 { Some(self.scene.add(self.scene.unique_name(&stem), ObjectKind::Group, None)?) } else { None };
@@ -812,8 +812,13 @@ impl Document {
     }
 
     pub fn export(&mut self, path: &Path) -> Result<(), EngineError> {
-        let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj or .stl".into()))?;
-        let bytes = exchange::export(&self.export_items(), kind)?;
+        self.export_with(path, exchange::Convert::default())
+    }
+
+    /// Export into another up axis or unit (`convert.scale`: metres per file unit).
+    pub fn export_with(&mut self, path: &Path, convert: exchange::Convert) -> Result<(), EngineError> {
+        let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl or .fbx".into()))?;
+        let bytes = exchange::export_with(&self.export_items(), kind, convert)?;
         craft_atomic_write(path, &bytes)
     }
 
