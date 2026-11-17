@@ -73,8 +73,12 @@ pub fn default_layout(ws: Workspace) -> Layout<Pane> {
             let left = split(SplitAxis::Vertical, SplitSize::Ratio(0.62), tabs(&[Pane::Tree]), tabs(&[Pane::History]));
             split(h, SplitSize::FixedFirst(250.0), left, split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Properties])))
         }
-        Workspace::Sculpt => split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Brushes]), split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Properties]))),
-        Workspace::Paint => split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Tree]), split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Paint]))),
+        Workspace::Sculpt => {
+            split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Brushes]), split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Properties])))
+        }
+        Workspace::Paint => {
+            split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Tree]), split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Paint])))
+        }
     };
     Layout { root: Some(root), floating: Vec::new() }
 }
@@ -198,11 +202,9 @@ pub fn move_panel(app: &mut ModelApp, p: PanelId, m: Move) {
             }
         }
         Move::Float => {
-            if !shown {
-                if let Err(e) = app.layouts.apply(ws, Action::OpenAt { panel: pane, anchor: Pane::Viewport, placement: Placement::Split(Zone::Right) }) {
-                    app.status = e;
-                    return;
-                }
+            if !shown && let Err(e) = app.layouts.apply(ws, Action::OpenAt { panel: pane, anchor: Pane::Viewport, placement: Placement::Split(Zone::Right) }) {
+                app.status = e;
+                return;
             }
             Action::Float { panel: pane, rect: [320.0, 160.0, 300.0, 420.0] }
         }

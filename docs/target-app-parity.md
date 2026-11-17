@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 69 / 7 / 33 / 221 | counted |
+| Done / exceeds / partial / missing | 70 / 7 / 32 / 221 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **28.0 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **19.2 %** | counted |
-| Size-weighted parity over all rows, no area weights | 19.3 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **28.2 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **19.3 %** | counted |
+| Size-weighted parity over all rows, no area weights | 19.5 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -53,7 +53,7 @@ never estimated by hand.
 | Volumes | 2 (2 %) | 2 | 0 | 0 | 0 | 2 | 0 | 0 % | 0 % |
 | Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 3 | 5 | 1 | 35 % | 21 % |
 | Pipeline formats and referencing | 6 (5 %) | 15 | 5 | 1 | 0 | 9 | 1 | 40 % | 19 % |
-| UI and workspaces | 4 (3 %) | 13 | 7 | 1 | 3 | 2 | 0 | 73 % | 62 % |
+| UI and workspaces | 4 (3 %) | 13 | 8 | 1 | 2 | 2 | 0 | 77 % | 68 % |
 | Stability and performance | 3 (2 %) | 6 | 3 | 1 | 0 | 2 | 0 | 67 % | 50 % |
 <!-- parity:end -->
 
@@ -588,7 +588,7 @@ Weight: 4
 |---|---|---|---|---|
 | Dense dark theme, light theme from the system | C M Z | D | S | Text ≥ 4.5:1 (tested) |
 | Workspace layouts (model, sculpt, paint) | C M Z | D | S | Ctrl+1..3 |
-| Dockable panels | C M | P | M | Dock left/right, float, hide per workspace; no tabs, splits or saved layouts |
+| Dockable panels | C M | D | M | craft-ui docking: tab groups, splits, floating, per-workspace layouts saved in the preferences; moves by drag, tab menu, panel options menu or View ▸ Panels |
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |
 | Customisable shortcuts | C M Z | D | S | Suite Keyboard Shortcuts dialog (craft-keymap): conflicts, saved sets, per-workspace contexts |

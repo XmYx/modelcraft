@@ -405,7 +405,13 @@ pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
             ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, p.label().to_uppercase(), egui::FontId::proportional(11.0), theme::ACCENT);
         }
         let menu = ui.menu_button("...", |ui| {
-            for (m, l) in [(Move::Left, tl!("Dock Left")), (Move::Right, tl!("Dock Right")), (Move::Below, tl!("Dock Below the Viewport")), (Move::Float, tl!("Float")), (Move::Hide, tl!("Hide"))] {
+            for (m, l) in [
+                (Move::Left, tl!("Dock Left")),
+                (Move::Right, tl!("Dock Right")),
+                (Move::Below, tl!("Dock Below the Viewport")),
+                (Move::Float, tl!("Float")),
+                (Move::Hide, tl!("Hide")),
+            ] {
                 if ui.button(l).clicked() {
                     crate::dock::move_panel(app, p, m);
                     ui.close();

@@ -266,7 +266,7 @@ craft-mesh already reads FBX, so **F1** is mostly wiring plus a writer; FBX is p
 
 ## UI/UX
 
-**X7** replays the journal into undo on open, which is the cheapest point in the plan. **X3** builds on craft-ui `docking` for tabs and splits. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
+**X7** replays the journal into undo on open, which is the cheapest point in the plan. **X3**: docking with tabs, splits and saved layouts is in (craft-ui `docking`); radial menus, shelves, full preferences and shipped translations remain. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
