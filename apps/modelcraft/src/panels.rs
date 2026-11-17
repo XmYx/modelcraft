@@ -74,6 +74,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
                 ui.separator();
                 ui.checkbox(&mut app.doc.keep_history, tl!("Keep Undo History in Saved Files"));
+                let mut on = app.agents.is_on();
+                if ui.checkbox(&mut on, tl!("Allow Agents to Control ModelCraft")).changed() {
+                    app.allow_agents = on;
+                    if on { crate::agents::start(app, ui.ctx()) } else { crate::agents::stop(app) }
+                }
             });
             ui.menu_button(tl!("Select"), |ui| {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
