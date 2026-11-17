@@ -24,6 +24,7 @@ pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
+pub use modelcraft_clone as clone;
 pub use modelcraft_formats as formats;
 pub use modelcraft_mesh as mesh;
 pub use modelcraft_ops as ops;

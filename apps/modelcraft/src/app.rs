@@ -535,7 +535,7 @@ impl ModelApp {
         let a = self.active()?;
         match &self.doc.scene.get(a)?.kind {
             ObjectKind::Mesh { .. } => Some(a),
-            ObjectKind::SmoothCage { .. } => {
+            ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } => {
                 self.doc.scene.children(a).into_iter().find(|c| matches!(self.doc.scene.get(*c).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })))
             }
             _ => None,
@@ -720,6 +720,13 @@ impl ModelApp {
                 }
                 None => self.status = tl!("Select a mesh to deform"),
             },
+            AddCloner(kind) => {
+                // The selected mesh (or smooth cage) becomes the source; with none, a small cube is made.
+                let input = self
+                    .active()
+                    .filter(|id| matches!(self.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })));
+                self.run(Command::AddCloner { kind: kind.into(), input });
+            }
             AddGroup => {
                 self.run(Command::AddGroup { name: None });
             }
