@@ -23,11 +23,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 74 / 7 / 39 / 210 | counted |
+| Done / exceeds / partial / missing | 78 / 7 / 48 / 197 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **30.5 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **21.7 %** | counted |
-| Size-weighted parity over all rows, no area weights | 21.8 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **33.0 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **24.5 %** | counted |
+| Size-weighted parity over all rows, no area weights | 24.0 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -47,8 +47,8 @@ never estimated by hand.
 | Materials and shading | 5 (4 %) | 9 | 2 | 0 | 3 | 4 | 0 | 39 % | 30 % |
 | Render engine: core | 8 (6 %) | 17 | 5 | 0 | 5 | 7 | 2 | 44 % | 53 % |
 | Render engine: lights, camera effects and output | 6 (5 %) | 19 | 2 | 0 | 6 | 11 | 0 | 26 % | 20 % |
-| Rigging | 6 (5 %) | 15 | 0 | 0 | 0 | 15 | 0 | 0 % | 0 % |
-| Animation | 8 (6 %) | 17 | 0 | 0 | 0 | 17 | 0 | 0 % | 0 % |
+| Rigging | 6 (5 %) | 15 | 1 | 0 | 3 | 11 | 0 | 17 % | 11 % |
+| Animation | 8 (6 %) | 17 | 3 | 0 | 6 | 8 | 0 | 35 % | 36 % |
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
 | Hair, fur and grooming | 4 (3 %) | 6 | 0 | 0 | 0 | 6 | 0 | 0 % | 0 % |
 | Volumes | 2 (2 %) | 2 | 0 | 0 | 0 | 2 | 0 | 0 % | 0 % |
@@ -102,7 +102,9 @@ full 3D suite stays in the denominator, however large.
 | Sculptor roughing forms on a dense mesh | Preview | Nine brushes, masks, symmetry, pressure, 1 M+ polys interactive; no detail levels, live detail or remeshing |
 | Professional modeler | No | Missing knife, booleans, vertex snapping, UV tools, normals editing, splines |
 | Motion designer | No | No cloners, effectors, fields or animation |
-| Rigging, animation, simulation | No | Not started |
+| Animator keying objects and parameters | Preview | Keys on any number, curves, timeline, auto-key, Key Sheet and Curve Editor; no layers, clips or motion paths |
+| Rigging, character animation | No | Joints, automatic skin weights and both skinning methods work; no IK, constraints, blend shapes or weight brush yet |
+| Simulation | No | Not started |
 | Look development and final rendering | No | Viewport shading only; no offline renderer |
 
 ## Viewport, navigation and display
@@ -461,10 +463,10 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Joints: create, mirror, orient | C M | M | M | |
-| Skinning with linear blend and weight painting | C M | M | L | |
-| Dual-quaternion skinning | C M | M | S | |
-| Weight tools: normalize, mirror, copy, prune, automatic binding | C M | M | M | |
+| Joints: create, mirror, orient | C M | P | M | Joints are objects in the tree (keyable, parented), drawn as bones; add (chains by one key), aim at the child with children kept in place, mirror across a plane with renaming; no click-to-place tool, no separate orientation channel, joints are not picked in the viewport |
+| Skinning with linear blend and weight painting | C M | P | L | A skin under a mesh binds it to joints and evaluates through the graph (only the skin re-runs when a joint moves); weights are painted by a command dab with falloff, not yet by a viewport brush; weights are saved as JSON |
+| Dual-quaternion skinning | C M | D | S | Per skin switch (keyable); a half twist keeps the radius where linear blending collapses (tests) |
+| Weight tools: normalize, mirror, copy, prune, automatic binding | C M | P | M | Automatic binding by heat equilibrium over the surface (from the 2007 paper, without its visibility test) or by distance; normalize, prune, limit, mirror with joint renaming, set by number; no copying between meshes |
 | IK solvers: two-bone, multi-chain, spline IK | C M | M | L | |
 | FK / IK switching and blending | C M | M | M | |
 | Constraints: parent, point, orient, aim, scale, pole vector | C M | M | M | |
@@ -483,23 +485,23 @@ Weight: 8
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Keyframe any attribute; auto key | C M | M | M | |
-| Timeline: scrub, play, range | C M | M | M | |
-| Graph editor: curves, tangents, Bézier handles | C M | M | L | |
-| Dope sheet | C M | M | M | |
+| Keyframe any attribute; auto key | C M | D | M | Every number an object stores has a path (transform, visibility, material, primitive, history-step and deformer parameters); stepped, linear and Bézier keys; auto-key keys changed transform channels and already-animated attributes in the same undo step |
+| Timeline: scrub, play, range | C M | D | M | Scene frame rate and range, whole-frame playback (once, loop, back and forth), next/previous key; the ruler is a keyboard slider |
+| Graph editor: curves, tangents, Bézier handles | C M | P | L | Curve Editor: automatic clamped, flat, free and split tangents, weighted handles, five extrapolation modes, numeric fields for every drag; no box selection, no manual value zoom or normalised view, no copy/paste |
+| Dope sheet | C M | P | M | Key Sheet: select, move, scale and delete keys by pointer, keyboard or number; no box selection, copy/paste or summary rows |
 | Non-linear clips: blend, loop, offset | C M | M | L | |
-| Animation layers | C M | M | M | |
-| Motion paths and ghosting | C M | M | M | |
+| Animation layers | C M | P | M | Adding and replacing layers with weight and mute; keys go to the active layer and keying a pose solves for the layer's value; flatten to the base; no solo or lock, weights are not keyable, layers cannot be reordered |
+| Motion paths and ghosting | C M | P | M | Paths of selected moving objects in the viewport with a tick per frame and a mark per key, following animated parents; no ghosts, paths are not editable |
 | Viewport preview capture (playblast) | C M | M | S | |
 | Bake constraints and simulations to keys | C M | M | S | |
-| Curve cleanup: Euler filter, simplify | C M | M | S | |
+| Curve cleanup: Euler filter, simplify | C M | D | S | Smooth Rotation Keys removes whole-turn and flip jumps (property test: every rotation kept); simplify within a tolerance; bake to linear keys |
 | Follow a spline | C M | M | S | |
 | Audio in the timeline | C M | M | S | |
 | Motion-capture import (BVH) and mapping | C M | M | M | |
 | Cached playback | M | M | M | |
 | Camera sequencer / shot list | C M | M | M | |
-| Point cache of deformed meshes | C M | M | M | |
-| Turntable and simple timeline for sculpts | Z | M | S | |
+| Point cache of deformed meshes | C M | P | M | `modelcraft-cli bake` writes an object's vertices per frame to a documented `.mcpc` file (local or world space); no playback from a cache, no Alembic |
+| Turntable and simple timeline for sculpts | Z | P | S | Turntable command (one linear turn that repeats) and the timeline; no movie recording |
 
 ## Simulation
 
@@ -626,6 +628,8 @@ Weight: 3
 - Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs` (`material_layers_uvs_and_linked_maps_reach_the_render`), `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/material_ui.rs`, the output tests `feature_images_describe_the_first_surface`, `z_curve_pixel_order_moves_error_to_high_frequencies`, `mis_compensation_lowers_the_noise_of_image_lighting`, `apps/modelcraft-cli/src/bench_cmd.rs`, the light tests `spot_sun_and_image_lighting_match_their_formulas`, `the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights`, `sky.rs` (`the_sky_is_blue_at_noon_and_red_at_sunset`), the material tests `layers_conserve_energy_and_glass_passes_light`, `fresnel_and_thin_film_follow_optics`, `glass_is_invisible_in_a_furnace_and_absorbs_by_distance`, `cutouts_textures_and_normal_maps_change_the_picture`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
+- Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
 ## Where we mean to exceed the references
@@ -651,6 +655,9 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | minor | Rigging: dual-quaternion skinning done; joints, linear-blend skinning and weight tools partial |
+| 2026-11-17 | minor | Animation tools: rotation cleanup done; animation layers, motion paths, point cache and turntable partial |
+| 2026-11-17 | minor | Animation core: keys on any attribute, timeline, auto-key done; Curve Editor, Key Sheet and curve cleanup partial |
 | 2026-11-17 | major | Full-product map: 25 areas with weights, per-row sizes, out-of-scope rows; scored by `cargo xtask parity` |
 | 2026-11-17 | minor | Polish pass: snapping, loop/ring/grow, bridge, fill, mirror, rebindable shortcuts, undo history, recent files, incremental save, save prompt; 6 rows added |
 | 2026-11-17 | major | First assessment with the vertical slice |
