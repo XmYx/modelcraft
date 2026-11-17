@@ -327,3 +327,67 @@ fn live_detail_and_even_remesh_by_keyboard() {
     assert!(h.state().status.starts_with("Even remesh:"), "{}", h.state().status);
     assert_ne!(h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count(), before);
 }
+
+#[test]
+fn brush_presets_stroke_modes_and_new_brushes_by_keyboard() {
+    use modelcraft_engine::sculpt::{BrushKind, Stamp, StrokeMode};
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    // A new brush from its key, and one from the palette.
+    h.key_press(Key::H);
+    h.run();
+    assert_eq!(h.state().brush.kind, BrushKind::Pull);
+    palette(&mut h, "Surface Grab Brush");
+    assert_eq!(h.state().brush.kind, BrushKind::SurfaceGrab);
+    // A built-in preset sets the brush, its curve and its stroke mode; the radius stays.
+    let radius = h.state().brush.radius;
+    h.get_by_label("Hard edge, brush preset").click();
+    h.run();
+    let b = h.state().brush.clone();
+    assert_eq!((b.kind, b.radius), (BrushKind::Gouge, radius));
+    assert!(matches!(b.stroke, StrokeMode::Trail { .. }));
+    assert_eq!(h.state().status, "Hard edge preset");
+    h.get_by_label("Trail leash");
+    // Hardness is a named slider; the stroke mode is a named combo box.
+    h.get_by_label("Brush hardness").set_value_accesskit(0.6);
+    h.run();
+    assert!((h.state().brush.hardness - 0.6).abs() < 1e-5);
+    h.get_by_role_and_label(Role::ComboBox, "Stroke").click();
+    h.run();
+    h.get_by_label("Drag out").click();
+    h.run();
+    assert_eq!(h.state().brush.stroke, StrokeMode::Drag);
+    // A picture stamp shows its turn control.
+    h.get_by_role_and_label(Role::ComboBox, "Stamp").click();
+    h.run();
+    h.run();
+    h.get_by_label("Scales").click();
+    h.run();
+    assert!(matches!(h.state().brush.stamp, Stamp::Image { .. }));
+    h.get_by_role_and_label(Role::Slider, "Stamp turn");
+    // Save the brush as a preset by typing a name and pressing Enter; remove it with Delete.
+    let field = h.get_by_role_and_label(Role::TextInput, "Preset name");
+    field.focus();
+    h.run();
+    h.event(egui::Event::Text("Rock chips".to_string()));
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().user_presets.len(), 1);
+    assert_eq!(h.state().status, "Saved the preset Rock chips");
+    assert_eq!(h.state().user_presets[0].brush.stroke, StrokeMode::Drag);
+    h.key_press(Key::D);
+    h.run();
+    h.get_by_label("Rock chips, your brush preset").click();
+    h.run();
+    assert_eq!(h.state().brush.kind, BrushKind::Gouge);
+    h.get_by_label("Rock chips, your brush preset").focus();
+    h.run();
+    h.key_press(Key::Delete);
+    h.run();
+    assert!(h.state().user_presets.is_empty());
+    assert_eq!(h.state().status, "Removed the preset Rock chips");
+}

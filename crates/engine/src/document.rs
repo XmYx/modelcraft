@@ -281,7 +281,10 @@ impl Document {
 
     /// Interactive stroke: begin (requires a session).
     pub fn stroke_begin(&mut self, mut brush: BrushSettings) -> bool {
-        if brush.live_detail.is_some() && self.sculpt.as_ref().is_some_and(|s| self.live_detail_blocked(s.id).is_some()) {
+        // A drag stroke re-places its dab on every move, which live detail cannot take back.
+        if brush.live_detail.is_some()
+            && (brush.stroke == modelcraft_sculpt::StrokeMode::Drag || self.sculpt.as_ref().is_some_and(|s| self.live_detail_blocked(s.id).is_some()))
+        {
             brush.live_detail = None;
         }
         match &mut self.sculpt {
@@ -298,6 +301,11 @@ impl Document {
             s.mesh.dab(dab);
             s.unsynced = true;
         }
+    }
+
+    /// Take back what the open stroke has done so far (drag strokes).
+    pub fn stroke_rewind(&mut self) -> bool {
+        self.sculpt.as_mut().is_some_and(|s| s.mesh.rewind_stroke())
     }
 
     /// Finish the stroke: one undo entry and one journal line.

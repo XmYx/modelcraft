@@ -1,0 +1,3 @@
+- Ten more sculpt brushes: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface Grab, Gouge, Slide and Bulge.
+- Brushes have a hardness control, five stroke modes (Spaced, Dots, Spray, Trail, Drag out) and eight built-in stamp pictures you can turn.
+- Brush presets: ten to start from, and you can save your own.

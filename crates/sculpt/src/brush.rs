@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{SculptMesh, StrokeState};
 
+pub use crate::stroke::StrokeMode;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BrushKind {
@@ -28,6 +30,26 @@ pub enum BrushKind {
     Crease,
     /// Paint the mask (masked vertices resist every other brush).
     Mask,
+    /// Pull the surface along with the pointer, picking up new surface as it goes.
+    Pull,
+    /// Raise (or sink) the surface by one even step, however often the stroke passes.
+    Plateau,
+    /// Cut away what stands above the brush plane.
+    Trim,
+    /// Fill in what lies below the brush plane.
+    Fill,
+    /// Flatten and relax at once, for hard smooth planes.
+    Polish,
+    /// Pile material up fast, with a flat top.
+    Buildup,
+    /// Grab that follows the surface: only what is connected to the point under the pointer.
+    SurfaceGrab,
+    /// Cut a narrow, deep groove.
+    Gouge,
+    /// Slide the surface sideways along the stroke.
+    Slide,
+    /// Swell the surface into a round bulge.
+    Bulge,
 }
 
 pub const KINDS: &[BrushKind] = &[
@@ -40,6 +62,16 @@ pub const KINDS: &[BrushKind] = &[
     BrushKind::Flatten,
     BrushKind::Crease,
     BrushKind::Mask,
+    BrushKind::Pull,
+    BrushKind::Plateau,
+    BrushKind::Trim,
+    BrushKind::Fill,
+    BrushKind::Polish,
+    BrushKind::Buildup,
+    BrushKind::SurfaceGrab,
+    BrushKind::Gouge,
+    BrushKind::Slide,
+    BrushKind::Bulge,
 ];
 
 impl BrushKind {
@@ -54,7 +86,23 @@ impl BrushKind {
             BrushKind::Flatten => "Flatten",
             BrushKind::Crease => "Crease",
             BrushKind::Mask => "Mask",
+            BrushKind::Pull => "Pull",
+            BrushKind::Plateau => "Plateau",
+            BrushKind::Trim => "Trim",
+            BrushKind::Fill => "Fill",
+            BrushKind::Polish => "Polish",
+            BrushKind::Buildup => "Buildup",
+            BrushKind::SurfaceGrab => "Surface grab",
+            BrushKind::Gouge => "Gouge",
+            BrushKind::Slide => "Slide",
+            BrushKind::Bulge => "Bulge",
         }
+    }
+
+    /// The brush moves what it captured when the stroke began, following the pointer's drag
+    /// rather than dabbing along the surface.
+    pub fn drags(self) -> bool {
+        matches!(self, BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Pull)
     }
 }
 
@@ -67,6 +115,10 @@ pub enum Falloff {
     Linear,
     Sharp,
     Constant,
+    /// Full almost to the rim, then a quick drop.
+    Root,
+    /// A thin spike at the centre.
+    Needle,
 }
 
 impl Falloff {
@@ -82,6 +134,8 @@ impl Falloff {
             Falloff::Linear => 1.0 - x,
             Falloff::Sharp => (1.0 - x).powi(3),
             Falloff::Constant => 1.0,
+            Falloff::Root => (1.0 - x).max(0.0).sqrt(),
+            Falloff::Needle => (1.0 - x).powi(6),
         }
     }
 }
@@ -99,6 +153,12 @@ pub enum Stamp {
         count: f32,
     },
     Square,
+    /// A picture from the built-in library, turned by `turn` radians.
+    Image {
+        alpha: crate::alpha::Alpha,
+        #[serde(default)]
+        turn: f32,
+    },
 }
 
 impl Stamp {
@@ -116,6 +176,10 @@ impl Stamp {
                 a + (b - a) * fy
             }
             Stamp::Rings { count } => 0.5 + 0.5 * ((u * u + v * v).sqrt() * count.clamp(1.0, 32.0) * std::f32::consts::TAU).cos(),
+            Stamp::Image { alpha, turn } => {
+                let (s, c) = if turn.is_finite() { turn.sin_cos() } else { (0.0, 1.0) };
+                alpha.sample(u * c + v * s, v * c - u * s)
+            }
             Stamp::Square => {
                 if u.abs().max(v.abs()) < 0.7 {
                     1.0
@@ -169,6 +233,15 @@ pub struct BrushSettings {
     pub pressure_strength: bool,
     #[serde(default)]
     pub pressure_radius: bool,
+    /// How much of the radius, from the centre, keeps full weight before the falloff starts (0..1).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub hardness: f32,
+    /// How pointer movement becomes dabs.
+    #[serde(default, skip_serializing_if = "is_default_stroke")]
+    pub stroke: crate::stroke::StrokeMode,
+    /// Distance between dabs, in brush radii.
+    #[serde(default = "default_spacing")]
+    pub spacing: f32,
     /// Live detail: split the triangles under the brush until their edges are no longer than
     /// this (object units). None: the triangles stay as they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,13 +251,29 @@ pub struct BrushSettings {
 fn yes() -> bool {
     true
 }
+fn one() -> f32 {
+    1.0
+}
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
+}
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+fn is_default_stroke(m: &crate::stroke::StrokeMode) -> bool {
+    *m == crate::stroke::StrokeMode::Spaced
+}
+fn default_spacing() -> f32 {
+    0.2
+}
 
 impl BrushSettings {
     pub fn new(kind: BrushKind, radius: f32) -> Self {
         let strength = match kind {
             BrushKind::Smooth => 0.5,
-            BrushKind::Grab => 1.0,
+            BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Pull | BrushKind::Slide => 1.0,
             BrushKind::Mask => 0.8,
+            BrushKind::Polish | BrushKind::Trim | BrushKind::Fill => 0.6,
             _ => 0.4,
         };
         BrushSettings {
@@ -197,8 +286,21 @@ impl BrushSettings {
             symmetry: Symmetry::default(),
             pressure_strength: true,
             pressure_radius: false,
+            hardness: 0.0,
+            stroke: crate::stroke::StrokeMode::Spaced,
+            spacing: default_spacing(),
             live_detail: None,
         }
+    }
+
+    /// Weight at normalised distance `x` (0 centre .. 1 rim): the falloff, starting where the
+    /// hard core ends.
+    pub fn weight(&self, x: f32) -> f32 {
+        let h = if self.hardness.is_finite() { self.hardness.clamp(0.0, 1.0) } else { 0.0 };
+        if x <= h {
+            return 1.0;
+        }
+        if h >= 1.0 { 0.0 } else { self.falloff.weight((x - h) / (1.0 - h)) }
     }
 }
 
@@ -213,6 +315,9 @@ pub struct Dab {
     /// Grab brush: pointer movement since the previous dab.
     #[serde(default)]
     pub grab_delta: Vec3,
+    /// Multiplies the brush radius for this dab (spray and drag strokes).
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub scale: f32,
 }
 
 /// A recorded stroke (replayable).
@@ -231,7 +336,8 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
     }
     let b = st.brush.clone();
     let pressure = dab.pressure.clamp(0.0, 1.0);
-    let radius = (b.radius * if b.pressure_radius { pressure.max(0.05) } else { 1.0 }).clamp(1e-6, 1e6);
+    let scale = if dab.scale.is_finite() { dab.scale.clamp(0.01, 100.0) } else { 1.0 };
+    let radius = (b.radius * scale * if b.pressure_radius { pressure.max(0.05) } else { 1.0 }).clamp(1e-6, 1e6);
     let strength = b.strength.clamp(0.0, 1.0) * if b.pressure_strength { pressure } else { 1.0 };
     let sign = if b.invert { -1.0 } else { 1.0 };
     let first = st.dabs.is_empty();
@@ -242,21 +348,25 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
         let view = dab.view_dir * mirror;
         if let Some(edge) = b.live_detail
             && b.kind != crate::BrushKind::Mask
-            && (b.kind != crate::BrushKind::Grab || first)
+            && (!matches!(b.kind, BrushKind::Grab | BrushKind::SurfaceGrab) || first)
         {
             m.refine_sphere(st, center, radius, edge);
         }
-        if b.kind == crate::BrushKind::Grab {
+        if matches!(b.kind, BrushKind::Grab | BrushKind::SurfaceGrab) {
             if first {
-                m.query_sphere(center, radius, &mut verts);
-                let captured = verts
-                    .iter()
-                    .filter_map(|v| {
-                        let p = m.positions.get(*v as usize)?;
-                        let w = b.falloff.weight(p.distance(center) / radius) * (1.0 - m.mask.get(*v as usize).copied().unwrap_or(0.0));
-                        (w > 0.0).then_some((*v, w))
-                    })
-                    .collect();
+                let captured = if b.kind == BrushKind::SurfaceGrab {
+                    surface_capture(m, &b, center, radius)
+                } else {
+                    m.query_sphere(center, radius, &mut verts);
+                    verts
+                        .iter()
+                        .filter_map(|v| {
+                            let p = m.positions.get(*v as usize)?;
+                            let w = b.weight(p.distance(center) / radius) * (1.0 - m.mask.get(*v as usize).copied().unwrap_or(0.0));
+                            (w > 0.0).then_some((*v, w))
+                        })
+                        .collect()
+                };
                 st.grabbed.push(captured);
             }
             let delta = dab.grab_delta * mirror;
@@ -282,7 +392,7 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
         for v in &verts {
             let p = m.positions.get(*v as usize).copied().unwrap_or_default();
             let d = p - center;
-            let mut w = b.falloff.weight(d.length() / radius);
+            let mut w = b.weight(d.length() / radius);
             if b.stamp != Stamp::None {
                 w *= b.stamp.sample(d.dot(tu) / radius, d.dot(tv) / radius);
             }
@@ -331,9 +441,39 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
                     targets.push((*v, p.lerp(avg, (strength * w).clamp(0.0, 1.0))));
                 }
             }
+            BrushKind::Polish => {
+                for (v, w) in verts.iter().zip(&weights) {
+                    let p = m.positions.get(*v as usize).copied().unwrap_or_default();
+                    let flat = p - n * (p - c).dot(n) * w * strength * 0.5;
+                    let ns = m.neighbors(*v);
+                    let avg = if ns.is_empty() {
+                        flat
+                    } else {
+                        ns.iter().map(|k| m.positions.get(*k as usize).copied().unwrap_or(p)).sum::<Vec3>() / ns.len() as f32
+                    };
+                    targets.push((*v, flat.lerp(avg, (0.35 * strength * w).clamp(0.0, 1.0))));
+                }
+            }
+            BrushKind::Plateau => {
+                // Height above where the stroke found each point, capped at one step.
+                let height = n * step * 0.5 * sign;
+                for (v, w) in verts.iter().zip(&weights) {
+                    let p = m.positions.get(*v as usize).copied().unwrap_or_default();
+                    let from = st.original.get(v).map(|o| o.0).unwrap_or(p);
+                    let reach = st.reach.entry(*v).or_insert(0.0);
+                    if *w > *reach {
+                        *reach = *w;
+                    }
+                    targets.push((*v, from + height * *reach));
+                }
+            }
             kind => {
+                let delta = dab.grab_delta * mirror;
+                let slide = delta - n * delta.dot(n);
+                let bulge_from = center - n * radius * 0.5;
                 let plane_offset = match kind {
                     crate::BrushKind::Clay => n * step * 0.25 * sign,
+                    BrushKind::Buildup => n * step * 0.45 * sign,
                     _ => Vec3::ZERO,
                 };
                 let plane_p = c + plane_offset;
@@ -347,6 +487,24 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
                             if d < 0.0 { p - n * d * sign * w * 0.5 } else { p }
                         }
                         crate::BrushKind::Flatten => p - n * (p - c).dot(n) * w * strength * 0.5,
+                        BrushKind::Buildup => {
+                            let d = (p - plane_p).dot(n) * sign;
+                            if d < 0.0 { p - n * d * sign * w * 0.9 } else { p }
+                        }
+                        BrushKind::Trim | BrushKind::Fill => {
+                            // Trim lowers what is above the plane; Fill raises what is below; inverting swaps them.
+                            let above = (kind == BrushKind::Trim) != b.invert;
+                            let d = (p - c).dot(n);
+                            if (d > 0.0) == above { p - n * d * w * strength } else { p }
+                        }
+                        BrushKind::Pull => p + delta * w * strength.max(if b.pressure_strength { 0.0 } else { 1.0 }),
+                        BrushKind::Slide => p + slide * w * strength,
+                        BrushKind::Gouge => {
+                            let mut to_c = center - p;
+                            to_c -= n * to_c.dot(n);
+                            p + to_c * w * strength * 0.12 * sign - n * step * 0.14 * w * w * sign
+                        }
+                        BrushKind::Bulge => p + (p - bulge_from).normalize_or(n) * step * 0.1 * w * sign,
                         crate::BrushKind::Pinch | crate::BrushKind::Crease => {
                             let mut to_c = center - p;
                             to_c -= n * to_c.dot(n);
@@ -364,6 +522,42 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
         }
         commit(m, st, &targets);
     }
+}
+
+/// What a surface grab moves: the points reachable from the one nearest the brush centre by
+/// walking along edges for at most `radius`, weighted by that walking distance.
+fn surface_capture(m: &mut SculptMesh, b: &BrushSettings, center: Vec3, radius: f32) -> Vec<(u32, f32)> {
+    let mut near = Vec::new();
+    m.query_sphere(center, radius, &mut near);
+    let start = near.iter().copied().min_by(|a, c| {
+        let d = |v: &u32| m.positions.get(*v as usize).map(|p| p.distance_squared(center)).unwrap_or(f32::MAX);
+        d(a).total_cmp(&d(c)).then(a.cmp(c))
+    });
+    let Some(start) = start else { return Vec::new() };
+    let first = m.positions.get(start as usize).map(|p| p.distance(center)).unwrap_or(0.0);
+    let mut dist: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    dist.insert(start, first);
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(v) = queue.pop_front() {
+        let (Some(dv), Some(pv)) = (dist.get(&v).copied(), m.positions.get(v as usize).copied()) else { continue };
+        for w in m.neighbors(v) {
+            let Some(pw) = m.positions.get(*w as usize) else { continue };
+            let d = dv + pv.distance(*pw);
+            if d <= radius && dist.get(w).is_none_or(|old| d < *old - 1e-7) {
+                dist.insert(*w, d);
+                queue.push_back(*w);
+            }
+        }
+    }
+    let mut out: Vec<(u32, f32)> = dist
+        .into_iter()
+        .filter_map(|(v, d)| {
+            let w = b.weight(d / radius) * (1.0 - m.mask.get(v as usize).copied().unwrap_or(0.0));
+            (w > 0.0).then_some((v, w))
+        })
+        .collect();
+    out.sort_unstable_by_key(|e| e.0);
+    out
 }
 
 fn tangent_basis(view: Vec3) -> (Vec3, Vec3) {

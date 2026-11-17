@@ -17,6 +17,8 @@ pub struct Prefs {
     pub snap_rotate_deg: f32,
     pub snap_scale: f32,
     pub brush_px: f32,
+    /// Brush presets the user saved (the built-in ones are not stored).
+    pub brush_presets: Vec<modelcraft_engine::sculpt::preset::BrushPreset>,
     #[serde(with = "craft_keymap::keymap::overrides_list")]
     pub shortcuts: craft_keymap::Overrides,
 }
@@ -31,6 +33,7 @@ impl Default for Prefs {
             snap_rotate_deg: 15.0,
             snap_scale: 0.1,
             brush_px: 60.0,
+            brush_presets: Vec::new(),
             shortcuts: Default::default(),
         }
     }

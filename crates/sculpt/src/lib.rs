@@ -9,16 +9,21 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod alpha;
 pub mod brush;
 mod bvh;
 pub mod detail;
 pub mod live;
+pub mod preset;
+pub mod stroke;
 
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
 
+pub use alpha::Alpha;
 pub use brush::{BrushKind, BrushSettings, Dab, Falloff, Stamp, Stroke, Symmetry};
 pub use bvh::Bvh;
+pub use stroke::{DabMaker, DabOut, StrokeMode};
 
 /// Vertices per dirty chunk (a GPU upload unit).
 pub const CHUNK: usize = 4096;
@@ -107,6 +112,8 @@ struct StrokeState {
     /// Vertices captured by a grab brush at the first dab, with their weights, per symmetry pass.
     grabbed: Vec<Vec<(u32, f32)>>,
     dabs: Vec<Dab>,
+    /// Plateau brush: the largest weight each vertex has had in this stroke.
+    reach: std::collections::HashMap<u32, f32>,
     /// Set once live detail has split something in this stroke.
     topo: Option<live::TopoStart>,
 }
@@ -345,7 +352,7 @@ impl SculptMesh {
 
     /// Start a stroke with these brush settings.
     pub fn begin_stroke(&mut self, brush: BrushSettings) {
-        self.stroke = Some(StrokeState { brush, original: Default::default(), grabbed: Vec::new(), dabs: Vec::new(), topo: None });
+        self.stroke = Some(StrokeState { brush, original: Default::default(), grabbed: Vec::new(), dabs: Vec::new(), reach: Default::default(), topo: None });
     }
 
     /// Apply one dab of the current stroke (does nothing outside a stroke).
@@ -356,6 +363,36 @@ impl SculptMesh {
             st.dabs.push(dab);
         }
         self.stroke = Some(st);
+    }
+
+    /// Take back everything the current stroke has done and forget its dabs, keeping the stroke
+    /// open (a drag stroke re-places its one dab on every pointer move). Returns false when
+    /// there is no stroke or it has already changed the triangles.
+    pub fn rewind_stroke(&mut self) -> bool {
+        let Some(mut st) = self.stroke.take() else { return false };
+        if st.topo.is_some() {
+            self.stroke = Some(st);
+            return false;
+        }
+        let mut touched: Vec<u32> = st.original.keys().copied().collect();
+        touched.sort_unstable();
+        for v in &touched {
+            if let Some((p, mk)) = st.original.get(v).copied() {
+                if let Some(x) = self.positions.get_mut(*v as usize) {
+                    *x = p;
+                }
+                if let Some(x) = self.mask.get_mut(*v as usize) {
+                    *x = mk;
+                }
+            }
+        }
+        self.update_normals(&touched);
+        st.original.clear();
+        st.grabbed.clear();
+        st.reach.clear();
+        st.dabs.clear();
+        self.stroke = Some(st);
+        true
     }
 
     /// Finish the stroke: refit, return the undo record and the replayable stroke.

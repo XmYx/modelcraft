@@ -61,7 +61,7 @@ pub fn sculpt(doc: &mut Document, segments: u32) -> Option<ObjectId> {
             if let [a, c] = w {
                 for i in 0..8 {
                     let p = a.lerp(*c, i as f32 / 8.0).normalize() * 1.2;
-                    dabs.push(Dab { center: p, view_dir: -p.normalize(), pressure: 1.0, grab_delta: Vec3::ZERO });
+                    dabs.push(Dab { center: p, view_dir: -p.normalize(), pressure: 1.0, grab_delta: Vec3::ZERO, scale: 1.0 });
                 }
             }
         }
