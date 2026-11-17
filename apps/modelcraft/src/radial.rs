@@ -1,5 +1,5 @@
 //! The radial menu: eight actions around the pointer, chosen for what is being done (adding
-//! objects, editing components, sculpting, switching workspace). Opened with Shift+Space (a
+//! objects, editing components, sculpting, switching workspace). Opened with Shift+Q (a
 //! rebindable action). Every slice is a button with its name: click it, press its number 1–8,
 //! move with Tab and press Enter, or flick the pointer towards it and click; Esc closes.
 

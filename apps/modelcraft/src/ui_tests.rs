@@ -531,7 +531,7 @@ fn patch_grouping_and_mesh_check_by_keyboard() {
 fn radial_menu_by_number_and_by_name() {
     let mut h = harness();
     h.run();
-    h.key_press_modifiers(Modifiers::SHIFT, Key::Space);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
     h.run();
     h.run();
     assert!(h.state().radial.is_some());
@@ -543,12 +543,12 @@ fn radial_menu_by_number_and_by_name() {
     assert!(h.state().radial.is_none(), "choosing closes it: {} {:?}", h.state().status, h.state().mode);
     assert_eq!(h.state().doc.scene.len(), 1);
     // Again, and pick a slice by name; Esc closes without acting.
-    h.key_press_modifiers(Modifiers::SHIFT, Key::Space);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
     h.run();
     h.get_by_role_and_label(Role::MenuItem, "Add Torus").click();
     h.run();
     assert_eq!(h.state().doc.scene.len(), 2);
-    h.key_press_modifiers(Modifiers::SHIFT, Key::Space);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
     h.run();
     h.key_press(Key::Escape);
     h.run();

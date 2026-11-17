@@ -513,7 +513,7 @@ impl Action {
             ViewTop => "Alt+4",
             TransformDialog => "Cmd+T",
             RenderView => "F9",
-            RadialMenu => "Shift+Space",
+            RadialMenu => "Shift+Q",
             Preferences => "Cmd+,",
             Palette => "Cmd+K",
             KeyboardShortcuts => "Cmd+Alt+K",
