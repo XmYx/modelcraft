@@ -416,3 +416,45 @@ fn undo_history_reaches_back_into_the_last_session() {
     assert_eq!(h.state().doc.scene.len(), 1);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+#[test]
+fn agents_drive_the_window_over_the_control_channel() {
+    use std::io::{BufRead, BufReader, Write};
+    let mut h = harness();
+    h.run();
+    let token = "feedfacefeedfacefeedfacefeedfacefeedface";
+    h.state_mut().agents.token = Some(token.into());
+    h.state_mut().agents.port = Some(0);
+    // Off by default; the Edit menu item turns it on.
+    assert!(!h.state().agents.is_on());
+    h.get_by_label("Edit").click();
+    h.run();
+    h.get_by_label("Allow Agents to Control ModelCraft").click();
+    h.run();
+    assert!(h.state().agents.is_on(), "{}", h.state().status);
+    assert!(h.state().status.contains("on port"), "the status bar says where: {}", h.state().status);
+    let port = h.state().agents.listening.as_ref().unwrap().port;
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    writeln!(s, r#"{{"id":1,"method":"engine.execute","params":{{"cmd":"add_primitive","kind":"cylinder"}},"token":"{token}"}}"#).unwrap();
+    // The window answers between frames.
+    let mut reader = BufReader::new(s.try_clone().unwrap());
+    let mut line = String::new();
+    let waiter = std::thread::spawn(move || {
+        reader.read_line(&mut line).unwrap();
+        line
+    });
+    for _ in 0..200 {
+        h.run();
+        if waiter.is_finished() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let reply = waiter.join().unwrap();
+    assert!(reply.contains("\"ok\":true"), "{reply}");
+    assert_eq!(h.state().doc.scene.len(), 1);
+    assert!(h.state().status.contains("An agent changed the scene"), "announced in the status bar: {}", h.state().status);
+    h.get_by_role_and_label(Role::TreeItem, "Cylinder");
+    crate::agents::stop(h.state_mut());
+    assert!(!h.state().agents.is_on());
+}

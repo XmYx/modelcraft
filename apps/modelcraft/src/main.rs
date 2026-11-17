@@ -9,11 +9,15 @@
 #[macro_use]
 mod i18n;
 mod actions;
+mod agents;
 mod anim_ui;
 #[cfg(test)]
 mod anim_ui_tests;
 mod app;
 mod args;
+mod clone_ui;
+#[cfg(test)]
+mod clone_ui_tests;
 mod demo;
 mod gpu;
 mod keys;

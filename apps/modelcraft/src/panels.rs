@@ -10,11 +10,11 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, DEFORMERS, PRIMITIVES};
+use crate::actions::{self, Action, CLONERS, DEFORMERS, PRIMITIVES};
 use crate::app::{Dock, ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::theme;
 
-fn set_name(ui: &egui::Ui, resp: &egui::Response, name: impl Into<String>) {
+pub(crate) fn set_name(ui: &egui::Ui, resp: &egui::Response, name: impl Into<String>) {
     let name = name.into();
     ui.ctx().accesskit_node_builder(resp.id, |n| n.set_label(name));
 }
@@ -74,6 +74,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
                 ui.separator();
                 ui.checkbox(&mut app.doc.keep_history, tl!("Keep Undo History in Saved Files"));
+                let mut on = app.agents.is_on();
+                if ui.checkbox(&mut on, tl!("Allow Agents to Control ModelCraft")).changed() {
+                    app.allow_agents = on;
+                    if on { crate::agents::start(app, ui.ctx()) } else { crate::agents::stop(app) }
+                }
             });
             ui.menu_button(tl!("Select"), |ui| {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
@@ -90,6 +95,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ui.separator();
                 for d in DEFORMERS {
                     action_button(app, ui, Action::AddDeformer(d));
+                }
+                ui.separator();
+                for c in CLONERS {
+                    action_button(app, ui, Action::AddCloner(c));
                 }
             });
             ui.menu_button(tl!("Mesh"), |ui| {
@@ -217,6 +226,10 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, Action::AddCage);
                     for d in DEFORMERS {
                         action_button(app, ui, Action::AddDeformer(d));
+                    }
+                    ui.separator();
+                    for c in CLONERS {
+                        action_button(app, ui, Action::AddCloner(c));
                     }
                 });
             }
@@ -454,6 +467,13 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.2, g));
             p.circle_filled(c, 2.0, g);
         }
+        ObjectKind::Cloner { .. } => {
+            // Three small squares: one source, many clones.
+            let o = Color32::from_rgb(240, 170, 90);
+            for dx in [-4.0, 0.0, 4.0] {
+                p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
+            }
+        }
         ObjectKind::Deformer { .. } => {
             let m = Color32::from_rgb(200, 140, 230);
             let pts: Vec<egui::Pos2> = (0..=10).map(|k| c + egui::vec2(k as f32 - 5.0, (k as f32 * 1.2).sin() * 3.0)).collect();
@@ -630,7 +650,7 @@ pub(crate) fn commit_edit(app: &mut ModelApp, resp: &egui::Response, preview: im
     app.run(cmd());
 }
 
-fn vec3_row(ui: &mut egui::Ui, label: &str, v: &mut Vec3, speed: f32) -> Vec<egui::Response> {
+pub(crate) fn vec3_row(ui: &mut egui::Ui, label: &str, v: &mut Vec3, speed: f32) -> Vec<egui::Response> {
     let mut out = Vec::new();
     ui.horizontal(|ui| {
         ui.add_sized([62.0, 18.0], egui::Label::new(RichText::new(label).color(theme::TEXT_DIM)));
@@ -687,6 +707,9 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 });
                 ui.label(RichText::new(tl!("Shows its first mesh child subdivided. Edit the child; the cage follows.")).color(theme::TEXT_DIM).small());
             });
+        }
+        ObjectKind::Cloner { cloner, target } => {
+            egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
         ObjectKind::Deformer { deformer } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| deformer_fields(app, ui, id, *deformer));

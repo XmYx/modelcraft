@@ -42,6 +42,7 @@ const CORE: &[&str] = &[
     "modelcraft-mesh",
     "modelcraft-ops",
     "modelcraft-uv",
+    "modelcraft-clone",
     "modelcraft-scene",
     "modelcraft-sculpt",
     "modelcraft-formats",

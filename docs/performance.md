@@ -102,7 +102,7 @@ modelcraft-cli render dense.modelcraft  -o d.png --width 1280 --height 720  --sa
 | Cornell box, 1024², 256 spp | 36 | 7.5 M paths/s (35.6 s) | 326 M paths/s (0.82 s) | 43× |
 | Material row, 1280×720, 256 spp | 39,686 | 10.3 M paths/s (22.8 s) | 561 M paths/s (0.42 s) | 54× |
 | Dense sphere, 1280×720, 64 spp | 2,007,376 | 11.3 M paths/s (5.2 s) | 406 M paths/s (0.15 s) | 36× |
-| Material showcase (glass, coat, fuzz, thin film, textures, bump), 960×540, 256 spp | 72,196 | 6.2 M paths/s (21.4 s) | not rendered: the GPU path declines layered materials and textures | — |
+| Material showcase (glass, coat, fuzz, thin film, textures, bump), 960×540, 256 spp | 72,196 | 8.5 M paths/s (15.7 s; load average 22) | 299 M paths/s (0.44 s) | 35× |
 
 Scene preparation for the dense sphere (evaluate, triangulate with smoothed normals, build the
 BVH): 2.2 s. The BVH alone, on a 2,000,000-triangle height field: built in 560 ms (2.1 M nodes,
@@ -115,7 +115,9 @@ Correctness is tested, not assumed (see the test names in
 within 2 % of the environment (furnace test) for matte, rough-metal and layered dielectric
 surfaces; a random-material property test bounds every albedo below 1.04 (Monte Carlo slack);
 point, directional, uniform-sky and rectangular-area lighting match their closed forms within
-1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002.
+1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002 (the tests'
+bound; measured with the same 64 samples: showcase 0.00002, cut-outs and maps 0.0001, the Cornell
+box, studio, night street and interior below 0.000001).
 
 ### Benchmark: error against samples and time (`modelcraft-cli render-bench`)
 
@@ -154,19 +156,25 @@ Read honestly:
 - materials, night-street and showcase converge at 1/N from 16 samples on but start from large
   errors (speckle from the small bright light on glossy metal, and caustic paths through glass).
 
-**GPU, RTX 4090 (wgpu, Vulkan).** Three of the six scenes; the kernel declines panorama lighting
-and textures, and those scenes are reported as not rendered rather than run on the CPU.
+**GPU, RTX 4090 (wgpu, Vulkan).** All six scenes: the kernel renders everything the CPU path does
+(layered materials, textures, panorama lighting, the light tree). Load average 20 during the run;
+the GPU itself was idle.
 
 | Scene | relMSE at 1 / 4 / 16 / 64 / 256 spp | Seconds at 256 spp |
 |---|---|---|
-| cornell | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 0.050 |
-| materials | 6.07 / 1.22 / 0.221 / 0.069 / 0.0178 | 0.110 |
-| night-street | 12.6 / 3.41 / 0.848 / 0.236 / 0.0656 | 0.043 |
+| cornell | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 0.053 |
+| materials | 4.94 / 0.805 / 0.128 / 0.049 / 0.0121 | 0.123 |
+| interior | 0.246 / 0.046 / 0.0185 / 0.262 / 0.148 | 0.114 |
+| night-street | 6.79 / 1.01 / 0.262 / 0.072 / 0.0198 | 0.057 |
+| studio | 0.326 / 0.081 / 0.0205 / 0.0052 / 0.0013 | 0.115 |
+| showcase | 2.45 / 0.692 / 0.166 / 0.049 / 0.0135 | 0.168 |
 
-On cornell the GPU reaches the same error per sample as the CPU (it runs the same samples) in
-1/55 of the time. On night-street it needs about 3.3× the samples of the CPU for the same error,
-because the GPU chooses lights by power while the CPU uses the light tree; it is still far ahead
-in time. Porting the tree to the kernel is the next step for that scene.
+Every error equals the CPU's to the digits shown, because the two devices run the same samples
+through the same estimator; the GPU takes 1/20 to 1/50 of the time. Before this kernel the GPU
+rendered three of these scenes and chose lights by power: night-street then stood at
+12.6 / 3.41 / 0.848 / 0.236 / 0.0656 (3.3× the samples of the CPU for the same error) and
+materials at 6.07 / 1.22 / 0.221 / 0.069 / 0.0178. The interior scene's rise at 64 and 256 samples
+is the estimator's (see above), now on both devices.
 
 ### Sample order, feature images and environment sampling (measured by their tests)
 

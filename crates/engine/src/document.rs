@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MaskOp, Outcome};
@@ -63,6 +63,8 @@ pub struct Document {
     pub history_max_bytes: usize,
     /// What happened to the stored history on open, for the status bar.
     pub history_note: Option<String>,
+    /// Counts the changes made in this session (control clients watch it).
+    pub revision: u64,
 }
 
 /// Default bound on the history a save stores: 256 MiB of commands.
@@ -90,6 +92,7 @@ impl Document {
             keep_history: true,
             history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
             history_note: None,
+            revision: 0,
         }
     }
 
@@ -407,6 +410,7 @@ impl Document {
         self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
         self.log(&cmd);
         self.dirty = true;
+        self.revision += 1;
     }
 
     // ---- execution ----
@@ -514,6 +518,7 @@ impl Document {
         self.log(&cmd);
         if !matches!(cmd, Command::BeginSculpt { .. } | Command::EndSculpt) {
             self.dirty = true;
+            self.revision += 1;
         }
         Ok(out)
     }
@@ -635,6 +640,27 @@ impl Document {
                 }
                 out.created.push(cage);
             }
+            Command::AddCloner { kind, input } => {
+                let cloner = Cloner::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone layout {kind:?}")))?;
+                if let Some(i) = input
+                    && !matches!(self.scene.get(*i).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. }))
+                {
+                    return invalid("clones need a mesh or smooth cage as their source");
+                }
+                let parent = input.and_then(|i| self.scene.get(i)).and_then(|o| o.parent);
+                let name = self.scene.unique_name("Clones");
+                let id = self.scene.add(name, ObjectKind::Cloner { cloner, target: None }, parent)?;
+                match input {
+                    Some(i) => self.scene.reparent(*i, Some(id))?,
+                    None => {
+                        let primitive = Primitive::Cube { size: glam::Vec3::splat(0.5), segments: 1 };
+                        let name = self.scene.unique_name("Clone source");
+                        self.scene.add(name, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(id))?;
+                    }
+                }
+                out.warnings.extend(self.eval.evaluate(&self.scene, id).errors.iter().map(|e| e.message.clone()));
+                out.created.push(id);
+            }
             Command::AddDeformer { kind, target } => {
                 let deformer = Deformer::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown deformer {kind:?}")))?;
                 if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
@@ -699,6 +725,21 @@ impl Document {
                 ObjectKind::Deformer { deformer: d } => *d = *deformer,
                 _ => return invalid("not a deformer"),
             },
+            Command::SetCloner { id, cloner, target } => {
+                if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
+                    return invalid("the target must be another object in the scene");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::Cloner { cloner: c, target: t } => {
+                        *c = cloner.sanitized();
+                        *t = *target;
+                    }
+                    _ => return invalid("not a clone generator"),
+                }
+                // A missing source or target, or a cut-off count, reaches the status line (a
+                // live region) so it is announced where the edit was made.
+                out.warnings.extend(self.eval.evaluate(&self.scene, *id).errors.iter().map(|e| e.message.clone()));
+            }
             Command::AddStep { id, op } => {
                 if matches!(op, StepOp::Sculpt { .. }) {
                     return invalid("sculpt layers are added by begin_sculpt");
@@ -794,14 +835,33 @@ impl Document {
             if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. }) || !self.scene.visible(id) {
                 continue;
             }
-            let mesh = match o.kind {
+            let evaluated = match o.kind {
                 // Joints export as empty nodes; a skinned mesh exports in its current pose.
                 ObjectKind::Group | ObjectKind::Joint { .. } => None,
-                _ => Some(self.eval.evaluate(&self.scene, id).mesh),
+                _ => Some(self.eval.evaluate(&self.scene, id)),
             };
             let parent = o.parent.and_then(|p| index.get(&p).copied());
             index.insert(id, items.len());
+            // A clone generator exports as a group with one node per clone, all sharing the source
+            // mesh (glTF nodes may share a mesh).
+            let instances = evaluated.as_ref().and_then(|e| e.instances.clone());
+            let mesh = if instances.is_some() { None } else { evaluated.map(|e| e.mesh) };
+            let here = items.len();
             items.push(Item { name: o.name.clone(), parent, transform: o.transform, mesh, material: o.material.clone() });
+            if let Some(inst) = instances {
+                let material = inst.source_object.and_then(|s| self.scene.get(s)).map(|s| s.material.clone()).unwrap_or_default();
+                let mut baked_vertices = 0usize;
+                for c in &inst.clones.instances {
+                    let (transform, mesh) = clone_node(c.matrix, &inst.source, &mut baked_vertices);
+                    items.push(Item {
+                        name: format!("{} {}", o.name, c.index + 1),
+                        parent: Some(here),
+                        transform,
+                        mesh: Some(mesh),
+                        material: material.clone(),
+                    });
+                }
+            }
         }
         items
     }
@@ -862,10 +922,46 @@ impl Document {
             .filter(|id| !self.scene.is_cage_input(*id))
             .map(|id| match &self.sculpt {
                 Some(s) if s.id == id => s.mesh.triangle_count(),
-                _ => self.eval.evaluate(&self.scene, id).mesh.triangle_count(),
+                _ => {
+                    let e = self.eval.evaluate(&self.scene, id);
+                    e.mesh.triangle_count() + e.instances.map_or(0, |i| i.triangle_count())
+                }
             })
             .sum()
     }
+}
+
+/// Most vertices all the baked clones of one generator may add to an export.
+const MAX_BAKED_VERTICES: usize = 16_000_000;
+
+/// The node for one clone. A glTF node carries translation, rotation and scale only, so a clone
+/// whose matrix has shear (a stretch applied after a rotation) cannot be one node over the shared
+/// mesh: it gets its own copy of the mesh with the matrix applied to the points, and an identity
+/// transform. `baked_vertices` counts those copies; past [`MAX_BAKED_VERTICES`] a sheared clone
+/// falls back to its nearest rotation and scale.
+fn clone_node(
+    matrix: glam::Mat4,
+    source: &std::sync::Arc<modelcraft_scene::PolyMesh>,
+    baked_vertices: &mut usize,
+) -> (modelcraft_scene::Transform, std::sync::Arc<modelcraft_scene::PolyMesh>) {
+    let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
+    let rebuilt = glam::Mat4::from_scale_rotation_translation(scale, rotation, translation);
+    let tolerance = 1e-4 * matrix.to_cols_array().iter().fold(1.0f32, |m, v| m.max(v.abs()));
+    let trs = rebuilt.to_cols_array().iter().zip(matrix.to_cols_array()).all(|(a, b)| (a - b).abs() <= tolerance);
+    if trs || !matrix.is_finite() || *baked_vertices + source.vertex_count() > MAX_BAKED_VERTICES {
+        return (modelcraft_scene::Transform { translation, rotation, scale }.sanitized(), source.clone());
+    }
+    *baked_vertices += source.vertex_count();
+    let mut baked = (**source).clone();
+    baked.map_positions(|_, p| matrix.transform_point3(p));
+    // A matrix that mirrors turns the faces inside out; put them back the right way round.
+    if matrix.determinant() < 0.0 {
+        let all: Vec<u32> = (0..baked.face_count() as u32).collect();
+        if let Ok(flipped) = modelcraft_ops::edit::flip_faces(&baked, &all) {
+            baked = flipped;
+        }
+    }
+    (modelcraft_scene::Transform::default(), std::sync::Arc::new(baked))
 }
 
 fn craft_atomic_write(path: &Path, bytes: &[u8]) -> Result<(), EngineError> {
