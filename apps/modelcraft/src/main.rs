@@ -38,6 +38,9 @@ mod sculpt_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
+mod uv_ui;
+#[cfg(test)]
+mod uv_ui_tests;
 mod viewport;
 
 use args::{Cli, Launch};

@@ -253,6 +253,8 @@ pub struct ModelApp {
     pub agents: crate::agents::Agents,
     /// The allow-agents preference.
     pub allow_agents: bool,
+    /// The UV Editor window: selection, pins, view and display settings.
+    pub uv: crate::uv_ui::UvUi,
 }
 
 /// The engine's note about a restored or dropped undo history, in the interface language.
@@ -355,6 +357,7 @@ impl ModelApp {
             anim: Default::default(),
             agents: Default::default(),
             allow_agents: false,
+            uv: Default::default(),
         };
         if let Some(port) = cli.control {
             app.agents.port = port;
@@ -388,6 +391,15 @@ impl ModelApp {
         }
         if let Some(f) = cli.file.clone() {
             app.open_path(f);
+        }
+        if let Some(heat) = cli.uv_editor {
+            app.uv.open = true;
+            app.uv.heat = heat;
+            if app.selection.is_empty()
+                && let Some(id) = app.doc.scene.objects().iter().find(|o| matches!(o.kind, ObjectKind::Mesh { .. })).map(|o| o.id)
+            {
+                app.select_only(id);
+            }
         }
         if let Some(ws) = cli.workspace {
             let ws = match ws {
@@ -675,6 +687,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
@@ -1236,6 +1249,9 @@ impl ModelApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         if crate::render_view::escape(self, ctx) {
+            return;
+        }
+        if crate::uv_ui::keys(self, ctx) {
             return;
         }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {
