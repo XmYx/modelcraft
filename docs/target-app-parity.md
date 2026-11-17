@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 68 / 7 / 31 / 224 | counted |
+| Done / exceeds / partial / missing | 69 / 7 / 33 / 221 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **27.4 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **18.3 %** | counted |
-| Size-weighted parity over all rows, no area weights | 18.5 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **28.0 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **19.2 %** | counted |
+| Size-weighted parity over all rows, no area weights | 19.3 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -43,7 +43,7 @@ never estimated by hand.
 | Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 7 | 1 | 2 | 12 | 0 | 41 % | 28 % |
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 15 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
-| Materials and shading | 5 (4 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 7 % |
+| Materials and shading | 5 (4 %) | 9 | 2 | 0 | 3 | 4 | 0 | 39 % | 30 % |
 | Render engine: core | 8 (6 %) | 17 | 5 | 0 | 5 | 7 | 2 | 44 % | 53 % |
 | Render engine: lights, camera effects and output | 6 (5 %) | 19 | 0 | 0 | 3 | 16 | 0 | 8 % | 6 % |
 | Rigging | 6 (5 %) | 15 | 0 | 0 | 0 | 15 | 0 | 0 % | 0 % |
@@ -393,10 +393,10 @@ Weight: 5
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Per-object PBR material (base colour, metallic, roughness) | C M Z | D | S | glTF metallic-roughness core, exported to GLB |
-| Link a MaterialCraft `.mcmat` | | P | M | Stored and saved; not rendered |
-| Full layered surface model (OpenPBR-class: coat, sheen, transmission, thin film) | C M R | M | L | |
-| Texture inputs: images, procedural noise, ramps, triplanar | C M R | M | L | |
-| Bump, normal and displacement inputs | C M R | M | M | |
+| Link a MaterialCraft `.mcmat` | | D | M | Stored and saved; the path tracer reads its base colour, roughness, metallic, normal, height and opacity maps (the viewport still shows the flat colour, counted under viewport textures) |
+| Full layered surface model (OpenPBR-class: coat, sheen, transmission, thin film) | C M R | P | L | The engine evaluates fuzz, coat, anisotropic metal with edge tint, dielectric with thin film, rough diffuse, rough transmission with absorption, emission and opacity on the CPU, energy-checked by a furnace test; Properties exposes coat, sheen, transmission, index of refraction and emission; the GPU path declines these layers and the render falls back to the CPU; no nested dielectrics or dispersion |
+| Texture inputs: images, procedural noise, ramps, triplanar | C M R | P | L | Image maps for base colour, roughness, metalness, normal, height and opacity, bilinear, through a linked `.mcmat`; no mip filtering, procedural textures, ramps or triplanar, and no per-map controls in the app |
+| Bump, normal and displacement inputs | C M R | P | M | Tangent-space normal maps and height bump in the path tracer (a test checks the lit result against the tilted normal); no displacement |
 | Node material editor | C M R | M | XL | Planned with MaterialCraft |
 | Per-face / per-patch material assignment | C M Z | M | M | |
 | Material library and preset browser | C M R | M | M | |
@@ -622,7 +622,7 @@ Weight: 3
 - Files: `crates/formats` (project round trip with blobs, corrupted-project proptest, GLB/OBJ/STL round trips, torn journal).
 - Engine: `crates/engine/src/tests.rs` (`journal_recovers_unsaved_work_after_a_crash`, `undo_memory_is_bounded`).
 - GPU: `crates/render/src/gpu.rs` `renders_a_quad_when_a_gpu_is_present` (renders and reads back).
-- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs`, `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
+- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs` (`material_layers_uvs_and_linked_maps_reach_the_render`), `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/material_ui.rs`, the material tests `layers_conserve_energy_and_glass_passes_light`, `fresnel_and_thin_film_follow_optics`, `glass_is_invisible_in_a_furnace_and_absorbs_by_distance`, `cutouts_textures_and_normal_maps_change_the_picture`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).

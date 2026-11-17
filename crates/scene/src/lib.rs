@@ -79,8 +79,9 @@ impl Transform {
     }
 }
 
-/// A PBR surface in the glTF metallic-roughness model (the suite's shared material core). A
-/// `.mcmat` from MaterialCraft can be linked by path.
+/// A PBR surface: the glTF metallic-roughness core (the suite's shared material), plus the
+/// layers the path tracer renders. A `.mcmat` from MaterialCraft can be linked by path. Fields
+/// added after the first file format have defaults, so older projects open unchanged.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Material {
     pub base_color: [f32; 4],
@@ -88,11 +89,57 @@ pub struct Material {
     pub roughness: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linked: Option<String>,
+    /// Emitted colour; with `emission_strength` above zero the surface is a light in renders.
+    #[serde(default = "white", skip_serializing_if = "is_white")]
+    pub emission: [f32; 3],
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub emission_strength: f32,
+    /// A clear layer over the surface (lacquer, varnish).
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub coat: f32,
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub coat_roughness: f32,
+    /// Soft fibres on the surface (cloth, dust).
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub sheen: f32,
+    /// How much light passes through (glass, liquids).
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub transmission: f32,
+    #[serde(default = "default_ior", skip_serializing_if = "is_default_ior")]
+    pub ior: f32,
+}
+
+fn white() -> [f32; 3] {
+    [1.0; 3]
+}
+fn is_white(c: &[f32; 3]) -> bool {
+    *c == [1.0; 3]
+}
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.0
+}
+fn default_ior() -> f32 {
+    1.5
+}
+fn is_default_ior(v: &f32) -> bool {
+    *v == 1.5
 }
 
 impl Default for Material {
     fn default() -> Self {
-        Material { base_color: [0.62, 0.62, 0.64, 1.0], metallic: 0.0, roughness: 0.55, linked: None }
+        Material {
+            base_color: [0.62, 0.62, 0.64, 1.0],
+            metallic: 0.0,
+            roughness: 0.55,
+            linked: None,
+            emission: white(),
+            emission_strength: 0.0,
+            coat: 0.0,
+            coat_roughness: 0.0,
+            sheen: 0.0,
+            transmission: 0.0,
+            ior: default_ior(),
+        }
     }
 }
 

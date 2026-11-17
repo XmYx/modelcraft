@@ -32,7 +32,7 @@ Object ids are numbers (`info` prints them).
 | `reparent` | `id`, `parent` (null for top level) |
 | `set_transform` | `id`, `transform` {translation, rotation [x,y,z,w], scale} |
 | `set_visible` | `id`, `visible` |
-| `set_material` | `id`, `material` {base_color, metallic, roughness, linked?} |
+| `set_material` | `id`, `material` {base_color, metallic, roughness, linked?, emission?, emission_strength?, coat?, coat_roughness?, sheen?, transmission?, ior?} |
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …} |
@@ -51,7 +51,7 @@ Object ids are numbers (`info` prints them).
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
-model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:furnace`) and
+model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:showcase`, `builtin:furnace`) and
 prints one JSON line: device, size, samples, triangles, scene and render seconds, and million
 samples per second.
 
@@ -88,4 +88,4 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' '{"cmd":"add_step","id":
 - **ArtCraft**: GLB, Y up, metres, the same convention as its three.js stage and image-to-mesh output.
 - **TextureCraft**: export GLB with UVs (TEXCOORD_0) and stable material names; TextureCraft
   auto-unwraps meshes without UVs.
-- **MaterialCraft**: link an `.mcmat` on an object's material (stored; rendering it is planned).
+- **MaterialCraft**: link an `.mcmat` on an object's material; the path tracer renders its base colour, roughness, metallic, normal, height and opacity maps.

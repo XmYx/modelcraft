@@ -493,7 +493,7 @@ mod tests {
         wait_until_done(&mut h);
         let id = h.state().doc.scene.objects()[0].id;
         let recolour = |h: &mut Harness<'static, ModelApp>, red: f32| {
-            let material = modelcraft_engine::scene::Material { base_color: [red, 0.1, 0.1, 1.0], metallic: 0.0, roughness: 0.5, linked: None };
+            let material = modelcraft_engine::scene::Material { base_color: [red, 0.1, 0.1, 1.0], metallic: 0.0, roughness: 0.5, ..Default::default() };
             h.state_mut().doc.execute(Command::SetMaterial { id, material }).unwrap();
         };
         let centre = |h: &Harness<'static, ModelApp>| {

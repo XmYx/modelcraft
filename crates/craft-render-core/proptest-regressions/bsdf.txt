@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2ed211e80c9cb898d2faf6b191df53cc70cdd03acc1b8195211768602b1af991 # shrinks to r = 0.0, g = 0.9698482, b = 0.0, metal = 0.67089236, rough = 0.9779415, ior = 1.0, sw = 0.0, cos = 0.9911535, coat = 0.0, fuzz = 0.0, trans = 0.0, aniso = 0.6709065, film = 0.0

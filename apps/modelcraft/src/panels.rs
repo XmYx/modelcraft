@@ -241,7 +241,7 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
     });
 }
 
-fn drag(ui: &mut egui::Ui, v: &mut f32, speed: f32, range: std::ops::RangeInclusive<f32>, name: String) -> egui::Response {
+pub(crate) fn drag(ui: &mut egui::Ui, v: &mut f32, speed: f32, range: std::ops::RangeInclusive<f32>, name: String) -> egui::Response {
     ui.label(name.clone());
     let r = ui.add(egui::DragValue::new(v).speed(speed).range(range).max_decimals(3));
     set_name(ui, &r, name);
@@ -589,7 +589,7 @@ fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------- properties
 
 /// Edit a value with live preview while dragging and one undo step at the end.
-fn commit_edit(app: &mut ModelApp, resp: &egui::Response, preview: impl FnOnce(&mut Object), cmd: impl FnOnce() -> Command, id: ObjectId) {
+pub(crate) fn commit_edit(app: &mut ModelApp, resp: &egui::Response, preview: impl FnOnce(&mut Object), cmd: impl FnOnce() -> Command, id: ObjectId) {
     if resp.changed() && resp.dragged() {
         if app.prop_snapshot.is_none() {
             app.prop_snapshot = Some(Box::new(app.doc.scene.clone()));
@@ -701,6 +701,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 let mm = m3.clone();
                 commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
             });
+            crate::material_ui::rows(app, ui, id, &obj);
             ui.horizontal(|ui| {
                 ui.label(tl!("MaterialCraft link"));
                 ui.label(RichText::new(obj.material.linked.clone().unwrap_or_else(|| tl!("none"))).color(theme::TEXT_DIM));

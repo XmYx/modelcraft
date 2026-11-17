@@ -27,6 +27,8 @@ pub enum GpuError {
     TooLarge { what: &'static str, needed: u64, allowed: u64 },
     #[error("the image size {0}×{1} is not renderable")]
     BadImageSize(u32, u32),
+    #[error("the GPU path does not render {0} yet; the CPU path does")]
+    Unsupported(&'static str),
     #[error("GPU error: {0}")]
     Device(String),
 }
@@ -165,7 +167,8 @@ struct GpuMaterial {
     roughness: f32,
     d0: f32,
     d90: f32,
-    pad: [f32; 2],
+    ior: f32,
+    pad: f32,
 }
 
 #[repr(C)]
@@ -201,6 +204,37 @@ pub struct GpuRenderer {
     samples: u32,
 }
 
+/// The first feature of a material that only the CPU path renders so far.
+fn unsupported(m: &craft_render_core::Material) -> Option<&'static str> {
+    let white = m.specular_color == glam::Vec3::ONE;
+    if m.coat_weight > 0.0 {
+        Some("coats")
+    } else if m.fuzz_weight > 0.0 {
+        Some("fuzz")
+    } else if m.is_transmissive() {
+        Some("transmission")
+    } else if m.thin_film_weight > 0.0 && m.base_metalness < 1.0 {
+        Some("thin films")
+    } else if m.specular_roughness_anisotropy > 0.0 {
+        Some("anisotropic highlights")
+    } else if m.base_diffuse_roughness > 0.0 && m.base_metalness < 1.0 {
+        Some("rough diffuse bases")
+    } else if m.base_metalness > 0.0 && !white {
+        Some("tinted metal edges")
+    } else if m.has_cutouts() {
+        Some("cut-outs")
+    } else if m.base_color_texture.is_some()
+        || m.roughness_texture.is_some()
+        || m.metalness_texture.is_some()
+        || m.normal_texture.is_some()
+        || m.bump_texture.is_some()
+    {
+        Some("textures")
+    } else {
+        None
+    }
+}
+
 fn storage<T: Pod>(ctx: &GpuContext, label: &'static str, data: &[T], fallback: T) -> Result<wgpu::Buffer, GpuError> {
     let one = [fallback];
     let data = if data.is_empty() { &one[..] } else { data };
@@ -233,6 +267,9 @@ impl GpuRenderer {
         if w == 0 || h == 0 || w > max_side || h > max_side {
             return Err(GpuError::BadImageSize(w, h));
         }
+        if let Some(feature) = scene.materials.iter().find_map(unsupported) {
+            return Err(GpuError::Unsupported(feature));
+        }
         let order = &scene.accel.bvh.prim_order;
         let lights = &scene.lights;
         let emissive_count = lights.emissive.len();
@@ -259,12 +296,13 @@ impl GpuRenderer {
                 let r = (m.specular_ior - 1.0) / (m.specular_ior + 1.0);
                 GpuMaterial {
                     base: (m.base_color * m.base_weight).to_array(),
-                    metalness: m.metalness,
+                    metalness: m.base_metalness,
                     tint: m.specular_color.to_array(),
                     roughness: m.specular_roughness,
                     d0: r * r * m.specular_weight,
                     d90: m.specular_weight,
-                    pad: [0.0; 2],
+                    ior: m.specular_ior,
+                    pad: 0.0,
                 }
             })
             .collect();
@@ -320,7 +358,7 @@ impl GpuRenderer {
         let attrs_buf = storage(ctx, "triangle attributes", &attrs, Zeroable::zeroed())?;
         let mats_buf = storage(ctx, "materials", &materials, Zeroable::zeroed())?;
         let lights_buf = storage(ctx, "lights", &entries, Zeroable::zeroed())?;
-        let table_buf = storage(ctx, "albedo table", &AlbedoTable::get().ab, [0.0f32; 2])?;
+        let table_buf = storage(ctx, "albedo table", &AlbedoTable::get().ab, [0.0f32; 4])?;
         let accum_size = u64::from(w) * u64::from(h) * 16;
         let allowed = ctx.caps.max_storage_buffer_binding_size.min(ctx.caps.max_buffer_size);
         if accum_size > allowed {
@@ -521,5 +559,25 @@ mod tests {
         // A device with tiny limits refuses a scene instead of crashing.
         let small = GpuContext { device: ctx.device.clone(), queue: ctx.queue.clone(), caps: Caps { max_storage_buffer_binding_size: 64, ..ctx.caps.clone() } };
         assert!(matches!(GpuRenderer::new(&small, &scenes::cornell_box().unwrap(), settings), Err(GpuError::TooLarge { .. })));
+    }
+
+    #[test]
+    fn gpu_declines_materials_it_cannot_render() {
+        // No adapter needed: the check comes before any GPU work, but a context is required to call it.
+        let Some(ctx) = gpu() else { return };
+        let settings = RenderSettings { width: 16, height: 16, ..RenderSettings::default() };
+        for (material, word) in [
+            (Material::glass(1.5, 0.0), "transmission"),
+            (Material { coat_weight: 1.0, ..Material::default() }, "coats"),
+            (Material { fuzz_weight: 0.5, ..Material::default() }, "fuzz"),
+            (Material { geometry_opacity: 0.5, ..Material::default() }, "cut-outs"),
+            (Material { base_color_texture: Some(0), ..Material::default() }, "textures"),
+        ] {
+            let scene = scenes::furnace(material).unwrap();
+            match GpuRenderer::new(&ctx, &scene, settings) {
+                Err(GpuError::Unsupported(feature)) => assert_eq!(feature, word),
+                other => panic!("expected Unsupported({word}), got {:?}", other.map(|_| ()).map_err(|e| e.to_string())),
+            }
+        }
     }
 }
