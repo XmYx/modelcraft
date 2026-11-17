@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 76 / 7 / 37 / 210 | counted |
+| Done / exceeds / partial / missing | 73 / 7 / 39 / 211 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **30.8 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **22.2 %** | counted |
-| Size-weighted parity over all rows, no area weights | 22.3 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **30.2 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **21.2 %** | counted |
+| Size-weighted parity over all rows, no area weights | 21.6 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -51,7 +51,7 @@ never estimated by hand.
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
 | Hair, fur and grooming | 4 (3 %) | 6 | 0 | 0 | 0 | 6 | 0 | 0 % | 0 % |
 | Volumes | 2 (2 %) | 2 | 0 | 0 | 0 | 2 | 0 | 0 % | 0 % |
-| Scripting and automation | 5 (4 %) | 10 | 4 | 1 | 1 | 4 | 1 | 55 % | 48 % |
+| Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 3 | 5 | 1 | 35 % | 21 % |
 | Pipeline formats and referencing | 6 (5 %) | 15 | 5 | 1 | 0 | 9 | 1 | 40 % | 19 % |
 | UI and workspaces | 4 (3 %) | 13 | 7 | 1 | 3 | 2 | 0 | 73 % | 62 % |
 | Stability and performance | 3 (2 %) | 6 | 3 | 1 | 0 | 2 | 0 | 67 % | 50 % |
@@ -545,7 +545,7 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Embedded scripting language | C M Z | D | L | Rhai in `modelcraft-script`: sandboxed, with operation, time and size limits and file access only by grant ([scripting.md](scripting.md)) |
+| Embedded scripting language | C M Z | P | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant ([scripting.md](scripting.md)); runs from `modelcraft-cli run-script`, no in-app way to run a script yet |
 | Object-model API over every command | C M Z | D | M | `cmd::<name>` for every registry command, scene queries, dependency graph, history-node evaluation, mesh handles, undo groups |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
 | Headless scene API (batch interpreter) | C M | D | S | `modelcraft-cli run-script`: queries, control flow and commands over a project |

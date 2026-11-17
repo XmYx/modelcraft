@@ -134,6 +134,9 @@ impl Shared {
 
     /// Commands that name files go through the permissions; the path is made absolute.
     fn permit(&self, cmd: &mut Command) -> R<()> {
+        // Exhaustive on purpose: `cmd::<name>` exposes every command of the registry, so a command
+        // that gains a file path must be given a decision here before this compiles. (A material's
+        // linked file and similar paths are read only by the renderer, which scripts cannot call.)
         match cmd {
             Command::Import { path } => {
                 let full = self.path(path, Access::Read)?;
@@ -144,7 +147,36 @@ impl Shared {
                     self.permit(c)?;
                 }
             }
-            _ => {}
+            Command::AddPrimitive { .. }
+            | Command::AddGroup { .. }
+            | Command::AddSmoothCage { .. }
+            | Command::AddDeformer { .. }
+            | Command::Delete { .. }
+            | Command::Duplicate { .. }
+            | Command::Rename { .. }
+            | Command::Reparent { .. }
+            | Command::SetTransform { .. }
+            | Command::SetVisible { .. }
+            | Command::SetMaterial { .. }
+            | Command::SetPrimitive { .. }
+            | Command::SetCageLevels { .. }
+            | Command::SetDeformer { .. }
+            | Command::AddStep { .. }
+            | Command::SetStep { .. }
+            | Command::EnableStep { .. }
+            | Command::RemoveStep { .. }
+            | Command::Collapse { .. }
+            | Command::BeginSculpt { .. }
+            | Command::EndSculpt
+            | Command::SculptStroke { .. }
+            | Command::SculptMask { .. }
+            | Command::SculptDetail { .. }
+            | Command::SculptShape { .. }
+            | Command::AddMesh { .. }
+            | Command::SetPositions { .. }
+            | Command::Anim(_)
+            | Command::Undo
+            | Command::Redo => {}
         }
         Ok(())
     }
