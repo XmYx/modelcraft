@@ -492,3 +492,65 @@ fn agents_drive_the_window_over_the_control_channel() {
     crate::agents::stop(h.state_mut());
     assert!(!h.state().agents.is_on());
 }
+
+/// Drag the primary button across the viewport, from `from` to `to` in screen points.
+fn drag(h: &mut Harness<'static, ModelApp>, from: egui::Pos2, to: egui::Pos2) {
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    h.event(egui::Event::PointerMoved(from));
+    h.step();
+    h.event(button(from, true));
+    h.step();
+    for k in 1..=12 {
+        h.event(egui::Event::PointerMoved(from.lerp(to, k as f32 / 12.0)));
+        h.step();
+    }
+    h.event(button(to, false));
+    h.step();
+    h.step();
+}
+
+#[test]
+fn a_pointer_drag_in_the_viewport_sculpts_in_every_stroke_mode() {
+    use modelcraft_engine::sculpt::{BrushKind, StrokeMode};
+    let modes = [StrokeMode::Spaced, StrokeMode::Dots, StrokeMode::Spray { scatter: 0.5 }, StrokeMode::Trail { leash: 0.5 }, StrokeMode::Drag];
+    let cases = modes.iter().map(|m| (BrushKind::Draw, *m, false)).chain([
+        (BrushKind::Pull, StrokeMode::Spaced, false),
+        (BrushKind::SurfaceGrab, StrokeMode::Spaced, false),
+        (BrushKind::Slide, StrokeMode::Trail { leash: 0.5 }, false),
+        (BrushKind::Clay, StrokeMode::Dots, false),
+        (BrushKind::Draw, StrokeMode::Spaced, true),
+    ]);
+    // One drag per fresh window: the pointer path is the same every time.
+    for (kind, mode, live) in cases {
+        let mut h = harness();
+        h.run();
+        palette(&mut h, "Add Quad sphere");
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+        h.run();
+        if live {
+            h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+        }
+        h.state_mut().brush.kind = kind;
+        h.state_mut().brush.stroke = mode;
+        h.run();
+        let rect = h.get_by_label_contains("Viewport, Perspective").rect();
+        let (a, b) = (rect.center() - egui::vec2(30.0, 0.0), rect.center() + egui::vec2(30.0, 10.0));
+        let before = h.state().doc.sculpt.as_ref().unwrap().mesh.positions.clone();
+        let (undo, tris) = (h.state().doc.undo.len(), h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count());
+        drag(&mut h, a, b);
+        let mesh = &h.state().doc.sculpt.as_ref().unwrap().mesh;
+        assert!(before.iter().zip(&mesh.positions).any(|(x, y)| x != y), "{kind:?} with {mode:?} moved nothing");
+        assert!(mesh.positions.iter().all(|p| p.is_finite()));
+        assert_eq!(mesh.triangle_count() > tris, live, "only live detail adds triangles");
+        assert_eq!(h.state().doc.undo.len(), undo + 1, "{kind:?} with {mode:?}: one stroke, one undo step");
+        assert!(h.state().stroke.is_none(), "the stroke ended with the button release");
+        // Undo puts the surface back. The command is run directly: in this harness Ctrl+Z
+        // right after a pointer drag in the viewport is not delivered (it is after a button
+        // click, see `sculpt_workspace_by_keyboard`); whether a real window differs is not known.
+        h.run();
+        assert!(h.state_mut().run(modelcraft_engine::Command::Undo));
+        h.run();
+        let mesh = &h.state().doc.sculpt.as_ref().unwrap().mesh;
+        assert!(before.len() == mesh.positions.len() && before.iter().zip(&mesh.positions).all(|(x, y)| x.distance(*y) < 1e-6), "{kind:?} with {mode:?}: undo");
+    }
+}
