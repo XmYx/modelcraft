@@ -36,7 +36,7 @@ never estimated by hand.
 | Dependency graph, history and node editing | 5 (4 %) | 14 | 7 | 1 | 0 | 6 | 0 | 57 % | 33 % |
 | Primitives and generators | 4 (3 %) | 12 | 2 | 0 | 0 | 10 | 0 | 17 % | 8 % |
 | Splines, curves and NURBS | 4 (3 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
-| Polygon modeling | 9 (7 %) | 36 | 13 | 1 | 1 | 21 | 0 | 40 % | 31 % |
+| Polygon modeling | 9 (7 %) | 36 | 11 | 1 | 3 | 21 | 0 | 38 % | 30 % |
 | Subdivision surfaces | 2 (2 %) | 6 | 3 | 0 | 0 | 3 | 0 | 50 % | 36 % |
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
