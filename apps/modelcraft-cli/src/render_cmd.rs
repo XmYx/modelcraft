@@ -13,7 +13,7 @@ use modelcraft_render::trace::{ExportOptions, Lighting, export_scene, scene_boun
 use modelcraft_render::{Camera, Projection};
 
 pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
-                                    path-trace an image. Built-in scenes: cornell, materials, furnace
+                                    path-trace an image. Built-in scenes: cornell, materials, showcase, furnace
       --width N --height N          image size (default 960×540)
       --samples N                   samples per pixel (default 64)
       --depth N                     bounces (default 12)
@@ -115,8 +115,9 @@ pub fn builtin(name: &str) -> Result<Scene, String> {
     match name {
         "cornell" => scenes::cornell_box(),
         "materials" => scenes::material_row(),
+        "showcase" => scenes::showcase(),
         "furnace" => scenes::furnace(modelcraft_render::pathtrace::Material::metal(glam::Vec3::ONE, 0.5)),
-        other => return Err(format!("unknown built-in scene {other:?} (cornell, materials, furnace)")),
+        other => return Err(format!("unknown built-in scene {other:?} (cornell, materials, showcase, furnace)")),
     }
     .map_err(|e| e.to_string())
 }
@@ -141,7 +142,7 @@ pub fn document_scene(d: &mut Document, args: &RenderArgs) -> Result<Scene, Stri
         cam.projection = Projection::Orthographic;
     }
     let lighting = args.sky.map_or(Lighting::Studio, |s| Lighting::Sky(glam::Vec3::from_array(s)));
-    export_scene(&d.scene, &mut d.eval, &cam, &ExportOptions { lighting, ground: args.ground }).map_err(|e| e.to_string())
+    export_scene(&d.scene, &mut d.eval, &cam, &ExportOptions { lighting, ground: args.ground, ..ExportOptions::default() }).map_err(|e| e.to_string())
 }
 
 /// What a render did, for the JSON line the command prints.

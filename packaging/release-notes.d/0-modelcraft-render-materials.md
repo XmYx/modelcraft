@@ -1,0 +1,1 @@
+- Materials gained coat, sheen, transmission, index of refraction and emission; the Render View shows them, along with the maps of a linked MaterialCraft material. An emissive object lights the scene.

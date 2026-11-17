@@ -30,6 +30,7 @@ pub mod shapes;
 
 pub use camera::Camera;
 pub use craft_render_bvh as bvh;
+pub use craft_texture as texture;
 pub use integrator::{IntegratorSettings, Strategy};
 pub use material::Material;
 pub use render::{Film, RenderSettings, Renderer, mean_rgb, mse, relative_mse, render_image};

@@ -1,6 +1,7 @@
 //! The scene a render reads: triangles in world space, materials, lights and a camera.
 
 use craft_render_bvh::{Aabb, Hit, Ray, TriangleBvh};
+use craft_texture::Image;
 use glam::{Mat3A, Mat4, Vec2, Vec3, Vec3A};
 
 use crate::camera::Camera;
@@ -13,6 +14,8 @@ pub const MAX_TRIANGLES: usize = 100_000_000;
 /// Most materials and analytic lights a scene may hold.
 pub const MAX_MATERIALS: usize = 1 << 20;
 pub const MAX_LIGHTS: usize = 1 << 20;
+/// Most textures a scene may hold.
+pub const MAX_TEXTURES: usize = 4096;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum SceneError {
@@ -22,6 +25,8 @@ pub enum SceneError {
     TooManyMaterials,
     #[error("the scene has more than {MAX_LIGHTS} lights")]
     TooManyLights,
+    #[error("the scene has more than {MAX_TEXTURES} textures")]
+    TooManyTextures,
     #[error("a mesh refers to vertex {0}, which it does not have")]
     BadIndex(u32),
     #[error("the image size {0}×{1} is outside 1..={max}", max = crate::render::MAX_IMAGE_SIDE)]
@@ -244,6 +249,10 @@ pub struct Scene {
     /// The object (in the order meshes were added) each triangle belongs to.
     pub tri_object: Vec<u32>,
     pub materials: Vec<Material>,
+    /// Images the materials refer to (linear values).
+    pub textures: Vec<Image>,
+    /// Whether any material has cut-outs, so shadow rays must look at opacity.
+    pub has_cutouts: bool,
     pub lights: Lights,
     pub camera: Camera,
     pub bounds: Aabb,
@@ -290,14 +299,53 @@ impl Scene {
         Ray { origin: p + ng * (eps * side), dir, tmin: 0.0, tmax }
     }
 
-    /// Whether anything blocks the segment from `p` along `dir` up to `distance`.
+    /// Whether anything blocks the segment from `p` along `dir` up to `distance`. Cut-outs block
+    /// in proportion to their opacity (a fixed pattern per point decides, so the answer is
+    /// repeatable).
     #[inline]
     pub fn occluded(&self, p: Vec3A, ng: Vec3A, dir: Vec3A, distance: f32) -> bool {
         let tmax = if distance.is_finite() { distance * (1.0 - 2e-4) - 1e-5 } else { f32::INFINITY };
         if tmax <= 0.0 {
             return false;
         }
-        self.accel.occluded(&Scene::spawn(p, ng, dir, tmax))
+        let ray = Scene::spawn(p, ng, dir, tmax);
+        if !self.has_cutouts {
+            return self.accel.occluded(&ray);
+        }
+        self.accel.occluded_with(&ray, |hit| {
+            let opacity = self.opacity_at(hit);
+            opacity >= 1.0
+                || (opacity > 0.0
+                    && (crate::sampler::hash_combine(hit.prim, hit.u.to_bits() ^ hit.v.to_bits().rotate_left(16)) >> 8) as f32 / 16_777_216.0 < opacity)
+        })
+    }
+
+    /// Opacity of the surface at a hit.
+    #[inline]
+    pub fn opacity_at(&self, hit: &Hit) -> f32 {
+        let i = hit.prim as usize;
+        let Some(m) = self.tri_material.get(i).and_then(|m| self.materials.get(*m as usize)) else { return 1.0 };
+        if !m.has_cutouts() {
+            return 1.0;
+        }
+        let uv = self.uvs.get(i).map_or(Vec2::ZERO, |t| t[0] * (1.0 - hit.u - hit.v) + t[1] * hit.u + t[2] * hit.v);
+        m.opacity(uv, &self.textures)
+    }
+
+    /// The directions in which the texture coordinates `u` and `v` grow across a triangle, or
+    /// `None` when its texture coordinates are degenerate.
+    #[inline]
+    pub fn uv_axes(&self, tri: u32) -> Option<(Vec3A, Vec3A)> {
+        let (p, t) = (self.positions.get(tri as usize)?, self.uvs.get(tri as usize)?);
+        let (e1, e2) = (Vec3A::from(p[1] - p[0]), Vec3A::from(p[2] - p[0]));
+        let (d1, d2) = (t[1] - t[0], t[2] - t[0]);
+        let det = d1.x * d2.y - d1.y * d2.x;
+        if det.abs() < 1e-12 || !det.is_finite() {
+            return None;
+        }
+        let dpdu = (e1 * d2.y - e2 * d1.y) / det;
+        let dpdv = (e2 * d1.x - e1 * d2.x) / det;
+        (dpdu.is_finite() && dpdv.is_finite() && dpdu.length_squared() > 0.0 && dpdv.length_squared() > 0.0).then_some((dpdu, dpdv))
     }
 
     pub fn material(&self, index: u32) -> Option<&Material> {
@@ -323,6 +371,15 @@ impl SceneBuilder {
         }
         self.scene.materials.push(m.sanitized());
         Ok(self.scene.materials.len() as u32 - 1)
+    }
+
+    /// Add an image for materials to refer to (linear values; decode sRGB first).
+    pub fn add_texture(&mut self, image: Image) -> Result<u32, SceneError> {
+        if self.scene.textures.len() >= MAX_TEXTURES {
+            return Err(SceneError::TooManyTextures);
+        }
+        self.scene.textures.push(image);
+        Ok(self.scene.textures.len() as u32 - 1)
     }
 
     /// Add a mesh placed by `transform`. Returns the object's index.
@@ -399,6 +456,7 @@ impl SceneBuilder {
         for m in &mut s.tri_material {
             *m = (*m).min(last);
         }
+        s.has_cutouts = s.materials.iter().any(Material::has_cutouts);
         s.accel = TriangleBvh::build(&s.positions);
         s.bounds = s.accel.bvh.bounds();
         s.lights.emissive.clear();

@@ -14,6 +14,7 @@ mod args;
 mod demo;
 mod gpu;
 mod keys;
+mod material_ui;
 mod panels;
 mod prefs;
 mod render_view;

@@ -1,6 +1,7 @@
 //! Built-in scenes, made in code, for tests and benchmarks. None of them comes from another
 //! renderer's sample files.
 
+use craft_texture::{Image, Kind};
 use glam::{Mat4, Vec3};
 
 use crate::camera::Camera;
@@ -72,5 +73,62 @@ pub fn material_row() -> Result<Scene, SceneError> {
     b.add_mesh(&quad(Vec3::new(-5.0, 2.0, -6.0), Vec3::X * 10.0, Vec3::Y * 4.0), Mat4::IDENTITY, large)?;
     b.set_environment(Vec3::splat(0.05));
     b.set_camera(Camera { eye: Vec3::new(0.0, 2.6, 6.5), target: Vec3::new(0.0, 0.4, 0.0), fov_y: 38f32.to_radians(), ..Camera::default() });
+    Ok(b.build())
+}
+
+/// One sphere per layer of the surface model (clear and frosted glass, coloured glass with
+/// absorption, a coated paint, brushed metal, cloth with fuzz, a thin-film soap skin, a bumpy
+/// matte ball) on a checkered floor: the materials test scene.
+pub fn showcase() -> Result<Scene, SceneError> {
+    let mut b = SceneBuilder::new();
+    let checker =
+        b.add_texture(Image::generate(64, 64, Kind::Color, |x, y| if (x / 8 + y / 8) % 2 == 0 { [0.75, 0.75, 0.75, 1.0] } else { [0.2, 0.22, 0.25, 1.0] }))?;
+    let dimples = b.add_texture(Image::generate_uv(256, 128, Kind::Gray, |u, v| {
+        let (x, y) = ((u * 24.0).fract() - 0.5, (v * 12.0).fract() - 0.5);
+        [(1.0 - (x * x + y * y) * 6.0).max(0.0), 0.0, 0.0, 1.0]
+    }))?;
+    let floor = b.add_material(Material { base_color: Vec3::ONE, base_color_texture: Some(checker), specular_roughness: 0.5, ..Material::default() })?;
+    let mut ground = quad(Vec3::new(-8.0, 0.0, -8.0), Vec3::Z * 16.0, Vec3::X * 16.0);
+    if let Some(uvs) = &mut ground.uvs {
+        for t in uvs.iter_mut() {
+            *t = t.map(|uv| uv * 4.0);
+        }
+    }
+    b.add_mesh(&ground, Mat4::IDENTITY, floor)?;
+    let materials = [
+        Material::glass(1.5, 0.0),
+        Material::glass(1.5, 0.35),
+        Material { transmission_color: Vec3::new(0.2, 0.7, 0.45), transmission_depth: 0.5, ..Material::glass(1.45, 0.0) },
+        Material { base_color: Vec3::new(0.6, 0.02, 0.02), specular_roughness: 0.6, coat_weight: 1.0, coat_roughness: 0.03, ..Material::default() },
+        Material { specular_roughness_anisotropy: 0.85, ..Material::metal(Vec3::new(0.95, 0.78, 0.45), 0.35) },
+        Material {
+            base_color: Vec3::new(0.15, 0.2, 0.55),
+            specular_weight: 0.0,
+            base_diffuse_roughness: 1.0,
+            fuzz_weight: 1.0,
+            fuzz_color: Vec3::new(0.7, 0.75, 1.0),
+            fuzz_roughness: 0.4,
+            ..Material::default()
+        },
+        Material {
+            base_color: Vec3::splat(0.02),
+            specular_roughness: 0.1,
+            thin_film_weight: 1.0,
+            thin_film_thickness: 0.45,
+            thin_film_ior: 1.9,
+            ..Material::default()
+        },
+        Material { base_color: Vec3::new(0.85, 0.6, 0.25), specular_roughness: 0.45, bump_texture: Some(dimples), bump_scale: -0.02, ..Material::default() },
+    ];
+    let sphere = uv_sphere(Vec3::ZERO, 0.5, 96, 48);
+    for (i, m) in materials.into_iter().enumerate() {
+        let id = b.add_material(m)?;
+        let (col, row) = ((i % 4) as f32, (i / 4) as f32);
+        b.add_mesh(&sphere, Mat4::from_translation(Vec3::new((col - 1.5) * 1.25, 0.5, row * 1.5 - 0.9)), id)?;
+    }
+    let key = b.add_material(Material::emitter(Vec3::new(30.0, 28.0, 25.0)))?;
+    b.add_mesh(&quad(Vec3::new(-1.5, 5.0, 0.0), Vec3::X * 1.5, Vec3::Z * 1.5), Mat4::IDENTITY, key)?;
+    b.set_environment(Vec3::new(0.35, 0.42, 0.55));
+    b.set_camera(Camera { eye: Vec3::new(0.0, 3.2, 5.2), target: Vec3::new(0.0, 0.3, -0.2), fov_y: 38f32.to_radians(), ..Camera::default() });
     Ok(b.build())
 }

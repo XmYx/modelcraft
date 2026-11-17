@@ -80,6 +80,7 @@ modelcraft-cli render dense.modelcraft  -o d.png --width 1280 --height 720  --sa
 | Cornell box, 1024², 256 spp | 36 | 7.5 M paths/s (35.6 s) | 326 M paths/s (0.82 s) | 43× |
 | Material row, 1280×720, 256 spp | 39,686 | 10.3 M paths/s (22.8 s) | 561 M paths/s (0.42 s) | 54× |
 | Dense sphere, 1280×720, 64 spp | 2,007,376 | 11.3 M paths/s (5.2 s) | 406 M paths/s (0.15 s) | 36× |
+| Material showcase (glass, coat, fuzz, thin film, textures, bump), 960×540, 256 spp | 72,196 | 6.2 M paths/s (21.4 s) | not rendered: the GPU path declines layered materials and textures | — |
 
 Scene preparation for the dense sphere (evaluate, triangulate with smoothed normals, build the
 BVH): 2.2 s. The BVH alone, on a 2,000,000-triangle height field: built in 560 ms (2.1 M nodes,

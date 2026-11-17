@@ -70,7 +70,7 @@ pub fn import(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<
     let mats: Vec<Material> = scene
         .materials
         .iter()
-        .map(|m| Material { base_color: m.base_color, metallic: m.metallic.clamp(0.0, 1.0), roughness: m.roughness.clamp(0.0, 1.0), linked: None })
+        .map(|m| Material { base_color: m.base_color, metallic: m.metallic.clamp(0.0, 1.0), roughness: m.roughness.clamp(0.0, 1.0), ..Material::default() })
         .collect();
     let meshes: Vec<(Arc<PolyMesh>, Material)> = scene
         .meshes

@@ -53,7 +53,7 @@ struct Mat {
     roughness: f32,
     d0: f32,
     d90: f32,
-    pad0: f32,
+    ior: f32,
     pad1: f32,
 }
 
@@ -74,7 +74,7 @@ struct LightEntry {
 @group(0) @binding(3) var<storage, read> attrs: array<Attr>;
 @group(0) @binding(4) var<storage, read> materials: array<Mat>;
 @group(0) @binding(5) var<storage, read> lights: array<LightEntry>;
-@group(0) @binding(6) var<storage, read> albedo: array<vec2<f32>>;
+@group(0) @binding(6) var<storage, read> albedo: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read_write> accum: array<vec4<f32>>;
 
 const PI: f32 = 3.14159265358979;
@@ -373,10 +373,10 @@ fn albedo_lookup(c: f32, roughness: f32) -> vec2<f32> {
     let y0 = min(u32(y), TABLE - 2u);
     let fx = x - f32(x0);
     let fy = y - f32(y0);
-    let p00 = albedo[y0 * TABLE + x0];
-    let p10 = albedo[y0 * TABLE + x0 + 1u];
-    let p01 = albedo[(y0 + 1u) * TABLE + x0];
-    let p11 = albedo[(y0 + 1u) * TABLE + x0 + 1u];
+    let p00 = albedo[y0 * TABLE + x0].xy;
+    let p10 = albedo[y0 * TABLE + x0 + 1u].xy;
+    let p01 = albedo[(y0 + 1u) * TABLE + x0].xy;
+    let p11 = albedo[(y0 + 1u) * TABLE + x0 + 1u].xy;
     return mix(mix(p00, p10, fx), mix(p01, p11, fx), fy);
 }
 
@@ -385,8 +385,23 @@ struct Bsdf {
     alpha: f32,
     diffuse: vec3<f32>,
     p_spec: f32,
-    f0: vec3<f32>,
-    f90: vec3<f32>,
+    metal_f0: vec3<f32>,
+    eta: f32,
+    metal_scale: vec3<f32>,
+    diel_scale: vec3<f32>,
+}
+
+// Unpolarized Fresnel reflectance of a dielectric interface (1 under total internal reflection).
+fn fresnel_dielectric(cos_i: f32, eta: f32) -> f32 {
+    let c = clamp(cos_i, 0.0, 1.0);
+    let s2 = (1.0 - c * c) / (eta * eta);
+    if s2 >= 1.0 {
+        return 1.0;
+    }
+    let ct = sqrt(1.0 - s2);
+    let rs = (c - eta * ct) / (c + eta * ct);
+    let rp = (eta * c - ct) / (eta * c + ct);
+    return 0.5 * (rs * rs + rp * rp);
 }
 
 fn bsdf_new(m: Mat, wo_in: vec3<f32>) -> Bsdf {
@@ -395,7 +410,7 @@ fn bsdf_new(m: Mat, wo_in: vec3<f32>) -> Bsdf {
         wo = normalize(vec3<f32>(wo.x, wo.y, 1e-4));
     }
     let alpha = max(m.roughness * m.roughness, ALPHA_MIN);
-    let ab = albedo_lookup(wo.z, m.roughness);
+    let ab = albedo_lookup(wo.z, sqrt(alpha));
     let e = clamp(ab.x + ab.y, 1e-4, 1.0);
     let k = (1.0 - e) / e;
     let metal_ms = vec3<f32>(1.0) + m.base * k;
@@ -407,8 +422,13 @@ fn bsdf_new(m: Mat, wo_in: vec3<f32>) -> Bsdf {
     var b: Bsdf;
     b.wo = wo;
     b.alpha = alpha;
-    b.f0 = m.base * metal_ms * mt + m.tint * (m.d0 * diel_ms * dl);
-    b.f90 = metal_ms * mt + m.tint * (m.d90 * diel_ms * dl);
+    b.metal_f0 = m.base;
+    b.metal_scale = metal_ms * mt;
+    b.diel_scale = m.tint * (m.d90 * diel_ms * dl);
+    b.eta = m.ior;
+    if abs(b.eta - 1.0) < 1e-4 {
+        b.eta = 1.0001;
+    }
     b.diffuse = m.base * (dl * (1.0 - diel_e));
     let spec_albedo = luminance(metal_e * mt + m.tint * (diel_e * dl));
     let diff_albedo = luminance(b.diffuse);
@@ -436,7 +456,8 @@ fn bsdf_eval(b: Bsdf, wi: vec3<f32>) -> vec4<f32> {
                 let d = ggx_d(h, b.alpha);
                 let lo = ggx_lambda(b.wo, b.alpha);
                 let li = ggx_lambda(wi, b.alpha);
-                let fr = b.f0 + (b.f90 - b.f0) * schlick_weight(dot(b.wo, h));
+                let ch = dot(b.wo, h);
+                let fr = b.diel_scale * fresnel_dielectric(ch, b.eta) + b.metal_scale * (b.metal_f0 + (vec3<f32>(1.0) - b.metal_f0) * schlick_weight(ch));
                 let dv = d / (4.0 * b.wo.z);
                 if dv < INF {
                     f += fr * (dv / (1.0 + lo + li));

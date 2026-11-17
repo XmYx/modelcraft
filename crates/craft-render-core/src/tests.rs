@@ -206,3 +206,91 @@ fn hostile_scenes_render_without_panicking() {
     assert!(matches!(Film::new(0, 4), Err(SceneError::BadImageSize(0, 4))));
     assert!(Film::new(1 << 20, 4).is_err());
 }
+
+#[test]
+fn glass_is_invisible_in_a_furnace_and_absorbs_by_distance() {
+    // Clear glass neither creates nor loses light: every path through the ball leaves it again.
+    let f = render(scenes::furnace(Material::glass(1.5, 0.0)).unwrap(), 40, 40, 128, IntegratorSettings { max_depth: 64, ..IntegratorSettings::default() });
+    let m = mean_rgb(&f.mean());
+    assert!((m[0] - 1.0).abs() < 0.03, "glass furnace {m:?}");
+    // A slab one unit thick whose colour is reached at depth 1: straight through it the sky is
+    // tinted by exactly that colour, times the two Fresnel transmissions (0.96² at normal incidence).
+    let tint = Vec3::new(0.5, 0.8, 0.25);
+    let mut b = SceneBuilder::new();
+    let glass = b.add_material(Material { transmission_color: tint, transmission_depth: 1.0, ..Material::glass(1.5, 0.0) }).unwrap();
+    b.add_mesh(&crate::shapes::cuboid(Vec3::new(-50.0, -50.0, -1.0), Vec3::new(50.0, 50.0, 0.0)), Mat4::IDENTITY, glass).unwrap();
+    b.set_environment(Vec3::ONE);
+    b.set_camera(Camera { eye: Vec3::new(0.0, 0.0, 5.0), target: Vec3::ZERO, fov_y: 1f32.to_radians(), ..Camera::default() });
+    // Two bounces: in and out. Reflection off the front (4 %) is seen too and is untinted.
+    let f =
+        render(b.build(), 8, 8, 8192, IntegratorSettings { max_depth: 2, strategy: Strategy::BsdfOnly, roulette_start: 99, ..IntegratorSettings::default() });
+    let m = mean_rgb(&f.mean());
+    for (got, t) in m.iter().zip(tint.to_array()) {
+        let want = 0.04 + 0.96 * 0.96 * f64::from(t);
+        assert!((got - want).abs() < 0.02, "slab {m:?}, want {want}");
+    }
+}
+
+#[test]
+fn cutouts_textures_and_normal_maps_change_the_picture() {
+    use craft_texture::{Image, Kind};
+    let view =
+        |b: &mut SceneBuilder| b.set_camera(Camera { eye: Vec3::new(0.0, 0.0, 5.0), target: Vec3::ZERO, fov_y: 12f32.to_radians(), ..Camera::default() });
+    let wall = quad(Vec3::new(-2.0, -2.0, 0.0), Vec3::X * 4.0, Vec3::Y * 4.0);
+
+    // A black sheet that is one quarter solid lets three quarters of the sky behind it through,
+    // and its shadow on a floor is one quarter as deep.
+    let mut b = SceneBuilder::new();
+    let sheet = b.add_material(Material { geometry_opacity: 0.25, ..Material::diffuse(Vec3::ZERO) }).unwrap();
+    b.add_mesh(&wall, Mat4::IDENTITY, sheet).unwrap();
+    b.set_environment(Vec3::ONE);
+    view(&mut b);
+    let m = mean_rgb(&render(b.build(), 16, 16, 1024, IntegratorSettings::default()).mean());
+    assert!((m[0] - 0.75).abs() < 0.02, "cut-out {m:?}");
+    let shadow = |opacity: f32| {
+        let mut b = SceneBuilder::new();
+        let grey = b.add_material(Material::diffuse(Vec3::splat(0.5))).unwrap();
+        b.add_mesh(&quad(Vec3::new(-50.0, 0.0, -50.0), Vec3::Z * 100.0, Vec3::X * 100.0), Mat4::IDENTITY, grey).unwrap();
+        let sheet = b.add_material(Material { geometry_opacity: opacity, ..Material::diffuse(Vec3::ZERO) }).unwrap();
+        b.add_mesh(&quad(Vec3::new(-5.0, 1.0, -5.0), Vec3::Z * 10.0, Vec3::X * 10.0), Mat4::IDENTITY, sheet).unwrap();
+        b.add_light(Light::Directional { direction: Vec3::Y, irradiance: Vec3::splat(std::f32::consts::PI) }).unwrap();
+        b.set_camera(Camera { eye: Vec3::new(20.0, 0.5, 0.0), target: Vec3::ZERO, fov_y: 0.5f32.to_radians(), ..Camera::default() });
+        mean_rgb(&render(b.build(), 8, 8, 2048, IntegratorSettings { max_depth: 1, ..IntegratorSettings::default() }).mean())[0]
+    };
+    let (open, quarter, solid) = (shadow(0.0), shadow(0.25), shadow(1.0));
+    assert!((open - 0.5).abs() < 0.01 && solid < 1e-3, "{open} {solid}");
+    assert!((quarter - 0.375).abs() < 0.03, "shadow through a quarter-solid sheet: {quarter}");
+
+    // A base-colour texture: red on the left half, blue on the right.
+    let mut b = SceneBuilder::new();
+    let tex = b.add_texture(Image::generate(64, 4, Kind::Color, |x, _| if x < 32 { [1.0, 0.0, 0.0, 1.0] } else { [0.0, 0.0, 1.0, 1.0] })).unwrap();
+    let painted = b.add_material(Material { base_color: Vec3::ONE, base_color_texture: Some(tex), specular_weight: 0.0, ..Material::default() }).unwrap();
+    b.add_mesh(&wall, Mat4::IDENTITY, painted).unwrap();
+    b.set_environment(Vec3::ONE);
+    view(&mut b);
+    let f = render(b.build(), 16, 16, 256, IntegratorSettings::default());
+    let img = f.mean();
+    let (left, right) = (img[8 * 16 + 3], img[8 * 16 + 12]);
+    assert!(left[0] > 0.9 && left[2] < 0.05 && right[2] > 0.9 && right[0] < 0.05, "{left:?} {right:?}");
+
+    // A normal map that tilts the normal 60° towards +x halves the light from straight ahead and
+    // makes the wall face a light from the side.
+    let lit = |map: bool, from: Vec3| {
+        let mut b = SceneBuilder::new();
+        let (sx, cz) = (60f32.to_radians().sin(), 60f32.to_radians().cos());
+        let tex = b.add_texture(Image::filled(1, 1, Kind::Color, [sx * 0.5 + 0.5, 0.5, cz * 0.5 + 0.5, 1.0])).unwrap();
+        let m = b.add_material(Material { normal_texture: map.then_some(tex), ..Material::diffuse(Vec3::ONE) }).unwrap();
+        b.add_mesh(&wall, Mat4::IDENTITY, m).unwrap();
+        b.add_light(Light::Directional { direction: from, irradiance: Vec3::splat(std::f32::consts::PI) }).unwrap();
+        view(&mut b);
+        mean_rgb(&render(b.build(), 8, 8, 64, IntegratorSettings::default()).mean())[0]
+    };
+    assert!((lit(false, Vec3::Z) - 1.0).abs() < 0.01);
+    assert!((lit(true, Vec3::Z) - 0.5).abs() < 0.02, "{}", lit(true, Vec3::Z));
+    let side = Vec3::new(60f32.to_radians().sin(), 0.0, 60f32.to_radians().cos());
+    assert!((lit(false, side) - 0.5).abs() < 0.01 && (lit(true, side) - 1.0).abs() < 0.02, "{} {}", lit(false, side), lit(true, side));
+
+    // The showcase scene renders finite values with every layer in play.
+    let f = render(scenes::showcase().unwrap(), 48, 32, 8, IntegratorSettings::default());
+    assert!(f.sum.iter().all(|p| p.iter().all(|c| c.is_finite())) && mean_rgb(&f.mean())[1] > 0.02);
+}
