@@ -198,6 +198,13 @@ audio and the sculpt turntable. Everything else is not started. **A1** came firs
 Limits of what exists:
 - Rotation is keyed as XYZ Euler angles (keying one angle keys all three); there are no other
   rotation orders and no quaternion interpolation.
+- Rigging: joints are added by command and moved with the gizmo or by number (no click-to-place
+  tool, no viewport picking of joints); a joint's rest orientation lives in its rotation, not in a
+  separate channel. Skin weights are painted by a command dab, not by a viewport brush; heat
+  weights skip the paper's visibility test, so two limbs that touch can share weights; weights
+  cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
+  `Scene::get` is a linear search, which shows with thousands of objects. glTF export writes
+  the posed mesh, not the skin or the animation.
 - Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
   be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
 - Motion paths are drawn, not edited, and there are no ghosts. Point caches are written

@@ -158,6 +158,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 });
             });
             crate::anim_ui::menu(app, ui);
+            crate::rig_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
                 action_button(app, ui, Action::KeyboardShortcuts);
@@ -455,6 +456,18 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             let m = Color32::from_rgb(200, 140, 230);
             let pts: Vec<egui::Pos2> = (0..=10).map(|k| c + egui::vec2(k as f32 - 5.0, (k as f32 * 1.2).sin() * 3.0)).collect();
             p.add(egui::Shape::line(pts, egui::Stroke::new(1.4, m)));
+        }
+        ObjectKind::Joint { .. } => {
+            // A bone: a small circle with a line.
+            let j = Color32::from_rgb(115, 205, 240);
+            p.circle_stroke(c + egui::vec2(-3.0, 3.0), 2.5, egui::Stroke::new(1.2, j));
+            p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], egui::Stroke::new(1.4, j));
+        }
+        ObjectKind::Skin { .. } => {
+            // A skin: two linked circles.
+            let k = Color32::from_rgb(240, 200, 120);
+            p.circle_stroke(c + egui::vec2(-2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
+            p.circle_stroke(c + egui::vec2(2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
         }
     }
 }

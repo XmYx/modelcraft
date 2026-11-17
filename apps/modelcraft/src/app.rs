@@ -641,6 +641,7 @@ impl ModelApp {
                 self.status = tl!("Redo");
             }
             Anim(a) => crate::anim_ui::act(self, a),
+            Rig(a) => crate::rig_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();

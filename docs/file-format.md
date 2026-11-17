@@ -25,6 +25,16 @@ shape offsets and the anchor in the layer blob (version 2). Schema 1 files still
 A newer `schema_version` is refused with a clear message; `0` is invalid. Scenes are repaired on
 load (unique ids, parents exist, no cycles, depth ≤ 64, finite transforms).
 
+## Joints and skins
+
+Two more object kinds: `{"type":"joint","radius":…}` (a transform drawn as a bone to each child
+joint) and `{"type":"skin","skin":{joints, inverse_bind, weights, dual_quaternion?}}`, a child of
+the mesh it binds. `joints` are object ids; `inverse_bind[i]` (16 numbers, column-major) takes a
+point of the mesh at bind time into joint `i`'s space; `weights` is
+`{influences, joints: [...], weights: [...]}` with `influences` slots per point. On load, a skin
+whose arrays disagree is emptied, weights on missing joints are dropped and every point is
+re-normalised. Weights are JSON for now, not a blob.
+
 ## Animation
 
 `scene.anim` (left out when the scene has none) holds `fps`, `start`, `end` (the playback range in
