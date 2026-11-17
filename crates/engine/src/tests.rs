@@ -1,6 +1,6 @@
 use super::*;
 use glam::Vec3;
-use modelcraft_scene::Transform;
+use modelcraft_scene::{Cloner, Transform};
 use modelcraft_sculpt::{BrushKind, Stroke};
 
 fn tmp(name: &str) -> PathBuf {
@@ -166,6 +166,8 @@ fn commands_round_trip_as_json() {
         Command::SculptDetail { id: ObjectId(1), op: crate::DetailOp::Up },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Strength { index: 0, strength: 0.25 } },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Select { index: None } },
+        Command::AddCloner { kind: "radial".into(), input: Some(ObjectId(1)) },
+        Command::SetCloner { id: ObjectId(2), cloner: Cloner::default_of("grid").unwrap(), target: Some(ObjectId(1)) },
         Command::Undo,
     ];
     for c in cmds {
@@ -174,7 +176,7 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 28);
+    assert_eq!(crate::COMMANDS.len(), 30);
 }
 
 fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {
@@ -380,4 +382,39 @@ fn strokes_and_presets_keep_their_json_form() {
         d.execute(Command::SculptStroke { id: ball, stroke: st }).unwrap();
         assert!(d.undo.len() >= 3, "{} changed nothing", p.name);
     }
+}
+
+#[test]
+fn clone_generator_commands_undo_and_export_instances() {
+    let mut d = Document::new();
+    let out = d.execute(Command::AddCloner { kind: "grid".into(), input: None }).unwrap();
+    let gen_id = out.created[0];
+    assert_eq!(d.scene.len(), 2, "a default source is made inside the generator");
+    let inst = d.eval.evaluate(&d.scene, gen_id).instances.unwrap();
+    assert_eq!(inst.clones.len(), 16);
+    // Settings change through a command, with a sanitized result and one undo step.
+    let before = d.undo.len();
+    let mut c = Cloner::default_of("linear").unwrap();
+    if let modelcraft_scene::Cloner { layout: modelcraft_clone::Layout::Linear { count, .. }, .. } = &mut c {
+        *count = u32::MAX;
+    }
+    d.execute(Command::SetCloner { id: gen_id, cloner: c, target: None }).unwrap();
+    assert_eq!(d.undo.len(), before + 1);
+    assert_eq!(d.eval.evaluate(&d.scene, gen_id).instances.unwrap().clones.len(), modelcraft_scene::MAX_CLONES);
+    assert_eq!(d.triangle_count(), 12 * modelcraft_scene::MAX_CLONES);
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.eval.evaluate(&d.scene, gen_id).instances.unwrap().clones.len(), 16);
+    // The export has one node per clone, all sharing the source mesh.
+    let items = d.export_items();
+    assert_eq!(items.len(), 17);
+    assert!(items[1..].iter().all(|i| i.mesh.as_ref().is_some_and(|m| std::sync::Arc::ptr_eq(m, items[1].mesh.as_ref().unwrap()))));
+    // A cloner is never its own target; a plain mesh is not a clone generator.
+    assert!(d.execute(Command::SetCloner { id: gen_id, cloner: Cloner::default_of("surface").unwrap(), target: Some(gen_id) }).is_err());
+    let cube = add(&mut d, "cube");
+    assert!(d.execute(Command::SetCloner { id: cube, cloner: Cloner::default_of("grid").unwrap(), target: None }).is_err());
+    assert!(d.execute(Command::AddCloner { kind: "honeycomb".into(), input: None }).is_err());
+    // An existing object becomes the source.
+    let g2 = d.execute(Command::AddCloner { kind: "linear".into(), input: Some(cube) }).unwrap().created[0];
+    assert_eq!(d.scene.get(cube).unwrap().parent, Some(g2));
+    assert_eq!(d.eval.evaluate(&d.scene, g2).instances.unwrap().clones.len(), 5);
 }

@@ -14,6 +14,9 @@ mod anim_ui;
 mod anim_ui_tests;
 mod app;
 mod args;
+mod clone_ui;
+#[cfg(test)]
+mod clone_ui_tests;
 mod demo;
 mod gpu;
 mod keys;

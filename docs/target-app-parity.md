@@ -298,11 +298,11 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Cloner: linear, radial, grid, honeycomb, on-object modes | C M | M | L | |
+| Cloner: linear, radial, grid, honeycomb, on-object modes | C M | P | L | Clones object: linear, radial, grid, scatter, surface and vertex layouts, seeded; no honeycomb or per-clone selections |
 | Effectors: plain, random, shader, step, delay, time, target, formula | C M | M | L | |
 | Fields drive effectors | C | M | M | |
 | Clone selections and weight maps | C | M | M | |
-| Instancing at scale (millions of points, render instances) | C M | M | M | |
+| Instancing at scale (millions of points, render instances) | C M | P | M | Clones share one GPU mesh and one evaluated mesh; capped at 10,000 per generator, one draw call each |
 | Voronoi fracture | C M | M | L | |
 | Animated text per letter / word / line | C | M | M | |
 | Trace clone paths into splines | C | M | S | |

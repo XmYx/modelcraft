@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MaskOp, Outcome};
@@ -558,6 +558,26 @@ impl Document {
                 }
                 out.created.push(cage);
             }
+            Command::AddCloner { kind, input } => {
+                let cloner = Cloner::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone layout {kind:?}")))?;
+                if let Some(i) = input
+                    && !matches!(self.scene.get(*i).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. }))
+                {
+                    return invalid("clones need a mesh or smooth cage as their source");
+                }
+                let parent = input.and_then(|i| self.scene.get(i)).and_then(|o| o.parent);
+                let name = self.scene.unique_name("Clones");
+                let id = self.scene.add(name, ObjectKind::Cloner { cloner, target: None }, parent)?;
+                match input {
+                    Some(i) => self.scene.reparent(*i, Some(id))?,
+                    None => {
+                        let primitive = Primitive::Cube { size: glam::Vec3::splat(0.5), segments: 1 };
+                        let name = self.scene.unique_name("Clone source");
+                        self.scene.add(name, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(id))?;
+                    }
+                }
+                out.created.push(id);
+            }
             Command::AddDeformer { kind, target } => {
                 let deformer = Deformer::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown deformer {kind:?}")))?;
                 if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
@@ -622,6 +642,18 @@ impl Document {
                 ObjectKind::Deformer { deformer: d } => *d = *deformer,
                 _ => return invalid("not a deformer"),
             },
+            Command::SetCloner { id, cloner, target } => {
+                if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
+                    return invalid("the target must be another object in the scene");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::Cloner { cloner: c, target: t } => {
+                        *c = cloner.sanitized();
+                        *t = *target;
+                    }
+                    _ => return invalid("not a clone generator"),
+                }
+            }
             Command::AddStep { id, op } => {
                 if matches!(op, StepOp::Sculpt { .. }) {
                     return invalid("sculpt layers are added by begin_sculpt");
@@ -716,13 +748,32 @@ impl Document {
             if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. }) || !self.scene.visible(id) {
                 continue;
             }
-            let mesh = match o.kind {
+            let evaluated = match o.kind {
                 ObjectKind::Group => None,
-                _ => Some(self.eval.evaluate(&self.scene, id).mesh),
+                _ => Some(self.eval.evaluate(&self.scene, id)),
             };
             let parent = o.parent.and_then(|p| index.get(&p).copied());
             index.insert(id, items.len());
+            // A clone generator exports as a group with one node per clone, all sharing the source
+            // mesh (glTF nodes may share a mesh).
+            let instances = evaluated.as_ref().and_then(|e| e.instances.clone());
+            let mesh = if instances.is_some() { None } else { evaluated.map(|e| e.mesh) };
+            let here = items.len();
             items.push(Item { name: o.name.clone(), parent, transform: o.transform, mesh, material: o.material.clone() });
+            if let Some(inst) = instances {
+                let material = inst.source_object.and_then(|s| self.scene.get(s)).map(|s| s.material.clone()).unwrap_or_default();
+                for c in &inst.clones.instances {
+                    let (scale, rotation, translation) = c.matrix.to_scale_rotation_translation();
+                    let transform = modelcraft_scene::Transform { translation, rotation, scale }.sanitized();
+                    items.push(Item {
+                        name: format!("{} {}", o.name, c.index + 1),
+                        parent: Some(here),
+                        transform,
+                        mesh: Some(inst.source.clone()),
+                        material: material.clone(),
+                    });
+                }
+            }
         }
         items
     }
@@ -783,7 +834,10 @@ impl Document {
             .filter(|id| !self.scene.is_cage_input(*id))
             .map(|id| match &self.sculpt {
                 Some(s) if s.id == id => s.mesh.triangle_count(),
-                _ => self.eval.evaluate(&self.scene, id).mesh.triangle_count(),
+                _ => {
+                    let e = self.eval.evaluate(&self.scene, id);
+                    e.mesh.triangle_count() + e.instances.map_or(0, |i| i.triangle_count())
+                }
             })
             .sum()
     }
