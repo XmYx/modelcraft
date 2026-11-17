@@ -18,6 +18,11 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shape layers | sculpt layers / 3D layers with an intensity | Generic words; the reference product's layer names avoided | Use |
 | Live detail | dynamic topology | No live software mark found | Use |
 | Even remesh | voxel remeshing products | Generic words; product names avoided | Use |
+| Pull, Plateau, Buildup, Surface grab, Gouge, Slide, Bulge (brushes) | the reference sculpting app's hook, layer, clay build-up, topological move, groove, nudge and blob brushes | Plain verbs and nouns; the reference brush names avoided | Use |
+| Trim, Fill, Polish (brushes) | planar trim, fill and polish brushes | Generic tool words | Use |
+| Hardness | brush focal shift | Generic | Use |
+| Spaced, Dots, Spray, Trail, Drag out (stroke modes) | freehand, dots, spray, lazy-mouse and drag-rectangle strokes | Generic words; "lazy" naming avoided | Use |
+| Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |
@@ -29,6 +34,9 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Snap, Toggle Snapping | snapping | Generic | Use |
 | Select Edge Loop, Select Edge Ring, Grow Selection, Shrink Selection | selection tools | Generic modeling terms | Use |
 | Bridge Faces, Fill Hole, Mirror X/Y/Z | polygon tools | Generic modeling terms | Use |
+| Animation (panel), Key Sheet, Curve Editor | timeline, dope sheet and graph/function-curve editors | "Key sheet" and "curve editor" are generic descriptions; the reference apps' editor names are not used | Use |
+| Key Transform, Key Attribute, Auto-Key, Shift Keys, Scale Keys | set-key and auto-keyframe commands | Generic animation terms | Use |
+| Stepped, Linear, Curved (interpolation); Automatic, Flat, Free, Split (tangents); Hold, Continue, Repeat, Repeat with offset, Back and forth (outside the keys) | key interpolation, tangent types, pre/post infinity | Plain words; no product's tangent-type names ("spline", "clamped", "plateau") used as labels | Use |
 | Keyboard Shortcuts (dialog) | shortcut editors | Generic; the dialog is the suite's shared craft-keymap one | Use |
 | Render View, Update while editing | interactive / progressive render windows (the references use product-specific names for theirs) | Generic words; no live software mark found for the phrase in class 9; the references' own names avoided | Use |
 | Studio, Daylight, Panorama image (Render View lighting) | dome lights, physical sun-and-sky systems, HDRI lighting | Generic words; the references' product names for their skies and domes avoided | Use |

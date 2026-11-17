@@ -219,6 +219,8 @@ pub struct ModelApp {
     pub brush: BrushSettings,
     /// Brush radius in screen pixels.
     pub brush_px: f32,
+    /// Brush presets the user saved (shown after the built-in ones).
+    pub user_presets: Vec<modelcraft_engine::sculpt::preset::BrushPreset>,
     pub ops: OpParams,
     pub layout: Layout,
     pub status: String,
@@ -244,6 +246,8 @@ pub struct ModelApp {
     pub last_frame: Option<std::time::Instant>,
     pub autosave_at: Option<std::time::Instant>,
     pub recovery_dir: Option<PathBuf>,
+    /// The Animation panel: playback, key selection, views.
+    pub anim: crate::anim_ui::AnimUi,
 }
 
 pub fn recovery_dir() -> Option<PathBuf> {
@@ -302,6 +306,7 @@ impl ModelApp {
             nav: NavPreset::AltMouse,
             brush: BrushSettings::new(BrushKind::Draw, 0.2),
             brush_px: 60.0,
+            user_presets: Vec::new(),
             ops: OpParams::default(),
             layout: Layout::default(),
             status: tl!("Ready"),
@@ -327,6 +332,7 @@ impl ModelApp {
             last_frame: None,
             autosave_at: None,
             recovery_dir: None,
+            anim: Default::default(),
         };
         if let Some(n) = cli.bench_frames {
             let polys = cli.bench_polys.unwrap_or(1_000_000);
@@ -380,23 +386,31 @@ impl ModelApp {
         let pos = |v: f32, d: f32| if v.is_finite() && v > 0.0 { v } else { d };
         self.snap_steps = (pos(p.snap_move, 0.25), pos(p.snap_rotate_deg, 15.0), pos(p.snap_scale, 0.1));
         self.brush_px = p.brush_px.clamp(4.0, 800.0);
+        self.user_presets = p
+            .brush_presets
+            .iter()
+            .take(modelcraft_engine::sculpt::preset::MAX_PRESETS)
+            .map(|b| modelcraft_engine::sculpt::preset::BrushPreset::new(&b.name, &b.brush))
+            .collect();
         self.keymap = crate::keys::keymap(p.shortcuts);
     }
 
     /// Write changed preferences (debounced by craft-settings).
-    fn store_prefs(&mut self) {
+    pub fn store_prefs(&mut self) {
         let nav = match self.nav {
             NavPreset::AltMouse => "alt",
             NavPreset::MiddleMouse => "middle",
             NavPreset::RightMouse => "right",
         };
         let (recent, snap, brush_px) = (self.recent.clone(), self.snap, self.brush_px);
+        let presets = self.user_presets.clone();
         if let Some(store) = &mut self.prefs {
             store.update(|p| {
                 p.navigation = nav.into();
                 p.recent = recent;
                 p.snap = snap;
                 p.brush_px = brush_px;
+                p.brush_presets = presets;
             });
             let _ = store.tick(std::time::Instant::now());
         }
@@ -626,6 +640,7 @@ impl ModelApp {
                 self.run(Command::Redo);
                 self.status = tl!("Redo");
             }
+            Anim(a) => crate::anim_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
@@ -740,9 +755,10 @@ impl ModelApp {
                 }
             }
             Brush(k) => {
-                let keep = (self.brush.symmetry, self.brush.falloff, self.brush.live_detail);
-                self.brush = BrushSettings::new(k, self.brush.radius);
-                (self.brush.symmetry, self.brush.falloff, self.brush.live_detail) = keep;
+                let keep = self.brush.clone();
+                self.brush = BrushSettings::new(k, keep.radius);
+                (self.brush.symmetry, self.brush.falloff, self.brush.live_detail) = (keep.symmetry, keep.falloff, keep.live_detail);
+                (self.brush.hardness, self.brush.stroke, self.brush.spacing, self.brush.stamp) = (keep.hardness, keep.stroke, keep.spacing, keep.stamp);
                 self.status = crate::tlf!("{brush} brush", brush = crate::actions::brush_label(k));
             }
             Symmetry => {
@@ -1130,6 +1146,7 @@ impl ModelApp {
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
         crate::panels::status_bar(self, ui);
+        crate::anim_ui::bottom_panel(self, ui);
         for side in [Dock::Left, Dock::Right] {
             let panels: Vec<PanelId> = PanelId::ALL.iter().copied().filter(|p| self.layout.dock(self.workspace, *p) == side).collect();
             if panels.is_empty() {
@@ -1161,7 +1178,7 @@ impl ModelApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL_DEEP)).show(ui, |ui| crate::viewport::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         self.screenshot_tick(&ctx);
-        if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() {
+        if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {
             ctx.request_repaint();
         }
     }

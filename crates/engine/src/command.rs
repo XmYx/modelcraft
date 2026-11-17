@@ -175,6 +175,8 @@ pub enum Command {
     },
     Undo,
     Redo,
+    /// Keys, curves and time: `{"cmd":"anim","op":"set_key",…}` ([`crate::anim::AnimCommand`]).
+    Anim(crate::anim::AnimCommand),
 }
 
 fn two() -> u32 {
@@ -260,6 +262,7 @@ impl Command {
             .into(),
             Command::Undo => "Undo".into(),
             Command::Redo => "Redo".into(),
+            Command::Anim(a) => a.label(),
         }
     }
 }

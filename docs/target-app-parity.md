@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 72 / 7 / 37 / 214 | counted |
+| Done / exceeds / partial / missing | 73 / 7 / 39 / 211 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **29.5 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **20.7 %** | counted |
-| Size-weighted parity over all rows, no area weights | 21.0 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **30.2 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **21.2 %** | counted |
+| Size-weighted parity over all rows, no area weights | 21.6 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -40,7 +40,7 @@ never estimated by hand.
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
 | UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
-| Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 7 | 1 | 2 | 12 | 0 | 41 % | 28 % |
+| Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 8 | 1 | 4 | 9 | 0 | 50 % | 36 % |
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 2 | 0 | 2 | 5 | 0 | 33 % | 35 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
 | Materials and shading | 5 (4 %) | 9 | 2 | 0 | 3 | 4 | 0 | 39 % | 30 % |
@@ -333,17 +333,17 @@ Weight: 7
 |---|---|---|---|---|
 | Draw, clay, smooth, inflate, grab, pinch | C M Z | D | M | |
 | Flatten, crease | C M Z | D | S | |
-| Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | M | L | Nine brushes today |
+| Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | P | L | Ten more, nineteen in all: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge. No rotate, elastic move or scrape yet |
 | Mask brush; clear, invert, fill; mask by patch | C M Z | D | S | |
 | Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | M | M | |
 | Lasso and rectangle masks; clip, trim and slice brushes | Z | M | M | |
 | X, Y, Z symmetry | C M Z | D | S | |
 | Radial and topological symmetry | C Z | M | M | |
 | Pen pressure to strength and size | C M Z | P | S | Through egui touch force; not verified on every tablet driver |
-| Falloff curves and procedural stamps | C M Z | D | S | Five curves; noise, rings, square stamps |
-| Image alphas and an alpha library | C M Z | M | M | |
-| Stroke types: lazy / stabilized, dots, spray, rectangle drag, curve strokes | C M Z | P | M | Freehand with fixed spacing only |
-| Brush presets and saved brushes | C M Z | M | S | |
+| Falloff curves and procedural stamps | C M Z | D | S | Seven curves and a hardness control; noise, rings, square stamps |
+| Image alphas and an alpha library | C M Z | P | M | Eight built-in pictures (drawn in code), with a turn angle; importing your own images is missing |
+| Stroke types: lazy / stabilized, dots, spray, rectangle drag, curve strokes | C M Z | P | M | Spaced (with a spacing control), Dots, Spray, Trail (stabilized) and Drag out; no curve strokes |
+| Brush presets and saved brushes | C M Z | D | S | Ten built-in presets; save and remove your own (kept in the preferences) |
 | Polygon-group visibility: hide, show, isolate | Z | M | M | |
 | Sculpt layers with blend strength | C Z | D | L | "Shape layers": named offsets with a strength of −1..1; record, merge, remove. No per-layer mask; stepping down a detail level needs them merged |
 | Morph target and restore brush | C Z | M | M | |

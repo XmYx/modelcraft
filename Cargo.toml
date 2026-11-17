@@ -12,6 +12,7 @@ repository = "https://github.com/storytold/modelcraft"
 
 [workspace.dependencies]
 # internal
+modelcraft-anim = { path = "crates/anim" }
 modelcraft-mesh = { path = "crates/mesh" }
 modelcraft-ops = { path = "crates/ops" }
 modelcraft-scene = { path = "crates/scene" }

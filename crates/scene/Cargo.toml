@@ -15,8 +15,9 @@ modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+modelcraft-anim = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 proptest = { workspace = true }
