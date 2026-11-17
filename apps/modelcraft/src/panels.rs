@@ -756,6 +756,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
         });
     }
+    crate::constraint_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
     }

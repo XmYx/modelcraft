@@ -122,6 +122,26 @@ One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","
 | `set_skin` | `mesh`, `dual_quaternion` |
 | `edit_weights` | `mesh`, `weights`: `normalize` · `prune` + `threshold` · `limit` + `max` · `mirror` + `axis`, `find`, `replace`, `tolerance` · `set` + `points`, `joint`, `weight` · `paint` + `joint`, `center` [x, y, z] in the mesh's space, `radius`, `strength` (−1..1) |
 
+| `add_constraint` | `kind` (point, orient, scale, parent, aim), `target`, `sources`, `weights?` (one per source), `maintain_offset` (default true), `aim` (default y), `up` (default z), `up_object?`, `name?` |
+| `add_ik` | `end` (the chain's end joint), `goal?` (an object; a group is created at the end joint without it), `pole?`, `bones` (default 2), `solver` (auto, two_bone, fabrik, ccd), `name?` |
+| `set_driven_key` | `driver`, `driver_path`, `target`, `path`, `driver_value?`, `value?` (the attributes' current values without them): one key of the curve that maps the driver's value to the driven attribute |
+| `set_expression` | `target`, `path`, `expr` (empty removes it) |
+| `set_constraint` | `id`, `weight?` (0–1; the IK/FK blend of an IK constraint), `enabled?`, `name?`, `source_weights?`, `solver?`, `iterations?`, `pole?` (an object id, 0 for none) |
+| `remove_constraint` | `id` |
+| `match_ik` | `id`, `to`: `fk` (the joints keep the solved pose, blend 0) or `ik` (the goal and pole move onto the chain, blend 1) |
+| `bake_constraints` | `objects`, `start?`, `end?` (the playback range without them), `step` (default 1), `keep?`: key the solved transforms, then switch the constraints off |
+
+Constraints run after every command and frame change, in dependency order: a constraint that reads
+what another writes runs after it, and constraints that depend on themselves are skipped and named
+in the command's `warnings`. A constraint's weight is the attribute `constraint.<id>.weight` of its
+target, so `anim set_key` keys it (an IK/FK switch over time).
+
+An expression is one formula giving one number: `+ - * / % ^`, comparisons, `&&`, `||`, `!`,
+`cond ? a : b`, brackets, the constants `pi`, `tau`, `e`, and the functions `sin cos tan asin acos
+atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smoothstep deg rad`.
+Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
+`@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
+
 A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
 
 ## Rendering
