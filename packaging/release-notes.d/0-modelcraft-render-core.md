@@ -1,0 +1,1 @@
+- Render View (F9): a path-traced image of your scene that refines while you watch and restarts as you edit, on the graphics card when there is one. `modelcraft-cli render` makes the same image from the command line.

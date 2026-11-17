@@ -12,6 +12,7 @@ modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
+modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 ```
 
 ## Commands
@@ -46,6 +47,27 @@ Object ids are numbers (`info` prints them).
 | `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
 | `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
 | `undo`, `redo` | — |
+
+## Rendering
+
+`modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
+model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:furnace`) and
+prints one JSON line: device, size, samples, triangles, scene and render seconds, and million
+samples per second.
+
+| Option | Meaning |
+|---|---|
+| `--width N --height N` | Image size, default 960×540 |
+| `--samples N` | Samples per pixel, default 64 |
+| `--depth N` | Bounces, default 12 |
+| `--device auto\|cpu\|gpu` | `auto` uses a hardware GPU when there is one and falls back to the CPU; `gpu` fails if it cannot |
+| `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
+| `--exposure EV` | Brightness in stops |
+| `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
+| `--seed N` | The same seed gives the same image |
+
+The scene graph has no light objects yet, so a project is lit by a studio set-up (a soft sky and
+one key light sized to the scene) on a matte ground plane.
 
 ## Control channel
 

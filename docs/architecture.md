@@ -10,7 +10,10 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L2 | `modelcraft-scene` | Objects, hierarchy, transforms, materials, history steps, the `Evaluator` (dependency graph with per-step caches), picking | mesh, ops |
 | L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh | scene, craft-mesh, craft-zip, craft-atomic |
 | L4 | `modelcraft-engine` | `Document`, `Command`, undo (memory-bounded), journaling, sculpt session, export | all above |
-| L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback) | mesh, scene, wgpu |
+| L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries | glam, rayon |
+| L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator, the progressive film | craft-render-bvh |
+| L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline; capabilities from the created device | craft-render-core, wgpu |
+| L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback); `trace`: the scene graph exported to the path tracer | mesh, scene, craft-render-*, wgpu |
 | L5 | `modelcraft` (app) | egui UI: viewport, gizmos, panels, workspaces, palette, i18n, kittest tests | engine, render, egui/eframe |
 | L5 | `modelcraft-cli` | Batch commands, JSON-lines control channel, benchmarks | engine, render |
 
@@ -43,6 +46,18 @@ views has its own target. Evaluated meshes are uploaded once and cached by alloc
 is uploaded once per session and then patched per 4096-vertex chunk. Without a wgpu device the
 viewport paints a bounded wireframe with the egui painter (also used by the UI tests).
 
+## Path tracing
+
+The `craft-render-*` crates know nothing about ModelCraft: they take triangles, materials, lights
+and a camera, and could move to craft-libs under RFC-0032 as they are. `craft-render-core` is the
+reference; every algorithm in it names the paper or specification it comes from, and no other
+renderer's code was read. `craft-render-gpu` runs the same sample sequence and estimator in one
+WGSL compute kernel over the same BVH bytes, so the two converge to the same image (tested).
+`modelcraft-render::trace` is the only ModelCraft-specific part: it evaluates the visible surfaces,
+bakes world transforms, converts the material and adds lighting (the scene graph has no light
+objects yet). The Render View (`apps/modelcraft/src/render_view.rs`) and `modelcraft-cli render`
+are thin callers; the render itself runs on a worker thread.
+
 ## Shared libraries and gaps (house rule 16)
 
 Used from craft-libs at `0649a07`: `craft-mesh` (readers/writers), `craft-zip`, `craft-atomic`,
@@ -58,7 +73,13 @@ app-local snapshot autosave; the two are candidates for one shared recovery crat
 Gaps found, to raise in craft-libs rather than copy:
 - `craft-mesh` ignores glTF `extras` and writes GLB only (no `.gltf` JSON); it cannot carry quads.
 - No shared GPU crate on main yet (RFC-0022 / craft-libs #663): the viewport uses wgpu directly
-  behind `modelcraft-render`, with a CPU fallback, ready to move to `craft-gpu`.
+  behind `modelcraft-render`, with a CPU fallback, ready to move to `craft-gpu`. `craft-render-gpu`
+  follows the RFC's rules too (capabilities from the created device, no adapter is a defined
+  answer, its tests run on a real backend including a software one) and has one place,
+  `GpuContext`, to swap for `craft-gpu`.
+- No shared BVH on main (craft-libs #1233 `craft-mesh-ops` proposes one behind a feature):
+  `craft-render-bvh` is written to be offered there; the sculpt BVH in `modelcraft-sculpt` stays
+  separate because it refits under moving vertices.
 - No shared mesh-processing crate on main (craft-libs #1233 `craft-mesh-ops` is open): ModelCraft's
   half-edge mesh, subdivision and validated polygon operations are candidates to contribute there,
   next to its tangents, UV unwrap and BVH. Its `OrbitCamera` and ours should converge.

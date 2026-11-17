@@ -226,6 +226,7 @@ pub struct ModelApp {
     pub numeric: Option<NumericTransform>,
     pub rename: Option<(ObjectId, String)>,
     pub about: bool,
+    pub render_view: crate::render_view::RenderView,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -308,6 +309,7 @@ impl ModelApp {
             numeric: None,
             rename: None,
             about: false,
+            render_view: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -772,6 +774,7 @@ impl ModelApp {
                 }
             }
             About => self.about = true,
+            RenderView => crate::render_view::toggle(self, ctx),
         }
     }
 
@@ -1162,6 +1165,9 @@ impl ModelApp {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
+        if crate::render_view::escape(self, ctx) {
+            return;
+        }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 self.palette = None;

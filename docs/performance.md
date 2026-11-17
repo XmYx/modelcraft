@@ -60,6 +60,47 @@ linear refinement itself, is most of the time, and it is single-threaded.
 symmetry and normals) + chunk upload (≈0.5 ms) + one frame (≈3.5 ms uncapped) ≈ **5 ms** before
 display latency.
 
+## Render engine (path tracer)
+
+Measured 2026-11-17 on the same machine, release build. `modelcraft-cli render` prints one JSON
+line per render with these numbers; "samples" are complete camera paths (up to 12 bounces, each
+with a shadow ray), so a rate is paths per second, not rays per second.
+
+```
+modelcraft-cli render builtin:cornell   -o c.png --width 1024 --height 1024 --samples 256 --device cpu|gpu
+modelcraft-cli render builtin:materials -o m.png --width 1280 --height 720  --samples 256 --device cpu|gpu
+modelcraft-cli render dense.modelcraft  -o d.png --width 1280 --height 720  --samples 64  --device cpu|gpu
+```
+
+`dense.modelcraft` is a quad sphere of 1,003,686 quads (`new`, `add_primitive round_cube`,
+`set_primitive … "segments":409`) on the default ground plane under the studio light.
+
+| Scene | Triangles | CPU, 24 threads | GPU, RTX 4090 (wgpu, Vulkan) | GPU / CPU |
+|---|---|---|---|---|
+| Cornell box, 1024², 256 spp | 36 | 7.5 M paths/s (35.6 s) | 326 M paths/s (0.82 s) | 43× |
+| Material row, 1280×720, 256 spp | 39,686 | 10.3 M paths/s (22.8 s) | 561 M paths/s (0.42 s) | 54× |
+| Dense sphere, 1280×720, 64 spp | 2,007,376 | 11.3 M paths/s (5.2 s) | 406 M paths/s (0.15 s) | 36× |
+
+Scene preparation for the dense sphere (evaluate, triangulate with smoothed normals, build the
+BVH): 2.2 s. The BVH alone, on a 2,000,000-triangle height field: built in 560 ms (2.1 M nodes,
+depth 24), then 2.6 M closest-hit rays per second on one thread
+(`cargo test --release -p craft-render-bvh -- --ignored --nocapture`). The GPU times exclude shader compilation and
+upload (about 1.3 s for the dense scene).
+
+Correctness is tested, not assumed (see the test names in
+[target-app-parity.md](target-app-parity.md)): a white surface in a uniform environment renders
+within 2 % of the environment (furnace test) for matte, rough-metal and layered dielectric
+surfaces; a random-material property test bounds every albedo below 1.04 (Monte Carlo slack);
+point, directional, uniform-sky and rectangular-area lighting match their closed forms within
+1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002.
+
+**What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
+run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
+without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
+GPU path traverses the BVH in a compute shader rather than through hardware ray queries. A fair
+comparison needs the same scene, hardware and noise level in both renderers; until someone runs
+that, the honest statement is the absolute rates above.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have

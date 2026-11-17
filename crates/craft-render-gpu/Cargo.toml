@@ -1,0 +1,20 @@
+[package]
+name = "craft-render-gpu"
+description = "The Craft render engine on a GPU: the path tracer of craft-render-core as a wgpu compute pipeline, with capabilities taken from the created device and a clean answer when there is no adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+craft-render-core = { workspace = true }
+glam = { workspace = true }
+bytemuck = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
