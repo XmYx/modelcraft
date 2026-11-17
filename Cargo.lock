@@ -2458,7 +2458,6 @@ dependencies = [
  "glam",
  "log",
  "modelcraft-mesh",
- "modelcraft-scene",
  "pollster 0.4.0",
  "proptest",
  "wgpu",
