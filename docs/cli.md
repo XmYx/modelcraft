@@ -14,6 +14,7 @@ modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdo
 modelcraft-cli bake scene.modelcraft Cube out.mcpc --start 0 --end 48 --step 1 --world
                                               # an object's vertices per frame (point cache)
 modelcraft-cli cache-info out.mcpc            # a point cache's header and bounds
+modelcraft-cli run-script scene.modelcraft tool.rhai -o out.modelcraft   # a script over a project
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 ```
@@ -49,6 +50,9 @@ Object ids are numbers (`info` prints them).
 | `sculpt_mask` | `id`, `op`: clear, fill, invert, {patch: {triangle}} |
 | `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
 | `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
+| `add_mesh` | `positions` [[x,y,z]…], `faces` [[i,j,k…]…], `name?`, `parent?` (a mesh from raw geometry; faces that do not fit are dropped with a warning) |
+| `set_positions` | `id`, `positions` [[x,y,z]…] (objects that store their own mesh; one per vertex) |
+| `batch` | `commands` [{cmd…}…], `label?` (scene commands as one undo step, all or none) |
 | `undo`, `redo` | — |
 
 ### Animation
@@ -90,6 +94,16 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
     '{"cmd":"anim","op":"set_key","id":1,"path":"translate.x","frame":24,"value":6}' \
     '{"cmd":"anim","op":"set_time","frame":12}' | modelcraft-cli control
 ```
+
+## Scripts
+
+`modelcraft-cli run-script <project|new> <script.rhai> [-o <out>]` runs a [Rhai script](scripting.md)
+over a project (or an empty scene) and saves like `run` does. Scripts have no file access unless
+it is granted: they may read the script's folder and the project's folder, and write nowhere;
+`--allow-read DIR` and `--allow-write DIR` (repeatable) grant more, `--time-limit SECS` and
+`--max-ops N` change the limits, and `--no-save` runs without writing. Errors print as
+`file:line:column: message` and give a non-zero exit status. Commands the script ran before an
+error stay applied in memory but nothing is saved.
 
 ## Rendering
 

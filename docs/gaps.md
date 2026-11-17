@@ -246,7 +246,7 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 ## Scripting and node graph
 
-Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. **G2** wires craft-control (token auth) and craft-mcp-server, which exist in craft-libs. The node view (**G3**) shows the dependency graph the evaluator already has.
+Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. G1's language (Rhai, see [scripting.md](scripting.md)), object-model API and headless API are in; the script editor, event callbacks and user tools remain. **G2** wires craft-control (token auth) and craft-mcp-server, which exist in craft-libs. The node view (**G3**) shows the dependency graph the evaluator already has.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

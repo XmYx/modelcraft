@@ -15,8 +15,9 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator, the progressive film | craft-render-bvh |
 | L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline; capabilities from the created device | craft-render-core, wgpu |
 | L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback); `trace`: the scene graph exported to the path tracer | mesh, scene, craft-render-*, wgpu |
+| L5 | `modelcraft-script` | Sandboxed Rhai engine over the command registry: scene and mesh API, undo groups, permissions and limits (see [scripting.md](scripting.md)) | engine, rhai |
 | L5 | `modelcraft` (app) | egui UI: viewport, gizmos, panels, workspaces, palette, i18n, kittest tests | engine, render, egui/eframe |
-| L5 | `modelcraft-cli` | Batch commands, JSON-lines control channel, benchmarks | engine, render |
+| L5 | `modelcraft-cli` | Batch commands, scripts, JSON-lines control channel, benchmarks | engine, render, script |
 
 `cargo xtask layers` fails if any L0–L4 crate depends on egui, eframe, winit or rfd.
 

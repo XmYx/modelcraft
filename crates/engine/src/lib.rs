@@ -15,7 +15,7 @@ mod layers;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef};
-pub use command::{COMMANDS, Command, DetailOp, MaskOp, Outcome, ShapeOp};
+pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
 pub use document::{Document, EngineError, SculptSession};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use undo::{UndoEntry, UndoStack};

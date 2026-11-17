@@ -1,0 +1,2 @@
+- Scripting: `modelcraft-cli run-script` runs Rhai scripts over a project. Scripts can create and edit objects, query the scene, selection and history, build meshes and group their work into one undo step, inside a sandbox with time and size limits and no file access unless you grant it.
+- New commands for agents and scripts: `add_mesh` (a mesh from raw geometry), `set_positions` and `batch` (several commands as one undo step).

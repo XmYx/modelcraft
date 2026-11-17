@@ -5,6 +5,7 @@
 
 mod bench_cmd;
 mod render_cmd;
+mod script_cmd;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -40,7 +41,7 @@ Commands:
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nRendering:\n{}\n{}\n", render_cmd::USAGE, bench_cmd::USAGE)
+    format!("{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n", script_cmd::USAGE, render_cmd::USAGE, bench_cmd::USAGE)
 }
 
 fn main() -> ExitCode {
@@ -162,6 +163,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         }
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
+        "run-script" => script_cmd::run(a, load, save),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;

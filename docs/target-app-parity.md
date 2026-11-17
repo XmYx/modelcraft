@@ -51,7 +51,7 @@ never estimated by hand.
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
 | Hair, fur and grooming | 4 (3 %) | 6 | 0 | 0 | 0 | 6 | 0 | 0 % | 0 % |
 | Volumes | 2 (2 %) | 2 | 0 | 0 | 0 | 2 | 0 | 0 % | 0 % |
-| Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 3 | 5 | 1 | 35 % | 21 % |
+| Scripting and automation | 5 (4 %) | 10 | 4 | 1 | 1 | 4 | 1 | 55 % | 48 % |
 | Pipeline formats and referencing | 6 (5 %) | 15 | 5 | 1 | 0 | 9 | 1 | 40 % | 19 % |
 | UI and workspaces | 4 (3 %) | 13 | 7 | 1 | 3 | 2 | 0 | 73 % | 62 % |
 | Stability and performance | 3 (2 %) | 6 | 3 | 1 | 0 | 2 | 0 | 67 % | 50 % |
@@ -545,10 +545,10 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Embedded scripting language | C M Z | M | L | |
-| Object-model API over every command | C M Z | P | M | Every action is a serializable command; no language binds it |
+| Embedded scripting language | C M Z | D | L | Rhai in `modelcraft-script`: sandboxed, with operation, time and size limits and file access only by grant ([scripting.md](scripting.md)) |
+| Object-model API over every command | C M Z | D | M | `cmd::<name>` for every registry command, scene queries, dependency graph, history-node evaluation, mesh handles, undo groups |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
-| Headless scene API (batch interpreter) | C M | P | S | `run` and `exec` take command files; no queries or control flow |
+| Headless scene API (batch interpreter) | C M | D | S | `modelcraft-cli run-script`: queries, control flow and commands over a project |
 | Machine control channel and MCP server | M | P | M | JSON lines on stdin/stdout; no socket or MCP server |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | M | M | |
