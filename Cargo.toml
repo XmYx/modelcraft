@@ -19,6 +19,7 @@ modelcraft-sculpt = { path = "crates/sculpt" }
 modelcraft-formats = { path = "crates/formats" }
 modelcraft-engine = { path = "crates/engine" }
 modelcraft-render = { path = "crates/render" }
+modelcraft-uvpack = { path = "crates/uvpack" }
 craft-render-bvh = { path = "crates/craft-render-bvh" }
 craft-render-core = { path = "crates/craft-render-core" }
 craft-render-gpu = { path = "crates/craft-render-gpu" }
@@ -81,6 +82,8 @@ codegen-units = 1
 [profile.dev.package.modelcraft-mesh]
 opt-level = 3
 [profile.dev.package.modelcraft-ops]
+opt-level = 3
+[profile.dev.package.modelcraft-uvpack]
 opt-level = 3
 [profile.dev.package.modelcraft-sculpt]
 opt-level = 3

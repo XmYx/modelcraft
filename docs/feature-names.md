@@ -34,6 +34,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
+| Pack UV Islands, Project UVs, Planar, Box, Cylindrical, Spherical, Camera (projections) | UV layout and projection tools | Generic geometry terms; no product-specific tool names used | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 
 Names deliberately **not** used as labels: the reference products' names and their branded features
