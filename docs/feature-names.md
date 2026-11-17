@@ -18,6 +18,11 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shape layers | sculpt layers / 3D layers with an intensity | Generic words; the reference product's layer names avoided | Use |
 | Live detail | dynamic topology | No live software mark found | Use |
 | Even remesh | voxel remeshing products | Generic words; product names avoided | Use |
+| Pull, Plateau, Buildup, Surface grab, Gouge, Slide, Bulge (brushes) | the reference sculpting app's hook, layer, clay build-up, topological move, groove, nudge and blob brushes | Plain verbs and nouns; the reference brush names avoided | Use |
+| Trim, Fill, Polish (brushes) | planar trim, fill and polish brushes | Generic tool words | Use |
+| Hardness | brush focal shift | Generic | Use |
+| Spaced, Dots, Spray, Trail, Drag out (stroke modes) | freehand, dots, spray, lazy-mouse and drag-rectangle strokes | Generic words; "lazy" naming avoided | Use |
+| Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |

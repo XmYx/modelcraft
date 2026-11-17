@@ -1,0 +1,1 @@
+| 2026-11-17 | Sculpt brush depth: ten more brushes (Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge), brush hardness and two more falloff curves, five stroke modes (Spaced, Dots, Spray, Trail, Drag out), eight built-in stamp pictures, brush presets with save and remove |

@@ -39,6 +39,8 @@ pub struct StrokeInput {
     pub last: Option<Vec3>,
     /// Grab brush: the plane the pointer moves on (world point, normal) and its last point.
     pub grab: Option<(Vec3, Vec3, Vec3)>,
+    /// Places the dabs along the pointer path for the brush's stroke mode.
+    pub maker: modelcraft_engine::sculpt::DabMaker,
 }
 
 pub struct Bench {
@@ -140,7 +142,7 @@ fn bench_tick(app: &mut ModelApp) {
                 brush.symmetry.x = true;
                 s.mesh.begin_stroke(brush);
             }
-            s.mesh.dab(Dab { center: hit, view_dir: -dir, pressure: 1.0, grab_delta: Vec3::ZERO });
+            s.mesh.dab(Dab { center: hit, view_dir: -dir, pressure: 1.0, grab_delta: Vec3::ZERO, scale: 1.0 });
             s.unsynced = true;
             b.dab_ms.push(t0.elapsed().as_secs_f32() * 1000.0);
         }
@@ -648,13 +650,13 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
         // The app keeps the live-detail size as a share of the brush radius.
         brush.live_detail = crate::sculpt_ui::live_detail_edge(app, brush.radius);
         let object = app.doc.sculpt.as_ref().map(|s| s.id).unwrap_or_default();
+        let mut maker = modelcraft_engine::sculpt::DabMaker::new(&brush);
         app.doc.stroke_begin(brush);
         let world_hit = w.transform_point3(hit);
-        app.stroke = Some(StrokeInput { view: i, object, last: None, grab: Some((world_hit, cam.back(), world_hit)) });
-        app.doc.stroke_dab(Dab { center: hit, view_dir: dir, pressure: pressure(ui), grab_delta: Vec3::ZERO });
-        if let Some(st) = &mut app.stroke {
-            st.last = Some(hit);
+        for d in maker.push(hit, dir, pressure(ui)).dabs {
+            app.doc.stroke_dab(d);
         }
+        app.stroke = Some(StrokeInput { view: i, object, last: Some(hit), grab: Some((world_hit, cam.back(), world_hit)), maker });
     }
     let active = app.stroke.as_ref().is_some_and(|s| s.view == i);
     if active
@@ -663,8 +665,7 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
     {
         let p = pressure(ui);
         let kind = app.doc.sculpt.as_ref().map(|_| app.brush.kind);
-        let radius = app.brush.radius;
-        if kind == Some(BrushKind::Grab) {
+        if kind.is_some_and(BrushKind::drags) {
             // Move on the plane through the grab point facing the camera.
             let ray = world_ray(&cam, rect, at);
             if let Some(st) = &mut app.stroke
@@ -677,23 +678,22 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
                     let w = app.doc.scene.world_matrix(st.object);
                     let delta = w.inverse().transform_vector3(now - last);
                     st.grab = Some((origin, n, now));
-                    let center = st.last.unwrap_or(Vec3::ZERO);
-                    app.doc.stroke_dab(Dab { center, view_dir: -n, pressure: p, grab_delta: delta });
+                    let mut center = st.last.unwrap_or(Vec3::ZERO);
+                    if kind == Some(BrushKind::Pull) {
+                        // A pull travels with what it moves, picking up new surface on the way.
+                        center += delta;
+                        st.last = Some(center);
+                    }
+                    app.doc.stroke_dab(Dab { center, view_dir: -n, pressure: p, grab_delta: delta, scale: 1.0 });
                 }
             }
         } else if let Some((hit, dir, _)) = sculpt_hit(app, &cam, rect, at) {
-            let spacing = (radius * 0.2).max(1e-5);
-            let last = app.stroke.as_ref().and_then(|s| s.last).unwrap_or(hit);
-            let dist = last.distance(hit);
-            if dist >= spacing {
-                let steps = ((dist / spacing) as usize).clamp(1, 64);
-                for k in 1..=steps {
-                    let c = last.lerp(hit, k as f32 / steps as f32);
-                    app.doc.stroke_dab(Dab { center: c, view_dir: dir, pressure: p, grab_delta: Vec3::ZERO });
-                }
-                if let Some(st) = &mut app.stroke {
-                    st.last = Some(hit);
-                }
+            let out = app.stroke.as_mut().map(|st| st.maker.push(hit, dir, p)).unwrap_or_default();
+            if out.rewind {
+                app.doc.stroke_rewind();
+            }
+            for d in out.dabs {
+                app.doc.stroke_dab(d);
             }
         }
     }

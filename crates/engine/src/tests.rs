@@ -62,6 +62,7 @@ fn stroke(kind: BrushKind) -> Stroke {
                 view_dir: -Vec3::Y,
                 pressure: 1.0,
                 grab_delta: Vec3::ZERO,
+                scale: 1.0,
             })
             .collect(),
     }
@@ -351,4 +352,32 @@ fn even_remesh_is_a_history_step() {
     // Sculpting continues on the remeshed surface.
     d.execute(Command::BeginSculpt { id: ball }).unwrap();
     d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Draw) }).unwrap();
+}
+
+#[test]
+fn strokes_and_presets_keep_their_json_form() {
+    use modelcraft_sculpt::preset;
+    // A stroke journaled before hardness, stroke modes, image stamps and dab scale existed.
+    let old = r#"{"cmd":"sculpt_stroke","id":1,"stroke":{"brush":{"kind":"draw","radius":0.3,"strength":0.4},"dabs":[{"center":[0,1,0],"view_dir":[0,-1,0],"pressure":1.0}]}}"#;
+    let Command::SculptStroke { stroke: s, .. } = serde_json::from_str::<Command>(old).unwrap() else { panic!("not a stroke") };
+    assert_eq!((s.brush.hardness, s.brush.spacing, s.dabs[0].scale), (0.0, 0.2, 1.0));
+    assert_eq!(s.brush.stroke, modelcraft_sculpt::StrokeMode::Spaced);
+    // A default brush serialises without the new fields, so old readers still parse it.
+    let j = serde_json::to_string(&stroke(BrushKind::Draw)).unwrap();
+    assert!(!j.contains("hardness") && !j.contains("scale") && !j.contains("\"stroke\"") && !j.contains("live_detail"), "{j}");
+    for p in preset::builtin() {
+        let j = serde_json::to_string(&p).unwrap();
+        assert_eq!(serde_json::from_str::<preset::BrushPreset>(&j).unwrap(), p);
+        // Every preset sculpts through the command path.
+        let mut d = Document::new();
+        let ball = d.execute(Command::AddPrimitive { kind: "round_cube".into(), name: None, parent: None }).unwrap().created[0];
+        d.execute(Command::BeginSculpt { id: ball }).unwrap();
+        let mut st = stroke(p.brush.kind);
+        st.brush = p.apply(&st.brush);
+        for dab in &mut st.dabs {
+            dab.grab_delta = Vec3::new(0.02, 0.0, 0.0);
+        }
+        d.execute(Command::SculptStroke { id: ball, stroke: st }).unwrap();
+        assert!(d.undo.len() >= 3, "{} changed nothing", p.name);
+    }
 }

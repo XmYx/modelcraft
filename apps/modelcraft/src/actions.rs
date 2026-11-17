@@ -180,6 +180,16 @@ fn brush_label_id(k: BrushKind) -> &'static str {
         BrushKind::Flatten => "flatten",
         BrushKind::Crease => "crease",
         BrushKind::Mask => "mask",
+        BrushKind::Pull => "pull",
+        BrushKind::Plateau => "plateau",
+        BrushKind::Trim => "trim",
+        BrushKind::Fill => "fill",
+        BrushKind::Polish => "polish",
+        BrushKind::Buildup => "buildup",
+        BrushKind::SurfaceGrab => "surface_grab",
+        BrushKind::Gouge => "gouge",
+        BrushKind::Slide => "slide",
+        BrushKind::Bulge => "bulge",
     }
 }
 
@@ -194,6 +204,16 @@ pub fn brush_label(k: BrushKind) -> String {
         BrushKind::Flatten => tl!("Flatten"),
         BrushKind::Crease => tl!("Crease"),
         BrushKind::Mask => tl!("Mask"),
+        BrushKind::Pull => tl!("Pull"),
+        BrushKind::Plateau => tl!("Plateau"),
+        BrushKind::Trim => tl!("Trim"),
+        BrushKind::Fill => tl!("Fill"),
+        BrushKind::Polish => tl!("Polish"),
+        BrushKind::Buildup => tl!("Buildup"),
+        BrushKind::SurfaceGrab => tl!("Surface Grab"),
+        BrushKind::Gouge => tl!("Gouge"),
+        BrushKind::Slide => tl!("Slide"),
+        BrushKind::Bulge => tl!("Bulge"),
     }
 }
 
@@ -415,6 +435,11 @@ impl Action {
                 BrushKind::Flatten => "Sculpt: L",
                 BrushKind::Crease => "Sculpt: K",
                 BrushKind::Mask => "Sculpt: M",
+                BrushKind::Pull => "Sculpt: H",
+                BrushKind::Trim => "Sculpt: T",
+                BrushKind::Polish => "Sculpt: O",
+                BrushKind::Buildup => "Sculpt: B",
+                _ => return None,
             },
             Symmetry => "Sculpt: X",
             MaskInvert => "Sculpt: Cmd+9",
