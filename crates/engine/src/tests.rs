@@ -449,6 +449,9 @@ fn uv_layout_exports_as_svg_and_png() {
     let mut e = Document::new();
     e.execute(Command::Import { path: obj.display().to_string() }).unwrap();
     assert!(e.export_uv_layout(&dir.join("t.svg"), None, 64).is_err());
+}
+
+#[test]
 fn a_history_that_no_longer_replays_is_dropped_not_fatal() {
     let dir = tmp("history-bad");
     let mesh_file = dir.join("part.obj");
