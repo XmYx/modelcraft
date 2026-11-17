@@ -544,13 +544,38 @@ fn a_pointer_drag_in_the_viewport_sculpts_in_every_stroke_mode() {
         assert_eq!(mesh.triangle_count() > tris, live, "only live detail adds triangles");
         assert_eq!(h.state().doc.undo.len(), undo + 1, "{kind:?} with {mode:?}: one stroke, one undo step");
         assert!(h.state().stroke.is_none(), "the stroke ended with the button release");
-        // Undo puts the surface back. The command is run directly: in this harness Ctrl+Z
-        // right after a pointer drag in the viewport is not delivered (it is after a button
-        // click, see `sculpt_workspace_by_keyboard`); whether a real window differs is not known.
+        // Undo puts the surface back.
         h.run();
-        assert!(h.state_mut().run(modelcraft_engine::Command::Undo));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
         h.run();
         let mesh = &h.state().doc.sculpt.as_ref().unwrap().mesh;
         assert!(before.len() == mesh.positions.len() && before.iter().zip(&mesh.positions).all(|(x, y)| x.distance(*y) < 1e-6), "{kind:?} with {mode:?}: undo");
     }
+}
+
+#[test]
+fn undo_and_brush_keys_work_after_a_stroke_in_the_viewport() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let at = h.get_by_label_contains("Viewport, Perspective").rect().center();
+    let before = h.state().doc.sculpt.as_ref().unwrap().mesh.positions.clone();
+    let undo = h.state().doc.undo.len();
+    drag(&mut h, at, at + egui::vec2(40.0, 0.0));
+    h.run();
+    assert_eq!(h.state().doc.undo.len(), undo + 1);
+    // The viewport now has keyboard focus; shortcuts must still reach the app.
+    assert!(h.get_by_label_contains("Viewport, Perspective").is_focused());
+    h.key_press(Key::C);
+    h.run();
+    assert_eq!(h.state().brush.kind, modelcraft_engine::sculpt::BrushKind::Clay);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.undo.len(), undo, "Ctrl+Z undoes the stroke");
+    assert_eq!(h.state().doc.sculpt.as_ref().unwrap().mesh.positions, before);
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.undo.len(), undo + 1, "and Ctrl+Shift+Z redoes it");
 }
