@@ -415,7 +415,9 @@ fn undo_history_reaches_back_into_the_last_session() {
     h.run();
     assert_eq!(h.state().doc.scene.len(), 1);
     let _ = std::fs::remove_dir_all(&d);
+}
 
+#[test]
 fn mask_tools_by_keyboard_and_buttons() {
     let mut h = harness();
     h.run();
