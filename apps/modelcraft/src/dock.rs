@@ -202,11 +202,9 @@ pub fn move_panel(app: &mut ModelApp, p: PanelId, m: Move) {
             }
         }
         Move::Float => {
-            if !shown {
-                if let Err(e) = app.layouts.apply(ws, Action::OpenAt { panel: pane, anchor: Pane::Viewport, placement: Placement::Split(Zone::Right) }) {
-                    app.status = e;
-                    return;
-                }
+            if !shown && let Err(e) = app.layouts.apply(ws, Action::OpenAt { panel: pane, anchor: Pane::Viewport, placement: Placement::Split(Zone::Right) }) {
+                app.status = e;
+                return;
             }
             Action::Float { panel: pane, rect: [320.0, 160.0, 300.0, 420.0] }
         }
