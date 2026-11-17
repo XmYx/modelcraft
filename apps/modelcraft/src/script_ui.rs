@@ -24,6 +24,10 @@ use crate::theme;
 
 /// Largest script file the editor opens.
 pub const MAX_FILE_BYTES: u64 = 1 << 20;
+/// Entries read from each folder of the scripts folder.
+const MAX_SCAN: usize = 500;
+/// Bytes of a script read for its tooltip.
+const TIP_BYTES: usize = 4096;
 /// Console lines kept.
 const MAX_CONSOLE_LINES: usize = 2000;
 /// Above this many bytes the editor stops colouring (the text stays editable).
@@ -182,19 +186,28 @@ fn is_script(p: &Path) -> bool {
     p.is_file() && p.extension().is_some_and(|e| e == EXT)
 }
 
+/// The first comment line of a file, reading only its first few KiB.
+fn tip_of(path: &Path) -> String {
+    use std::io::Read;
+    let mut buf = vec![0u8; TIP_BYTES];
+    let n = std::fs::File::open(path).and_then(|mut f| f.read(&mut buf)).unwrap_or(0);
+    buf.truncate(n);
+    first_comment(&String::from_utf8_lossy(&buf))
+}
+
 fn entry_of(path: PathBuf, folder: Option<String>) -> Entry {
     let label = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let tip = read_script(&path).map(|t| first_comment(&t)).unwrap_or_default();
+    let tip = tip_of(&path);
     Entry { label, path, folder, tip }
 }
 
 /// The menu entries and the quick scripts of a scripts folder: `*.rhai` at the top and one level
 /// of subfolders (the `quick` subfolder is the strip), sorted by name, without the startup script.
 pub fn scan(dir: &Path) -> (Vec<Entry>, Vec<Entry>) {
+    // At most MAX_SCAN entries per folder are read, however many there are.
     let list = |d: &Path| -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(d).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).collect()).unwrap_or_default();
+        let mut v: Vec<PathBuf> = std::fs::read_dir(d).map(|rd| rd.filter_map(|e| e.ok()).take(MAX_SCAN).map(|e| e.path()).collect()).unwrap_or_default();
         v.sort();
-        v.truncate(500);
         v
     };
     let mut entries = Vec::new();
@@ -225,9 +238,48 @@ fn project_dir(app: &ModelApp) -> Option<PathBuf> {
     app.doc.path.as_ref().and_then(|p| p.parent()).map(Path::to_path_buf).filter(|p| !p.as_os_str().is_empty())
 }
 
+/// A folder a script may be given write access to: not a filesystem root and not the user's home
+/// folder (a project saved straight into the home folder would otherwise give a script the
+/// dot-files that run at the next login).
+fn safe_write_root(dir: &Path) -> bool {
+    safe_write_root_given(dir, &home_folders())
+}
+
+fn home_folders() -> Vec<PathBuf> {
+    ["HOME", "USERPROFILE"].into_iter().filter_map(std::env::var_os).filter_map(|h| std::fs::canonicalize(h).ok()).collect()
+}
+
+fn safe_write_root_given(dir: &Path, homes: &[PathBuf]) -> bool {
+    let Ok(canon) = std::fs::canonicalize(dir) else { return false };
+    canon.parent().is_some() && !homes.contains(&canon)
+}
+
+/// The folders a script run may write when "Allow writing files" is on: the project's folder (or
+/// `scripts-out` inside it when the project's folder is not a safe place to give away, created on
+/// demand) and the scripts folder.
+pub fn write_roots(app: &ModelApp) -> Vec<PathBuf> {
+    write_roots_given(app, &home_folders())
+}
+
+fn write_roots_given(app: &ModelApp, homes: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(p) = project_dir(app) {
+        if safe_write_root_given(&p, homes) {
+            roots.push(p);
+        } else {
+            let out = p.join("scripts-out");
+            if std::fs::create_dir_all(&out).is_ok() {
+                roots.push(out);
+            }
+        }
+    }
+    roots.extend(app.script.dir.iter().filter(|d| d.is_dir()).cloned());
+    roots
+}
+
 /// What a script run may touch: the script's folder, the project's folder and the scripts folder
 /// to read; writing only when the window's "Allow writing files" is on, and then only the
-/// project's folder and the scripts folder.
+/// folders of [`write_roots`].
 fn permissions(app: &ModelApp, script: Option<&Path>) -> Permissions {
     let project = project_dir(app);
     let script_dir = script.and_then(Path::parent).map(Path::to_path_buf).filter(|p| !p.as_os_str().is_empty());
@@ -237,7 +289,7 @@ fn permissions(app: &ModelApp, script: Option<&Path>) -> Permissions {
         p = p.allow_read(d);
     }
     if app.script.allow_writes {
-        for d in [project.as_ref(), app.script.dir.as_ref()].into_iter().flatten() {
+        for d in write_roots(app) {
             p = p.allow_write(d);
         }
     }
@@ -588,9 +640,20 @@ fn body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ui.separator();
         let w = ui.checkbox(&mut app.script.allow_writes, tl!("Allow writing files"));
         w.on_hover_text(tl!(
-            "Lets scripts write files in the project's folder and the scripts folder. Reading is limited to the same folders and the script's own."
+            "Lets scripts write files in the folders listed below. Reading is limited to the project's folder, the scripts folder and the script's own."
         ));
     });
+
+    if app.script.allow_writes {
+        let roots = write_roots(app);
+        let text = if roots.is_empty() {
+            tl!("Scripts can write nowhere: save the project or create the scripts folder first.")
+        } else {
+            crate::tlf!("Scripts can write in: {folders}", folders = roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", "))
+        };
+        let l = ui.label(RichText::new(text).color(theme::SELECT).small());
+        ui.ctx().accesskit_node_builder(l.id, |n| n.set_live(egui::accesskit::Live::Polite));
+    }
 
     if let Some(t) = app.script.confirm.clone() {
         ui.horizontal(|ui| {
@@ -1209,5 +1272,59 @@ mod tests {
         assert!(read_script(&p).is_err(), "not UTF-8");
         assert_eq!(first_comment("\n  // hello there\ncode"), "hello there");
         assert_eq!(first_comment("code"), "");
+    }
+
+    #[test]
+    fn writes_are_never_granted_to_a_home_folder_or_a_root() {
+        assert!(!safe_write_root(Path::new("/")));
+        assert!(!safe_write_root(Path::new("/definitely/not/a/folder")));
+        let dir = tmp("safe-root");
+        assert!(safe_write_root_given(&dir, &[]));
+        // The home folder is refused, and a project saved there gets a subfolder instead.
+        let home = tmp("fake-home");
+        let homes = [home.clone()];
+        assert!(!safe_write_root_given(&home, &homes));
+        assert!(safe_write_root_given(&dir, &homes));
+        let mut h = harness();
+        h.run();
+        h.state_mut().doc.path = Some(home.join("scene.modelcraft"));
+        h.state_mut().script.allow_writes = true;
+        let roots = write_roots_given(h.state(), &homes);
+        assert_eq!(roots, vec![home.join("scripts-out")]);
+        assert!(home.join("scripts-out").is_dir());
+        // A project in an ordinary folder gets that folder.
+        h.state_mut().doc.path = Some(dir.join("scene.modelcraft"));
+        assert_eq!(write_roots_given(h.state(), &homes), vec![dir.clone()]);
+    }
+
+    #[test]
+    fn the_granted_write_folders_are_shown_next_to_the_checkbox() {
+        let dir = tmp("shown");
+        let mut h = harness();
+        h.run();
+        h.state_mut().script = ScriptState::new(Some(dir.clone()));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::J);
+        h.step();
+        h.step();
+        h.get_by_role_and_label(Role::CheckBox, "Allow writing files").click();
+        h.run();
+        h.get_by_label_contains("Scripts can write in:");
+        assert!(h.state().script.allow_writes);
+    }
+
+    #[test]
+    fn scanning_reads_a_bounded_number_of_entries_and_only_the_start_of_each_file() {
+        let dir = tmp("scan-bound");
+        for i in 0..(MAX_SCAN + 50) {
+            std::fs::write(dir.join(format!("s{i:04}.rhai")), "// tip\n").unwrap();
+        }
+        let (entries, _) = scan(&dir);
+        assert_eq!(entries.len(), MAX_SCAN);
+        // A huge file is not read whole for its tooltip.
+        let big = dir.join("big.rhai");
+        let mut text = String::from("// the tip\n");
+        text.push_str(&"x".repeat(5 << 20));
+        std::fs::write(&big, text).unwrap();
+        assert_eq!(tip_of(&big), "the tip");
     }
 }

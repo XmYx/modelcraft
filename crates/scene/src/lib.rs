@@ -293,6 +293,35 @@ pub enum StepOp {
     EvenRemesh {
         cell: f32,
     },
+    /// Flatten the surface into UVs: cut along `seams` (and along every edge sharper than
+    /// `angle` degrees), solve a least-squares conformal map per island and lay the islands out
+    /// in the unit square. Seams are vertex pairs and pins name a face corner, both in the
+    /// numbering of the step's input mesh.
+    Unwrap {
+        #[serde(default)]
+        seams: Vec<[u32; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<f32>,
+        #[serde(default)]
+        pins: Vec<UvPin>,
+        /// Add the cuts an island needs to be flattenable (a sphere gets a path, a tube a line).
+        #[serde(default = "yes")]
+        auto_cut: bool,
+        /// Margin around and between islands, as a fraction of the unit square.
+        #[serde(default = "default_margin")]
+        margin: f32,
+    },
+}
+
+/// A face corner held at a UV position while unwrapping.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UvPin {
+    pub corner: u32,
+    pub uv: [f32; 2],
+}
+
+fn default_margin() -> f32 {
+    0.01
 }
 
 impl StepOp {
@@ -318,6 +347,7 @@ impl StepOp {
             StepOp::Mirror { .. } => "Mirror",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
+            StepOp::Unwrap { .. } => "Unwrap UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -329,6 +359,7 @@ impl StepOp {
             | StepOp::Flip { faces }
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
+            StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }

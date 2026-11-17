@@ -79,8 +79,9 @@ a prompt (New, Open and choosing a file ask first).
 one level of subfolders become the Scripts menu (the first comment line is the tooltip); the
 `quick` subfolder becomes the Quick Scripts strip under the tool options; `startup.rhai` runs once
 when the app starts. A script run from the window may read the script's folder, the project's
-folder and the scripts folder, and write nowhere unless "Allow writing files" is on, and then only
-the project's folder and the scripts folder.
+folder and the scripts folder, and write nowhere unless "Allow writing files" is on. Then the
+window lists the folders it grants: the project's folder (a `scripts-out` folder inside it when the
+project is saved straight into the user's home folder or a filesystem root) and the scripts folder.
 
 ## The model
 
