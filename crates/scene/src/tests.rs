@@ -117,3 +117,47 @@ fn picking_hits_the_front_face() {
     assert!(pick::pick_vertex(&m, &r).is_some());
     assert!(pick::pick_edge(&m, &r).is_some());
 }
+
+#[test]
+fn unwrap_step_writes_uvs_that_later_steps_keep() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let id = s.add("Cube", cube_kind(), None).unwrap();
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
+        steps.push(Step { id: 1, enabled: true, op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01 } });
+        steps.push(Step { id: 2, enabled: true, op: StepOp::Subdivide { levels: 1 } });
+    }
+    let e = ev.evaluate(&s, id);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    assert!(e.mesh.has_uvs());
+    assert!(e.mesh.corner_uvs().iter().all(|u| u.is_finite() && u.min_element() >= -1e-6 && u.max_element() <= 1.0 + 1e-6));
+    // The step round-trips through JSON with its defaults filled in.
+    let json = serde_json::to_string(&s.get(id).unwrap().steps()[0]).unwrap();
+    assert!(json.contains("\"op\":\"unwrap\""));
+    let back: Step = serde_json::from_str(r#"{"id":1,"op":"unwrap"}"#).unwrap();
+    assert!(matches!(back.op, StepOp::Unwrap { auto_cut: true, ref seams, .. } if seams.is_empty()));
+}
+
+#[test]
+fn unwrap_step_with_stale_input_is_skipped() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let id = s.add("Cube", cube_kind(), None).unwrap();
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
+        // Seams and a pin that name things the cube does not have are ignored, not fatal.
+        steps.push(Step {
+            id: 1,
+            enabled: true,
+            op: StepOp::Unwrap {
+                seams: vec![[900, 901], [0, 0]],
+                angle: Some(f32::NAN),
+                pins: vec![UvPin { corner: 9999, uv: [0.0, 0.0] }],
+                auto_cut: true,
+                margin: 5.0,
+            },
+        });
+    }
+    let e = ev.evaluate(&s, id);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    assert!(e.mesh.has_uvs());
+}

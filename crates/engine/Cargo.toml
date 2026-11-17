@@ -15,6 +15,7 @@ modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-sculpt = { workspace = true }
+modelcraft-uv = { workspace = true }
 modelcraft-formats = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }

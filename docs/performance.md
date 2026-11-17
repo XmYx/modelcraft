@@ -102,6 +102,29 @@ GPU path traverses the BVH in a compute shader rather than through hardware ray 
 comparison needs the same scene, hardware and noise level in both renderers; until someone runs
 that, the honest statement is the absolute rates above.
 
+## UV unwrap (engine, `modelcraft-cli uv-bench --segments N`)
+
+A welded UV sphere of N×N/2 quads with no seams: the automatic cut adds a path, then LSCM solves
+the single island with a sparse Cholesky factorisation (nested-dissection order, two steps of
+refinement). Distortion is measured on the result (`modelcraft_uv::measure`; area-weighted, angle
+error in degrees, stretch is σ1/σ2 of the per-triangle map, 1 = conformal; area RMS is the RMS of
+the log of each triangle's UV-to-surface area share, 0 = one scale everywhere). Same machine as
+above, release build.
+
+| Sphere | Vertices | Unwrap | Solve residual | Mean / max angle error | Mean / max stretch | Area RMS (log) | Flipped |
+|---|---|---|---|---|---|---|---|
+| 32×16 | 482 | 3 ms | 2e-14 | 0.53° / 1.12° | 1.013 / 1.023 | 0.486 | 0 |
+| 64×32 | 1,986 | 7 ms | 8e-14 | 0.14° / 0.43° | 1.003 / 1.008 | 0.493 | 0 |
+| 128×64 | 8,066 | 32 ms | 3e-13 | 0.035° / 0.11° | 1.001 / 1.002 | 0.496 | 0 |
+| 256×128 | 32,514 | 176 ms | 1e-12 | 0.010° / 0.38° | 1.000 / 1.008 | 0.499 | 0 |
+
+A conformal map keeps angles and cannot keep areas on a sphere: the area RMS near 0.5 is the price
+of the cut. On developable shapes (plane, open tube, cube faces) the unwrap is exact to float
+precision (angle error below 1e-4°, area RMS below 1e-6; see `crates/uv/src/tests.rs`).
+Preconditioned conjugate gradients on the same system stalled (residual 1.7e-5 after 8,000
+iterations at 64×32), which is why the solver is direct; conjugate gradients remain as the
+fallback above 40 M factor entries.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have

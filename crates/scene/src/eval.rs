@@ -259,6 +259,17 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
+        StepOp::Unwrap { seams, angle, pins, auto_cut, margin } => {
+            use modelcraft_uv::{Pin, SeamSet, UnwrapOptions};
+            let mut set = SeamSet::from_vertex_pairs(seams);
+            set.retain_existing(m);
+            if let Some(a) = angle {
+                set.mark_by_angle(m, *a);
+            }
+            let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
+            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1) };
+            modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
         StepOp::Sculpt { layer } => {
             let mut out = if layer.level == 0 { m.clone() } else { modelcraft_ops::subdivide::catmull_clark(m, u32::from(layer.level))? };
             let nv = out.vertex_count();
