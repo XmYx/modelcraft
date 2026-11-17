@@ -190,7 +190,9 @@ impl Evaluator {
                     }
                 }
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Field { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } => Evaluated::default(),
+            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Field { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } => {
+                Evaluated::default()
+            }
         };
         self.finals.insert(id, (key, result.clone()));
         result
