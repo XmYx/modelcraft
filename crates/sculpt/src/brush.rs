@@ -169,6 +169,10 @@ pub struct BrushSettings {
     pub pressure_strength: bool,
     #[serde(default)]
     pub pressure_radius: bool,
+    /// Live detail: split the triangles under the brush until their edges are no longer than
+    /// this (object units). None: the triangles stay as they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_detail: Option<f32>,
 }
 
 fn yes() -> bool {
@@ -193,6 +197,7 @@ impl BrushSettings {
             symmetry: Symmetry::default(),
             pressure_strength: true,
             pressure_radius: false,
+            live_detail: None,
         }
     }
 }
@@ -235,6 +240,12 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
     for (pass, mirror) in b.symmetry.passes().into_iter().enumerate() {
         let center = dab.center * mirror;
         let view = dab.view_dir * mirror;
+        if let Some(edge) = b.live_detail
+            && b.kind != crate::BrushKind::Mask
+            && (b.kind != crate::BrushKind::Grab || first)
+        {
+            m.refine_sphere(st, center, radius, edge);
+        }
         if b.kind == crate::BrushKind::Grab {
             if first {
                 m.query_sphere(center, radius, &mut verts);

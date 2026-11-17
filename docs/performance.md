@@ -56,6 +56,28 @@ this size) and the undo snapshot.
 Level changes build the level topology twice through the validated mesh builder; that, not the
 linear refinement itself, is most of the time, and it is single-threaded.
 
+## Live detail and even remesh (`modelcraft-cli bench`, last lines)
+
+Measured 2026-11-17 on the same machine while other builds were running, engine only (no GPU
+upload). A draw stroke of 200 dabs with live detail on:
+
+| Mesh | Triangles before → after | Dab mean / p95 | Stroke end (rebuild the picking tree) | Undo |
+|---|---|---|---|---|
+| 49 k triangles, radius 0.2, edge 0.01 | 49,152 → 149,606 | 5.8 ms / 7.3 ms | 86 ms | 36 ms |
+| 1 M triangles, radius 0.1, edge 0.004 | 995,328 → 1,156,008 | 6.5 ms / 7.0 ms | 0.76 s | 0.82 s |
+
+A dab with live detail costs about twenty times a plain dab: each of up to four split rounds
+scans every triangle under the brush. In the app each split also re-uploads the whole vertex and
+index buffer; that is not in these numbers and not yet measured.
+
+Even remesh (closed quad spheres, unit radius):
+
+| Input quads | Cell | Output quads | Time | Volume change |
+|---|---|---|---|---|
+| 24,576 | 0.02 | 47,022 | 0.20 s | 0.045 % |
+| 1,008,600 | 0.01 | 188,466 | 3.8 s | 0.011 % |
+| 1,008,600 | 0.006 | 523,584 | 3.8 s | 0.004 % |
+
 **Input-to-photon estimate while sculpting 2 M triangles**: one dab (≈1.2 ms in the app, including
 symmetry and normals) + chunk upload (≈0.5 ms) + one frame (≈3.5 ms uncapped) ≈ **5 ms** before
 display latency.

@@ -35,6 +35,10 @@ pub struct SculptSession {
     pub id: ObjectId,
     pub step_id: u64,
     pub mesh: SculptMesh,
+    /// The layer already carried its own triangles (live detail) when the session began.
+    had_topology: bool,
+    /// The mesh's triangle revision last written to the layer.
+    topo_synced: u64,
     /// The scene's layer is older than `mesh`.
     pub unsynced: bool,
 }
@@ -199,6 +203,12 @@ impl Document {
         s.unsynced = false;
         let (pos, mask) = (Arc::new(s.mesh.positions.clone()), Arc::new(s.mesh.mask.clone()));
         let (id, step_id) = (s.id, s.step_id);
+        // Live detail changed the triangles: the layer takes them over (or gives them back
+        // when every live stroke has been undone).
+        let topology = (s.mesh.topology_rev() != s.topo_synced).then(|| {
+            s.topo_synced = s.mesh.topology_rev();
+            if s.mesh.topology_changed() || s.had_topology { s.mesh.to_poly_mesh().ok().filter(|m| m.vertex_count() == pos.len()).map(Arc::new) } else { None }
+        });
         if let Ok(o) = self.scene.edit(id)
             && let ObjectKind::Mesh { steps, .. } = &mut o.kind
             && let Some(step) = steps.iter_mut().find(|st| st.id == step_id)
@@ -206,6 +216,9 @@ impl Document {
         {
             layer.positions = pos;
             layer.mask = mask;
+            if let Some(t) = topology {
+                layer.topology = t;
+            }
         }
     }
 
@@ -222,13 +235,16 @@ impl Document {
             return invalid("the object has no sculpt layer");
         };
         let (step_id, layer) = (*step_id, layer.clone());
-        let input = self.eval.steps_output(&self.scene, id, last).mesh;
+        let input = match &layer.topology {
+            Some(t) => Arc::clone(t),
+            None => self.eval.steps_output(&self.scene, id, last).mesh,
+        };
         let input = crate::layers::level_mesh(&input, layer.level)?;
         if layer.positions.len() != input.vertex_count() {
             return invalid("the sculpt layer no longer matches the mesh (an earlier step changed the vertex count)");
         }
         let mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
-        self.sculpt = Some(SculptSession { id, step_id, mesh, unsynced: false });
+        self.sculpt = Some(SculptSession { id, step_id, mesh, unsynced: false, had_topology: layer.topology.is_some(), topo_synced: 0 });
         Ok(())
     }
 
@@ -250,8 +266,24 @@ impl Document {
         Ok(())
     }
 
+    /// Why live detail cannot be used on `id` right now (None: it can). Detail levels and shape
+    /// layers hold one value per vertex of fixed triangles, which live detail would change.
+    pub fn live_detail_blocked(&self, id: ObjectId) -> Option<&'static str> {
+        let l = self.sculpt_layer(id)?;
+        if l.level != 0 || !l.finer.is_empty() {
+            Some("live detail works on the base detail level only, with no finer levels kept")
+        } else if !l.shapes.is_empty() {
+            Some("merge or remove the shape layers before using live detail")
+        } else {
+            None
+        }
+    }
+
     /// Interactive stroke: begin (requires a session).
-    pub fn stroke_begin(&mut self, brush: BrushSettings) -> bool {
+    pub fn stroke_begin(&mut self, mut brush: BrushSettings) -> bool {
+        if brush.live_detail.is_some() && self.sculpt.as_ref().is_some_and(|s| self.live_detail_blocked(s.id).is_some()) {
+            brush.live_detail = None;
+        }
         match &mut self.sculpt {
             Some(s) => {
                 s.mesh.begin_stroke(brush);
@@ -322,6 +354,11 @@ impl Document {
             }
             Command::SculptStroke { id, stroke } => {
                 self.ensure_session(*id)?;
+                if stroke.brush.live_detail.is_some()
+                    && let Some(why) = self.live_detail_blocked(*id)
+                {
+                    return invalid(why);
+                }
                 let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
                 let change = s.mesh.replay(stroke);
                 s.unsynced = true;

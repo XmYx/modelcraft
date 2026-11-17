@@ -288,3 +288,42 @@ fn detail_levels_and_shape_layers_by_keyboard() {
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes.len(), 1);
     assert!(h.state().doc.sculpt.is_some(), "undo keeps the sculpt session");
 }
+
+#[test]
+fn live_detail_and_even_remesh_by_keyboard() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let id = h.state().selection[0];
+    // Live detail: a checkbox with a keyboard toggle; the size is a number field.
+    let boxed = h.get_by_role_and_label(Role::CheckBox, "Live Detail");
+    assert_eq!(boxed.accesskit_node().toggled(), Some(egui::accesskit::Toggled::False));
+    h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+    h.run();
+    assert!(h.state().brush.live_detail.is_some());
+    assert_eq!(h.get_by_role_and_label(Role::CheckBox, "Live Detail").accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
+    assert!(h.state().status.starts_with("Live detail on"));
+    h.get_by_role_and_label(Role::SpinButton, "Detail size").set_value_accesskit(40.0);
+    h.run();
+    assert!((h.state().brush.live_detail.unwrap() - 0.4).abs() < 1e-5);
+    // Changing brush keeps it on.
+    h.key_press(Key::C);
+    h.run();
+    assert!(h.state().brush.live_detail.is_some());
+    // With a finer level kept, live detail explains why it stays off.
+    h.key_press(Key::PageUp);
+    h.run();
+    h.get_by_label_contains("live detail works on the base detail level only");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    // Even remesh adds a history step and sculpting carries on.
+    let before = h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count();
+    palette(&mut h, "Even Remesh");
+    let steps = h.state().doc.scene.get(id).unwrap().steps().to_vec();
+    assert!(steps.iter().any(|s| matches!(s.op, modelcraft_engine::scene::StepOp::EvenRemesh { .. })));
+    assert!(h.state().doc.sculpt.is_some(), "a new sculpt layer sits on the remeshed surface");
+    assert!(h.state().status.starts_with("Even remesh:"), "{}", h.state().status);
+    assert_ne!(h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count(), before);
+}

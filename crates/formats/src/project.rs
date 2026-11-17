@@ -6,6 +6,7 @@
 //! | `project.json` | `{format, schema_version, generator, saved_at, scene}`; stored meshes and sculpt layers are left empty and listed in `blobs` |
 //! | `blobs/<object>-source.bin` | a stored mesh ([`crate::blob`]) |
 //! | `blobs/<object>-<step>.bin` | a sculpt layer |
+//! | `blobs/<object>-<step>-topology.bin` | the triangles of a sculpt layer changed by live detail (a mesh blob) |
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -54,6 +55,9 @@ fn source_key(id: ObjectId) -> String {
 fn layer_key(id: ObjectId, step: u64) -> String {
     format!("{}/step/{step}", id.0)
 }
+fn topology_key(id: ObjectId, step: u64) -> String {
+    format!("{}/step/{step}/topology", id.0)
+}
 
 fn zip_err(e: craft_zip::Error) -> FormatError {
     FormatError::Malformed(e.to_string())
@@ -84,6 +88,12 @@ pub fn to_bytes(scene: &Scene) -> Result<Vec<u8>> {
                     layer.anchor = Arc::default();
                     for sh in &mut layer.shapes {
                         sh.delta = Arc::default();
+                    }
+                    if let Some(t) = &mut layer.topology {
+                        let entry = format!("blobs/{}-{}-topology.bin", id.0, s.id);
+                        data.push((entry.clone(), blob::write_mesh(t)));
+                        blobs.insert(topology_key(id, s.id), entry);
+                        *t = Arc::default();
                     }
                     blobs.insert(layer_key(id, s.id), entry);
                 }
@@ -150,6 +160,12 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Scene> {
                     sh.delta = Arc::new(delta);
                 }
                 layer.anchor = Arc::new(bulk.anchor);
+                if layer.topology.is_some()
+                    && let Some(entry) = env.blobs.get(&topology_key(id, s.id))
+                {
+                    let b = zip.read(entry, MAX_BLOB_BYTES).map_err(zip_err)?.ok_or_else(|| FormatError::Malformed(format!("{entry} is missing")))?;
+                    layer.topology = Some(Arc::new(blob::read_mesh(&b)?));
+                }
             }
         }
     }
@@ -201,6 +217,7 @@ mod tests {
                                 active_shape: Some(0),
                                 anchor: Arc::new(vec![Vec3::ONE; n]),
                                 level: 0,
+                                topology: Some(Arc::new(Primitive::Cube { size: Vec3::ONE, segments: 1 }.build().unwrap())),
                             },
                         },
                     }],
