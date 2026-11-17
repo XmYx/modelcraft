@@ -144,6 +144,46 @@ impl Bvh {
         }
     }
 
+    /// Refit only the leaves holding the triangles `moved`, and the boxes above them. The cost
+    /// is one cheap pass over the nodes plus the real work for the moved part, instead of a
+    /// box computation for every triangle of the mesh.
+    pub fn refit_moved(&mut self, p: &[Vec3], tris: &[[u32; 3]], moved: impl Iterator<Item = u32>) {
+        let mut dirty = vec![false; self.nodes.len()];
+        for t in moved {
+            if let Some(d) = self.tri_leaf.get(t as usize).and_then(|leaf| dirty.get_mut(*leaf as usize)) {
+                *d = true;
+            }
+        }
+        for i in (0..self.nodes.len()).rev() {
+            let Some(node) = self.nodes.get(i).copied() else { continue };
+            let (lo, hi) = if node.count > 0 {
+                if !dirty.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                self.leaf_tris(i, &node)
+                    .filter_map(|t| tris.get(t as usize))
+                    .map(|t| tri_bounds(p, t))
+                    .fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
+            } else {
+                let (li, ri) = (node.first as usize, node.first as usize + 1);
+                if !(dirty.get(li).copied().unwrap_or(false) || dirty.get(ri).copied().unwrap_or(false)) {
+                    continue;
+                }
+                if let Some(d) = dirty.get_mut(i) {
+                    *d = true;
+                }
+                match (self.nodes.get(li).copied(), self.nodes.get(ri).copied()) {
+                    (Some(l), Some(r)) => (l.lo.min(r.lo), l.hi.max(r.hi)),
+                    _ => (node.lo, node.hi),
+                }
+            };
+            if let Some(nd) = self.nodes.get_mut(i) {
+                nd.lo = lo;
+                nd.hi = hi;
+            }
+        }
+    }
+
     /// Calls `f` for every triangle in leaves whose box (grown by `pad`) meets the sphere.
     pub fn visit_sphere(&self, c: Vec3, r: f32, mut f: impl FnMut(u32)) {
         let mut stack = vec![0usize];

@@ -494,7 +494,7 @@ fn ms(t: Instant) -> f64 {
 /// Sculpt latency on a dense quad sphere: build times, per-dab time for each brush, and, when a
 /// GPU is present, the chunked upload and a full 1920×1080 draw of the mesh.
 fn bench(polys: u32, dabs: usize) -> Result<(), String> {
-    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1024);
+    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1632);
     let t = Instant::now();
     let mesh = modelcraft_engine::ops::primitives::Primitive::RoundCube { radius: 1.0, segments: seg }.build().map_err(|e| e.to_string())?;
     let build_ms = ms(t);
@@ -564,7 +564,9 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                 }
             }
         }
+        let t = Instant::now();
         let undo = s.end_stroke().map(|(u, _)| u.indices.len()).unwrap_or(0);
+        let end_ms = ms(t);
         if kind == BrushKind::Mask {
             // Leave the surface free for the brushes that follow.
             s.mask_all(0.0);
@@ -572,19 +574,24 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
         }
         let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
         println!(
-            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts",
+            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts, stroke end {:.1} ms",
             kind.label(),
             mean(&dab_t),
             pct(&mut dab_t, 0.95),
             mean(&up_t),
             touched / dabs.max(1),
             mean(&draw_t),
-            undo
+            undo,
+            end_ms
         );
     }
     let t = Instant::now();
     s.refit();
-    println!("bvh refit {:.1} ms", ms(t));
+    println!("full bvh refit {:.1} ms (a stroke end refits only what moved)", ms(t));
+    if polys > 2_000_000 {
+        println!("(history, detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
+        return Ok(());
+    }
     // A full scene-evaluation round trip on the same density through the engine.
     let mut d = Document::new();
     let id = d
@@ -601,6 +608,10 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
     let faces = d.eval.evaluate(&d.scene, id).mesh.face_count();
     println!("history: {}-quad base + 1 subdivision level = {} quads in {:.0} ms", 6 * (seg / 2) * (seg / 2), faces, ms(t));
     let _ = (Scene::new(), ObjectKind::Group);
+    if polys > 2_000_000 {
+        println!("(detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
+        return Ok(());
+    }
     detail_bench(&mut d, id)
 }
 

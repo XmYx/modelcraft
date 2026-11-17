@@ -805,6 +805,7 @@ impl ModelApp {
             MaskClear => self.mask(modelcraft_engine::MaskOp::Clear),
             MaskInvert => self.mask(modelcraft_engine::MaskOp::Invert),
             MaskFill => self.mask(modelcraft_engine::MaskOp::Fill),
+            MaskOp(op) => self.mask(op),
             BrushBigger => self.brush_px = (self.brush_px * 1.15).min(800.0),
             BrushSmaller => self.brush_px = (self.brush_px / 1.15).max(4.0),
             DetailUp => self.sculpt_layer_command(|id| Command::SculptDetail { id, op: modelcraft_engine::DetailOp::Up }),

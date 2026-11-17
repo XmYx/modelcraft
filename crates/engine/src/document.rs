@@ -488,6 +488,12 @@ impl Document {
                     MaskOp::Fill => s.mesh.mask_all(1.0),
                     MaskOp::Invert => s.mesh.mask_invert(),
                     MaskOp::Patch { triangle } => s.mesh.mask_patch(*triangle),
+                    MaskOp::Blur => s.mesh.mask_blur(),
+                    MaskOp::Sharpen => s.mesh.mask_sharpen(),
+                    MaskOp::Grow => s.mesh.mask_grow(),
+                    MaskOp::Shrink => s.mesh.mask_shrink(),
+                    MaskOp::Hollows => s.mesh.mask_by_bend(false),
+                    MaskOp::Ridges => s.mesh.mask_by_bend(true),
                 };
                 s.unsynced = true;
                 if !change.is_empty() {

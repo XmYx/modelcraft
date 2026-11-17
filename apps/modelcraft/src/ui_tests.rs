@@ -9,14 +9,14 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use crate::app::{ModelApp, SelectMode, Workspace};
 use crate::args::Cli;
 
-fn harness() -> Harness<'static, ModelApp> {
+pub(crate) fn harness() -> Harness<'static, ModelApp> {
     let ctx = egui::Context::default();
     let app = ModelApp::with_context(&ctx, Cli::default());
     Harness::builder().with_size(egui::vec2(1500.0, 950.0)).build_ui_state(|ui, app: &mut ModelApp| app.draw(ui), app)
 }
 
 /// Open the command palette with Ctrl+K, type, press Enter.
-fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
+pub(crate) fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);
     h.run();
     h.event(egui::Event::Text(text.to_string()));

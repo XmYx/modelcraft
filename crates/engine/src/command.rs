@@ -16,6 +16,18 @@ pub enum MaskOp {
     Patch {
         triangle: u32,
     },
+    /// Soften the mask's edge.
+    Blur,
+    /// Harden the mask's edge.
+    Sharpen,
+    /// Widen the mask by one ring of vertices.
+    Grow,
+    /// Narrow the mask by one ring of vertices.
+    Shrink,
+    /// Mask the hollows of the surface.
+    Hollows,
+    /// Mask the ridges and bumps of the surface.
+    Ridges,
 }
 
 /// Step between detail levels (each level up subdivides once and keeps the sculpted detail).
@@ -230,7 +242,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
     ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs}"),
-    ("sculpt_mask", "Clear, fill or invert the mask, or mask a patch: id, op"),
+    ("sculpt_mask", "Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, {patch: {triangle}})"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
         "sculpt_shape",
