@@ -14,6 +14,8 @@ use crate::{FormatError, Result};
 
 /// Most faces a layout picture draws.
 pub const MAX_LAYOUT_FACES: usize = 1_000_000;
+/// Most pixel steps a raster layout takes in all (about a second); later faces are left out.
+pub const RASTER_STEP_BUDGET: u64 = 400_000_000;
 /// Largest side of a raster layout, in pixels.
 pub const MAX_LAYOUT_SIZE: u32 = 8192;
 
@@ -73,13 +75,20 @@ pub fn raster(mesh: &PolyMesh, size: u32) -> Result<(u32, Vec<u8>)> {
             }
         }
     };
+    // A total budget of pixel steps, so that a million faces that each span the picture cannot
+    // run for long: past it the remaining faces are left out.
+    let mut budget: u64 = RASTER_STEP_BUDGET;
     for f in 0..mesh.face_count() as u32 {
+        if budget == 0 {
+            break;
+        }
         let pts: Vec<glam::Vec2> = mesh.face_half_edges(f).map(|h| mesh.uv(h) * s).collect();
         for (i, a) in pts.iter().enumerate() {
             let b = pts.get((i + 1) % pts.len()).copied().unwrap_or(*a);
             // Walk the segment one pixel at a time along its longer axis (bounded by the picture).
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             let steps = dx.abs().max(dy.abs()).ceil().min(4.0 * (s + 1.0)) as i64;
+            budget = budget.saturating_sub(steps as u64 + 1);
             for k in 0..=steps {
                 let t = if steps == 0 { 0.0 } else { k as f32 / steps as f32 };
                 plot((a.x + dx * t).round() as i64, (a.y + dy * t).round() as i64);

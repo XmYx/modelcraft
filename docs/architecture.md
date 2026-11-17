@@ -43,6 +43,13 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   command). Auto-key compares the scene before and after a command and keys what changed.
   Tracks live in layers: the base, then layers that add to or replace the value below by a weight
   (`Animation::value_at`); key commands work in the active layer.
+- **Rigging**: a joint is an object (`ObjectKind::Joint`), so the tree, the gizmo, keys and layers
+  work on it unchanged. A skin (`ObjectKind::Skin`) is a child of a mesh, like a deformer: it
+  holds the joints, their inverse bind matrices and the per-point weights, and runs after the
+  deformers. The evaluator's cache key for a mesh with a skin also hashes its joints' world
+  matrices (`rig::pose_key`), so moving a joint re-runs the skin and nothing else. The maths
+  (weights, linear blend, dual quaternions, heat weights, aiming and mirroring joints) is in
+  `modelcraft-anim`, free of the scene.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.
