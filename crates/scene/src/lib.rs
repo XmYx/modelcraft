@@ -8,6 +8,7 @@
 //! - A **clone generator** lays out instances of its first mesh child ([`Cloner`]).
 //! - A **deformer** object bends, twists… its parent mesh, in its own frame.
 //! - A **group** only carries a transform.
+//! - **Constraints** pose objects from other objects, in dependency order ([`constraint`]).
 //!
 //! The [`Evaluator`] is the dependency graph: it caches every step's output per object and
 //! re-evaluates only what an edit invalidated (each object has a revision counter; a generator's
@@ -17,6 +18,7 @@
 
 pub mod anim;
 pub mod attr;
+pub mod constraint;
 mod eval;
 pub mod pick;
 pub mod rig;
@@ -444,6 +446,15 @@ pub struct Scene {
     /// Curves, the current frame and the time settings ([`anim`]).
     #[serde(default, skip_serializing_if = "Animation::is_default")]
     pub anim: Animation,
+    /// Constraints, IK, driven keys and expressions ([`constraint`]).
+    /// Boxed: a scene is moved around by value (history entries, snapshots).
+    #[serde(default, skip_serializing_if = "no_constraints")]
+    pub constraints: Box<constraint::Constraints>,
+}
+
+#[allow(clippy::borrowed_box)]
+fn no_constraints(c: &Box<constraint::Constraints>) -> bool {
+    c.is_empty()
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -493,6 +504,7 @@ impl Scene {
             o.rev = next_rev();
         }
         self.anim.repair(|id| ids.contains(&id));
+        self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
         Ok(self)
     }
@@ -579,6 +591,7 @@ impl Scene {
         self.bump_ancestors_of_removed(&out);
         for (_, o) in &out {
             self.anim.remove_object(o.id);
+            self.constraints.remove_object(o.id);
         }
         out
     }

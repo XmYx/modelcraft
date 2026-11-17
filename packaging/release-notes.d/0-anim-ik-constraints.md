@@ -1,0 +1,1 @@
+- Rigging: add IK to a joint chain and move its goal, blend between IK and FK (and switch without a jump), constrain objects to others by position, rotation, scale, as a child or to look at something, drive attributes with formulas or driven keys, and bake the result to keys.
