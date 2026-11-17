@@ -8,6 +8,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L0 | `modelcraft-mesh` | `PolyMesh`: validated half-edge mesh, per-corner UVs, patches, polygon-list (de)serialisation | glam |
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
 | L1 | `modelcraft-uv` | Seams, islands, automatic cuts into discs, LSCM unwrap with pins (sparse Cholesky, nested dissection; conjugate gradients as fallback), island layout, distortion measures | mesh |
+| L1 | `modelcraft-hair` | Guide curves grown from a surface (density and length maps, seeded), render hairs interpolated from the guides (barycentric or nearest-k blend, clump, frizz, width taper), hard caps on counts and memory | mesh, rayon |
 | L1 | `modelcraft-sculpt` | `SculptMesh` (flat arrays, CSR adjacency, BVH), brushes, falloff, stamps, symmetry, masks, dirty chunks, stroke undo and replay | mesh |
 | L2 | `modelcraft-scene` | Objects, hierarchy, transforms, materials, history steps, the `Evaluator` (dependency graph with per-step caches), picking | mesh, ops |
 | L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh | scene, craft-mesh, craft-zip, craft-atomic |

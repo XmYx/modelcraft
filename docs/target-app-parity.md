@@ -526,8 +526,8 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Guide curves on a surface; comb, cut, length brushes | C M Z | M | L | |
-| Render hair interpolated from guides: density, clumping, frizz | C M | M | L | |
+| Guide curves on a surface; comb, cut, length brushes | C M Z | M | L | `modelcraft-hair` grows seeded guides from a surface with density and length maps; no brushes or UI yet |
+| Render hair interpolated from guides: density, clumping, frizz | C M | M | L | `modelcraft-hair` blends up to millions of strands from guides (barycentric or nearest-k), with clump, frizz, width taper and hard memory caps; `modelcraft-cli hair-bench` measures it; not in the app yet |
 | Sculpted fibre meshes | Z | M | M | |
 | Hair to cards / geometry | C M | M | M | |
 | Import and export of curve grooms | C M | M | S | |
