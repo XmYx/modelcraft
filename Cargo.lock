@@ -2488,6 +2488,7 @@ dependencies = [
  "craft-atomic",
  "glam",
  "modelcraft-anim",
+ "modelcraft-field",
  "modelcraft-formats",
  "modelcraft-mesh",
  "modelcraft-ops",
@@ -2497,6 +2498,16 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "modelcraft-field"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "proptest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2564,6 +2575,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "modelcraft-anim",
+ "modelcraft-field",
  "modelcraft-mesh",
  "modelcraft-ops",
  "proptest",

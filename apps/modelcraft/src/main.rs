@@ -15,6 +15,9 @@ mod anim_ui_tests;
 mod app;
 mod args;
 mod demo;
+mod field_ui;
+#[cfg(test)]
+mod field_ui_tests;
 mod gpu;
 mod keys;
 mod material_ui;

@@ -14,6 +14,7 @@ workspace = true
 modelcraft-anim = { workspace = true }
 modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
+modelcraft-field = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-sculpt = { workspace = true }
 modelcraft-formats = { workspace = true }

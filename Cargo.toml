@@ -15,6 +15,7 @@ repository = "https://github.com/storytold/modelcraft"
 modelcraft-anim = { path = "crates/anim" }
 modelcraft-mesh = { path = "crates/mesh" }
 modelcraft-ops = { path = "crates/ops" }
+modelcraft-field = { path = "crates/field" }
 modelcraft-scene = { path = "crates/scene" }
 modelcraft-sculpt = { path = "crates/sculpt" }
 modelcraft-formats = { path = "crates/formats" }

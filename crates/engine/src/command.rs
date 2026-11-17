@@ -2,7 +2,7 @@
 
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Material, ObjectId, StepOp, Transform};
+use modelcraft_scene::{Field, Material, ObjectId, StepOp, Transform};
 use modelcraft_sculpt::Stroke;
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +86,12 @@ pub enum Command {
         kind: String,
         target: ObjectId,
     },
+    /// Add a falloff field (`sphere`, `box`, `linear`, `noise`) inside a deformer; the deformer
+    /// then acts only where the field is.
+    AddField {
+        kind: String,
+        target: ObjectId,
+    },
     Delete {
         ids: Vec<ObjectId>,
     },
@@ -123,6 +129,11 @@ pub enum Command {
     SetDeformer {
         id: ObjectId,
         deformer: Deformer,
+    },
+    /// Change a falloff field's shape, remap curve and blend mode.
+    SetField {
+        id: ObjectId,
+        field: Field,
     },
     /// Append a build-history step to a mesh object.
     AddStep {
@@ -189,6 +200,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_group", "Add an empty group: name?"),
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round) under target"),
+    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the deformer target"),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -199,6 +211,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_primitive", "Change a primitive's parameters: id, primitive"),
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
+    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
     (
         "add_step",
         "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op",
@@ -229,6 +242,7 @@ impl Command {
             Command::AddGroup { .. } => "Add group".into(),
             Command::AddSmoothCage { .. } => "Add smooth cage".into(),
             Command::AddDeformer { kind, .. } => format!("Add {kind}"),
+            Command::AddField { kind, .. } => format!("Add {kind} field"),
             Command::Delete { .. } => "Delete".into(),
             Command::Duplicate { .. } => "Duplicate".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -239,6 +253,7 @@ impl Command {
             Command::SetPrimitive { .. } => "Primitive settings".into(),
             Command::SetCageLevels { .. } => "Smooth cage levels".into(),
             Command::SetDeformer { .. } => "Deformer settings".into(),
+            Command::SetField { .. } => "Field settings".into(),
             Command::AddStep { op, .. } => op.name().into(),
             Command::SetStep { op, .. } => format!("Edit {}", op.name()),
             Command::EnableStep { .. } => "Toggle step".into(),

@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MaskOp, Outcome};
@@ -566,6 +566,14 @@ impl Document {
                 let name = self.scene.unique_name(&title(kind));
                 out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
             }
+            Command::AddField { kind, target } => {
+                let field = Field::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown field {kind:?}")))?;
+                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. })) {
+                    return invalid("falloff fields go inside a deformer");
+                }
+                let name = self.scene.unique_name(&format!("{} field", title(kind)));
+                out.created.push(self.scene.add(name, ObjectKind::Field { field }, Some(*target))?);
+            }
             Command::Delete { ids } => {
                 for id in ids {
                     if self.scene.get(*id).is_none() {
@@ -621,6 +629,10 @@ impl Document {
             Command::SetDeformer { id, deformer } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::Deformer { deformer: d } => *d = *deformer,
                 _ => return invalid("not a deformer"),
+            },
+            Command::SetField { id, field } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Field { field: f } => *f = field.sanitized(),
+                _ => return invalid("not a falloff field"),
             },
             Command::AddStep { id, op } => {
                 if matches!(op, StepOp::Sculpt { .. }) {

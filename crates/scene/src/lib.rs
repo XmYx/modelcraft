@@ -22,6 +22,7 @@ pub mod pick;
 use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
+pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
@@ -358,6 +359,11 @@ pub enum ObjectKind {
     Deformer {
         deformer: Deformer,
     },
+    /// A falloff field. Inside a deformer it sets how strongly the deformer acts at each point
+    /// (the field's own transform places it in the deformer's frame); several fields combine.
+    Field {
+        field: Field,
+    },
 }
 
 impl ObjectKind {
@@ -367,6 +373,7 @@ impl ObjectKind {
             ObjectKind::Mesh { .. } => "Mesh",
             ObjectKind::SmoothCage { .. } => "Smooth cage",
             ObjectKind::Deformer { .. } => "Deformer",
+            ObjectKind::Field { .. } => "Falloff field",
         }
     }
 }
@@ -675,6 +682,19 @@ impl Scene {
             c = o.parent.and_then(|p| self.get(p));
         }
         true
+    }
+
+    /// The falloff fields inside `id` (a deformer), each with the matrix taking the deformer's
+    /// frame into its own. Hidden fields are off.
+    pub fn field_stack(&self, id: ObjectId) -> FieldStack {
+        let mut stack = FieldStack::new();
+        for c in self.children(id) {
+            let Some(o) = self.get(c) else { continue };
+            if let (true, ObjectKind::Field { field }) = (o.visible, &o.kind) {
+                stack.push(o.transform.matrix().inverse(), field.clone());
+            }
+        }
+        stack
     }
 
     /// Combined revision of an object and everything its output depends on (children for

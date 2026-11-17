@@ -787,6 +787,21 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), color));
         }
     }
+    // Outline of the selected falloff fields (and of every field of a selected deformer).
+    let sel_fields: Vec<ObjectId> = app
+        .doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| matches!(o.kind, ObjectKind::Field { .. }) && app.doc.scene.visible(o.id))
+        .filter(|o| app.selection.contains(&o.id) || o.parent.is_some_and(|p| app.selection.contains(&p)))
+        .map(|o| o.id)
+        .collect();
+    for f in sel_fields {
+        for (a, b) in crate::field_ui::outline(&app.doc.scene, f) {
+            out.extend(line(a, b, [0.45, 0.85, 0.8, 0.9]));
+        }
+    }
     if app.mode == SelectMode::Edge
         && let Some((_, m, w)) = edit_mesh(app)
     {

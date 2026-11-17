@@ -117,3 +117,39 @@ fn picking_hits_the_front_face() {
     assert!(pick::pick_vertex(&m, &r).is_some());
     assert!(pick::pick_edge(&m, &r).is_some());
 }
+
+#[test]
+fn falloff_fields_limit_where_a_deformer_acts() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let cube = s.add("Cube", cube_kind(), None).unwrap();
+    let base = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    let twist = s.add("Twist", ObjectKind::Deformer { deformer: Deformer::Twist { angle: 90.0 } }, Some(cube)).unwrap();
+    let full = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    assert_ne!(base, full);
+    // A sphere field at the top of the cube (y = +1): the bottom stays, the top moves.
+    let mut sphere = Field::default_of("sphere").unwrap();
+    sphere.shape = modelcraft_field::Shape::Sphere { radius: 1.8, inner: 0.0 };
+    let field = s.add("Sphere field", ObjectKind::Field { field: sphere }, Some(twist)).unwrap();
+    s.edit(field).unwrap().transform.translation = Vec3::new(0.0, 1.0, 0.0);
+    assert_eq!(s.field_stack(twist).len(), 1);
+    let limited = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    for (i, p) in base.iter().enumerate() {
+        if p.y < -0.5 {
+            assert_eq!(limited[i], *p, "outside the field, unchanged");
+        }
+    }
+    assert!(base.iter().zip(&limited).any(|(a, b)| a != b), "inside the field, still deformed");
+    assert_ne!(limited, full);
+    // Moving the field re-evaluates through the cache; hiding it removes the falloff.
+    s.edit(field).unwrap().transform.translation = Vec3::new(0.0, -1.0, 0.0);
+    let moved = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    assert_ne!(moved, limited);
+    s.edit(field).unwrap().visible = false;
+    assert_eq!(ev.evaluate(&s, cube).mesh.positions(), &full[..]);
+    // A field outside a deformer is just data; a field alone evaluates to nothing.
+    assert_eq!(ev.evaluate(&s, field).mesh.face_count(), 0);
+    // Save and load keep it.
+    let back: Scene = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back.get(field).unwrap().kind, s.get(field).unwrap().kind);
+}
