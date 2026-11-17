@@ -1,0 +1,1 @@
+- The Render View can light your scene with daylight (set the sun's height and direction) or a panorama picture, as well as the studio light. Scenes with many small lights render with far less noise.

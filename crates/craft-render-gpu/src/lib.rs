@@ -189,6 +189,8 @@ const KIND_TRI_TWO_SIDED: u32 = 1;
 const KIND_POINT: u32 = 2;
 const KIND_DIRECTIONAL: u32 = 3;
 const KIND_ENVIRONMENT: u32 = 4;
+const KIND_SPOT: u32 = 5;
+const KIND_SUN: u32 = 6;
 
 /// Samples per pixel times pixels one dispatch may cover, so a single submission stays short
 /// enough for the driver's watchdog and for the interface to stay responsive.
@@ -267,6 +269,9 @@ impl GpuRenderer {
         if w == 0 || h == 0 || w > max_side || h > max_side {
             return Err(GpuError::BadImageSize(w, h));
         }
+        if scene.lights.env_map.is_some() {
+            return Err(GpuError::Unsupported("image-based lighting"));
+        }
         if let Some(feature) = scene.materials.iter().find_map(unsupported) {
             return Err(GpuError::Unsupported(feature));
         }
@@ -323,17 +328,26 @@ impl GpuRenderer {
         }
         for (j, l) in lights.analytic.iter().enumerate() {
             let k = emissive_count + j;
-            let (kind, p0, radiance) = match *l {
-                Light::Point { position, intensity } => (KIND_POINT, position, intensity),
-                Light::Directional { direction, irradiance } => (KIND_DIRECTIONAL, direction.normalize_or_zero(), irradiance),
+            // `e1` carries a spot's axis, `e2.x` the cosine where its fall-off starts, and `area`
+            // the cosine of its cone (spot) or the tangent of its angular radius (sun).
+            let (kind, p0, radiance, e1, e2, area) = match *l {
+                Light::Point { position, intensity } => (KIND_POINT, position, intensity, glam::Vec3::ZERO, 0.0, 0.0),
+                Light::Spot { position, direction, intensity, cone_angle, blend } => {
+                    let outer = cone_angle.clamp(1e-3, std::f32::consts::PI);
+                    (KIND_SPOT, position, intensity, direction.normalize_or_zero(), (outer * (1.0 - blend.clamp(0.0, 1.0))).cos(), outer.cos())
+                }
+                Light::Directional { direction, irradiance } => (KIND_DIRECTIONAL, direction.normalize_or_zero(), irradiance, glam::Vec3::ZERO, 0.0, 0.0),
+                Light::Sun { direction, irradiance, angular_radius } => {
+                    (KIND_SUN, direction.normalize_or_zero(), irradiance, glam::Vec3::ZERO, 0.0, angular_radius.clamp(0.0, 0.5).tan())
+                }
             };
             entries.push(GpuLight {
                 p0: p0.to_array(),
                 kind,
-                e1: [0.0; 3],
+                e1: e1.to_array(),
                 cdf: cdf.get(k).copied().unwrap_or(1.0),
-                e2: [0.0; 3],
-                area: 0.0,
+                e2: [e2, 0.0, 0.0],
+                area,
                 radiance: radiance.to_array(),
                 pmf: lights.pmf(k),
             });
@@ -374,7 +388,7 @@ impl GpuRenderer {
             cam_right: with(cam.right, cam.half_height),
             cam_up: with(cam.up, cam.aperture_radius),
             cam_forward: with(cam.forward, cam.focus_distance),
-            env: [env.x, env.y, env.z, lights.pdf_environment()],
+            env: [env.x, env.y, env.z, lights.pdf_environment(glam::Vec3A::Y)],
             size: [w, h],
             first_sample: 0,
             samples: 0,
@@ -498,18 +512,37 @@ mod tests {
     use craft_render_core::{Material, mean_rgb, render_image, scenes};
     use std::sync::Arc;
 
+    /// One GPU test at a time: several devices opened at once from one process have crashed
+    /// inside a vendor driver on a busy machine.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct TestGpu {
+        ctx: GpuContext,
+        _turn: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl std::ops::Deref for TestGpu {
+        type Target = GpuContext;
+        fn deref(&self) -> &GpuContext {
+            &self.ctx
+        }
+    }
+
     /// The GPU for a test, or `None` (with a note) on machines without an adapter.
-    fn gpu() -> Option<GpuContext> {
+    fn gpu() -> Option<TestGpu> {
+        let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
         let ctx = GpuContext::new();
         match &ctx {
             Some(c) => eprintln!("GPU test on {} ({}, software: {})", c.caps.adapter, c.caps.backend, c.caps.software),
             None => eprintln!("skipped: no GPU adapter on this machine; the CPU reference covers this path"),
         }
-        ctx
+        ctx.map(|ctx| TestGpu { ctx, _turn: turn })
     }
 
     fn both(scene: Scene, size: u32, spp: u32, integrator: IntegratorSettings) -> Option<(Film, Film)> {
         let ctx = gpu()?;
+        // The GPU chooses lights by power; ask the CPU for the same so the samples coincide.
+        let integrator = IntegratorSettings { light_sampling: craft_render_core::LightSampling::Power, ..integrator };
         let settings = RenderSettings { width: size, height: size, integrator, seed: 5 };
         let mut r = GpuRenderer::new(&ctx, &scene, settings).unwrap();
         r.render(&ctx, spp).unwrap();
@@ -579,5 +612,38 @@ mod tests {
                 other => panic!("expected Unsupported({word}), got {:?}", other.map(|_| ()).map_err(|e| e.to_string())),
             }
         }
+    }
+
+    #[test]
+    fn gpu_renders_spots_and_suns_like_the_cpu_and_declines_image_lighting() {
+        use craft_render_core::shapes::quad;
+        use craft_render_core::{Camera, Light, SceneBuilder};
+        use glam::{Mat4, Vec3};
+        let build = |light: Light| {
+            let mut b = SceneBuilder::new();
+            let grey = b.add_material(Material::diffuse(Vec3::splat(0.5))).unwrap();
+            b.add_mesh(&quad(Vec3::new(-5.0, 0.0, -5.0), Vec3::Z * 10.0, Vec3::X * 10.0), Mat4::IDENTITY, grey).unwrap();
+            b.add_mesh(&craft_render_core::shapes::uv_sphere(Vec3::new(0.0, 0.5, 0.0), 0.5, 24, 12), Mat4::IDENTITY, grey).unwrap();
+            b.add_light(light).unwrap();
+            b.set_camera(Camera { eye: Vec3::new(0.0, 4.0, 6.0), target: Vec3::ZERO, ..Camera::default() });
+            b.build()
+        };
+        let spot = Light::Spot {
+            position: Vec3::new(1.0, 3.0, 1.0),
+            direction: Vec3::new(-0.3, -1.0, -0.3),
+            intensity: Vec3::splat(20.0),
+            cone_angle: 0.6,
+            blend: 0.3,
+        };
+        let sun = Light::Sun { direction: Vec3::new(0.4, 0.8, 0.3), irradiance: Vec3::splat(2.0), angular_radius: 0.05 };
+        for light in [spot, sun] {
+            let Some((g, c)) = both(build(light), 32, 32, IntegratorSettings::default()) else { return };
+            let err = craft_render_core::relative_mse(&g.mean(), &c.mean());
+            assert!(err < 2e-3 && mean_rgb(&c.mean())[0] > 0.01, "{light:?}: relative MSE {err}");
+        }
+        let Some(ctx) = gpu() else { return };
+        let mut b = SceneBuilder::new();
+        b.set_environment_map(craft_render_core::texture::Image::filled(8, 4, craft_render_core::texture::Kind::Color, [1.0; 4]), 0.0);
+        assert!(matches!(GpuRenderer::new(&ctx, &b.build(), RenderSettings::default()), Err(GpuError::Unsupported("image-based lighting"))));
     }
 }

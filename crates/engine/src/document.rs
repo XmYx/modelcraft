@@ -55,6 +55,8 @@ pub struct Document {
     replaying: bool,
     /// Journal entries found next to an opened file, waiting for [`Document::recover`].
     pub pending_recovery: usize,
+    /// The frame the journal last recorded (scrubbing is journaled lazily, see `execute`).
+    journal_frame: f64,
 }
 
 impl Default for Document {
@@ -75,11 +77,19 @@ impl Document {
             journal: None,
             replaying: false,
             pending_recovery: 0,
+            journal_frame: 0.0,
         }
     }
 
     pub fn from_scene(scene: Scene) -> Self {
-        Document { scene, ..Self::new() }
+        let journal_frame = scene.anim.frame;
+        Document { scene, journal_frame, ..Self::new() }
+    }
+
+    /// Go to a frame and pose the scene there. Not an undo step and not a change to save; the
+    /// journal records the frame with the next command that depends on it.
+    pub fn set_frame(&mut self, frame: f64) {
+        self.scene.set_frame(frame);
     }
 
     /// Open a project. If a journal of unsaved work lies next to it, `pending_recovery` says how
@@ -281,7 +291,10 @@ impl Document {
 
     /// Interactive stroke: begin (requires a session).
     pub fn stroke_begin(&mut self, mut brush: BrushSettings) -> bool {
-        if brush.live_detail.is_some() && self.sculpt.as_ref().is_some_and(|s| self.live_detail_blocked(s.id).is_some()) {
+        // A drag stroke re-places its dab on every move, which live detail cannot take back.
+        if brush.live_detail.is_some()
+            && (brush.stroke == modelcraft_sculpt::StrokeMode::Drag || self.sculpt.as_ref().is_some_and(|s| self.live_detail_blocked(s.id).is_some()))
+        {
             brush.live_detail = None;
         }
         match &mut self.sculpt {
@@ -298,6 +311,11 @@ impl Document {
             s.mesh.dab(dab);
             s.unsynced = true;
         }
+    }
+
+    /// Take back what the open stroke has done so far (drag strokes).
+    pub fn stroke_rewind(&mut self) -> bool {
+        self.sculpt.as_mut().is_some_and(|s| s.mesh.rewind_stroke())
     }
 
     /// Finish the stroke: one undo entry and one journal line.
@@ -318,7 +336,21 @@ impl Document {
 
     /// Run a command: apply it, record undo, write the journal.
     pub fn execute(&mut self, cmd: Command) -> Result<Outcome, EngineError> {
+        // Scrubbing is not journaled; record the frame before a command that may depend on it.
+        if !self.replaying && self.scene.anim.frame != self.journal_frame && !matches!(cmd, Command::Anim(crate::anim::AnimCommand::SetTime { .. })) {
+            self.journal_frame = self.scene.anim.frame;
+            self.log(&Command::Anim(crate::anim::AnimCommand::SetTime { frame: self.journal_frame }));
+        }
         let out = match &cmd {
+            Command::Anim(crate::anim::AnimCommand::SetTime { frame }) => {
+                if !frame.is_finite() {
+                    return invalid("the frame must be a finite number");
+                }
+                self.set_frame(*frame);
+                self.journal_frame = self.scene.anim.frame;
+                self.log(&cmd);
+                return Ok(Outcome::default());
+            }
             Command::Undo => {
                 self.undo_once();
                 Outcome::default()
@@ -415,8 +447,11 @@ impl Document {
         let before = self.scene.clone();
         match f(self) {
             Ok(out) => {
+                if self.scene.anim.auto_key && !matches!(cmd, Command::Anim(_)) {
+                    modelcraft_scene::anim::auto_key(&before, &mut self.scene);
+                }
                 let after = self.scene.clone();
-                let bytes = 512 + self.scene.len() * 300;
+                let bytes = 512 + self.scene.len() * 300 + self.scene.anim.heap_bytes();
                 self.undo.push(UndoEntry::Scene { label: cmd.label(), before: Box::new(before), after: Box::new(after), bytes });
                 self.check_session();
                 self.eval.retain(&self.scene);
@@ -445,7 +480,9 @@ impl Document {
             UndoEntry::Scene { before, .. } => {
                 self.sync_sculpt();
                 let sculpting = self.sculpt.take().map(|s| s.id);
+                let frame = self.scene.anim.frame;
                 self.scene = (**before).clone().repaired_or(before);
+                self.scene.set_frame(frame);
                 // Keep sculpting the same object when it still has its sculpt layer.
                 if let Some(id) = sculpting {
                     let _ = self.ensure_session(id);
@@ -470,7 +507,9 @@ impl Document {
             UndoEntry::Scene { after, .. } => {
                 self.sync_sculpt();
                 let sculpting = self.sculpt.take().map(|s| s.id);
+                let frame = self.scene.anim.frame;
                 self.scene = (**after).clone().repaired_or(after);
+                self.scene.set_frame(frame);
                 // Keep sculpting the same object when it still has its sculpt layer.
                 if let Some(id) = sculpting {
                     let _ = self.ensure_session(id);
@@ -649,6 +688,7 @@ impl Document {
                 }
                 out.created.extend(ids);
             }
+            Command::Anim(a) => crate::anim::apply(&mut self.scene, a, &mut out)?,
             Command::Undo
             | Command::Redo
             | Command::BeginSculpt { .. }

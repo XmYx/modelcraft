@@ -13,7 +13,7 @@ use std::time::Instant;
 use egui::{Key, RichText};
 use modelcraft_render::pathtrace::{RenderSettings, Renderer, SceneBuilder};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
-use modelcraft_render::trace::{ExportOptions, export_builder};
+use modelcraft_render::trace::{ExportOptions, Lighting, export_builder};
 
 use crate::app::ModelApp;
 use crate::theme;
@@ -33,6 +33,27 @@ impl Device {
             Device::Auto => tl!("Automatic"),
             Device::Cpu => tl!("Processor (CPU)"),
             Device::Gpu => tl!("Graphics card (GPU)"),
+        }
+    }
+}
+
+/// What lights the render (the scene graph has no light objects yet).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Light {
+    /// A soft sky and one key light sized to the scene.
+    Studio,
+    /// A physical sky with a sun.
+    Daylight,
+    /// A panorama picture of the surroundings.
+    Panorama,
+}
+
+impl Light {
+    fn label(self) -> String {
+        match self {
+            Light::Studio => tl!("Studio"),
+            Light::Daylight => tl!("Daylight"),
+            Light::Panorama => tl!("Panorama image"),
         }
     }
 }
@@ -72,6 +93,12 @@ pub struct RenderView {
     pub device: Device,
     /// Restart when the scene or the camera changes.
     pub live: bool,
+    pub light: Light,
+    /// Sun height above the horizon and compass direction, in degrees (Daylight).
+    pub sun_elevation: f32,
+    pub sun_azimuth: f32,
+    /// The panorama picture and where it came from (Panorama); without one the studio light is used.
+    pub panorama: Option<(String, modelcraft_render::pathtrace::texture::Image)>,
     /// The state line, announced to assistive technology when it changes.
     pub state: String,
     job: Option<Job>,
@@ -92,6 +119,10 @@ impl Default for RenderView {
             samples: 256,
             device: Device::Auto,
             live: true,
+            light: Light::Studio,
+            sun_elevation: 40.0,
+            sun_azimuth: 30.0,
+            panorama: None,
             state: String::new(),
             job: None,
             key: 0,
@@ -229,8 +260,11 @@ fn scene_key(app: &ModelApp) -> u64 {
     }
     h = mix(h, c.projection as u64);
     let v = &app.render_view;
-    for n in [v.width, v.height, v.samples, v.device as u32] {
+    for n in [v.width, v.height, v.samples, v.device as u32, v.light as u32, v.sun_elevation.to_bits(), v.sun_azimuth.to_bits()] {
         h = mix(h, u64::from(n));
+    }
+    for b in v.panorama.iter().flat_map(|(path, _)| path.bytes()) {
+        h = mix(h, u64::from(b));
     }
     h
 }
@@ -240,7 +274,15 @@ pub fn start(app: &mut ModelApp, ctx: &egui::Context) {
     app.render_view.job = None;
     app.doc.sync_sculpt();
     let camera = app.views[app.active_view.min(3)].camera;
-    let builder = match export_builder(&app.doc.scene, &mut app.doc.eval, &camera, &ExportOptions::default()) {
+    let lighting = match app.render_view.light {
+        Light::Studio => Lighting::Studio,
+        Light::Daylight => Lighting::Daylight { elevation: app.render_view.sun_elevation.to_radians(), azimuth: app.render_view.sun_azimuth.to_radians() },
+        Light::Panorama => match &app.render_view.panorama {
+            Some((_, image)) => Lighting::Image { image: image.clone(), rotation: app.render_view.sun_azimuth.to_radians() },
+            None => Lighting::Studio,
+        },
+    };
+    let builder = match export_builder(&app.doc.scene, &mut app.doc.eval, &camera, &ExportOptions { lighting, ..ExportOptions::default() }) {
         Ok(b) => b,
         Err(e) => {
             app.render_view.state = crate::tlf!("Render failed: {error}", error = e);
@@ -378,6 +420,37 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
                 }
             });
             name(ui, &r.response, tl!("Device"));
+            ui.label(tl!("Lighting"));
+            let r = egui::ComboBox::from_id_salt("render-light").selected_text(v.light.label()).show_ui(ui, |ui| {
+                for l in [Light::Studio, Light::Daylight, Light::Panorama] {
+                    ui.selectable_value(&mut v.light, l, l.label());
+                }
+            });
+            name(ui, &r.response, tl!("Lighting"));
+            if v.light == Light::Daylight {
+                ui.label(tl!("Sun height"));
+                let r = ui.add(egui::DragValue::new(&mut v.sun_elevation).range(-10.0..=90.0).suffix("°"));
+                name(ui, &r, tl!("Sun height"));
+                ui.label(tl!("Sun direction"));
+                let r = ui.add(egui::DragValue::new(&mut v.sun_azimuth).range(-360.0..=360.0).suffix("°"));
+                name(ui, &r, tl!("Sun direction"));
+            }
+            if v.light == Light::Panorama {
+                let shown = v.panorama.as_ref().map_or_else(|| tl!("none"), |(path, _)| path.clone());
+                ui.label(RichText::new(shown).color(theme::TEXT_DIM));
+                if ui.button(tl!("Choose Panorama…")).clicked()
+                    && let Some(path) = rfd::FileDialog::new().add_filter(tl!("Radiance HDR"), &["hdr"]).pick_file()
+                {
+                    let path = path.display().to_string();
+                    match modelcraft_render::trace::load_panorama(&path) {
+                        Ok(image) => v.panorama = Some((path, image)),
+                        Err(e) => v.state = crate::tlf!("Render failed: {error}", error = e),
+                    }
+                }
+                ui.label(tl!("Turn"));
+                let r = ui.add(egui::DragValue::new(&mut v.sun_azimuth).range(-360.0..=360.0).suffix("°"));
+                name(ui, &r, tl!("Turn"));
+            }
             ui.checkbox(&mut v.live, tl!("Update while editing"));
         });
         let (done, target) = app.render_view.progress();
@@ -519,6 +592,29 @@ mod tests {
         h.step();
         wait_until_done(&mut h);
         assert!(centre(&h)[0] < red[0]);
+        // Daylight shows its two sun fields and renders a different picture.
+        let studio = centre(&h);
+        assert!(h.query_by_label("Sun height").is_none());
+        h.state_mut().render_view.light = Light::Daylight;
+        h.step();
+        assert!(h.get_all_by_label("Sun height").count() >= 1 && h.get_all_by_label("Sun direction").count() >= 1);
+        h.get_by_role_and_label(Role::Button, "Render").click();
+        h.step();
+        wait_until_done(&mut h);
+        assert_ne!(centre(&h), studio);
+        assert!(h.state().render_view.state.starts_with("Render finished"), "{}", h.state().render_view.state);
+        // A panorama lights the scene with its own colour; the picker is a named button.
+        let image = modelcraft_render::pathtrace::texture::Image::filled(8, 4, modelcraft_render::pathtrace::texture::Kind::Color, [0.0, 0.0, 3.0, 1.0]);
+        h.state_mut().render_view.panorama = Some(("blue.hdr".into(), image));
+        h.state_mut().render_view.light = Light::Panorama;
+        h.step();
+        h.get_by_role_and_label(Role::Button, "Choose Panorama…");
+        assert!(h.get_all_by_label("Turn").count() >= 1);
+        h.get_by_role_and_label(Role::Button, "Render").click();
+        h.step();
+        wait_until_done(&mut h);
+        let blue = centre(&h);
+        assert!(blue[2] > blue[0].saturating_add(30), "lit by a blue panorama: {blue:?}");
         // Stop is a keyboard-reachable button and reports where it stopped.
         h.state_mut().render_view.samples = 60_000;
         h.get_by_role_and_label(Role::Button, "Render").click();

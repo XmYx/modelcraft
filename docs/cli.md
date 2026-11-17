@@ -44,11 +44,44 @@ Object ids are numbers (`info` prints them).
 | `remove_step` | `id`, `index` |
 | `import` | `path` (.glb, .gltf, .obj, .stl, .ply) |
 | `end_sculpt` | — |
-| `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta}]} |
+| `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge. Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |
 | `sculpt_mask` | `id`, `op`: clear, fill, invert, {patch: {triangle}} |
 | `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
 | `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
 | `undo`, `redo` | — |
+
+### Animation
+
+One command, `anim`, with the operation in `op`: `{"cmd":"anim","op":"set_key",…}`.
+Time is in frames. A key is named by its object, attribute path and frame: `{id, path, frame}`.
+Attribute paths: `translate.x|y|z`, `rotate.x|y|z` (XYZ Euler degrees), `scale.x|y|z`, `visible`,
+`material.metallic`, `material.roughness`, `material.base_color.0`…`3`, `primitive.<parameter>`,
+`step.<step id>.<parameter>`, `step.<step id>.enabled`, and for the other kinds the saved field
+names (`levels`, `deformer.angle`, …). Whole-number attributes round; switches flip at 0.5.
+
+| `op` | Fields |
+|---|---|
+| `set_key` | `id`, `path`, `frame?` (current frame), `value?` (current value) |
+| `key_transform` | `ids`, `frame?`, `translate?`, `rotate?`, `scale?` (all true by default) |
+| `remove_keys` | `keys` |
+| `move_keys` | `keys`, `frames`, `value` |
+| `scale_keys` | `keys`, `pivot` (frame), `time` (factor), `value_pivot`, `value` (factor) |
+| `edit_key` | `id`, `path`, `frame`, then any of `value`, `interp` (stepped, linear, bezier), `tangent` (auto, flat, free, broken), `in_slope`, `out_slope` (value per frame), `in_weight`, `out_weight` (0..1 of the segment) |
+| `set_key_shape` | `keys`, `interp?`, `tangent?` |
+| `set_extrapolation` | `id`, `path`, `pre?`, `post?` (hold, linear, cycle, cycle_offset, ping_pong) |
+| `remove_track` | `id`, `path?` (every curve of the object without it) |
+| `bake_track` | `id`, `path`, `start?`, `end?` (the playback range), `step` (default 1) |
+| `simplify_track` | `id`, `path`, `tolerance` |
+| `set_time` | `frame` (poses the scene; not an undo step) |
+| `set_time_range` | `start?`, `end?`, `fps?` |
+| `set_auto_key` | `on` |
+
+```
+$ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
+    '{"cmd":"anim","op":"set_key","id":1,"path":"translate.x","frame":0,"value":0}' \
+    '{"cmd":"anim","op":"set_key","id":1,"path":"translate.x","frame":24,"value":6}' \
+    '{"cmd":"anim","op":"set_time","frame":12}' | modelcraft-cli control
+```
 
 ## Rendering
 
@@ -66,6 +99,8 @@ samples per second.
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
+| `--sun ELEVATION[,AZIMUTH]` | Daylight: a physical sky with the sun at these angles in degrees |
+| `--env FILE.hdr`, `--env-rotation DEG` | Light the scene with a Radiance HDR panorama, optionally turned |
 | `--seed N` | The same seed gives the same image |
 
 The scene graph has no light objects yet, so a project is lit by a studio set-up (a soft sky and

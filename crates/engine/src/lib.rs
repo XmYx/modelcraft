@@ -8,19 +8,25 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod anim;
 mod command;
 mod document;
 mod layers;
 mod undo;
 
+pub use anim::{AnimCommand, KeyRef};
 pub use command::{COMMANDS, Command, DetailOp, MaskOp, Outcome, ShapeOp};
 pub use document::{Document, EngineError, SculptSession};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use undo::{UndoEntry, UndoStack};
 
+pub use modelcraft_anim as animation;
 pub use modelcraft_formats as formats;
 pub use modelcraft_mesh as mesh;
 pub use modelcraft_ops as ops;
 pub use modelcraft_scene as scene;
 pub use modelcraft_sculpt as sculpt;
 pub use modelcraft_uv as uv;
+
+#[cfg(test)]
+mod anim_tests;

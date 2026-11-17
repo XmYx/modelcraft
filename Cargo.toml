@@ -12,6 +12,7 @@ repository = "https://github.com/storytold/modelcraft"
 
 [workspace.dependencies]
 # internal
+modelcraft-anim = { path = "crates/anim" }
 modelcraft-mesh = { path = "crates/mesh" }
 modelcraft-ops = { path = "crates/ops" }
 modelcraft-scene = { path = "crates/scene" }
@@ -29,6 +30,7 @@ craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "0649a07
 craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0", default-features = false, features = ["obj", "gltf", "stl", "ply"] }
 craft-texture = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
 craft-mcmat = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
+craft-hdr = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
 craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
 craft-image-codecs = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
 craft-i18n = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }

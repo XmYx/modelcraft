@@ -6,6 +6,7 @@ use craft_render_bvh::Ray;
 use glam::Vec3A;
 
 use crate::bsdf::Bsdf;
+use crate::light::LightSampling;
 use crate::material::Material;
 use crate::math::Frame;
 use crate::math::{Rgb, power_heuristic, sanitize};
@@ -38,11 +39,13 @@ pub struct IntegratorSettings {
     /// little energy for the removal of rare, very bright samples.
     pub clamp_indirect: f32,
     pub strategy: Strategy,
+    /// How lights with a position are chosen for direct lighting.
+    pub light_sampling: LightSampling,
 }
 
 impl Default for IntegratorSettings {
     fn default() -> Self {
-        IntegratorSettings { max_depth: 12, roulette_start: 3, clamp_indirect: 0.0, strategy: Strategy::Mis }
+        IntegratorSettings { max_depth: 12, roulette_start: 3, clamp_indirect: 0.0, strategy: Strategy::Mis, light_sampling: LightSampling::Tree }
     }
 }
 
@@ -65,13 +68,13 @@ pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &Integr
     let mut depth = 0u32;
     while depth <= max_depth {
         let Some(hit) = scene.accel.intersect(&ray) else {
-            let env = Vec3A::from(scene.lights.environment);
-            if env.max_element() > 0.0 {
+            if scene.lights.has_environment() {
+                let env = scene.lights.environment_radiance(ray.dir);
                 let w = if prev_pdf.is_infinite() {
                     1.0
                 } else {
                     match cfg.strategy {
-                        Strategy::Mis => power_heuristic(prev_pdf, scene.lights.pdf_environment()),
+                        Strategy::Mis => power_heuristic(prev_pdf, scene.lights.pdf_environment(ray.dir)),
                         Strategy::BsdfOnly => 1.0,
                         Strategy::LightOnly => 0.0,
                     }
@@ -98,7 +101,7 @@ pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &Integr
                 1.0
             } else {
                 match cfg.strategy {
-                    Strategy::Mis => power_heuristic(prev_pdf, scene.lights.pdf_triangle(hit.prim, hit.t, sf.ng.dot(ray.dir))),
+                    Strategy::Mis => power_heuristic(prev_pdf, scene.lights.pdf_triangle(hit.prim, ray.origin, hit.t, sf.ng.dot(ray.dir), cfg.light_sampling)),
                     Strategy::BsdfOnly => 1.0,
                     Strategy::LightOnly => 0.0,
                 }
@@ -117,7 +120,7 @@ pub fn radiance(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &Integr
         if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
             let pick = sampler.next1();
             let u = sampler.next2();
-            if let Some(ls) = scene.lights.sample(&scene.positions, sf.p, pick, u)
+            if let Some(ls) = scene.lights.sample(&scene.positions, sf.p, pick, u, cfg.light_sampling)
                 && ls.pdf > 0.0
             {
                 let wi = sf.frame.to_local(ls.wi);

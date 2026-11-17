@@ -5,8 +5,9 @@ use craft_texture::Image;
 use glam::{Mat3A, Mat4, Vec2, Vec3, Vec3A};
 
 use crate::camera::Camera;
+pub use crate::light::{EmissiveTri, EnvMap, Light, LightSample, LightSampling, Lights};
 use crate::material::Material;
-use crate::math::{Frame, Rgb, luminance, uniform_sphere, uniform_triangle};
+use crate::math::Frame;
 use crate::shapes::MeshData;
 
 /// Most triangles a scene may hold.
@@ -31,196 +32,6 @@ pub enum SceneError {
     BadIndex(u32),
     #[error("the image size {0}×{1} is outside 1..={max}", max = crate::render::MAX_IMAGE_SIDE)]
     BadImageSize(u32, u32),
-}
-
-/// A light without area.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Light {
-    /// Emits `intensity` (radiant intensity, W/sr) equally in every direction.
-    Point { position: Vec3, intensity: Vec3 },
-    /// Parallel light arriving from `direction` (pointing towards the light) with `irradiance`
-    /// on a surface facing it.
-    Directional { direction: Vec3, irradiance: Vec3 },
-}
-
-/// One triangle that emits light.
-#[derive(Clone, Copy, Debug)]
-pub struct EmissiveTri {
-    pub tri: u32,
-    pub area: f32,
-    pub radiance: Vec3,
-    pub two_sided: bool,
-}
-
-/// A direction towards a light, drawn for next-event estimation.
-#[derive(Clone, Copy, Debug)]
-pub struct LightSample {
-    /// Unit direction from the shaded point towards the light.
-    pub wi: Vec3A,
-    pub distance: f32,
-    pub radiance: Rgb,
-    /// Density over solid angle (lights with area) or the probability of choosing the light
-    /// (`delta` lights), selection included.
-    pub pdf: f32,
-    pub delta: bool,
-}
-
-/// Everything that emits, with the table used to choose one light per shading point.
-#[derive(Clone, Debug, Default)]
-pub struct Lights {
-    pub emissive: Vec<EmissiveTri>,
-    pub analytic: Vec<Light>,
-    /// Radiance arriving from every direction that leaves the scene.
-    pub environment: Vec3,
-    /// Triangle index → index into `emissive` (`u32::MAX` for the rest).
-    tri_slot: Vec<u32>,
-    /// Running sum of selection probabilities: emissive triangles, analytic lights, environment.
-    cdf: Vec<f32>,
-}
-
-const NO_SLOT: u32 = u32::MAX;
-
-impl Lights {
-    pub fn is_empty(&self) -> bool {
-        self.cdf.is_empty()
-    }
-
-    fn build(&mut self, tri_count: usize, scene_radius: f32) {
-        let mut power = Vec::with_capacity(self.emissive.len() + self.analytic.len() + 1);
-        self.tri_slot = vec![NO_SLOT; tri_count];
-        for (slot, e) in self.emissive.iter().enumerate() {
-            if let Some(s) = self.tri_slot.get_mut(e.tri as usize) {
-                *s = slot as u32;
-            }
-            let sides = if e.two_sided { 2.0 } else { 1.0 };
-            power.push(luminance(e.radiance.into()) * e.area * std::f32::consts::PI * sides);
-        }
-        let r2 = scene_radius * scene_radius;
-        for l in &self.analytic {
-            power.push(match l {
-                Light::Point { intensity, .. } => luminance((*intensity).into()) * 4.0 * std::f32::consts::PI,
-                Light::Directional { irradiance, .. } => luminance((*irradiance).into()) * std::f32::consts::PI * r2,
-            });
-        }
-        if self.environment.max_element() > 0.0 {
-            power.push(luminance(self.environment.into()) * 4.0 * std::f32::consts::PI * std::f32::consts::PI * r2);
-        }
-        let total: f64 = power.iter().map(|p| f64::from(p.max(0.0))).sum();
-        self.cdf.clear();
-        if total <= 0.0 || !total.is_finite() {
-            // Lights that carry no measurable power are chosen uniformly.
-            let n = power.len();
-            self.cdf.extend((1..=n).map(|i| i as f32 / n as f32));
-            return;
-        }
-        let mut acc = 0.0f64;
-        for p in &power {
-            acc += f64::from(p.max(0.0));
-            self.cdf.push((acc / total) as f32);
-        }
-        if let Some(last) = self.cdf.last_mut() {
-            *last = 1.0;
-        }
-    }
-
-    /// The running sum of selection probabilities, in the order emissive triangles, analytic
-    /// lights, environment.
-    pub fn selection_cdf(&self) -> &[f32] {
-        &self.cdf
-    }
-
-    /// The emissive slot of a triangle, if it emits.
-    pub fn emissive_slot(&self, tri: u32) -> Option<u32> {
-        self.tri_slot.get(tri as usize).copied().filter(|s| *s != NO_SLOT)
-    }
-
-    /// Probability with which entry `entry` of [`Lights::selection_cdf`] is chosen.
-    #[inline]
-    pub fn pmf(&self, entry: usize) -> f32 {
-        let hi = self.cdf.get(entry).copied().unwrap_or(0.0);
-        let lo = if entry == 0 { 0.0 } else { self.cdf.get(entry - 1).copied().unwrap_or(0.0) };
-        hi - lo
-    }
-
-    /// Density over solid angle with which [`Lights::sample`] reaches a point on emissive
-    /// triangle `tri`, seen at `distance` under the angle whose cosine is `cos_light`.
-    #[inline]
-    pub fn pdf_triangle(&self, tri: u32, distance: f32, cos_light: f32) -> f32 {
-        let Some(slot) = self.tri_slot.get(tri as usize).copied().filter(|s| *s != NO_SLOT) else { return 0.0 };
-        let Some(e) = self.emissive.get(slot as usize) else { return 0.0 };
-        let cos = cos_light.abs();
-        if cos <= 0.0 || e.area <= 0.0 {
-            return 0.0;
-        }
-        self.pmf(slot as usize) * distance * distance / (e.area * cos)
-    }
-
-    /// Density with which [`Lights::sample`] picks a direction that leaves the scene.
-    #[inline]
-    pub fn pdf_environment(&self) -> f32 {
-        if self.environment.max_element() > 0.0 { self.pmf(self.cdf.len().saturating_sub(1)) / (4.0 * std::f32::consts::PI) } else { 0.0 }
-    }
-
-    /// Radiance an emissive triangle sends towards a viewer on its front (`front`) or back side.
-    #[inline]
-    pub fn emitted(&self, tri: u32, front: bool) -> Option<Rgb> {
-        let slot = self.tri_slot.get(tri as usize).copied().filter(|s| *s != NO_SLOT)?;
-        let e = self.emissive.get(slot as usize)?;
-        (front || e.two_sided).then(|| e.radiance.into())
-    }
-
-    /// Choose a light with `pick` and a point on it with `u`, as seen from `p`.
-    #[inline]
-    pub fn sample(&self, positions: &[[Vec3; 3]], p: Vec3A, pick: f32, u: Vec2) -> Option<LightSample> {
-        if self.cdf.is_empty() {
-            return None;
-        }
-        let entry = self.cdf.partition_point(|c| *c <= pick).min(self.cdf.len() - 1);
-        let pmf = self.pmf(entry);
-        if pmf <= 0.0 {
-            return None;
-        }
-        if let Some(e) = self.emissive.get(entry) {
-            let t = positions.get(e.tri as usize)?;
-            let (p0, p1, p2) = (Vec3A::from(t[0]), Vec3A::from(t[1]), Vec3A::from(t[2]));
-            let (b1, b2) = uniform_triangle(u);
-            let q = p0 + (p1 - p0) * b1 + (p2 - p0) * b2;
-            let d = q - p;
-            let dist2 = d.length_squared();
-            if dist2 <= 0.0 {
-                return None;
-            }
-            let distance = dist2.sqrt();
-            let wi = d / distance;
-            let n = (p1 - p0).cross(p2 - p0).normalize_or_zero();
-            let cos = -wi.dot(n);
-            if cos == 0.0 || (cos < 0.0 && !e.two_sided) || e.area <= 0.0 {
-                return None;
-            }
-            return Some(LightSample { wi, distance, radiance: e.radiance.into(), pdf: pmf * dist2 / (e.area * cos.abs()), delta: false });
-        }
-        if let Some(l) = self.analytic.get(entry - self.emissive.len()) {
-            return match *l {
-                Light::Point { position, intensity } => {
-                    let d = Vec3A::from(position) - p;
-                    let dist2 = d.length_squared();
-                    (dist2 > 0.0).then(|| LightSample {
-                        wi: d / dist2.sqrt(),
-                        distance: dist2.sqrt(),
-                        radiance: Vec3A::from(intensity) / dist2,
-                        pdf: pmf,
-                        delta: true,
-                    })
-                }
-                Light::Directional { direction, irradiance } => {
-                    let wi = Vec3A::from(direction).normalize_or_zero();
-                    (wi != Vec3A::ZERO).then(|| LightSample { wi, distance: f32::INFINITY, radiance: irradiance.into(), pdf: pmf, delta: true })
-                }
-            };
-        }
-        let wi = uniform_sphere(u);
-        Some(LightSample { wi, distance: f32::INFINITY, radiance: self.environment.into(), pdf: pmf / (4.0 * std::f32::consts::PI), delta: false })
-    }
 }
 
 /// What the integrator needs at a hit.
@@ -304,11 +115,19 @@ impl Scene {
     /// repeatable).
     #[inline]
     pub fn occluded(&self, p: Vec3A, ng: Vec3A, dir: Vec3A, distance: f32) -> bool {
-        let tmax = if distance.is_finite() { distance * (1.0 - 2e-4) - 1e-5 } else { f32::INFINITY };
-        if tmax <= 0.0 {
-            return false;
+        let mut ray = Scene::spawn(p, ng, dir, f32::INFINITY);
+        if distance.is_finite() {
+            // Aim from the offset origin at the very point on the light, and stop just short of
+            // it: keeping the old direction would cross the light's own plane early at grazing
+            // angles and count the light as its own shadow.
+            let to = p + dir * distance - ray.origin;
+            let len = to.length();
+            ray.tmax = len * (1.0 - 2e-4) - 1e-5;
+            if ray.tmax <= 0.0 {
+                return false;
+            }
+            ray.dir = to / len;
         }
-        let ray = Scene::spawn(p, ng, dir, tmax);
         if !self.has_cutouts {
             return self.accel.occluded(&ray);
         }
@@ -421,10 +240,21 @@ impl SceneBuilder {
         if self.scene.lights.analytic.len() >= MAX_LIGHTS {
             return Err(SceneError::TooManyLights);
         }
+        let good = |v: Vec3| v.is_finite() && v.max_element() > 0.0;
         let ok = match light {
-            Light::Point { position, intensity } => position.is_finite() && intensity.is_finite() && intensity.max_element() > 0.0,
-            Light::Directional { direction, irradiance } => {
-                direction.is_finite() && direction.length_squared() > 0.0 && irradiance.is_finite() && irradiance.max_element() > 0.0
+            Light::Point { position, intensity } => position.is_finite() && good(intensity),
+            Light::Spot { position, direction, intensity, cone_angle, blend } => {
+                position.is_finite()
+                    && direction.is_finite()
+                    && direction.length_squared() > 0.0
+                    && good(intensity)
+                    && cone_angle.is_finite()
+                    && cone_angle > 0.0
+                    && blend.is_finite()
+            }
+            Light::Directional { direction, irradiance } => direction.is_finite() && direction.length_squared() > 0.0 && good(irradiance),
+            Light::Sun { direction, irradiance, angular_radius } => {
+                direction.is_finite() && direction.length_squared() > 0.0 && good(irradiance) && angular_radius.is_finite()
             }
         };
         if ok {
@@ -436,6 +266,13 @@ impl SceneBuilder {
     /// Constant radiance arriving from outside the scene.
     pub fn set_environment(&mut self, radiance: Vec3) {
         self.scene.lights.environment = if radiance.is_finite() { radiance.max(Vec3::ZERO) } else { Vec3::ZERO };
+    }
+
+    /// Light the scene with an image of the surroundings (latitude–longitude layout, linear
+    /// radiance), turned by `rotation` radians about the vertical axis. Replaces the constant
+    /// environment.
+    pub fn set_environment_map(&mut self, image: Image, rotation: f32) {
+        self.scene.lights.env_map = EnvMap::new(image, rotation);
     }
 
     pub fn set_camera(&mut self, camera: Camera) {
@@ -471,7 +308,7 @@ impl SceneBuilder {
             }
         }
         let radius = if s.bounds.is_empty() { 1.0 } else { ((s.bounds.max - s.bounds.min).length() * 0.5).max(1e-3) };
-        s.lights.build(s.positions.len(), radius);
+        s.lights.build(&s.positions, radius);
         self.scene
     }
 }

@@ -14,6 +14,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod anim;
+pub mod attr;
 mod eval;
 pub mod pick;
 
@@ -25,6 +27,7 @@ pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 use serde::{Deserialize, Serialize};
 
+pub use anim::{Animation, Track};
 pub use eval::{Evaluated, Evaluator, StepError};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
@@ -447,6 +450,9 @@ pub struct Scene {
     objects: Vec<Object>,
     #[serde(default)]
     next_id: u64,
+    /// Curves, the current frame and the time settings ([`anim`]).
+    #[serde(default, skip_serializing_if = "Animation::is_default")]
+    pub anim: Animation,
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -495,6 +501,7 @@ impl Scene {
         for o in &mut self.objects {
             o.rev = next_rev();
         }
+        self.anim.repair(|id| ids.contains(&id));
         Ok(self)
     }
 
@@ -578,6 +585,9 @@ impl Scene {
             orig += 1;
         }
         self.bump_ancestors_of_removed(&out);
+        for (_, o) in &out {
+            self.anim.remove_object(o.id);
+        }
         out
     }
 

@@ -20,6 +20,7 @@
 pub mod bsdf;
 pub mod camera;
 pub mod integrator;
+pub mod light;
 pub mod material;
 pub mod math;
 pub mod render;
@@ -27,14 +28,16 @@ pub mod sampler;
 pub mod scene;
 pub mod scenes;
 pub mod shapes;
+pub mod sky;
 
 pub use camera::Camera;
 pub use craft_render_bvh as bvh;
 pub use craft_texture as texture;
 pub use integrator::{IntegratorSettings, Strategy};
+pub use light::{Light, LightSampling};
 pub use material::Material;
 pub use render::{Film, RenderSettings, Renderer, mean_rgb, mse, relative_mse, render_image};
-pub use scene::{Light, Scene, SceneBuilder, SceneError};
+pub use scene::{Scene, SceneBuilder, SceneError};
 pub use shapes::MeshData;
 
 #[cfg(test)]

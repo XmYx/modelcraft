@@ -72,6 +72,22 @@ pub fn cuboid(min: Vec3, max: Vec3) -> MeshData {
     m
 }
 
+/// A flat disk around `center` whose front face looks along `normal`. Segments are clamped to
+/// 3..=2048.
+pub fn disk(center: Vec3, normal: Vec3, radius: f32, segments: u32) -> MeshData {
+    let n = normal.try_normalize().unwrap_or(Vec3::Y);
+    let u = n.any_orthonormal_vector();
+    let v = n.cross(u);
+    let segs = segments.clamp(3, 2048);
+    let mut positions = vec![center];
+    for s in 0..segs {
+        let a = s as f32 / segs as f32 * std::f32::consts::TAU;
+        positions.push(center + (u * a.cos() + v * a.sin()) * radius);
+    }
+    let indices = (0..segs).map(|s| [0, 1 + s, 1 + (s + 1) % segs]).collect();
+    MeshData { positions, indices, normals: None, uvs: None }
+}
+
 /// A latitude–longitude sphere with smooth normals. Counts are clamped to 3..=2048.
 pub fn uv_sphere(center: Vec3, radius: f32, segments: u32, rings: u32) -> MeshData {
     let (segs, rings) = (segments.clamp(3, 2048), rings.clamp(2, 2048));
@@ -134,6 +150,12 @@ mod tests {
         assert!(outward(&s, Vec3::ONE));
         assert_eq!(s.triangle_count(), 16 * (8 - 1) * 2);
         assert!(s.positions.iter().all(|p| ((*p - Vec3::ONE).length() - 2.0).abs() < 1e-5));
+        let d = disk(Vec3::ONE, Vec3::new(0.0, 0.0, 2.0), 1.5, 32);
+        assert_eq!(d.triangle_count(), 32);
+        assert!(d.indices.iter().all(|t| {
+            let [a, b, c] = t.map(|i| d.positions[i as usize]);
+            (b - a).cross(c - a).z > 0.0
+        }));
         // Hostile counts are clamped.
         assert!(uv_sphere(Vec3::ZERO, 1.0, 0, u32::MAX).triangle_count() < 20_000);
     }

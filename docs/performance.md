@@ -56,6 +56,26 @@ this size) and the undo snapshot.
 Level changes build the level topology twice through the validated mesh builder; that, not the
 linear refinement itself, is most of the time, and it is single-threaded.
 
+## The ten newer brushes (same bench, same mesh and radius)
+
+Measured 2026-11-17 while other builds shared the machine (the seven rows above re-measured in
+the same run at 0.26–0.47 ms, so read these as upper bounds).
+
+| Brush | Dab mean | Dab p95 |
+|---|---|---|
+| Pull | 0.58 ms | 0.78 ms |
+| Plateau | 0.48 ms | 0.76 ms |
+| Trim | 0.42 ms | 0.66 ms |
+| Fill | 0.31 ms | 0.53 ms |
+| Polish | 0.38 ms | 0.73 ms |
+| Buildup | 0.44 ms | 0.66 ms |
+| Gouge | 0.30 ms | 0.45 ms |
+| Slide | 0.31 ms | 0.52 ms |
+| Bulge | 0.34 ms | 0.56 ms |
+
+Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
+captured at the first dab, so its row there measures almost nothing.
+
 ## Live detail and even remesh (`modelcraft-cli bench`, last lines)
 
 Measured 2026-11-17 on the same machine while other builds were running, engine only (no GPU
@@ -116,6 +136,19 @@ within 2 % of the environment (furnace test) for matte, rough-metal and layered 
 surfaces; a random-material property test bounds every albedo below 1.04 (Monte Carlo slack);
 point, directional, uniform-sky and rectangular-area lighting match their closed forms within
 1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002.
+
+### Light sampling (variance at equal samples)
+
+Measured by the tests that assert them (`cargo test -p craft-render-core`), 48×48 and 16×16
+images, error against a 4096-sample reference:
+
+| Scene | Estimator | Result |
+|---|---|---|
+| 400 small lamps over a floor (800 emissive triangles), direct light, 16 spp | light tree against choosing by power | MSE 0.0166 against 0.0821: 4.9× lower with the tree |
+| A panorama whose light is one patch of 0.5 % of the image, 64 spp | sampling the image against sampling the surface | variance more than 20× lower (the test's bound; both converge to the patch's closed form within 3 %) |
+
+The tree has no orientation cones and does not split, so lights that face away still take
+samples; the references' many-light samplers do both.
 
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH

@@ -25,6 +25,16 @@ shape offsets and the anchor in the layer blob (version 2). Schema 1 files still
 A newer `schema_version` is refused with a clear message; `0` is invalid. Scenes are repaired on
 load (unique ids, parents exist, no cycles, depth ≤ 64, finite transforms).
 
+## Animation
+
+`scene.anim` (left out when the scene has none) holds `fps`, `start`, `end` (the playback range in
+frames), `frame` (the current frame), `auto_key` and `tracks`: `{target, path, curve}` with
+`curve.keys` = `[{t, v, interp?, tangent?, in_slope?, out_slope?, in_weight?, out_weight?}]`
+sorted by `t` (frames), plus `pre` / `post` extrapolation. Defaults are left out. The attribute
+`path` grammar is in [cli.md](cli.md#animation). On load, non-finite keys are dropped, keys are
+sorted and de-duplicated, counts are capped (2²⁰ keys per curve, 200 000 tracks) and tracks on
+missing objects are removed. Builds from before animation ignore the block.
+
 ## Journal
 
 Next to the project, `<file>.modelcraft.journal` holds one JSON object per line:

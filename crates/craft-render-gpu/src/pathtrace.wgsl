@@ -59,7 +59,7 @@ struct Mat {
 
 struct LightEntry {
     p0: vec3<f32>,
-    kind: u32, // 0 triangle, 1 two-sided triangle, 2 point, 3 directional, 4 environment
+    kind: u32, // 0 triangle, 1 two-sided triangle, 2 point, 3 directional, 4 environment, 5 spot, 6 sun
     e1: vec3<f32>,
     cdf: f32,
     e2: vec3<f32>,
@@ -315,14 +315,18 @@ fn spawn_origin(p: vec3<f32>, ng: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
 }
 
 fn occluded(p: vec3<f32>, ng: vec3<f32>, dir: vec3<f32>, distance: f32) -> bool {
-    var tmax = INF;
-    if distance < INF {
-        tmax = distance * (1.0 - 2e-4) - 1e-5;
+    let o = spawn_origin(p, ng, dir);
+    if distance >= INF {
+        return intersect(o, dir, INF, true).slot != NO_HIT;
     }
+    // Aim from the offset origin at the point on the light and stop just short of it.
+    let to = p + dir * distance - o;
+    let len = length(to);
+    let tmax = len * (1.0 - 2e-4) - 1e-5;
     if tmax <= 0.0 {
         return false;
     }
-    return intersect(spawn_origin(p, ng, dir), dir, tmax, true).slot != NO_HIT;
+    return intersect(o, to / len, tmax, true).slot != NO_HIT;
 }
 
 // ---- surface model ----------------------------------------------------------------------
@@ -529,6 +533,36 @@ fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
     }
     if l.kind == 3u {
         return LightSample(l.p0, INF, l.radiance, l.pmf, true);
+    }
+    if l.kind == 5u {
+        let d = l.p0 - p;
+        let dist2 = dot(d, d);
+        if dist2 <= 0.0 {
+            return out;
+        }
+        let wi = d / sqrt(dist2);
+        let c = -dot(wi, l.e1);
+        let co = l.area;
+        let ci = l.e2.x;
+        var falloff = 1.0;
+        if c <= co {
+            return out;
+        } else if c < ci && ci - co >= 1e-6 {
+            let t = (c - co) / (ci - co);
+            falloff = t * t * (3.0 - 2.0 * t);
+        }
+        return LightSample(wi, sqrt(dist2), l.radiance * (falloff / dist2), l.pmf, true);
+    }
+    if l.kind == 6u {
+        let disk = concentric_disk(u) * l.area;
+        let n = l.p0;
+        let sign = select(-1.0, 1.0, n.z >= 0.0);
+        let fa = -1.0 / (sign + n.z);
+        let fb = n.x * n.y * fa;
+        let tx = vec3<f32>(1.0 + sign * n.x * n.x * fa, sign * fb, -sign * n.x);
+        let ty = vec3<f32>(fb, sign + n.y * n.y * fa, -n.y);
+        let local = normalize(vec3<f32>(disk.x, disk.y, 1.0));
+        return LightSample(tx * local.x + ty * local.y + n * local.z, INF, l.radiance, l.pmf, true);
     }
     return LightSample(uniform_sphere(u), INF, l.radiance, l.pmf / (4.0 * PI), false);
 }

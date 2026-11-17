@@ -77,6 +77,7 @@ pub enum Action {
     ToggleSnap,
     KeyboardShortcuts,
     RenderView,
+    Anim(crate::anim_ui::AnimAction),
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -142,6 +143,7 @@ pub fn all() -> Vec<Action> {
         NextPanel,
         About,
     ]);
+    v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v
 }
 
@@ -180,6 +182,16 @@ fn brush_label_id(k: BrushKind) -> &'static str {
         BrushKind::Flatten => "flatten",
         BrushKind::Crease => "crease",
         BrushKind::Mask => "mask",
+        BrushKind::Pull => "pull",
+        BrushKind::Plateau => "plateau",
+        BrushKind::Trim => "trim",
+        BrushKind::Fill => "fill",
+        BrushKind::Polish => "polish",
+        BrushKind::Buildup => "buildup",
+        BrushKind::SurfaceGrab => "surface_grab",
+        BrushKind::Gouge => "gouge",
+        BrushKind::Slide => "slide",
+        BrushKind::Bulge => "bulge",
     }
 }
 
@@ -194,6 +206,16 @@ pub fn brush_label(k: BrushKind) -> String {
         BrushKind::Flatten => tl!("Flatten"),
         BrushKind::Crease => tl!("Crease"),
         BrushKind::Mask => tl!("Mask"),
+        BrushKind::Pull => tl!("Pull"),
+        BrushKind::Plateau => tl!("Plateau"),
+        BrushKind::Trim => tl!("Trim"),
+        BrushKind::Fill => tl!("Fill"),
+        BrushKind::Polish => tl!("Polish"),
+        BrushKind::Buildup => tl!("Buildup"),
+        BrushKind::SurfaceGrab => tl!("Surface Grab"),
+        BrushKind::Gouge => tl!("Gouge"),
+        BrushKind::Slide => tl!("Slide"),
+        BrushKind::Bulge => tl!("Bulge"),
     }
 }
 
@@ -275,6 +297,7 @@ impl Action {
             Mirror(_) => tl!("Mirror Z"),
             ToggleSnap => tl!("Toggle Snapping"),
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
+            Anim(a) => a.label(),
         }
     }
 
@@ -352,6 +375,7 @@ impl Action {
             RenderView => "view.render",
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
+            Anim(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
         };
@@ -415,6 +439,11 @@ impl Action {
                 BrushKind::Flatten => "Sculpt: L",
                 BrushKind::Crease => "Sculpt: K",
                 BrushKind::Mask => "Sculpt: M",
+                BrushKind::Pull => "Sculpt: H",
+                BrushKind::Trim => "Sculpt: T",
+                BrushKind::Polish => "Sculpt: O",
+                BrushKind::Buildup => "Sculpt: B",
+                _ => return None,
             },
             Symmetry => "Sculpt: X",
             MaskInvert => "Sculpt: Cmd+9",
@@ -434,6 +463,7 @@ impl Action {
             Palette => "Cmd+K",
             KeyboardShortcuts => "Cmd+Alt+K",
             NextPanel => "F6",
+            Anim(a) => return a.default_binding(),
             _ => return None,
         })
     }
@@ -451,6 +481,7 @@ impl Action {
             | EvenRemesh => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
+            Anim(_) => "Animate",
             _ => "View",
         }
     }

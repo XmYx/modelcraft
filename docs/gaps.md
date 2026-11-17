@@ -164,7 +164,7 @@ The biggest single gap: two whole areas (weights 8 and 6) and the materials area
 
 ## Sculpting
 
-Live detail and even remesh (**S2**) are in, live detail partly: it only splits (collapsing short edges and flipping edges are missing, so a region never gets coarser and slivers appear at the rim of a refined area), it works on the base detail level without shape layers, and every split re-uploads the whole mesh to the GPU. Even remesh needs a closed mesh and drops UVs and patches. Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
+Brush depth (**S3**) is mostly in: ten more brushes, hardness, five stroke modes, eight built-in stamp pictures and presets. Left of it: rotate, elastic-move and scrape brushes, curve strokes, importing your own stamp images, radial symmetry and the pen-pressure check. Live detail and even remesh (**S2**) are in, live detail partly: it only splits (collapsing short edges and flipping edges are missing, so a region never gets coarser and slivers appear at the rim of a refined area), it works on the base detail level without shape layers, and every split re-uploads the whole mesh to the GPU. Even remesh needs a closed mesh and drops UVs and patches. Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -180,7 +180,9 @@ Live detail and even remesh (**S2**) are in, live detail partly: it only splits 
 
 ## Animation and rigging
 
-Not started. **A1** comes first because rigging, simulation, Alembic and point caches all need a time model; design keys as data on attributes so the journal, CLI and undo cover them like every other command. **A3** skinning and **A4** constraints are the gate for character work; the muscle systems (**A8**) sit last.
+**A1** has its core: keys on any numeric attribute, curves, the timeline, auto-key, the Key Sheet
+and the Curve Editor (see the limits below). Still open in A1: preview capture, following a spline,
+audio and the sculpt turntable. Everything else is not started. **A1** came first because rigging, simulation, Alembic and point caches all need a time model; design keys as data on attributes so the journal, CLI and undo cover them like every other command. **A3** skinning and **A4** constraints are the gate for character work; the muscle systems (**A8**) sit last.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -192,6 +194,19 @@ Not started. **A1** comes first because rigging, simulation, Alembic and point c
 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | 6 | 65 | 2.71 | 7 | A1 |
 | **A7** Characters: rig templates, retargeting, motion capture, pose library, facial tools | 5 | 86 | 1.76 | 51 | A3, A4 |
 | **A8** Muscle and skin-sliding systems | 1 | 60 | 0.85 | 69 | A3 |
+
+Limits of what exists:
+- Rotation is keyed as XYZ Euler angles; there are no other rotation orders, no quaternion
+  interpolation and no Euler filter. A rotation with only some angles keyed reads the others back
+  from the quaternion, which is ambiguous past ±90° on Y: key all three (Key Transform and auto-key do).
+- No box selection or copy/paste of keys.
+- The Curve Editor fits its value axis to the shown curves; hide curves to see small ones next to
+  large ones.
+- Playback shows whole frames at the scene rate on the UI thread.
+- Duplicating an object does not copy its curves.
+- The app's shortcut handler gives every key to a focused widget, so with keyboard focus on a
+  button or a tree row single-key shortcuts do not run; the Animation panel handles Undo, Redo and
+  Delete itself while its ruler or a key has focus.
 
 ## Modeling
 

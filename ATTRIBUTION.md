@@ -27,6 +27,12 @@ Autodesk or any other 3D software vendor.
 | `docs/images/modelcraft-quad.png` | ModelCraft contributors | Original work: screenshot (`--demo model --quad --screenshot`) of the built-in modeling demo in four views | MIT OR Apache-2.0 | README, docs |
 | `docs/images/modelcraft-sculpt.png` | ModelCraft contributors | Original work: screenshot (`--demo sculpt --screenshot`) of the built-in sculpting demo, strokes scripted in `apps/modelcraft/src/demo.rs` | MIT OR Apache-2.0 | README, docs |
 
+## Drawn in code
+
+| Asset | Author | Source | Licence | Used for |
+|---|---|---|---|---|
+| Brush stamp pictures: Dots, Scales, Cracks, Weave, Pores, Star, Stripes, Honeycomb | ModelCraft contributors | Original work: computed at start-up by `crates/sculpt/src/alpha.rs`; no image files | MIT OR Apache-2.0 | Sculpt brush stamps |
+
 ## Bundled through dependencies
 
 | Asset | Author | Source | Licence | Used for |
