@@ -18,6 +18,46 @@ pub enum MaskOp {
     },
 }
 
+/// Step between detail levels (each level up subdivides once and keeps the sculpted detail).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailOp {
+    Up,
+    Down,
+}
+
+/// Edit the shape layers of a sculpt layer (named offsets, each blended with its own strength).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShapeOp {
+    /// Add an empty shape layer and make it the one strokes are recorded into.
+    Add {
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Remove a shape layer and what it added.
+    Remove {
+        index: u32,
+    },
+    /// Remove a shape layer but keep what it added, at its current strength.
+    Merge {
+        index: u32,
+    },
+    /// Blend strength, -1..1.
+    Strength {
+        index: u32,
+        strength: f32,
+    },
+    /// Record strokes into this shape layer (null: into the base sculpt).
+    Select {
+        index: Option<u32>,
+    },
+    Rename {
+        index: u32,
+        name: String,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
@@ -125,6 +165,14 @@ pub enum Command {
         id: ObjectId,
         op: MaskOp,
     },
+    SculptDetail {
+        id: ObjectId,
+        op: DetailOp,
+    },
+    SculptShape {
+        id: ObjectId,
+        op: ShapeOp,
+    },
     Undo,
     Redo,
 }
@@ -162,6 +210,11 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("end_sculpt", "Stop sculpting"),
     ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush, dabs}"),
     ("sculpt_mask", "Clear, fill or invert the mask, or mask a patch: id, op"),
+    ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
+    (
+        "sculpt_shape",
+        "Edit shape layers: id, op (add {name?}, remove {index}, merge {index}, strength {index, strength}, select {index or null}, rename {index, name})",
+    ),
     ("undo", "Undo the last change"),
     ("redo", "Redo the last undone change"),
 ];
@@ -194,6 +247,17 @@ impl Command {
             Command::EndSculpt => "Stop sculpting".into(),
             Command::SculptStroke { stroke, .. } => format!("{} stroke", stroke.brush.kind.label()),
             Command::SculptMask { .. } => "Mask".into(),
+            Command::SculptDetail { op: DetailOp::Up, .. } => "Detail level up".into(),
+            Command::SculptDetail { op: DetailOp::Down, .. } => "Detail level down".into(),
+            Command::SculptShape { op, .. } => match op {
+                ShapeOp::Add { .. } => "Add shape layer",
+                ShapeOp::Remove { .. } => "Remove shape layer",
+                ShapeOp::Merge { .. } => "Merge shape layer",
+                ShapeOp::Strength { .. } => "Shape layer strength",
+                ShapeOp::Select { .. } => "Select shape layer",
+                ShapeOp::Rename { .. } => "Rename shape layer",
+            }
+            .into(),
             Command::Undo => "Undo".into(),
             Command::Redo => "Redo".into(),
         }

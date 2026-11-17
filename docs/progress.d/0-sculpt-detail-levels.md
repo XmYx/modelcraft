@@ -1,0 +1,1 @@
+| 2026-11-17 | Sculpt detail levels (step up and down, a displacement kept per level, detail follows coarse edits) and shape layers (named offsets with a strength of −1..1): `sculpt_detail` and `sculpt_shape` commands, Sculpt panel sections with keyboard paths, layer blob version 2 |

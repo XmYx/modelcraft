@@ -162,6 +162,9 @@ fn commands_round_trip_as_json() {
         Command::AddPrimitive { kind: "cube".into(), name: Some("A".into()), parent: None },
         Command::AddStep { id: ObjectId(1), op: StepOp::LoopCut { edge: 3, cuts: 2 } },
         Command::SculptStroke { id: ObjectId(1), stroke: stroke(BrushKind::Grab) },
+        Command::SculptDetail { id: ObjectId(1), op: crate::DetailOp::Up },
+        Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Strength { index: 0, strength: 0.25 } },
+        Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Select { index: None } },
         Command::Undo,
     ];
     for c in cmds {
@@ -170,5 +173,119 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 26);
+    assert_eq!(crate::COMMANDS.len(), 28);
+}
+
+fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {
+    d.sculpt.as_ref().unwrap().mesh.positions.clone()
+}
+
+fn far(a: &[glam::Vec3], b: &[glam::Vec3]) -> f32 {
+    assert_eq!(a.len(), b.len());
+    a.iter().zip(b).map(|(x, y)| x.distance(*y)).fold(0.0, f32::max)
+}
+
+#[test]
+fn detail_levels_keep_the_sculpt_and_carry_it_through_coarse_edits() {
+    use crate::DetailOp::{Down, Up};
+    let mut d = Document::new();
+    let ball = d.execute(Command::AddPrimitive { kind: "round_cube".into(), name: None, parent: None }).unwrap().created[0];
+    d.execute(Command::BeginSculpt { id: ball }).unwrap();
+    let base_n = d.sculpt.as_ref().unwrap().mesh.vertex_count();
+    assert!(matches!(d.execute(Command::SculptDetail { id: ball, op: Down }), Err(EngineError::Invalid(_))), "already at the base");
+    d.execute(Command::SculptDetail { id: ball, op: Up }).unwrap();
+    assert_eq!(d.sculpt_layer(ball).unwrap().level, 1);
+    let fine_n = d.sculpt.as_ref().unwrap().mesh.vertex_count();
+    assert!(fine_n > base_n * 3);
+    // Sculpt fine detail, then go down and up again: nothing is lost.
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Draw) }).unwrap();
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Crease) }).unwrap();
+    let detailed = sculpt_positions(&d);
+    d.execute(Command::SculptDetail { id: ball, op: Down }).unwrap();
+    assert_eq!(d.sculpt.as_ref().unwrap().mesh.vertex_count(), base_n);
+    assert_eq!(d.sculpt_layer(ball).unwrap().finer.len(), 1);
+    d.execute(Command::SculptDetail { id: ball, op: Up }).unwrap();
+    assert!(far(&sculpt_positions(&d), &detailed) < 1e-4);
+    // The evaluated object is the level being shown.
+    assert_eq!(d.eval.evaluate(&d.scene, ball).mesh.vertex_count(), fine_n);
+    // A coarse edit moves the fine detail with it, and undo walks back through the levels.
+    d.execute(Command::SculptDetail { id: ball, op: Down }).unwrap();
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Inflate) }).unwrap();
+    d.execute(Command::SculptDetail { id: ball, op: Up }).unwrap();
+    assert!(far(&sculpt_positions(&d), &detailed) > 1e-3);
+    for _ in 0..3 {
+        d.execute(Command::Undo).unwrap();
+    }
+    d.ensure_session(ball).unwrap();
+    assert!(far(&sculpt_positions(&d), &detailed) < 1e-4);
+    // Save and load keep the level and the stored displacement.
+    d.execute(Command::SculptDetail { id: ball, op: Down }).unwrap();
+    let dir = tmp("detail");
+    let path = dir.join("d.modelcraft");
+    d.save_as(&path).unwrap();
+    let mut r = Document::open(&path).unwrap();
+    r.execute(Command::SculptDetail { id: ball, op: Up }).unwrap();
+    assert!(far(&sculpt_positions(&r), &detailed) < 1e-4);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn shape_layers_blend_with_their_strength_and_survive_undo_and_reload() {
+    use crate::ShapeOp;
+    let mut d = Document::new();
+    let ball = d.execute(Command::AddPrimitive { kind: "round_cube".into(), name: None, parent: None }).unwrap().created[0];
+    d.execute(Command::BeginSculpt { id: ball }).unwrap();
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Draw) }).unwrap();
+    let base = sculpt_positions(&d);
+    let shape = |d: &mut Document, op: ShapeOp| d.execute(Command::SculptShape { id: ball, op });
+    shape(&mut d, ShapeOp::Add { name: Some("  Brow\n ".into()) }).unwrap();
+    assert_eq!(d.sculpt_layer(ball).unwrap().shapes[0].name, "Brow");
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Inflate) }).unwrap();
+    let full = sculpt_positions(&d);
+    assert!(far(&full, &base) > 1e-3);
+    // Half strength is half way; zero is the base; back to one is the full sculpt.
+    shape(&mut d, ShapeOp::Strength { index: 0, strength: 0.5 }).unwrap();
+    let half: Vec<glam::Vec3> = base.iter().zip(&full).map(|(a, b)| a.lerp(*b, 0.5)).collect();
+    assert!(far(&sculpt_positions(&d), &half) < 1e-5);
+    shape(&mut d, ShapeOp::Strength { index: 0, strength: 0.0 }).unwrap();
+    assert!(far(&sculpt_positions(&d), &base) < 1e-5);
+    d.execute(Command::Undo).unwrap();
+    d.ensure_session(ball).unwrap();
+    assert!(far(&sculpt_positions(&d), &half) < 1e-5);
+    // Sculpting at half strength records twice the offset, so full strength doubles it.
+    shape(&mut d, ShapeOp::Add { name: None }).unwrap();
+    assert_eq!(d.sculpt_layer(ball).unwrap().active_shape, Some(1));
+    shape(&mut d, ShapeOp::Strength { index: 1, strength: 0.5 }).unwrap();
+    let before = sculpt_positions(&d);
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Draw) }).unwrap();
+    let after = sculpt_positions(&d);
+    shape(&mut d, ShapeOp::Strength { index: 1, strength: 1.0 }).unwrap();
+    let doubled: Vec<glam::Vec3> = before.iter().zip(&after).map(|(a, b)| *a + (*b - *a) * 2.0).collect();
+    assert!(far(&sculpt_positions(&d), &doubled) < 1e-4);
+    // Detail level up carries the shape layers; down is refused until they are merged.
+    d.execute(Command::SculptDetail { id: ball, op: crate::DetailOp::Up }).unwrap();
+    let up = sculpt_positions(&d);
+    assert!(d.execute(Command::SculptDetail { id: ball, op: crate::DetailOp::Down }).is_err());
+    assert!(far(&sculpt_positions(&d), &up) == 0.0, "a refused command changes nothing");
+    // Save, reload, then remove both layers: only the base stroke (subdivided) is left.
+    let dir = tmp("shapes");
+    let path = dir.join("s.modelcraft");
+    d.save_as(&path).unwrap();
+    let mut r = Document::open(&path).unwrap();
+    r.ensure_session(ball).unwrap();
+    assert!(far(&sculpt_positions(&r), &up) < 1e-6);
+    assert_eq!(r.sculpt_layer(ball).unwrap().shapes.len(), 2);
+    shape(&mut r, ShapeOp::Merge { index: 1 }).unwrap();
+    assert!(far(&sculpt_positions(&r), &up) < 1e-6, "merging keeps the shape");
+    shape(&mut r, ShapeOp::Remove { index: 0 }).unwrap();
+    assert!(far(&sculpt_positions(&r), &up) > 1e-3);
+    assert!(r.sculpt_layer(ball).unwrap().shapes.is_empty());
+    // Bad indices and values are errors, not panics.
+    assert!(shape(&mut r, ShapeOp::Remove { index: 9 }).is_err());
+    assert!(shape(&mut r, ShapeOp::Select { index: Some(3) }).is_err());
+    shape(&mut r, ShapeOp::Add { name: None }).unwrap();
+    assert!(shape(&mut r, ShapeOp::Strength { index: 0, strength: f32::NAN }).is_err());
+    shape(&mut r, ShapeOp::Strength { index: 0, strength: 99.0 }).unwrap();
+    assert_eq!(r.sculpt_layer(ball).unwrap().shapes[0].strength, 1.0);
+    let _ = std::fs::remove_dir_all(dir);
 }

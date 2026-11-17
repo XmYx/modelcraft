@@ -19,7 +19,9 @@ use crate::{FormatError, GENERATOR, Result, blob};
 
 pub const MIME_TYPE: &str = "application/vnd.storytold.modelcraft+zip";
 pub const FORMAT_ID: &str = "modelcraft.project";
-pub const SCHEMA_VERSION: u32 = 1;
+/// 2: sculpt layers carry a detail level, finer-level displacements and shape layers (layer
+/// blob version 2). Schema 1 files still open.
+pub const SCHEMA_VERSION: u32 = 2;
 pub const EXTENSION: &str = "modelcraft";
 
 const MAX_ENTRIES: u64 = 200_000;
@@ -75,10 +77,15 @@ pub fn to_bytes(scene: &Scene) -> Result<Vec<u8>> {
             for s in steps.iter_mut() {
                 if let StepOp::Sculpt { layer } = &mut s.op {
                     let entry = format!("blobs/{}-{}.bin", id.0, s.id);
-                    data.push((entry.clone(), blob::write_layer(&layer.positions, &layer.mask)));
+                    data.push((entry.clone(), blob::write_layer(layer)));
+                    layer.positions = Arc::default();
+                    layer.mask = Arc::default();
+                    layer.finer.clear();
+                    layer.anchor = Arc::default();
+                    for sh in &mut layer.shapes {
+                        sh.delta = Arc::default();
+                    }
                     blobs.insert(layer_key(id, s.id), entry);
-                    layer.positions = Arc::new(Vec::new());
-                    layer.mask = Arc::new(Vec::new());
                 }
             }
         }
@@ -135,9 +142,14 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Scene> {
                 && let Some(entry) = env.blobs.get(&layer_key(id, s.id))
             {
                 let b = zip.read(entry, MAX_BLOB_BYTES).map_err(zip_err)?.ok_or_else(|| FormatError::Malformed(format!("{entry} is missing")))?;
-                let (p, m) = blob::read_layer(&b)?;
-                layer.positions = Arc::new(p);
-                layer.mask = Arc::new(m);
+                let bulk = blob::read_layer(&b)?;
+                layer.positions = Arc::new(bulk.positions);
+                layer.mask = Arc::new(bulk.mask);
+                layer.finer = bulk.finer.into_iter().map(Arc::new).collect();
+                for (sh, delta) in layer.shapes.iter_mut().zip(bulk.shapes) {
+                    sh.delta = Arc::new(delta);
+                }
+                layer.anchor = Arc::new(bulk.anchor);
             }
         }
     }
@@ -180,7 +192,17 @@ mod tests {
                     steps: vec![Step {
                         id: 7,
                         enabled: true,
-                        op: StepOp::Sculpt { layer: SculptLayer { positions: Arc::new(vec![Vec3::ONE; n]), mask: Arc::new(vec![0.25; n]) } },
+                        op: StepOp::Sculpt {
+                            layer: SculptLayer {
+                                positions: Arc::new(vec![Vec3::ONE; n]),
+                                mask: Arc::new(vec![0.25; n]),
+                                finer: vec![Arc::new(vec![Vec3::X; 3])],
+                                shapes: vec![modelcraft_scene::ShapeLayer { name: "Brow".into(), strength: 0.5, delta: Arc::new(vec![Vec3::Y; n]) }],
+                                active_shape: Some(0),
+                                anchor: Arc::new(vec![Vec3::ONE; n]),
+                                level: 0,
+                            },
+                        },
                     }],
                 },
                 Some(g),

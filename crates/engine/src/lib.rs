@@ -10,10 +10,12 @@
 
 mod command;
 mod document;
+mod layers;
 mod undo;
 
-pub use command::{COMMANDS, Command, MaskOp, Outcome};
+pub use command::{COMMANDS, Command, DetailOp, MaskOp, Outcome, ShapeOp};
 pub use document::{Document, EngineError, SculptSession};
+pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_formats as formats;

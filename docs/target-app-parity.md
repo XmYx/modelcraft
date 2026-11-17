@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 61 / 7 / 26 / 236 | counted |
+| Done / exceeds / partial / missing | 63 / 7 / 25 / 235 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **24.5 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **14.2 %** | counted |
-| Size-weighted parity over all rows, no area weights | 13.7 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **25.0 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **15.1 %** | counted |
+| Size-weighted parity over all rows, no area weights | 14.5 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -40,8 +40,8 @@ never estimated by hand.
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
 | UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
-| Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 6 | 1 | 3 | 12 | 0 | 39 % | 25 % |
-| Sculpting: resolution and topology | 6 (5 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
+| Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 7 | 1 | 2 | 12 | 0 | 41 % | 28 % |
+| Sculpting: resolution and topology | 6 (5 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 15 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
 | Materials and shading | 5 (4 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 7 % |
 | Render engine: core | 8 (6 %) | 17 | 0 | 0 | 2 | 15 | 2 | 6 % | 5 % |
@@ -345,7 +345,7 @@ Weight: 7
 | Stroke types: lazy / stabilized, dots, spray, rectangle drag, curve strokes | C M Z | P | M | Freehand with fixed spacing only |
 | Brush presets and saved brushes | C M Z | M | S | |
 | Polygon-group visibility: hide, show, isolate | Z | M | M | |
-| Sculpt layers with blend strength | C Z | P | L | One sculpt layer per history step; no blending of several |
+| Sculpt layers with blend strength | C Z | D | L | "Shape layers": named offsets with a strength of −1..1; record, merge, remove. No per-layer mask; stepping down a detail level needs them merged |
 | Morph target and restore brush | C Z | M | M | |
 | Gizmo deformers in sculpt mode (bend, twist, stretch with a handle) | Z | M | M | |
 | Insert-mesh brushes and curve brushes | Z | M | L | |
@@ -360,7 +360,7 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Multiresolution subdivision levels | C M Z | M | L | Planned as "Detail levels" |
+| Multiresolution subdivision levels | C M Z | D | L | "Detail levels": step up and down, a displacement per level in a surface frame, detail follows coarse edits; the object shows the level being worked on |
 | Reconstruct lower levels from a dense mesh | Z | M | M | |
 | Dynamic topology | Z | M | L | Planned as "Live detail" |
 | Voxel / even remesh | Z | M | L | Planned as "Even remesh" |

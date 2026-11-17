@@ -16,6 +16,7 @@ mod gpu;
 mod keys;
 mod panels;
 mod prefs;
+mod sculpt_ui;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
