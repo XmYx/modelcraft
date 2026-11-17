@@ -9,6 +9,9 @@
 //!   allowlist (`cargo metadata`).
 //! - `progress [--check]`: the RFC-0017 progress log, `ROADMAP.md`'s table joined with the
 //!   fragments in `docs/progress.d/`; `--check` validates the fragments (part of `ci`).
+//! - `parity [--write]`: scores `docs/target-app-parity.md` (row parity and weighted parity, see
+//!   `parity.rs`); `--write` updates the block between the `parity:` markers, and without it the
+//!   command fails when the block is out of date (part of `ci`).
 //! - `version [set <x.y.z>]`: print or set `[workspace.package] version`.
 //! - `icons`: render `assets/app-icon/modelcraft.svg` to the hicolor PNGs, the 1024 px PNG, the
 //!   Windows `.ico` and the macOS `.icns` (all committed, so packaging needs no tools).
@@ -16,6 +19,8 @@
 //!   `docs/i18n/modelcraft-strings.tsv`, marking the ones the shared catalog already has.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+
+mod parity;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -427,6 +432,29 @@ fn icons() -> Result<(), String> {
     Ok(())
 }
 
+fn parity(write: bool) -> Result<(), String> {
+    let path = root().join("docs/target-app-parity.md");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let block = parity::score(&text)?.block();
+    print!("{block}");
+    let start = "<!-- parity:start -->\n";
+    let end = "<!-- parity:end -->";
+    let (Some(a), Some(b)) = (text.find(start), text.find(end)) else { return Err("parity markers missing".into()) };
+    if a + start.len() > b {
+        return Err("parity markers out of order".into());
+    }
+    if text[a + start.len()..b] == block {
+        return Ok(());
+    }
+    if !write {
+        return Err("the parity headline is out of date: run `cargo xtask parity --write`".into());
+    }
+    let new = format!("{}{start}{block}{}", &text[..a], &text[b..]);
+    std::fs::write(&path, new).map_err(|e| e.to_string())?;
+    println!("wrote {}", path.display());
+    Ok(())
+}
+
 fn ci() -> Result<(), String> {
     cargo(&["fmt", "--all", "--check"])?;
     cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])?;
@@ -434,6 +462,7 @@ fn ci() -> Result<(), String> {
     layers()?;
     assets()?;
     licenses()?;
+    parity(false)?;
     progress(true)
 }
 
@@ -446,10 +475,11 @@ fn main() -> ExitCode {
         "assets" => assets(),
         "licenses" => licenses(),
         "progress" => progress(rest.first().is_some_and(|a| a == "--check")),
+        "parity" => parity(rest.first().is_some_and(|a| a == "--write")),
         "version" => version(rest),
         "strings" => strings(rest),
         "icons" => icons(),
-        _ => Err("usage: cargo xtask <ci|layers|assets|licenses|progress [--check]|version [set X]|strings [craft-i18n dir]|icons>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|assets|licenses|progress [--check]|parity [--write]|version [set X]|strings [craft-i18n dir]|icons>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
