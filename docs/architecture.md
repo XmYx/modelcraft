@@ -58,6 +58,13 @@ bakes world transforms, converts the material and adds lighting (the scene graph
 objects yet). The Render View (`apps/modelcraft/src/render_view.rs`) and `modelcraft-cli render`
 are thin callers; the render itself runs on a worker thread.
 
+The kernel asks for rays through two functions, `trace_closest` and `trace_any`; today both are
+BVH traversal in the shader, which is the default and the reference. A hardware ray-query backend
+is planned behind the same two functions: off by default behind a cargo feature (`hw-ray-query`)
+and a runtime setting, its one `unsafe` call (wgpu's experimental-features constructor) confined
+to a module of its own and named as an exception in AGENTS.md when it lands, with a test that
+compares it against the software traversal and an automatic fall-back. It is not implemented yet.
+
 ## Shared libraries and gaps (house rule 16)
 
 Used from craft-libs at `0649a07`: `craft-mesh` (readers/writers), `craft-zip`, `craft-atomic`,

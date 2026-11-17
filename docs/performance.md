@@ -117,6 +117,65 @@ surfaces; a random-material property test bounds every albedo below 1.04 (Monte 
 point, directional, uniform-sky and rectangular-area lighting match their closed forms within
 1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002.
 
+### Benchmark: error against samples and time (`modelcraft-cli render-bench`)
+
+Protocol from [render-research.md](render-research.md) §8: six scenes built in code
+(`craft-render-core::scenes`), 256×256, each against its own reference of 4096 samples made of two
+independent halves (the last column is the reference's own error, a quarter of the squared
+difference between the halves); five seeds per budget, mean relative MSE (ε = 0.01). Two of the
+protocol's eight scenes are missing because the engine has no volumes, subsurface, hair or
+instancing yet; FLIP is not implemented yet, so only relMSE is reported.
+
+```
+modelcraft-cli render-bench                 # CPU, all scenes, 1/4/16/64/256 spp, 5 seeds
+modelcraft-cli render-bench --device gpu
+```
+
+**CPU, 24 threads.** The machine was shared with other builds during this run (load average
+about 50), so the seconds are upper bounds; the errors per sample count do not depend on load.
+
+| Scene (what it stresses) | Triangles | relMSE at 1 / 4 / 16 / 64 / 256 spp | Seconds at 256 spp | Reference's own relMSE |
+|---|---|---|---|---|
+| cornell (diffuse interreflection) | 36 | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 2.76 | 0.00005 |
+| materials (small bright light on glossy metal: MIS stress) | 39,686 | 4.94 / 0.805 / 0.128 / 0.049 / 0.0121 | 3.39 | 0.0006 |
+| interior (sun and sky through a small window) | 2,238 | 0.246 / 0.046 / 0.0185 / **0.262 / 0.148** | 5.50 | 0.0017 |
+| night-street (10,000 emissive triangles, 500 point and spot lights) | 10,602 | 6.79 / 1.01 / 0.262 / 0.072 / 0.0198 | 2.43 | 0.0012 |
+| studio (dome panorama, three area lights, coated and metal objects) | 36,104 | 0.326 / 0.081 / 0.0204 / 0.0052 / 0.0013 | 2.82 | 0.00008 |
+| showcase (glass, coat, fuzz, thin film, textures) | 72,196 | 2.45 / 0.692 / 0.166 / 0.049 / 0.0135 | 3.46 | 0.0010 |
+
+Read honestly:
+- Error falls as 1/N on cornell and studio (a factor of 4 per 4× samples): the estimator is
+  healthy there. Seconds to relMSE 0.01: 0.25 s (cornell) and 0.64 s (studio), interpolated.
+- **interior gets worse at 64 and 256 samples** (the spread at 256 spp is 0.005–0.62 across
+  seeds): a few paths that reach the sun through the window by way of the metal ball or the coat
+  carry enormous energy, and one such sample in an image dominates its relMSE. This is the case
+  path guiding, a radiance cache or at least path regularisation exists for; none is implemented.
+  `clamp_indirect` hides it at the cost of energy and is off by default.
+- materials, night-street and showcase converge at 1/N from 16 samples on but start from large
+  errors (speckle from the small bright light on glossy metal, and caustic paths through glass).
+
+**GPU, RTX 4090 (wgpu, Vulkan).** Three of the six scenes; the kernel declines panorama lighting
+and textures, and those scenes are reported as not rendered rather than run on the CPU.
+
+| Scene | relMSE at 1 / 4 / 16 / 64 / 256 spp | Seconds at 256 spp |
+|---|---|---|
+| cornell | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 0.050 |
+| materials | 6.07 / 1.22 / 0.221 / 0.069 / 0.0178 | 0.110 |
+| night-street | 12.6 / 3.41 / 0.848 / 0.236 / 0.0656 | 0.043 |
+
+On cornell the GPU reaches the same error per sample as the CPU (it runs the same samples) in
+1/55 of the time. On night-street it needs about 3.3× the samples of the CPU for the same error,
+because the GPU chooses lights by power while the CPU uses the light tree; it is still far ahead
+in time. Porting the tree to the kernel is the next step for that scene.
+
+### Sample order, feature images and environment sampling (measured by their tests)
+
+| What | Measurement |
+|---|---|
+| z-curve pixel order against independent pixels, Cornell box, 1 spp, six seeds | error after averaging 4×4 pixel blocks at least 1.5× lower (the test's bound), raw error unchanged: the noise moves to high frequencies |
+| MIS-compensated panorama table against the plain one, sun patch in a bright sky, 16 spp | MSE at least 1.3× lower, same mean within 1 % |
+| per-pixel variance image against the actual error of a 16-spp Cornell box | predicts the mean squared error within the test's bounds (actual / predicted below 4) |
+
 ### Light sampling (variance at equal samples)
 
 Measured by the tests that assert them (`cargo test -p craft-render-core`), 48×48 and 16×16
@@ -124,7 +183,7 @@ images, error against a 4096-sample reference:
 
 | Scene | Estimator | Result |
 |---|---|---|
-| 400 small lamps over a floor (800 emissive triangles), direct light, 16 spp | light tree against choosing by power | MSE 0.0166 against 0.0821: 4.9× lower with the tree |
+| 400 small lamps over a floor (800 emissive triangles), direct light, 16 spp | light tree against choosing by power | MSE 2.8× lower with the tree with z-curve pixel order (0.0252 against 0.0696), 4.9× with independent pixels (0.0166 against 0.0821) |
 | A panorama whose light is one patch of 0.5 % of the image, 64 spp | sampling the image against sampling the surface | variance more than 20× lower (the test's bound; both converge to the patch's closed form within 3 %) |
 
 The tree has no orientation cones and does not split, so lights that face away still take

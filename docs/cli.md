@@ -51,7 +51,7 @@ Object ids are numbers (`info` prints them).
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
-model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:showcase`, `builtin:furnace`) and
+model file or a built-in scene (`builtin:cornell`, `builtin:materials`, `builtin:interior`, `builtin:night-street`, `builtin:studio`, `builtin:showcase`, `builtin:furnace`) and
 prints one JSON line: device, size, samples, triangles, scene and render seconds, and million
 samples per second.
 
@@ -70,6 +70,15 @@ samples per second.
 
 The scene graph has no light objects yet, so a project is lit by a studio set-up (a soft sky and
 one key light sized to the scene) on a matte ground plane.
+
+An output ending in `.exr` holds linear radiance (`R`, `G`, `B`) and the feature images a denoiser
+or compositor reads: `albedo.R/G/B`, `N.X/Y/Z` (world-space normal), `Z` (distance from the
+camera), `motion.X/Y` and `variance`, all 32-bit float. The feature images come from the CPU path.
+
+`modelcraft-cli render-bench [--scenes a,b] [--size N] [--spp 1,4,16] [--seeds N] [--reference N]
+[--device cpu|gpu] [--order z|independent]` measures error against samples and time on the
+benchmark scenes, each against its own converged reference, and prints one JSON line per scene and
+a table ([performance.md](performance.md) explains the protocol).
 
 ## Control channel
 

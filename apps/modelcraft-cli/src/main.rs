@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod bench_cmd;
 mod render_cmd;
 
 use std::io::{BufRead, Write};
@@ -36,7 +37,7 @@ Commands:
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nRendering:\n{}\n", render_cmd::USAGE)
+    format!("{USAGE}\nRendering:\n{}\n{}\n", render_cmd::USAGE, bench_cmd::USAGE)
 }
 
 fn main() -> ExitCode {
@@ -142,6 +143,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             Ok(())
         }
         "control" => control(a.first().map(String::as_str)),
+        "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;

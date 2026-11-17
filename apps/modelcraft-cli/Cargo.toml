@@ -26,3 +26,4 @@ serde_json = { workspace = true }
 modelcraft-render = { workspace = true }
 wgpu = { workspace = true }
 craft-image-codecs = { workspace = true }
+craft-exr = { workspace = true }
