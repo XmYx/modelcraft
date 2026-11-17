@@ -175,6 +175,7 @@ impl Shared {
             | Command::AddMesh { .. }
             | Command::SetPositions { .. }
             | Command::Anim(_)
+            | Command::Rig(_)
             | Command::Undo
             | Command::Redo => {}
         }

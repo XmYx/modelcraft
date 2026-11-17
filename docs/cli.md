@@ -15,6 +15,9 @@ modelcraft-cli bake scene.modelcraft Cube out.mcpc --start 0 --end 48 --step 1 -
                                               # an object's vertices per frame (point cache)
 modelcraft-cli cache-info out.mcpc            # a point cache's header and bounds
 modelcraft-cli run-script scene.modelcraft tool.rhai -o out.modelcraft   # a script over a project
+
+modelcraft-cli bench-skin --verts 100000 --joints 60 --frames 120
+                                              # bind, pose and skin a procedural tube
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 ```
@@ -104,6 +107,22 @@ it is granted: they may read the script's folder and the project's folder, and w
 `--max-ops N` change the limits, and `--no-save` runs without writing. Errors print as
 `file:line:column: message` and give a non-zero exit status. Commands the script ran before an
 error stay applied in memory but nothing is saved.
+
+### Rigging
+
+One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","parent":3}`.
+
+| `op` | Fields |
+|---|---|
+| `add_joint` | `parent?`, `position?` [x, y, z] in world space (one unit up the parent's Y without it), `name?` |
+| `orient_joints` | `ids`, `aim` (x, y, z; default y), `up` (default z), `children?`: aim each joint at its first child joint, children stay in place |
+| `mirror_joints` | `id`, `axis` (default x), `find?`, `replace?` (for example `_L` → `_R`) |
+| `bind_skin` | `mesh`, `joints`, `method` (heat, distance; default heat), `influences` (1–8, default 4), `dual_quaternion?` |
+| `unbind_skin` | `mesh` |
+| `set_skin` | `mesh`, `dual_quaternion` |
+| `edit_weights` | `mesh`, `weights`: `normalize` · `prune` + `threshold` · `limit` + `max` · `mirror` + `axis`, `find`, `replace`, `tolerance` · `set` + `points`, `joint`, `weight` · `paint` + `joint`, `center` [x, y, z] in the mesh's space, `radius`, `strength` (−1..1) |
+
+A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
 
 ## Rendering
 

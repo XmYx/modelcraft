@@ -836,6 +836,7 @@ impl Document {
                 _ => return invalid("only objects that store their own mesh have positions to set (collapse a primitive first)"),
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
+            Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
             Command::Undo
             | Command::Redo
             | Command::BeginSculpt { .. }
@@ -911,11 +912,12 @@ impl Document {
         let mut items = Vec::new();
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
-            if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. }) || !self.scene.visible(id) {
+            if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. }) || !self.scene.visible(id) {
                 continue;
             }
             let mesh = match o.kind {
-                ObjectKind::Group => None,
+                // Joints export as empty nodes; a skinned mesh exports in its current pose.
+                ObjectKind::Group | ObjectKind::Joint { .. } => None,
                 _ => Some(self.eval.evaluate(&self.scene, id).mesh),
             };
             let parent = o.parent.and_then(|p| index.get(&p).copied());

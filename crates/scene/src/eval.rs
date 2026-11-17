@@ -131,7 +131,8 @@ impl Evaluator {
         if depth > crate::MAX_DEPTH {
             return Evaluated::default();
         }
-        let key = scene.deep_rev(id);
+        // A skinned mesh also depends on where its joints are.
+        let key = scene.deep_rev(id) ^ crate::rig::pose_key(scene, id);
         if let Some((k, e)) = self.finals.get(&id)
             && *k == key
         {
@@ -157,6 +158,11 @@ impl Evaluator {
                     }
                     e.mesh = Arc::new(m);
                 }
+                let (skinned, problems) = crate::rig::apply_skins(scene, id, &e.mesh);
+                if let Some(m) = skinned {
+                    e.mesh = Arc::new(m);
+                }
+                e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
                 e
             }
             ObjectKind::SmoothCage { levels } => {
@@ -180,7 +186,7 @@ impl Evaluator {
                     }
                 }
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } => Evaluated::default(),
+            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result

@@ -1,0 +1,1 @@
+| 2026-11-17 | Rigging: joints as scene objects with bones in the viewport (add, orient, mirror), skins that bind a mesh to joints with automatic heat or distance weights, linear-blend and dual-quaternion skinning through the dependency graph, weight tools (normalize, prune, limit, mirror, set, paint dab), the `rig` command, `modelcraft-cli bench-skin` with measured numbers |

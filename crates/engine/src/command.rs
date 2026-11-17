@@ -200,6 +200,8 @@ pub enum Command {
     Redo,
     /// Keys, curves and time: `{"cmd":"anim","op":"set_key",…}` ([`crate::anim::AnimCommand`]).
     Anim(crate::anim::AnimCommand),
+    /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
+    Rig(crate::rig::RigCommand),
 }
 
 /// Most commands one batch may hold, and how deep batches may nest.
@@ -296,6 +298,7 @@ impl Command {
             Command::Undo => "Undo".into(),
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),
+            Command::Rig(r) => r.label(),
         }
     }
 }
