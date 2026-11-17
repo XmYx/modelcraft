@@ -469,6 +469,13 @@ fn exchange_settings_from_the_file_menu() {
     h.run();
     h.get_by_role_and_label(Role::RadioButton, "Z up").click();
     h.run();
+    if h.query_by_role_and_label(Role::RadioButton, "Centimetres").is_none() {
+        // A choice closes the menu; open it again for the unit.
+        h.get_by_label("File").click();
+        h.run();
+        h.get_by_label("Exchange Settings").click();
+        h.run();
+    }
     h.get_by_role_and_label(Role::RadioButton, "Centimetres").click();
     h.run();
     let c = h.state().exchange;
