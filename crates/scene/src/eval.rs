@@ -180,7 +180,7 @@ impl Evaluator {
                     }
                     e.mesh = Arc::new(m);
                 }
-                let (skinned, problems) = crate::rig::apply_skins(scene, id, &e.mesh);
+                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
                 if let Some(m) = skinned {
                     e.mesh = Arc::new(m);
                 }
@@ -246,7 +246,9 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } => Evaluated::default(),
+            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } => {
+                Evaluated::default()
+            }
         };
         self.finals.insert(id, (key, result.clone()));
         result

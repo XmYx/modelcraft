@@ -242,6 +242,6 @@ fn mirrored_weights_animation_and_files() {
         let j = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<Command>(&j).unwrap(), c, "{j}");
     }
-    assert_eq!(crate::rig::COMMANDS.len(), 15);
+    assert_eq!(crate::rig::COMMANDS.len(), 23);
     let _ = Transform::default();
 }

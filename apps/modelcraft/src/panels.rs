@@ -486,6 +486,13 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c + egui::vec2(-3.0, 3.0), 2.5, egui::Stroke::new(1.2, j));
             p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], egui::Stroke::new(1.4, j));
         }
+        ObjectKind::PointDeformer { .. } => {
+            // A stack deformer: a small grid.
+            let g = Color32::from_rgb(200, 140, 230);
+            p.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), 0.0, egui::Stroke::new(1.2, g), egui::StrokeKind::Inside);
+            p.line_segment([c + egui::vec2(-5.0, 0.0), c + egui::vec2(5.0, 0.0)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(0.0, -5.0), c + egui::vec2(0.0, 5.0)], egui::Stroke::new(1.0, g));
+        }
         ObjectKind::Skin { .. } => {
             // A skin: two linked circles.
             let k = Color32::from_rgb(240, 200, 120);
@@ -755,6 +762,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
         });
     }
+    crate::deform_ui::properties(app, ui, id);
     crate::constraint_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);

@@ -29,10 +29,16 @@ pub enum RigAction {
     MatchIk,
     BakeConstraints,
     RemoveConstraints,
+    AddBlendShape,
+    AddInBetween,
+    AddLattice,
+    AddCluster,
+    StackEarlier,
+    StackLater,
 }
 
 impl RigAction {
-    pub const ALL: [RigAction; 19] = [
+    pub const ALL: [RigAction; 25] = [
         RigAction::AddJoint,
         RigAction::OrientJoints,
         RigAction::MirrorJoints,
@@ -52,6 +58,12 @@ impl RigAction {
         RigAction::MatchIk,
         RigAction::BakeConstraints,
         RigAction::RemoveConstraints,
+        RigAction::AddBlendShape,
+        RigAction::AddInBetween,
+        RigAction::AddLattice,
+        RigAction::AddCluster,
+        RigAction::StackEarlier,
+        RigAction::StackLater,
     ];
 
     pub fn label(self) -> String {
@@ -75,6 +87,12 @@ impl RigAction {
             RigAction::MatchIk => tl!("Match IK to FK"),
             RigAction::BakeConstraints => tl!("Bake Constraints to Keys"),
             RigAction::RemoveConstraints => tl!("Remove Constraints"),
+            RigAction::AddBlendShape => tl!("Add Blend Shape from Mesh"),
+            RigAction::AddInBetween => tl!("Add In-Between Shape from Mesh"),
+            RigAction::AddLattice => tl!("Add Lattice"),
+            RigAction::AddCluster => tl!("Add Cluster from Vertices"),
+            RigAction::StackEarlier => tl!("Move Deformer Earlier"),
+            RigAction::StackLater => tl!("Move Deformer Later"),
         }
     }
 
@@ -99,6 +117,12 @@ impl RigAction {
             RigAction::MatchIk => "rig.match_ik",
             RigAction::BakeConstraints => "rig.bake_constraints",
             RigAction::RemoveConstraints => "rig.remove_constraints",
+            RigAction::AddBlendShape => "rig.add_blend_shape",
+            RigAction::AddInBetween => "rig.add_in_between",
+            RigAction::AddLattice => "rig.add_lattice",
+            RigAction::AddCluster => "rig.add_cluster",
+            RigAction::StackEarlier => "rig.stack_earlier",
+            RigAction::StackLater => "rig.stack_later",
         }
     }
 
@@ -206,6 +230,12 @@ pub fn act(app: &mut ModelApp, a: RigAction) {
             };
             app.run(Command::Rig(RigCommand::EditWeights { mesh, edit }));
         }
+        RigAction::AddBlendShape
+        | RigAction::AddInBetween
+        | RigAction::AddLattice
+        | RigAction::AddCluster
+        | RigAction::StackEarlier
+        | RigAction::StackLater => crate::deform_ui::act(app, a),
         _ => crate::constraint_ui::act(app, a),
     }
 }
@@ -213,7 +243,7 @@ pub fn act(app: &mut ModelApp, a: RigAction) {
 pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.menu_button(tl!("Rig"), |ui| {
         for a in RigAction::ALL {
-            if a == RigAction::AddIk {
+            if a == RigAction::AddIk || a == RigAction::AddBlendShape {
                 ui.separator();
             }
             let action = crate::actions::Action::Rig(a);
@@ -249,5 +279,6 @@ pub fn bone_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
         }
     }
     out.extend(crate::constraint_ui::guide_lines(app));
+    out.extend(crate::deform_ui::lattice_lines(app));
     out
 }

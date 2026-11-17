@@ -213,6 +213,15 @@ Limits of what exists:
   constrained object by number takes the other channels' solved values as authored. The driven
   key's curve has no editor yet (keys are set from poses or by command). Formulas give one
   number; when the scripting crate lands they can call into it instead of growing.
+- Deformer stack (owned by the animation and rigging stream: blend shapes, lattice / FFD,
+  clusters; the parametric deformers such as bend, shear, wrap and spline wrap belong to the
+  procedural-modeling stream): the stack deformers and skins run in child order *after* the
+  parametric deformers, whose loop in `eval.rs` this stream did not touch. One order for both
+  kinds needs that loop to hand its deformers to `rig::apply_stack`; until then a bend always
+  runs before a lattice. Lattice control points and cluster weights are edited by number and by
+  command, not picked or painted in the viewport; a lattice only moves points inside its box;
+  blend-shape targets are made from another mesh and are not edited in place; shape offsets are
+  saved as JSON, not as a blob.
 - Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
   be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
 - Motion paths are drawn, not edited, and there are no ghosts. Point caches are written
