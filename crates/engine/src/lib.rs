@@ -10,27 +10,33 @@
 
 pub mod anim;
 mod command;
+mod constraints;
+pub mod control;
 mod document;
 mod layers;
 pub mod rig;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef};
-pub use command::{COMMANDS, Command, DetailOp, MaskOp, Outcome, ShapeOp};
+pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
+pub use modelcraft_clone as clone;
 pub use modelcraft_formats as formats;
 pub use modelcraft_mesh as mesh;
 pub use modelcraft_ops as ops;
 pub use modelcraft_scene as scene;
 pub use modelcraft_sculpt as sculpt;
+pub use modelcraft_uv as uv;
 pub use modelcraft_uvpack as uvpack;
 
 #[cfg(test)]
 mod anim_tests;
+#[cfg(test)]
+mod constraint_tests;
 #[cfg(test)]
 mod rig_tests;

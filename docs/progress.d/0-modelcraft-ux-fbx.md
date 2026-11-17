@@ -1,0 +1,1 @@
+| 2026-11-17 | FBX import (binary and ASCII, through craft-mesh) and FBX 7.4 ASCII export written from public descriptions; 3MF import; up-axis and unit conversion on import and export (File ▸ Exchange Settings, `import` fields `up` and `scale`, `modelcraft-cli export/convert --up --scale`) |

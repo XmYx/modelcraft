@@ -1,6 +1,6 @@
 use super::*;
 use glam::Vec3;
-use modelcraft_scene::Transform;
+use modelcraft_scene::{Cloner, Transform};
 use modelcraft_sculpt::{BrushKind, Stroke};
 
 fn tmp(name: &str) -> PathBuf {
@@ -149,11 +149,11 @@ fn import_export_round_trip_and_hostile_paths() {
         let p = dir.join(format!("out.{ext}"));
         d.export(&p).unwrap();
         let mut e = Document::new();
-        let out = e.execute(Command::Import { path: p.display().to_string() }).unwrap();
+        let out = e.execute(Command::Import { path: p.display().to_string(), up: Default::default(), scale: None }).unwrap();
         assert!(!out.created.is_empty(), "{ext}");
     }
-    assert!(d.execute(Command::Import { path: dir.join("nope.glb").display().to_string() }).is_err());
-    assert!(d.execute(Command::Import { path: "/etc/passwd".into() }).is_err());
+    assert!(d.execute(Command::Import { path: dir.join("nope.glb").display().to_string(), up: Default::default(), scale: None }).is_err());
+    assert!(d.execute(Command::Import { path: "/etc/passwd".into(), up: Default::default(), scale: None }).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -166,6 +166,8 @@ fn commands_round_trip_as_json() {
         Command::SculptDetail { id: ObjectId(1), op: crate::DetailOp::Up },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Strength { index: 0, strength: 0.25 } },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Select { index: None } },
+        Command::AddCloner { kind: "radial".into(), input: Some(ObjectId(1)) },
+        Command::SetCloner { id: ObjectId(2), cloner: Cloner::default_of("grid").unwrap(), target: Some(ObjectId(1)) },
         Command::Undo,
     ];
     for c in cmds {
@@ -174,7 +176,7 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 28);
+    assert_eq!(crate::COMMANDS.len(), 33);
 }
 
 fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {
@@ -427,6 +429,127 @@ fn strokes_and_presets_keep_their_json_form() {
     }
 }
 
+fn quad() -> Command {
+    Command::AddMesh {
+        name: Some("Quad".into()),
+        parent: None,
+        positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+        faces: vec![vec![0, 1, 2, 3]],
+    }
+}
+
+#[test]
+fn add_mesh_and_set_positions_round_trip_and_validate() {
+    let mut d = Document::new();
+    let id = d.execute(quad()).unwrap().created[0];
+    assert_eq!(d.eval.evaluate(&d.scene, id).mesh.face_count(), 1);
+    // Faces that do not fit are dropped with a warning; no face left is an error and leaves no trace.
+    let out = d
+        .execute(Command::AddMesh {
+            name: None,
+            parent: None,
+            positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            faces: vec![vec![0, 1, 2], vec![0, 1, 9]],
+        })
+        .unwrap();
+    assert_eq!(out.warnings.len(), 1);
+    let before = d.undo.len();
+    assert!(d.execute(Command::AddMesh { name: None, parent: None, positions: vec![[0.0; 3]], faces: vec![vec![0, 1, 2]] }).is_err());
+    assert!(d.execute(Command::AddMesh { name: None, parent: None, positions: vec![], faces: vec![] }).is_err());
+    assert_eq!(d.undo.len(), before);
+
+    d.execute(Command::SetPositions { id, positions: vec![[0.0, 0.0, 1.0], [2.0, 0.0, 1.0], [2.0, 2.0, 1.0], [0.0, 2.0, 1.0]] }).unwrap();
+    let (lo, hi) = d.eval.evaluate(&d.scene, id).mesh.bounds();
+    assert_eq!((lo.z, hi.x), (1.0, 2.0));
+    // Wrong count, non-finite values and objects without a stored mesh are errors.
+    assert!(d.execute(Command::SetPositions { id, positions: vec![[0.0; 3]] }).is_err());
+    assert!(d.execute(Command::SetPositions { id, positions: vec![[f32::NAN, 0.0, 0.0]; 4] }).is_err());
+    let cube = add(&mut d, "cube");
+    assert!(d.execute(Command::SetPositions { id: cube, positions: vec![] }).is_err());
+    d.execute(Command::Undo).unwrap();
+    d.execute(Command::Undo).unwrap();
+    assert!(d.scene.get(cube).is_none());
+    let j = serde_json::to_string(&quad()).unwrap();
+    assert_eq!(serde_json::from_str::<Command>(&j).unwrap(), quad());
+}
+
+#[test]
+fn a_batch_is_one_undo_step_and_all_or_nothing() {
+    let mut d = Document::new();
+    let cmds = vec![
+        Command::AddPrimitive { kind: "cube".into(), name: None, parent: None },
+        Command::AddPrimitive { kind: "sphere".into(), name: None, parent: None },
+        Command::Batch { label: None, commands: vec![Command::AddGroup { name: None }] },
+    ];
+    let out = d.execute(Command::Batch { label: Some("Three".into()), commands: cmds }).unwrap();
+    assert_eq!(out.created.len(), 3);
+    assert_eq!(d.undo.len(), 1);
+    assert_eq!(d.undo.labels(), vec!["Three".to_string()]);
+    d.execute(Command::Undo).unwrap();
+    assert!(d.scene.is_empty());
+    d.execute(Command::Redo).unwrap();
+    assert_eq!(d.scene.len(), 3);
+    // A failing member undoes the others and names itself.
+    let n = d.scene.len();
+    let bad = Command::Batch {
+        label: None,
+        commands: vec![Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }, Command::Delete { ids: vec![ObjectId(999)] }],
+    };
+    let e = d.execute(bad).unwrap_err().to_string();
+    assert!(e.contains("batch command 2"), "{e}");
+    assert_eq!(d.scene.len(), n);
+    assert_eq!(d.undo.len(), 1);
+    // Sculpting, undo and runaway nesting are refused.
+    assert!(d.execute(Command::Batch { label: None, commands: vec![Command::Undo] }).is_err());
+    let mut deep = Command::AddGroup { name: None };
+    for _ in 0..crate::MAX_BATCH_DEPTH + 1 {
+        deep = Command::Batch { label: None, commands: vec![deep] };
+    }
+    assert!(d.execute(deep).is_err());
+}
+
+#[test]
+fn undo_groups_merge_roll_back_and_nest() {
+    let mut d = Document::new();
+    add(&mut d, "cube");
+    d.begin_group("Scatter");
+    for _ in 0..5 {
+        add(&mut d, "sphere");
+    }
+    assert_eq!(d.undo.len(), 6);
+    assert_eq!(d.end_group(false), 5);
+    assert_eq!(d.undo.labels(), vec!["Add cube".to_string(), "Scatter".to_string()]);
+    assert_eq!(d.scene.len(), 6);
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.scene.len(), 1, "one undo removes the whole group");
+    d.execute(Command::Redo).unwrap();
+    assert_eq!(d.scene.len(), 6);
+
+    // Rollback leaves the scene as it was and nothing to redo.
+    let steps = d.undo.len();
+    d.begin_group("Oops");
+    add(&mut d, "torus");
+    add(&mut d, "cone");
+    d.end_group(true);
+    assert_eq!(d.scene.len(), 6);
+    assert_eq!(d.undo.len(), steps);
+    assert!(!d.undo.can_redo());
+
+    // Nested groups make one step; undo and redo are refused while a group is open.
+    d.begin_group("Outer");
+    add(&mut d, "cube");
+    d.begin_group("Inner");
+    add(&mut d, "cube");
+    assert!(d.execute(Command::Undo).is_err());
+    assert_eq!(d.group_depth(), 2);
+    d.end_group(false);
+    add(&mut d, "cube");
+    d.end_group(false);
+    assert_eq!(d.undo.len(), steps + 1);
+    assert_eq!(d.undo.labels().last().map(String::as_str), Some("Outer"));
+    assert_eq!(d.end_group(false), 0, "no open group");
+}
+
 #[test]
 fn a_history_that_no_longer_replays_is_dropped_not_fatal() {
     let dir = tmp("history-bad");
@@ -436,7 +559,7 @@ fn a_history_that_no_longer_replays_is_dropped_not_fatal() {
     src.export(&mesh_file).unwrap();
     let p = dir.join("h.modelcraft");
     let mut d = Document::new();
-    d.execute(Command::Import { path: mesh_file.display().to_string() }).unwrap();
+    d.execute(Command::Import { path: mesh_file.display().to_string(), up: Default::default(), scale: None }).unwrap();
     d.save_as(&p).unwrap();
     // The imported file moved away: replaying the history cannot rebuild the scene.
     std::fs::remove_file(&mesh_file).unwrap();
@@ -476,5 +599,170 @@ fn history_storage_is_optional_and_bounded() {
     let r = Document::open(&p).unwrap();
     assert_eq!(r.undo.len(), e.undo.len());
     assert_eq!(r.scene.len(), 10);
+}
+
+#[test]
+fn fbx_export_and_import_with_axis_and_unit_conversion() {
+    use modelcraft_formats::exchange::{Convert, Up};
+    let dir = tmp("fbx");
+    let mut d = Document::new();
+    let cube = add(&mut d, "cube");
+    d.execute(Command::SetTransform { id: cube, transform: Transform { translation: Vec3::new(0.0, 2.0, 0.0), ..Default::default() } }).unwrap();
+    let p = dir.join("z.fbx");
+    d.export_with(&p, Convert { up: Up::Z, scale: Some(0.01) }).unwrap();
+    // The file says Z up in centimetres, so a plain import puts the cube back where it was.
+    let mut e = Document::new();
+    let out = e.execute(Command::Import { path: p.display().to_string(), up: Up::Auto, scale: None }).unwrap();
+    let t = e.scene.get(out.created[0]).unwrap().transform.translation;
+    assert!((t - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-4, "{t:?}");
+    // Told it is Y up in metres, the raw numbers come through: 200 units along +Z.
+    let mut f = Document::new();
+    let out = f.execute(Command::Import { path: p.display().to_string(), up: Up::Y, scale: Some(1.0) }).unwrap();
+    let t = f.scene.get(out.created[0]).unwrap().transform.translation;
+    assert!((t - Vec3::new(0.0, 0.0, 200.0)).length() < 1e-2, "{t:?}");
+    // The command keeps its old JSON form when no conversion is asked for.
+    let j = serde_json::to_string(&Command::Import { path: "a.fbx".into(), up: Up::Auto, scale: None }).unwrap();
+    assert_eq!(j, r#"{"cmd":"import","path":"a.fbx"}"#);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_merged_undo_group_is_saved_with_the_history_and_replays_as_one_step() {
+    let dir = tmp("history-group");
+    let p = dir.join("g.modelcraft");
+    let mut d = Document::new();
+    add(&mut d, "cube");
+    d.begin_group("Row");
+    add(&mut d, "sphere");
+    add(&mut d, "torus");
+    d.end_group(false);
+    assert_eq!(d.undo.labels(), vec!["Add cube".to_string(), "Row".to_string()]);
+    d.save_as(&p).unwrap();
+    let mut r = Document::open(&p).unwrap();
+    assert_eq!(r.scene.len(), 3);
+    assert_eq!(r.undo.labels(), vec!["Add cube".to_string(), "Row".to_string()], "the group is still one step");
+    r.execute(Command::Undo).unwrap();
+    assert_eq!(r.scene.len(), 1);
+    r.execute(Command::Redo).unwrap();
+    assert_eq!(r.scene.len(), 3);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn clone_generator_commands_undo_and_export_instances() {
+    let mut d = Document::new();
+    let out = d.execute(Command::AddCloner { kind: "grid".into(), input: None }).unwrap();
+    let gen_id = out.created[0];
+    assert_eq!(d.scene.len(), 2, "a default source is made inside the generator");
+    let inst = d.eval.evaluate(&d.scene, gen_id).instances.unwrap();
+    assert_eq!(inst.clones.len(), 16);
+    // Settings change through a command, with a sanitized result and one undo step.
+    let before = d.undo.len();
+    let mut c = Cloner::default_of("linear").unwrap();
+    if let modelcraft_scene::Cloner { layout: modelcraft_clone::Layout::Linear { count, .. }, .. } = &mut c {
+        *count = u32::MAX;
+    }
+    d.execute(Command::SetCloner { id: gen_id, cloner: c, target: None }).unwrap();
+    assert_eq!(d.undo.len(), before + 1);
+    assert_eq!(d.eval.evaluate(&d.scene, gen_id).instances.unwrap().clones.len(), modelcraft_scene::MAX_CLONES);
+    assert_eq!(d.triangle_count(), 12 * modelcraft_scene::MAX_CLONES);
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.eval.evaluate(&d.scene, gen_id).instances.unwrap().clones.len(), 16);
+    // The export has one node per clone, all sharing the source mesh.
+    let items = d.export_items();
+    assert_eq!(items.len(), 17);
+    assert!(items[1..].iter().all(|i| i.mesh.as_ref().is_some_and(|m| std::sync::Arc::ptr_eq(m, items[1].mesh.as_ref().unwrap()))));
+    // A cloner is never its own target; a plain mesh is not a clone generator.
+    assert!(d.execute(Command::SetCloner { id: gen_id, cloner: Cloner::default_of("surface").unwrap(), target: Some(gen_id) }).is_err());
+    let cube = add(&mut d, "cube");
+    assert!(d.execute(Command::SetCloner { id: cube, cloner: Cloner::default_of("grid").unwrap(), target: None }).is_err());
+    assert!(d.execute(Command::AddCloner { kind: "honeycomb".into(), input: None }).is_err());
+    // An existing object becomes the source.
+    let g2 = d.execute(Command::AddCloner { kind: "linear".into(), input: Some(cube) }).unwrap().created[0];
+    assert_eq!(d.scene.get(cube).unwrap().parent, Some(g2));
+    assert_eq!(d.eval.evaluate(&d.scene, g2).instances.unwrap().clones.len(), 5);
+}
+
+#[test]
+fn sheared_clones_export_with_their_true_world_positions() {
+    use glam::{Mat4, Quat};
+    use modelcraft_clone::Layout;
+    let mut d = Document::new();
+    let gen_id = d.execute(Command::AddCloner { kind: "linear".into(), input: None }).unwrap().created[0];
+    let src = d.scene.generator_input(gen_id).unwrap();
+    // A rotated source, and a stretch that grows along X with each clone: stretch after rotation is a shear.
+    let t = Transform { rotation: Quat::from_rotation_z(0.7), ..Transform::default() };
+    d.execute(Command::SetTransform { id: src, transform: t }).unwrap();
+    let cloner =
+        Cloner { layout: Layout::Linear { count: 4, offset: Vec3::new(3.0, 0.0, 0.0), rotation: Vec3::ZERO, scale: Vec3::new(1.0, 0.0, 0.0) }, seed: 0 };
+    d.execute(Command::SetCloner { id: gen_id, cloner, target: None }).unwrap();
+    let inst = d.eval.evaluate(&d.scene, gen_id).instances.unwrap();
+    let items = d.export_items();
+    assert_eq!(items.len(), 5);
+    let mut baked = 0;
+    for (k, c) in inst.clones.instances.iter().enumerate() {
+        let item = &items[k + 1];
+        let node = item.transform.matrix();
+        let mesh = item.mesh.as_ref().unwrap();
+        if !std::sync::Arc::ptr_eq(mesh, &inst.source) {
+            baked += 1;
+        }
+        assert_eq!(mesh.vertex_count(), inst.source.vertex_count());
+        for v in 0..mesh.vertex_count() as u32 {
+            let exported = node.transform_point3(mesh.position(v));
+            let shown = c.matrix.transform_point3(inst.source.position(v));
+            assert!((exported - shown).length() < 1e-4, "clone {k} vertex {v}: exported {exported:?}, shown {shown:?}");
+        }
+    }
+    assert!(baked >= 2, "the sheared clones carry their own baked mesh, got {baked}");
+    // The clones without shear still share the one source mesh.
+    assert!(std::sync::Arc::ptr_eq(items[1].mesh.as_ref().unwrap(), &inst.source));
+    let _ = Mat4::IDENTITY;
+}
+
+#[test]
+fn clone_generator_problems_reach_the_status_line_as_warnings() {
+    let mut d = Document::new();
+    let out = d.execute(Command::AddCloner { kind: "surface".into(), input: None }).unwrap();
+    assert!(out.warnings.iter().any(|w| w.contains("target")), "{:?}", out.warnings);
+    let id = out.created[0];
+    let cube = add(&mut d, "cube");
+    let ok = d.execute(Command::SetCloner { id, cloner: Cloner::default_of("surface").unwrap(), target: Some(cube) }).unwrap();
+    assert!(ok.warnings.is_empty(), "{:?}", ok.warnings);
+    let src = d.scene.generator_input(id).unwrap();
+    d.execute(Command::Delete { ids: vec![src] }).unwrap();
+    let again = d.execute(Command::SetCloner { id, cloner: Cloner::default_of("surface").unwrap(), target: Some(cube) }).unwrap();
+    assert!(again.warnings.iter().any(|w| w.contains("source")), "{:?}", again.warnings);
+}
+
+#[test]
+fn mirrored_sheared_clones_export_with_outward_faces() {
+    use glam::{Mat4, Quat};
+    use modelcraft_clone::Layout;
+    let mut d = Document::new();
+    let gen_id = d.execute(Command::AddCloner { kind: "linear".into(), input: None }).unwrap().created[0];
+    let src = d.scene.generator_input(gen_id).unwrap();
+    // A mirrored, rotated source with a per-clone stretch: sheared and with a negative determinant.
+    let t = Transform { rotation: Quat::from_rotation_z(0.7), scale: Vec3::new(-1.0, 1.0, 1.0), ..Transform::default() };
+    d.execute(Command::SetTransform { id: src, transform: t }).unwrap();
+    let cloner =
+        Cloner { layout: Layout::Linear { count: 3, offset: Vec3::new(3.0, 0.0, 0.0), rotation: Vec3::ZERO, scale: Vec3::new(1.0, 0.0, 0.0) }, seed: 0 };
+    d.execute(Command::SetCloner { id: gen_id, cloner, target: None }).unwrap();
+    let inst = d.eval.evaluate(&d.scene, gen_id).instances.unwrap();
+    let items = d.export_items();
+    let _ = Mat4::IDENTITY;
+    for (k, c) in inst.clones.instances.iter().enumerate() {
+        let mesh = items[k + 1].mesh.as_ref().unwrap();
+        let node = items[k + 1].transform.matrix();
+        let centre = {
+            let (lo, hi) = mesh.bounds();
+            node.transform_point3((lo + hi) * 0.5)
+        };
+        // Every exported face points away from the clone's centre (the source is a convex cube).
+        for f in 0..mesh.face_count() as u32 {
+            let n = node.transform_vector3(mesh.face_normal(f));
+            let at = node.transform_point3(mesh.face_center(f));
+            assert!(n.dot(at - centre) > 0.0, "clone {k} (det {}) face {f} points inwards", c.matrix.determinant());
+        }
+    }
 }

@@ -19,10 +19,20 @@ pub enum RigAction {
     NormalizeWeights,
     PruneWeights,
     MirrorWeights,
+    AddIk,
+    ConstrainPosition,
+    ConstrainRotation,
+    ConstrainScale,
+    ConstrainAsChild,
+    ConstrainLookAt,
+    MatchFk,
+    MatchIk,
+    BakeConstraints,
+    RemoveConstraints,
 }
 
 impl RigAction {
-    pub const ALL: [RigAction; 9] = [
+    pub const ALL: [RigAction; 19] = [
         RigAction::AddJoint,
         RigAction::OrientJoints,
         RigAction::MirrorJoints,
@@ -32,6 +42,16 @@ impl RigAction {
         RigAction::NormalizeWeights,
         RigAction::PruneWeights,
         RigAction::MirrorWeights,
+        RigAction::AddIk,
+        RigAction::ConstrainPosition,
+        RigAction::ConstrainRotation,
+        RigAction::ConstrainScale,
+        RigAction::ConstrainAsChild,
+        RigAction::ConstrainLookAt,
+        RigAction::MatchFk,
+        RigAction::MatchIk,
+        RigAction::BakeConstraints,
+        RigAction::RemoveConstraints,
     ];
 
     pub fn label(self) -> String {
@@ -45,6 +65,16 @@ impl RigAction {
             RigAction::NormalizeWeights => tl!("Normalize Skin Weights"),
             RigAction::PruneWeights => tl!("Prune Small Skin Weights"),
             RigAction::MirrorWeights => tl!("Mirror Skin Weights Across X"),
+            RigAction::AddIk => tl!("Add IK to Joint Chain"),
+            RigAction::ConstrainPosition => tl!("Constrain Position"),
+            RigAction::ConstrainRotation => tl!("Constrain Rotation"),
+            RigAction::ConstrainScale => tl!("Constrain Scale"),
+            RigAction::ConstrainAsChild => tl!("Constrain as Child"),
+            RigAction::ConstrainLookAt => tl!("Constrain to Look At"),
+            RigAction::MatchFk => tl!("Match FK to IK"),
+            RigAction::MatchIk => tl!("Match IK to FK"),
+            RigAction::BakeConstraints => tl!("Bake Constraints to Keys"),
+            RigAction::RemoveConstraints => tl!("Remove Constraints"),
         }
     }
 
@@ -59,6 +89,16 @@ impl RigAction {
             RigAction::NormalizeWeights => "rig.normalize_weights",
             RigAction::PruneWeights => "rig.prune_weights",
             RigAction::MirrorWeights => "rig.mirror_weights",
+            RigAction::AddIk => "rig.add_ik",
+            RigAction::ConstrainPosition => "rig.constrain_position",
+            RigAction::ConstrainRotation => "rig.constrain_rotation",
+            RigAction::ConstrainScale => "rig.constrain_scale",
+            RigAction::ConstrainAsChild => "rig.constrain_as_child",
+            RigAction::ConstrainLookAt => "rig.constrain_look_at",
+            RigAction::MatchFk => "rig.match_fk",
+            RigAction::MatchIk => "rig.match_ik",
+            RigAction::BakeConstraints => "rig.bake_constraints",
+            RigAction::RemoveConstraints => "rig.remove_constraints",
         }
     }
 
@@ -166,12 +206,16 @@ pub fn act(app: &mut ModelApp, a: RigAction) {
             };
             app.run(Command::Rig(RigCommand::EditWeights { mesh, edit }));
         }
+        _ => crate::constraint_ui::act(app, a),
     }
 }
 
 pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.menu_button(tl!("Rig"), |ui| {
         for a in RigAction::ALL {
+            if a == RigAction::AddIk {
+                ui.separator();
+            }
             let action = crate::actions::Action::Rig(a);
             let b = egui::Button::new(action.label()).shortcut_text(action.shortcut_text(app));
             if ui.add(b).clicked() {
@@ -204,5 +248,6 @@ pub fn bone_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
             }
         }
     }
+    out.extend(crate::constraint_ui::guide_lines(app));
     out
 }

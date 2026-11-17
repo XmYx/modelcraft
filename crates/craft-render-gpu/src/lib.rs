@@ -122,6 +122,11 @@ struct Params {
     cam_right: [f32; 4],
     cam_up: [f32; 4],
     cam_forward: [f32; 4],
+    /// The previous frame's camera, for the motion feature image.
+    prev_origin: [f32; 4],
+    prev_right: [f32; 4],
+    prev_up: [f32; 4],
+    prev_forward: [f32; 4],
     env: [f32; 4],
     size: [u32; 2],
     first_sample: u32,
@@ -136,7 +141,21 @@ struct Params {
     strategy: u32,
     /// Index bits of the z-curve pixel order; 255 for independent pixels.
     z_bits: u32,
-    pad: [u32; 3],
+    light_tree: u32,
+    positional: u32,
+    positional_mass: f32,
+    tree_nodes: u32,
+    tree_paths: u32,
+    env_w: u32,
+    env_h: u32,
+    env_pixels: u32,
+    env_marginal: u32,
+    env_conditional: u32,
+    env_turn: f32,
+    textures: u32,
+    texture_count: u32,
+    has_cutouts: u32,
+    has_env: u32,
 }
 
 #[repr(C)]
@@ -158,20 +177,116 @@ struct GpuAttr {
     n1: [f32; 3],
     light: i32,
     n2: [f32; 3],
-    pad: u32,
+    /// The triangle's index in the scene.
+    prim: u32,
+    uv: [[f32; 2]; 3],
+    pad: [f32; 2],
 }
 
+const FLAG_TRANSMISSIVE: u32 = 1;
+const FLAG_CUTOUTS: u32 = 2;
+/// The shading frame depends on the texture axes (normal map, bump map or anisotropy).
+const FLAG_AXES: u32 = 4;
+
+/// A sanitized [`craft_render_core::Material`] as the kernel reads it.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GpuMaterial {
     base: [f32; 3],
     metalness: f32,
-    tint: [f32; 3],
+    specular_color: [f32; 3],
     roughness: f32,
-    d0: f32,
-    d90: f32,
+    transmission_tint: [f32; 3],
     ior: f32,
-    pad: f32,
+    coat_color: [f32; 3],
+    coat: f32,
+    fuzz_color: [f32; 3],
+    fuzz: f32,
+    absorption: [f32; 3],
+    specular_weight: f32,
+    base_color: [f32; 3],
+    opacity: f32,
+    diffuse_roughness: f32,
+    anisotropy: f32,
+    transmission: f32,
+    coat_roughness: f32,
+    coat_ior: f32,
+    fuzz_roughness: f32,
+    thin_film: f32,
+    thin_film_thickness: f32,
+    thin_film_ior: f32,
+    normal_scale: f32,
+    bump_scale: f32,
+    flags: u32,
+    /// Base colour, roughness, metalness, normal, opacity and bump textures (−1: none), then padding.
+    textures: [i32; 8],
+}
+
+impl GpuMaterial {
+    fn new(m: &craft_render_core::Material, texture_count: usize) -> GpuMaterial {
+        // A texture the scene does not have is no texture, as on the CPU.
+        let tex = |id: Option<u32>| id.filter(|t| (*t as usize) < texture_count).map_or(-1, |t| t as i32);
+        let textures = [
+            tex(m.base_color_texture),
+            tex(m.roughness_texture),
+            tex(m.metalness_texture),
+            tex(m.normal_texture),
+            tex(m.opacity_texture),
+            tex(m.bump_texture),
+            0,
+            0,
+        ];
+        let mut flags = 0;
+        if m.is_transmissive() {
+            flags |= FLAG_TRANSMISSIVE;
+        }
+        if m.has_cutouts() {
+            flags |= FLAG_CUTOUTS;
+        }
+        if m.normal_texture.is_some() || m.bump_texture.is_some() || m.specular_roughness_anisotropy > 0.0 {
+            flags |= FLAG_AXES;
+        }
+        GpuMaterial {
+            base: (m.base_color * m.base_weight).to_array(),
+            metalness: m.base_metalness,
+            specular_color: m.specular_color.to_array(),
+            roughness: m.specular_roughness,
+            transmission_tint: if m.transmission_depth > 0.0 { [1.0; 3] } else { m.transmission_color.to_array() },
+            ior: m.specular_ior,
+            coat_color: m.coat_color.to_array(),
+            coat: m.coat_weight,
+            fuzz_color: m.fuzz_color.to_array(),
+            fuzz: m.fuzz_weight,
+            absorption: glam::Vec3::from(m.absorption()).to_array(),
+            specular_weight: m.specular_weight,
+            base_color: m.base_color.to_array(),
+            opacity: m.geometry_opacity,
+            diffuse_roughness: m.base_diffuse_roughness,
+            anisotropy: m.specular_roughness_anisotropy,
+            transmission: m.transmission_weight,
+            coat_roughness: m.coat_roughness,
+            coat_ior: m.coat_ior,
+            fuzz_roughness: m.fuzz_roughness,
+            thin_film: m.thin_film_weight,
+            thin_film_thickness: m.thin_film_thickness,
+            thin_film_ior: m.thin_film_ior,
+            normal_scale: m.normal_scale,
+            bump_scale: m.bump_scale,
+            flags,
+            textures,
+        }
+    }
+}
+
+/// What one pixel accumulates on the GPU: radiance and samples, base colour and depth, normal and
+/// squared luminance, motion.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuPixel {
+    radiance: [f32; 4],
+    albedo: [f32; 4],
+    normal: [f32; 4],
+    motion: [f32; 4],
 }
 
 #[repr(C)]
@@ -209,37 +324,6 @@ pub struct GpuRenderer {
     samples: u32,
 }
 
-/// The first feature of a material that only the CPU path renders so far.
-fn unsupported(m: &craft_render_core::Material) -> Option<&'static str> {
-    let white = m.specular_color == glam::Vec3::ONE;
-    if m.coat_weight > 0.0 {
-        Some("coats")
-    } else if m.fuzz_weight > 0.0 {
-        Some("fuzz")
-    } else if m.is_transmissive() {
-        Some("transmission")
-    } else if m.thin_film_weight > 0.0 && m.base_metalness < 1.0 {
-        Some("thin films")
-    } else if m.specular_roughness_anisotropy > 0.0 {
-        Some("anisotropic highlights")
-    } else if m.base_diffuse_roughness > 0.0 && m.base_metalness < 1.0 {
-        Some("rough diffuse bases")
-    } else if m.base_metalness > 0.0 && !white {
-        Some("tinted metal edges")
-    } else if m.has_cutouts() {
-        Some("cut-outs")
-    } else if m.base_color_texture.is_some()
-        || m.roughness_texture.is_some()
-        || m.metalness_texture.is_some()
-        || m.normal_texture.is_some()
-        || m.bump_texture.is_some()
-    {
-        Some("textures")
-    } else {
-        None
-    }
-}
-
 fn storage<T: Pod>(ctx: &GpuContext, label: &'static str, data: &[T], fallback: T) -> Result<wgpu::Buffer, GpuError> {
     let one = [fallback];
     let data = if data.is_empty() { &one[..] } else { data };
@@ -272,12 +356,6 @@ impl GpuRenderer {
         if w == 0 || h == 0 || w > max_side || h > max_side {
             return Err(GpuError::BadImageSize(w, h));
         }
-        if scene.lights.env_map.is_some() {
-            return Err(GpuError::Unsupported("image-based lighting"));
-        }
-        if let Some(feature) = scene.materials.iter().find_map(unsupported) {
-            return Err(GpuError::Unsupported(feature));
-        }
         let order = &scene.accel.bvh.prim_order;
         let lights = &scene.lights;
         let emissive_count = lights.emissive.len();
@@ -293,27 +371,13 @@ impl GpuRenderer {
                     n1: n[1].to_array(),
                     light: lights.emissive_slot(*i).map_or(-1, |s| s as i32),
                     n2: n[2].to_array(),
-                    pad: 0,
+                    prim: *i,
+                    uv: scene.uvs.get(*i as usize).map_or([[0.0; 2]; 3], |t| t.map(|v| v.to_array())),
+                    pad: [0.0; 2],
                 }
             })
             .collect();
-        let materials: Vec<GpuMaterial> = scene
-            .materials
-            .iter()
-            .map(|m| {
-                let r = (m.specular_ior - 1.0) / (m.specular_ior + 1.0);
-                GpuMaterial {
-                    base: (m.base_color * m.base_weight).to_array(),
-                    metalness: m.base_metalness,
-                    tint: m.specular_color.to_array(),
-                    roughness: m.specular_roughness,
-                    d0: r * r * m.specular_weight,
-                    d90: m.specular_weight,
-                    ior: m.specular_ior,
-                    pad: 0.0,
-                }
-            })
-            .collect();
+        let materials: Vec<GpuMaterial> = scene.materials.iter().map(|m| GpuMaterial::new(m, scene.textures.len())).collect();
         let cdf = lights.selection_cdf();
         let mut entries: Vec<GpuLight> = Vec::with_capacity(cdf.len());
         for (k, e) in lights.emissive.iter().enumerate() {
@@ -370,13 +434,59 @@ impl GpuRenderer {
         }
         let light_count = entries.len() as u32;
 
+        // One buffer of four-float rows (the albedo table, then texture and environment pixels)
+        // and one of plain words (texture table, light tree, environment sampling tables), so
+        // the kernel stays within the eight storage buffers every device offers.
+        let limit = ctx.caps.max_storage_buffer_binding_size.min(ctx.caps.max_buffer_size);
+        let mut blob: Vec<[f32; 4]> = AlbedoTable::get().ab.clone();
+        let mut words: Vec<u32> = Vec::new();
+        let fits = |what: &'static str, have: usize, more: usize, each: u64| -> Result<(), GpuError> {
+            let needed = (have as u64).saturating_add(more as u64).saturating_mul(each);
+            if needed > limit || needed / each > u64::from(u32::MAX) { Err(GpuError::TooLarge { what, needed, allowed: limit }) } else { Ok(()) }
+        };
+        let push_image = |blob: &mut Vec<[f32; 4]>, image: &craft_render_core::texture::Image| -> Result<u32, GpuError> {
+            let at = blob.len();
+            let data = image.data();
+            if image.is_gray() {
+                fits("textures", at, data.len(), 16)?;
+                blob.extend(data.iter().map(|v| [*v, *v, *v, 1.0]));
+            } else {
+                fits("textures", at, data.len() / 4, 16)?;
+                blob.extend(data.as_chunks::<4>().0.iter().copied());
+            }
+            Ok(at as u32)
+        };
+        let texture_table = words.len() as u32;
+        for image in &scene.textures {
+            let at = push_image(&mut blob, image)?;
+            words.extend([at, image.width(), image.height(), u32::from(image.is_gray())]);
+        }
+        let (tree, paths) = lights.tree_words();
+        fits("light tree", words.len(), tree.len() + paths.len() * 2, 4)?;
+        let tree_nodes = words.len() as u32;
+        words.extend(tree);
+        let tree_paths = words.len() as u32;
+        words.extend(paths.iter().flat_map(|p| [*p as u32, (*p >> 32) as u32]));
+        let (mut env_w, mut env_h, mut env_pixels, mut env_marginal, mut env_conditional, mut env_turn) = (0, 0, 0, 0, 0, 0.0);
+        if let Some(map) = &lights.env_map {
+            (env_w, env_h, env_turn) = (map.image.width(), map.image.height(), map.turn);
+            env_pixels = push_image(&mut blob, &map.image)?;
+            let (marginal, conditional) = map.sampling_tables();
+            fits("environment tables", words.len(), marginal.len() + conditional.len(), 4)?;
+            env_marginal = words.len() as u32;
+            words.extend(marginal.iter().map(|v| v.to_bits()));
+            env_conditional = words.len() as u32;
+            words.extend(conditional.iter().map(|v| v.to_bits()));
+        }
+
         let nodes_buf = storage(ctx, "bvh nodes", &scene.accel.bvh.nodes, Zeroable::zeroed())?;
         let tris_buf = storage(ctx, "triangles", &tris, Zeroable::zeroed())?;
         let attrs_buf = storage(ctx, "triangle attributes", &attrs, Zeroable::zeroed())?;
         let mats_buf = storage(ctx, "materials", &materials, Zeroable::zeroed())?;
         let lights_buf = storage(ctx, "lights", &entries, Zeroable::zeroed())?;
-        let table_buf = storage(ctx, "albedo table", &AlbedoTable::get().ab, [0.0f32; 4])?;
-        let accum_size = u64::from(w) * u64::from(h) * 16;
+        let blob_buf = storage(ctx, "tables and textures", &blob, [0.0f32; 4])?;
+        let words_buf = storage(ctx, "light tree and sampling tables", &words, 0u32)?;
+        let accum_size = u64::from(w) * u64::from(h) * std::mem::size_of::<GpuPixel>() as u64;
         let allowed = ctx.caps.max_storage_buffer_binding_size.min(ctx.caps.max_buffer_size);
         if accum_size > allowed {
             return Err(GpuError::TooLarge { what: "image", needed: accum_size, allowed });
@@ -386,12 +496,21 @@ impl GpuRenderer {
         let with = |v: [f32; 3], w: f32| [v[0], v[1], v[2], w];
         let i = settings.integrator;
         let env = lights.environment;
+        let has_env = lights.has_environment();
+        let env_pmf = if has_env { lights.pmf(cdf.len().saturating_sub(1)) } else { 0.0 };
+        let aspect = w as f32 / h as f32;
+        let prev = settings.previous_camera.map(|c| c.prepare(aspect).data());
+        let prev_or = |f: fn(&craft_render_core::camera::CameraData) -> [f32; 3], w: f32| prev.as_ref().map_or([0.0; 4], |c| with(f(c), w));
         let params = Params {
             cam_origin: with(cam.origin, cam.half_width),
             cam_right: with(cam.right, cam.half_height),
             cam_up: with(cam.up, cam.aperture_radius),
             cam_forward: with(cam.forward, cam.focus_distance),
-            env: [env.x, env.y, env.z, lights.pdf_environment(glam::Vec3A::Y)],
+            prev_origin: prev_or(|c| c.origin, prev.as_ref().map_or(1.0, |c| c.half_width)),
+            prev_right: prev_or(|c| c.right, prev.as_ref().map_or(1.0, |c| c.half_height)),
+            prev_up: prev_or(|c| c.up, 1.0),
+            prev_forward: prev_or(|c| c.forward, prev.as_ref().map_or(0.0, |c| f32::from(u8::from(c.orthographic)))),
+            env: [env.x, env.y, env.z, env_pmf],
             size: [w, h],
             first_sample: 0,
             samples: 0,
@@ -411,7 +530,21 @@ impl GpuRenderer {
                 craft_render_core::PixelOrder::ZCurve => craft_render_core::sampler::z_order_bits(w, h),
                 craft_render_core::PixelOrder::Independent => 255,
             },
-            pad: [0; 3],
+            light_tree: u32::from(i.light_sampling == craft_render_core::LightSampling::Tree),
+            positional: lights.positional_count() as u32,
+            positional_mass: lights.positional_mass(),
+            tree_nodes,
+            tree_paths,
+            env_w,
+            env_h,
+            env_pixels,
+            env_marginal,
+            env_conditional,
+            env_turn,
+            textures: texture_table,
+            texture_count: scene.textures.len() as u32,
+            has_cutouts: u32::from(scene.has_cutouts),
+            has_env: u32::from(has_env),
         };
 
         scoped(ctx, || {
@@ -439,7 +572,7 @@ impl GpuRenderer {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
-            let buffers = [&params_buf, &nodes_buf, &tris_buf, &attrs_buf, &mats_buf, &lights_buf, &table_buf, &accum];
+            let buffers = [&params_buf, &nodes_buf, &tris_buf, &attrs_buf, &mats_buf, &lights_buf, &blob_buf, &words_buf, &accum];
             let entries: Vec<wgpu::BindGroupEntry<'_>> =
                 buffers.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect();
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -504,9 +637,14 @@ impl GpuRenderer {
             let view = slice.get_mapped_range().map_err(|e| GpuError::Device(e.to_string()))?;
             Ok(view.to_vec())
         })??;
-        let pixels: &[[f32; 4]] = bytemuck::try_cast_slice(&data).map_err(|e| GpuError::Device(e.to_string()))?;
-        for (dst, src) in film.sum.iter_mut().zip(pixels) {
-            *dst = [src[0], src[1], src[2]];
+        let pixels: &[GpuPixel] = bytemuck::try_cast_slice(&data).map_err(|e| GpuError::Device(e.to_string()))?;
+        for (i, src) in pixels.iter().enumerate().take(film.sum.len()) {
+            film.sum[i] = [src.radiance[0], src.radiance[1], src.radiance[2]];
+            film.albedo[i] = [src.albedo[0], src.albedo[1], src.albedo[2]];
+            film.normal[i] = [src.normal[0], src.normal[1], src.normal[2]];
+            film.depth[i] = src.albedo[3];
+            film.luminance_sq[i] = src.normal[3];
+            film.motion[i] = [src.motion[0], src.motion[1]];
         }
         film.samples = self.samples;
         Ok(film)
@@ -549,8 +687,6 @@ mod tests {
 
     fn both(scene: Scene, size: u32, spp: u32, integrator: IntegratorSettings) -> Option<(Film, Film)> {
         let ctx = gpu()?;
-        // The GPU chooses lights by power; ask the CPU for the same so the samples coincide.
-        let integrator = IntegratorSettings { light_sampling: craft_render_core::LightSampling::Power, ..integrator };
         let settings = RenderSettings { width: size, height: size, integrator, seed: 5, ..RenderSettings::default() };
         let mut r = GpuRenderer::new(&ctx, &scene, settings).unwrap();
         r.render(&ctx, spp).unwrap();
@@ -603,27 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_declines_materials_it_cannot_render() {
-        // No adapter needed: the check comes before any GPU work, but a context is required to call it.
-        let Some(ctx) = gpu() else { return };
-        let settings = RenderSettings { width: 16, height: 16, ..RenderSettings::default() };
-        for (material, word) in [
-            (Material::glass(1.5, 0.0), "transmission"),
-            (Material { coat_weight: 1.0, ..Material::default() }, "coats"),
-            (Material { fuzz_weight: 0.5, ..Material::default() }, "fuzz"),
-            (Material { geometry_opacity: 0.5, ..Material::default() }, "cut-outs"),
-            (Material { base_color_texture: Some(0), ..Material::default() }, "textures"),
-        ] {
-            let scene = scenes::furnace(material).unwrap();
-            match GpuRenderer::new(&ctx, &scene, settings) {
-                Err(GpuError::Unsupported(feature)) => assert_eq!(feature, word),
-                other => panic!("expected Unsupported({word}), got {:?}", other.map(|_| ()).map_err(|e| e.to_string())),
-            }
-        }
-    }
-
-    #[test]
-    fn gpu_renders_spots_and_suns_like_the_cpu_and_declines_image_lighting() {
+    fn gpu_renders_spots_and_suns_like_the_cpu() {
         use craft_render_core::shapes::quad;
         use craft_render_core::{Camera, Light, SceneBuilder};
         use glam::{Mat4, Vec3};
@@ -649,9 +765,124 @@ mod tests {
             let err = craft_render_core::relative_mse(&g.mean(), &c.mean());
             assert!(err < 2e-3 && mean_rgb(&c.mean())[0] > 0.01, "{light:?}: relative MSE {err}");
         }
-        let Some(ctx) = gpu() else { return };
+    }
+
+    /// The largest difference a feature image shows between the two devices, as a mean.
+    fn mean_abs(a: &[[f32; 3]], b: &[[f32; 3]]) -> f64 {
+        a.iter().zip(b).map(|(p, q)| (0..3).map(|k| f64::from((p[k] - q[k]).abs())).sum::<f64>()).sum::<f64>() / (a.len() * 3) as f64
+    }
+
+    fn agree(name: &str, g: &Film, c: &Film) {
+        let err = craft_render_core::relative_mse(&g.mean(), &c.mean());
+        let (gm, cm) = (mean_rgb(&g.mean()), mean_rgb(&c.mean()));
+        eprintln!("{name}: relative MSE between GPU and CPU {err:.6}, means {gm:?} {cm:?}");
+        assert!(err < 2e-3, "{name}: relative MSE between GPU and CPU: {err}");
+        assert!(cm[1] > 0.01, "{name}: the reference is black");
+    }
+
+    #[test]
+    fn gpu_matches_the_cpu_on_layered_materials_and_textures() {
+        // Glass (clear, rough, absorbing), coat, anisotropic metal, fuzz over a rough diffuse
+        // base, a thin film, a bump map and a textured floor.
+        let Some((g, c)) = both(scenes::showcase().unwrap(), 48, 64, IntegratorSettings::default()) else { return };
+        agree("showcase", &g, &c);
+    }
+
+    #[test]
+    fn gpu_matches_the_cpu_under_a_panorama() {
+        let Some((g, c)) = both(scenes::studio().unwrap(), 48, 64, IntegratorSettings::default()) else { return };
+        agree("studio", &g, &c);
+        // The panorama alone, seen directly and reflected, with each estimator on its own.
+        for strategy in [Strategy::Mis, Strategy::BsdfOnly] {
+            let mut b = craft_render_core::SceneBuilder::new();
+            let sky = craft_render_core::texture::Image::generate_uv(64, 32, craft_render_core::texture::Kind::Color, |u, v| {
+                let patch = if (0.2..0.3).contains(&u) && (0.2..0.35).contains(&v) { 40.0 } else { 0.0 };
+                [0.3 + patch, 0.4 + patch, 0.6 * (1.0 - v) + patch, 1.0]
+            });
+            b.set_environment_map(sky, 1.1);
+            let grey = b.add_material(Material { base_color: glam::Vec3::splat(0.6), specular_roughness: 0.4, ..Material::default() }).unwrap();
+            b.add_mesh(&craft_render_core::shapes::uv_sphere(glam::Vec3::ZERO, 1.0, 32, 16), glam::Mat4::IDENTITY, grey).unwrap();
+            b.set_camera(craft_render_core::Camera { eye: glam::Vec3::new(0.0, 1.0, 4.0), target: glam::Vec3::ZERO, ..Default::default() });
+            let Some((g, c)) = both(b.build(), 32, 64, IntegratorSettings { strategy, ..IntegratorSettings::default() }) else { return };
+            agree("panorama", &g, &c);
+        }
+    }
+
+    #[test]
+    fn gpu_matches_the_cpu_with_the_light_tree_and_by_power() {
+        for light_sampling in [craft_render_core::LightSampling::Tree, craft_render_core::LightSampling::Power] {
+            let integrator = IntegratorSettings { light_sampling, ..IntegratorSettings::default() };
+            let Some((g, c)) = both(scenes::night_street().unwrap(), 48, 64, integrator) else { return };
+            agree("night-street", &g, &c);
+        }
+        let Some((g, c)) = both(scenes::interior().unwrap(), 32, 64, IntegratorSettings { clamp_indirect: 4.0, ..IntegratorSettings::default() }) else {
+            return;
+        };
+        agree("interior", &g, &c);
+    }
+
+    #[test]
+    fn gpu_matches_the_cpu_on_cutouts_and_normal_maps() {
+        use craft_render_core::shapes::quad;
+        use craft_render_core::texture::{Image, Kind};
+        use craft_render_core::{Camera, Light, SceneBuilder};
+        use glam::{Mat4, Vec3};
         let mut b = SceneBuilder::new();
-        b.set_environment_map(craft_render_core::texture::Image::filled(8, 4, craft_render_core::texture::Kind::Color, [1.0; 4]), 0.0);
-        assert!(matches!(GpuRenderer::new(&ctx, &b.build(), RenderSettings::default()), Err(GpuError::Unsupported("image-based lighting"))));
+        // A leaf-like card: holes from the alpha channel, over a floor with a normal map and
+        // textured roughness and metalness; a half-transparent pane casts a partial shadow.
+        let holes = b.add_texture(Image::generate(32, 32, Kind::Color, |x, y| [0.2, 0.7, 0.3, if (x / 4 + y / 4) % 2 == 0 { 1.0 } else { 0.0 }])).unwrap();
+        let waves = b
+            .add_texture(Image::generate_uv(64, 64, Kind::Color, |u, v| {
+                let (x, y) = ((u * 25.0).sin() * 0.4, (v * 19.0).cos() * 0.4);
+                [x * 0.5 + 0.5, y * 0.5 + 0.5, 0.9, 1.0]
+            }))
+            .unwrap();
+        let packed = b.add_texture(Image::generate_uv(16, 16, Kind::Color, |u, v| [1.0, 0.3 + 0.7 * u, v, 1.0])).unwrap();
+        let floor = b
+            .add_material(Material {
+                base_color: Vec3::new(0.7, 0.6, 0.5),
+                specular_roughness: 0.8,
+                base_metalness: 1.0,
+                roughness_texture: Some(packed),
+                metalness_texture: Some(packed),
+                normal_texture: Some(waves),
+                normal_scale: 1.0,
+                ..Material::default()
+            })
+            .unwrap();
+        let card = b.add_material(Material { base_color_texture: Some(holes), opacity_texture: Some(holes), ..Material::diffuse(Vec3::ONE) }).unwrap();
+        let pane = b.add_material(Material { geometry_opacity: 0.5, ..Material::diffuse(Vec3::new(0.8, 0.2, 0.2)) }).unwrap();
+        b.add_mesh(&quad(Vec3::new(-4.0, 0.0, -4.0), Vec3::Z * 8.0, Vec3::X * 8.0), Mat4::IDENTITY, floor).unwrap();
+        b.add_mesh(&quad(Vec3::new(-1.5, 0.2, 0.0), Vec3::X * 1.5, Vec3::Y * 1.5), Mat4::IDENTITY, card).unwrap();
+        b.add_mesh(&quad(Vec3::new(0.3, 0.2, 0.3), Vec3::X * 1.2, Vec3::Y * 1.2), Mat4::IDENTITY, pane).unwrap();
+        b.add_light(Light::Point { position: Vec3::new(0.0, 3.0, 3.0), intensity: Vec3::splat(40.0) }).unwrap();
+        b.set_environment(Vec3::splat(0.3));
+        b.set_camera(Camera { eye: Vec3::new(0.0, 2.5, 4.5), target: Vec3::new(0.0, 0.5, 0.0), ..Camera::default() });
+        let Some((g, c)) = both(b.build(), 48, 64, IntegratorSettings::default()) else { return };
+        agree("cut-outs and maps", &g, &c);
+    }
+
+    #[test]
+    fn gpu_fills_the_feature_images_like_the_cpu() {
+        let Some(ctx) = gpu() else { return };
+        let scene = scenes::showcase().unwrap();
+        let moved = craft_render_core::Camera { eye: scene.camera.eye + glam::Vec3::new(0.3, 0.0, 0.0), ..scene.camera };
+        let settings = RenderSettings { width: 40, height: 24, seed: 9, previous_camera: Some(moved), ..RenderSettings::default() };
+        let mut r = GpuRenderer::new(&ctx, &scene, settings).unwrap();
+        r.render(&ctx, 16).unwrap();
+        r.render(&ctx, 16).unwrap();
+        let g = r.film(&ctx).unwrap();
+        let c = render_image(Arc::new(scene), settings, 32).unwrap();
+        let albedo = mean_abs(&g.mean_of(&g.albedo), &c.mean_of(&c.albedo));
+        let normal = mean_abs(&g.mean_of(&g.normal), &c.mean_of(&c.normal));
+        assert!(albedo < 2e-3 && normal < 2e-3, "albedo {albedo}, normal {normal}");
+        let n = g.depth.len() as f64;
+        let depth = g.depth.iter().zip(&c.depth).map(|(a, b)| f64::from((a - b).abs())).sum::<f64>() / n / 32.0;
+        let motion = g.motion.iter().zip(&c.motion).map(|(a, b)| f64::from((a[0] - b[0]).abs() + (a[1] - b[1]).abs())).sum::<f64>() / n / 32.0;
+        assert!(depth < 2e-2 && motion < 2e-2, "depth {depth}, motion {motion}");
+        assert!(c.motion.iter().any(|m| m[0].abs() > 1.0), "the camera moved, so something moved on screen");
+        // The per-pixel variance estimate has the same total on both devices.
+        let (gv, cv): (f64, f64) = (g.variance().iter().map(|v| f64::from(*v)).sum(), c.variance().iter().map(|v| f64::from(*v)).sum());
+        assert!(cv > 0.0 && (gv - cv).abs() < 0.1 * cv, "variance {gv} against {cv}");
     }
 }

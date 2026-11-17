@@ -1,0 +1,1 @@
+- UV unwrapping in the engine and command line: mark seams (by edge, angle or path), cut closed shapes automatically and flatten each island with a conformal map, with optional pinned vertices. Add it as an `Unwrap UVs` history step; `modelcraft-cli uv` reports distortion. The editor view follows.

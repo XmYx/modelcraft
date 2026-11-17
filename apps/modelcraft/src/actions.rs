@@ -15,6 +15,7 @@ pub enum Action {
     ExportGlb,
     ExportObj,
     ExportStl,
+    ExportFbx,
     Undo,
     Redo,
     Delete,
@@ -34,6 +35,7 @@ pub enum Action {
     AddPrimitive(&'static str),
     AddCage,
     AddDeformer(&'static str),
+    AddCloner(&'static str),
     AddGroup,
     Extrude,
     Inset,
@@ -51,6 +53,7 @@ pub enum Action {
     MaskClear,
     MaskInvert,
     MaskFill,
+    MaskOp(modelcraft_engine::MaskOp),
     BrushBigger,
     BrushSmaller,
     DetailUp,
@@ -83,6 +86,8 @@ pub enum Action {
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
 pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
+/// The clone layouts (`modelcraft_clone::KINDS`).
+pub const CLONERS: &[&str] = modelcraft_engine::clone::KINDS;
 
 pub fn all() -> Vec<Action> {
     use Action::*;
@@ -96,6 +101,7 @@ pub fn all() -> Vec<Action> {
         ExportGlb,
         ExportObj,
         ExportStl,
+        ExportFbx,
         Undo,
         Redo,
         Delete,
@@ -118,6 +124,7 @@ pub fn all() -> Vec<Action> {
     v.extend(PRIMITIVES.iter().map(|p| AddPrimitive(p)));
     v.extend([AddCage, AddGroup]);
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
+    v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
@@ -126,6 +133,12 @@ pub fn all() -> Vec<Action> {
         MaskClear,
         MaskInvert,
         MaskFill,
+        MaskOp(modelcraft_engine::MaskOp::Blur),
+        MaskOp(modelcraft_engine::MaskOp::Sharpen),
+        MaskOp(modelcraft_engine::MaskOp::Grow),
+        MaskOp(modelcraft_engine::MaskOp::Shrink),
+        MaskOp(modelcraft_engine::MaskOp::Hollows),
+        MaskOp(modelcraft_engine::MaskOp::Ridges),
         BrushBigger,
         BrushSmaller,
         DetailUp,
@@ -233,6 +246,7 @@ impl Action {
             ExportGlb => tl!("Export glTF Binary (.glb)…"),
             ExportObj => tl!("Export OBJ…"),
             ExportStl => tl!("Export STL…"),
+            ExportFbx => tl!("Export FBX…"),
             Undo => tl!("Undo"),
             Redo => tl!("Redo"),
             Delete => tl!("Delete"),
@@ -254,6 +268,7 @@ impl Action {
             AddPrimitive(p) => crate::tlf!("Add {shape}", shape = prim_label(p)),
             AddCage => tl!("Add Smooth Cage"),
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
+            AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
             AddGroup => tl!("Add Group"),
             Extrude => tl!("Extrude"),
             Inset => tl!("Inset"),
@@ -271,6 +286,15 @@ impl Action {
             MaskClear => tl!("Clear Mask"),
             MaskInvert => tl!("Invert Mask"),
             MaskFill => tl!("Mask All"),
+            MaskOp(op) => match op {
+                modelcraft_engine::MaskOp::Blur => tl!("Blur Mask"),
+                modelcraft_engine::MaskOp::Sharpen => tl!("Sharpen Mask"),
+                modelcraft_engine::MaskOp::Grow => tl!("Grow Mask"),
+                modelcraft_engine::MaskOp::Shrink => tl!("Shrink Mask"),
+                modelcraft_engine::MaskOp::Hollows => tl!("Mask Hollows"),
+                modelcraft_engine::MaskOp::Ridges => tl!("Mask Ridges"),
+                _ => tl!("Mask"),
+            },
             BrushBigger => tl!("Larger Brush"),
             BrushSmaller => tl!("Smaller Brush"),
             DetailUp => tl!("Detail Level Up"),
@@ -317,6 +341,7 @@ impl Action {
             ExportGlb => "file.export_glb",
             ExportObj => "file.export_obj",
             ExportStl => "file.export_stl",
+            ExportFbx => "file.export_fbx",
             Undo => "edit.undo",
             Redo => "edit.redo",
             Delete => "edit.delete",
@@ -338,6 +363,7 @@ impl Action {
             AddPrimitive(p) => return format!("create.{p}"),
             AddCage => "create.smooth_cage",
             AddDeformer(d) => return format!("create.deformer.{d}"),
+            AddCloner(c) => return format!("create.clones.{c}"),
             AddGroup => "create.group",
             Extrude => "mesh.extrude",
             Inset => "mesh.inset",
@@ -363,6 +389,15 @@ impl Action {
             MaskClear => "sculpt.mask_clear",
             MaskInvert => "sculpt.mask_invert",
             MaskFill => "sculpt.mask_fill",
+            MaskOp(op) => match op {
+                modelcraft_engine::MaskOp::Blur => "sculpt.mask_blur",
+                modelcraft_engine::MaskOp::Sharpen => "sculpt.mask_sharpen",
+                modelcraft_engine::MaskOp::Grow => "sculpt.mask_grow",
+                modelcraft_engine::MaskOp::Shrink => "sculpt.mask_shrink",
+                modelcraft_engine::MaskOp::Hollows => "sculpt.mask_hollows",
+                modelcraft_engine::MaskOp::Ridges => "sculpt.mask_ridges",
+                _ => "sculpt.mask_other",
+            },
             BrushBigger => "sculpt.brush_bigger",
             BrushSmaller => "sculpt.brush_smaller",
             DetailUp => "sculpt.detail_up",
@@ -452,6 +487,8 @@ impl Action {
             Symmetry => "Sculpt: X",
             MaskInvert => "Sculpt: Cmd+9",
             MaskClear => "Sculpt: Alt+M",
+            MaskOp(modelcraft_engine::MaskOp::Grow) => "Sculpt: Cmd+]",
+            MaskOp(modelcraft_engine::MaskOp::Shrink) => "Sculpt: Cmd+[",
             BrushBigger => "]",
             BrushSmaller => "[",
             DetailUp => "Sculpt: PageUp",
@@ -477,13 +514,13 @@ impl Action {
     pub fn menu(self) -> &'static str {
         use Action::*;
         match self {
-            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl => "File",
+            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddGroup => "Create",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddCloner(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
-            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd | LiveDetail
-            | EvenRemesh => "Sculpt",
+            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
+            | LiveDetail | EvenRemesh => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
             Anim(_) => "Animate",
