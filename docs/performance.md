@@ -56,6 +56,26 @@ this size) and the undo snapshot.
 Level changes build the level topology twice through the validated mesh builder; that, not the
 linear refinement itself, is most of the time, and it is single-threaded.
 
+## The ten newer brushes (same bench, same mesh and radius)
+
+Measured 2026-11-17 while other builds shared the machine (the seven rows above re-measured in
+the same run at 0.26–0.47 ms, so read these as upper bounds).
+
+| Brush | Dab mean | Dab p95 |
+|---|---|---|
+| Pull | 0.58 ms | 0.78 ms |
+| Plateau | 0.48 ms | 0.76 ms |
+| Trim | 0.42 ms | 0.66 ms |
+| Fill | 0.31 ms | 0.53 ms |
+| Polish | 0.38 ms | 0.73 ms |
+| Buildup | 0.44 ms | 0.66 ms |
+| Gouge | 0.30 ms | 0.45 ms |
+| Slide | 0.31 ms | 0.52 ms |
+| Bulge | 0.34 ms | 0.56 ms |
+
+Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
+captured at the first dab, so its row there measures almost nothing.
+
 ## Live detail and even remesh (`modelcraft-cli bench`, last lines)
 
 Measured 2026-11-17 on the same machine while other builds were running, engine only (no GPU

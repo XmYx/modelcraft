@@ -285,7 +285,7 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
     });
     let _ = s.take_dirty_chunks();
     let radius = 0.08f32;
-    for kind in [BrushKind::Draw, BrushKind::Clay, BrushKind::Smooth, BrushKind::Inflate, BrushKind::Grab, BrushKind::Pinch, BrushKind::Mask] {
+    for kind in modelcraft_engine::sculpt::brush::KINDS.iter().copied() {
         let mut b = BrushSettings::new(kind, radius);
         b.symmetry.x = true;
         s.begin_stroke(b);
@@ -294,7 +294,7 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
             let a = i as f32 * 0.01;
             let c = Vec3::new(a.cos() * 0.6, 0.55, a.sin() * 0.6).normalize();
             let t = Instant::now();
-            s.dab(Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::new(0.0, 0.002, 0.0) });
+            s.dab(Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::new(0.0, 0.002, 0.0), scale: 1.0 });
             dab_t.push(ms(t));
             if let (Some((g, target, r)), Some((device, queue, _))) = (gpu_state.as_mut(), gpu.as_ref()) {
                 let t = Instant::now();
@@ -330,9 +330,14 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
             }
         }
         let undo = s.end_stroke().map(|(u, _)| u.indices.len()).unwrap_or(0);
+        if kind == BrushKind::Mask {
+            // Leave the surface free for the brushes that follow.
+            s.mask_all(0.0);
+            let _ = s.take_dirty_chunks();
+        }
         let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
         println!(
-            "{:<8} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts",
+            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts",
             kind.label(),
             mean(&dab_t),
             pct(&mut dab_t, 0.95),
@@ -377,7 +382,7 @@ fn detail_bench(d: &mut Document, id: modelcraft_engine::scene::ObjectId) -> Res
         let dabs = (0..40).map(|i| {
             let a = i as f32 * 0.05;
             let c = Vec3::new(a.cos() * 0.6, 0.55, a.sin() * 0.6).normalize();
-            Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO }
+            Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO, scale: 1.0 }
         });
         modelcraft_engine::sculpt::Stroke { brush: b, dabs: dabs.collect() }
     };
@@ -427,7 +432,7 @@ fn live_bench() -> Result<(), String> {
             let a = i as f32 * 0.01;
             let c = Vec3::new(a.cos() * 0.6, 0.55, a.sin() * 0.6).normalize();
             let t = Instant::now();
-            s.dab(Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO });
+            s.dab(Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO, scale: 1.0 });
             times.push(ms(t));
         }
         let t = Instant::now();
