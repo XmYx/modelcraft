@@ -22,10 +22,10 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 73 / 7 / 40 / 210 | counted |
+| Done / exceeds / partial / missing | 74 / 7 / 39 / 210 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **30.3 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **21.4 %** | counted |
+| **Row parity**, (D + X + ½·P) / rows | **30.5 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **21.7 %** | counted |
 | Size-weighted parity over all rows, no area weights | 21.8 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
@@ -39,7 +39,7 @@ never estimated by hand.
 | Subdivision surfaces | 2 (2 %) | 6 | 3 | 0 | 0 | 3 | 0 | 50 % | 36 % |
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
-| UVs | 4 (3 %) | 10 | 0 | 0 | 2 | 8 | 0 | 10 % | 12 % |
+| UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
 | Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 8 | 1 | 4 | 9 | 0 | 50 % | 36 % |
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 2 | 0 | 2 | 5 | 0 | 33 % | 35 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
@@ -54,7 +54,7 @@ never estimated by hand.
 | Scripting and automation | 5 (4 %) | 10 | 1 | 1 | 3 | 5 | 1 | 35 % | 21 % |
 | Pipeline formats and referencing | 6 (5 %) | 15 | 5 | 1 | 0 | 9 | 1 | 40 % | 19 % |
 | UI and workspaces | 4 (3 %) | 13 | 7 | 1 | 3 | 2 | 0 | 73 % | 62 % |
-| Stability and performance | 3 (2 %) | 6 | 3 | 1 | 0 | 2 | 0 | 67 % | 50 % |
+| Stability and performance | 3 (2 %) | 6 | 4 | 1 | 0 | 1 | 0 | 83 % | 75 % |
 <!-- parity:end -->
 
 Measured outside the map (see [performance.md](performance.md)): viewport 296 fps orbiting and
@@ -610,7 +610,7 @@ Weight: 3
 | Prompt before discarding unsaved changes | C M Z | D | S | New, Open, Open Recent and Quit ask Save / Don't Save / Cancel |
 | Never-panic policy, hostile-input tests | | X | S | Lints deny panics; proptests for mesh ops and formats |
 | Bounded undo memory | | D | S | 1 GiB budget, oldest dropped |
-| Undo history kept across sessions | M Z | M | M | The journal has every command; not replayed into undo on open |
+| Undo history kept across sessions | M Z | D | M | Saves store a base scene and the history's commands; open replays and checks them (`undo_history_survives_save_and_open`) |
 | Multithreaded dabs, evaluation and BVH build | C M Z | M | M | Single-threaded today |
 
 ## What works today (evidence)

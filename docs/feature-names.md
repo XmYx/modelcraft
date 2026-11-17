@@ -35,6 +35,8 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Select Edge Loop, Select Edge Ring, Grow Selection, Shrink Selection | selection tools | Generic modeling terms | Use |
 | Bridge Faces, Fill Hole, Mirror X/Y/Z | polygon tools | Generic modeling terms | Use |
 | Animation (panel), Key Sheet, Curve Editor | timeline, dope sheet and graph/function-curve editors | "Key sheet" and "curve editor" are generic descriptions; the reference apps' editor names are not used | Use |
+| Joint, Add Joint, Orient Joints, Mirror Joints, Skin, Bind Skin, Unbind Skin, Normalize / Prune / Mirror Skin Weights | joints, skin binding and weight tools | Generic rigging terms | Use |
+| Volume-Preserving Skin | dual-quaternion skinning | Our own description of what the option does; the method's name appears in the docs only | Use |
 | Animation layer, Base layer, Add Layer, Layer weight, Mute Layer, Layer Replaces, Flatten Layers | animation layers (additive / override, merge) | Generic terms | Use |
 | Motion Paths, Turntable, Smooth Rotation Keys | motion trails, turntable animation, Euler filter | Generic descriptions; "Euler filter" is the mathematician's name and appears only in the parity map and the command id | Use |
 | Key Transform, Key Attribute, Auto-Key, Shift Keys, Scale Keys | set-key and auto-keyframe commands | Generic animation terms | Use |
