@@ -2,6 +2,7 @@
 //!
 //! - [`curve`]: a [`Curve`] of [`Key`]s with stepped, linear and Bézier segments, automatic
 //!   clamped tangents, weighted handles, extrapolation, baking and simplifying.
+//! - [`euler`]: removing whole-turn and flip jumps from keyed Euler rotations.
 //! - [`clock`]: frame rate, playback range and a [`Playback`] that advances the current frame from
 //!   wall-clock time.
 //!
@@ -13,6 +14,7 @@
 
 pub mod clock;
 pub mod curve;
+pub mod euler;
 
 pub use clock::{LoopMode, Playback, TimeSettings};
 pub use curve::{Curve, Extrapolation, Interp, Key, Tangent};

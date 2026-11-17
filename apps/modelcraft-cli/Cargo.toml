@@ -24,5 +24,6 @@ modelcraft-mesh = { workspace = true }
 glam = { workspace = true }
 serde_json = { workspace = true }
 modelcraft-render = { workspace = true }
+craft-atomic = { workspace = true }
 wgpu = { workspace = true }
 craft-image-codecs = { workspace = true }

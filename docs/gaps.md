@@ -196,9 +196,12 @@ audio and the sculpt turntable. Everything else is not started. **A1** came firs
 | **A8** Muscle and skin-sliding systems | 1 | 60 | 0.85 | 69 | A3 |
 
 Limits of what exists:
-- Rotation is keyed as XYZ Euler angles; there are no other rotation orders, no quaternion
-  interpolation and no Euler filter. A rotation with only some angles keyed reads the others back
-  from the quaternion, which is ambiguous past ±90° on Y: key all three (Key Transform and auto-key do).
+- Rotation is keyed as XYZ Euler angles (keying one angle keys all three); there are no other
+  rotation orders and no quaternion interpolation.
+- Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
+  be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
+- Motion paths are drawn, not edited, and there are no ghosts. Point caches are written
+  (`modelcraft-cli bake`) but cannot be played back on a mesh yet.
 - No box selection or copy/paste of keys.
 - The Curve Editor fits its value axis to the shown curves; hide curves to see small ones next to
   large ones.
