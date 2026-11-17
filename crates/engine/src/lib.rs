@@ -10,6 +10,7 @@
 
 pub mod anim;
 mod command;
+pub mod control;
 mod document;
 mod layers;
 pub mod rig;

@@ -14,7 +14,9 @@ use std::time::Instant;
 use glam::Vec3;
 use modelcraft_engine::scene::{ObjectKind, Scene};
 use modelcraft_engine::sculpt::{BrushKind, BrushSettings, Dab, SculptMesh};
-use modelcraft_engine::{COMMANDS, Command, Document};
+use modelcraft_engine::{COMMANDS, Command, Document, control as channel};
+
+mod mcp;
 
 const USAGE: &str = "Usage: modelcraft-cli <command> [args]
 
@@ -37,6 +39,12 @@ Commands:
   cache-info <file.mcpc>            print a point cache's header and bounds
   bench-skin [--verts N] [--joints N] [--frames N]
                                     bind and play a skinned tube: weights, evaluation, playback
+  serve [project] [--port N]        the same channel on a loopback socket, behind a token
+                                    written to a file only you can read
+  call <method> ['<json params>'] [--port N] [--token T]
+                                    one request to a running app or `serve` (engine.execute,
+                                    document.info, document.save, …)
+  mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
   -h, --help | -V, --version
 ";
@@ -80,7 +88,7 @@ fn is_project(p: &Path) -> bool {
 }
 
 /// Open a project, or import any other readable file into a new document.
-fn load(path: &str) -> Result<Document, String> {
+pub(crate) fn load(path: &str) -> Result<Document, String> {
     let p = Path::new(path);
     if is_project(p) {
         let mut d = Document::open(p).map_err(|e| e.to_string())?;
@@ -179,6 +187,28 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
             println!("{report}");
             Ok(())
+        }
+        "serve" => serve(positional(a), flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?),
+        "call" => {
+            let method = arg(a, 0, "method")?;
+            let params = match a.get(1).filter(|p| !p.starts_with("--")) {
+                Some(p) => serde_json::from_str(p).map_err(|e| format!("params: {e}"))?,
+                None => serde_json::json!({}),
+            };
+            let port = flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?;
+            let mut c = mcp::app_connection(port, flag(a, "--token").as_deref())?;
+            let v = c.call(craft_control::client::Request::new(method, params)).map_err(|e| e.message().to_string())?;
+            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            Ok(())
+        }
+        "mcp" => {
+            let backend = if a.iter().any(|x| x == "--app") {
+                let port = flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?;
+                mcp::Backend::App(Box::new(mcp::app_connection(port, None)?))
+            } else {
+                mcp::local(positional(a))?
+            };
+            mcp::serve(backend)
         }
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
@@ -362,8 +392,29 @@ fn validate(d: &mut Document) -> Result<(), String> {
     if bad == 0 { Ok(()) } else { Err("invalid meshes found".into()) }
 }
 
-/// The agent channel: newline-delimited JSON commands on stdin, one reply per line on stdout.
-/// Extra verbs: `{"cmd":"save","path":…}`, `{"cmd":"info"}`, `{"cmd":"export","path":…}`.
+/// The first argument that is not a flag (or a flag's value).
+fn positional(a: &[String]) -> Option<&str> {
+    let mut skip = false;
+    for x in a {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if matches!(x.as_str(), "--port" | "--token") {
+            skip = true;
+            continue;
+        }
+        if !x.starts_with("--") {
+            return Some(x);
+        }
+    }
+    None
+}
+
+/// The agent channel: newline-delimited JSON on stdin, one reply per line on stdout. A line is an
+/// engine command (`{"cmd": …}`), one of the extra verbs `{"cmd":"save","path":…}`,
+/// `{"cmd":"info"}`, `{"cmd":"export","path":…}`, or a control request `{"method": …, "params": …}`
+/// as the socket takes it.
 fn control(project: Option<&str>) -> Result<(), String> {
     let mut d = match project {
         Some(p) if Path::new(p).exists() => load(p)?,
@@ -376,44 +427,57 @@ fn control(project: Option<&str>) -> Result<(), String> {
         if line.trim().is_empty() {
             continue;
         }
-        if line.len() > 64 << 20 {
+        if line.len() > channel::MAX_LINE {
             let _ = writeln!(out, "{{\"ok\":false,\"error\":\"line too long\"}}");
             continue;
         }
         let reply = match serde_json::from_str::<serde_json::Value>(&line) {
             Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-            Ok(v) => match v.get("cmd").and_then(|c| c.as_str()) {
-                Some("save") | Some("export") => {
-                    let path = v.get("path").and_then(|p| p.as_str()).unwrap_or_default().to_string();
-                    match save(&mut d, &path) {
-                        Ok(()) => serde_json::json!({ "ok": true }),
-                        Err(e) => serde_json::json!({ "ok": false, "error": e }),
-                    }
+            Ok(v) => {
+                let (method, params) = match (v.get("method").and_then(|m| m.as_str()), v.get("cmd").and_then(|c| c.as_str())) {
+                    (Some(m), _) => (m.to_string(), v.get("params").cloned().unwrap_or(serde_json::json!({}))),
+                    (None, Some("save")) => ("document.save".into(), v.clone()),
+                    (None, Some("export")) => ("document.export".into(), v.clone()),
+                    (None, Some("info")) => ("document.info".into(), serde_json::json!({})),
+                    _ => ("engine.execute".into(), v.clone()),
+                };
+                let r = channel::handle(&mut d, &method, &params);
+                // A CLI save is final: no journal left behind.
+                if method == "document.save" {
+                    d.detach_journal();
                 }
-                Some("info") => {
-                    let objects: Vec<serde_json::Value> = d
-                        .scene
-                        .tree_order()
-                        .into_iter()
-                        .filter_map(|(id, depth)| {
-                            let o = d.scene.get(id)?.clone();
-                            let m = d.eval.evaluate(&d.scene, id).mesh;
-                            Some(serde_json::json!({"id": id.0, "name": o.name, "type": o.kind.type_name(), "depth": depth, "faces": m.face_count(), "steps": o.steps().len()}))
-                        })
-                        .collect();
-                    serde_json::json!({ "ok": true, "result": { "objects": objects, "undo": d.undo.labels() } })
-                }
-                _ => match serde_json::from_value::<Command>(v) {
-                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-                    Ok(c) => match d.execute(c) {
-                        Ok(o) => serde_json::json!({ "ok": true, "result": o }),
-                        Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-                    },
-                },
-            },
+                r
+            }
         };
         writeln!(out, "{reply}").map_err(|e| e.to_string())?;
         out.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The control channel on a loopback socket, answering until the process is stopped.
+fn serve(project: Option<&str>, port: Option<u16>) -> Result<(), String> {
+    let mut d = match project {
+        Some(p) if Path::new(p).exists() => load(p)?,
+        Some(p) => {
+            let mut d = Document::new();
+            d.path = Some(PathBuf::from(p));
+            d
+        }
+        None => Document::new(),
+    };
+    let l = channel::listen(port, None, || {}).map_err(|e| format!("cannot listen: {e}"))?;
+    match &l.token_file {
+        Some(f) => println!("listening on 127.0.0.1:{} (token in {})", l.port, f.display()),
+        None => println!("listening on 127.0.0.1:{} (token from MODELCRAFT_CONTROL_TOKEN)", l.port),
+    }
+    let _ = std::io::stdout().flush();
+    while let Ok(req) = l.requests.recv() {
+        let save = req.method == "document.save";
+        channel::answer(&mut d, req);
+        if save {
+            d.detach_journal();
+        }
     }
     Ok(())
 }

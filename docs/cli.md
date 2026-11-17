@@ -143,16 +143,47 @@ a table ([performance.md](performance.md) explains the protocol).
 
 ## Control channel
 
-`modelcraft-cli control` reads one command per line and answers one line each:
-`{"ok":true,"result":{"created":[…],"warnings":[…]}}` or `{"ok":false,"error":"…"}`. Extra verbs:
-`{"cmd":"info"}` (object list and undo labels), `{"cmd":"save","path":…}`, `{"cmd":"export","path":…}`.
-It runs locally over stdio only, so it needs no authentication; a socket listener will use
-`craft-control`'s token files, as TextureCraft and MaterialCraft do.
+The same requests reach a document four ways (`crates/engine/src/control.rs`):
 
-Example session:
+| Method | Params | Result |
+|---|---|---|
+| `engine.execute` | a command (`{"cmd": …}`), or `{"command": {…}}` | `{created, warnings}` |
+| `engine.commands` | — | `[{name, help}]` |
+| `document.info` | — | `{path, dirty, revision, objects: [{id, name, type, depth, parent, visible, faces, steps}], undo, redo}` |
+| `document.revision` | — | `{document_id, revision}` |
+| `document.save` | `{path?}` | `{path}` |
+| `document.export` | `{path}` (.glb, .obj, .stl) | `{path}` |
+
+Every reply is `{"ok":true,"result":…}` or `{"ok":false,"error":"…"}`.
+
+- **stdin/stdout**: `modelcraft-cli control [project]` reads one line each: an engine command,
+  `{"method": …, "params": …}`, or the short verbs `{"cmd":"info"}`, `{"cmd":"save","path":…}`,
+  `{"cmd":"export","path":…}`. Local, so no token.
+- **Loopback socket in the window**: `modelcraft --control` (or `--control-port N`), or
+  **Edit ▸ Allow Agents to Control ModelCraft** (a preference, off by default). The channel is
+  craft-control's: loopback only, a fresh 32-byte token per launch written to
+  `<data folder>/modelcraft/control/<port>.token` (readable only by you; `MODELCRAFT_CONTROL_DIR`
+  moves the folder, `MODELCRAFT_CONTROL_TOKEN` sets the token), the port in `current.port`, default
+  port 28730 then the next 15. The first request of a connection carries `"token"`; requests are
+  `{"id", "method", "params"}` lines. The window answers between frames, never during a drag or
+  stroke; the status bar says when an agent changed the scene.
+- **Loopback socket without a window**: `modelcraft-cli serve [project] [--port N]`, the same
+  channel on a document of its own.
+- **One request from a shell**: `modelcraft-cli call <method> ['<json params>'] [--port N]
+  [--token T]` finds the port and token the way any craft-control client does.
+- **MCP**: `modelcraft-cli mcp [project]` is an MCP server on stdio (craft-mcp-server) with the
+  tools `info`, `commands`, `execute`, `save` and `export` on its own document;
+  `modelcraft-cli mcp --app [--port N]` sends every tool call to the running window instead, so an
+  agent and a person work on the same scene. Register it with an MCP client as the command
+  `modelcraft-cli mcp --app`.
+
+Example sessions:
 
 ```
 $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' '{"cmd":"add_step","id":1,"op":{"op":"subdivide","levels":2}}' '{"cmd":"info"}' | modelcraft-cli control
+$ modelcraft --control &
+$ modelcraft-cli call engine.execute '{"cmd":"add_primitive","kind":"torus"}'
+$ modelcraft-cli call document.info
 ```
 
 ## Interop with the suite

@@ -552,7 +552,7 @@ Weight: 5
 | Object-model API over every command | C M Z | P | M | Every action is a serializable command; no language binds it |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
 | Headless scene API (batch interpreter) | C M | P | S | `run` and `exec` take command files; no queries or control flow |
-| Machine control channel and MCP server | M | P | M | JSON lines on stdin/stdout; no socket or MCP server |
+| Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | M | M | |
 | User tools, shelves and recorded macros | C M Z | M | M | |
