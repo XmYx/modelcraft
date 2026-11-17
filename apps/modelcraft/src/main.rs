@@ -30,6 +30,7 @@ mod gpu;
 mod keys;
 mod material_ui;
 mod mesh_tools;
+mod object_manager;
 mod panels;
 mod prefs;
 mod prefs_ui;

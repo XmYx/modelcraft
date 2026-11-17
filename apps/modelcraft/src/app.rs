@@ -241,6 +241,7 @@ pub struct ModelApp {
     pub unit: crate::prefs_ui::Unit,
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
+    pub objects: crate::object_manager::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -355,6 +356,7 @@ impl ModelApp {
             show_axes: true,
             unit: Default::default(),
             language: None,
+            objects: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -737,8 +739,11 @@ impl ModelApp {
                     };
                     self.add_step(op);
                 } else if !self.selection.is_empty() {
-                    let ids = std::mem::take(&mut self.selection);
-                    self.run(Command::Delete { ids });
+                    // A refused delete (a locked object) keeps the selection.
+                    let ids = self.selection.clone();
+                    if self.run(Command::Delete { ids }) {
+                        self.selection.clear();
+                    }
                 }
             }
             Duplicate => {
@@ -890,6 +895,7 @@ impl ModelApp {
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
+            Objects(op) => crate::object_manager::run(self, op),
         }
     }
 

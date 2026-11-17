@@ -602,3 +602,86 @@ fn preferences_shelf_units_and_display() {
     let x = h.state().doc.scene.get(id).unwrap().transform.translation.x;
     assert!((x - 1.5).abs() < 1e-5, "{x}");
 }
+
+#[test]
+fn object_manager_search_lock_sets_paste_and_multi_edit() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    palette(&mut h, "Add Sphere");
+    palette(&mut h, "Add Torus");
+    let ids: Vec<_> = h.state().doc.scene.objects().iter().map(|o| o.id).collect();
+    // Search: only matching rows stay in the tree.
+    h.get_by_label("Search objects").focus();
+    h.run();
+    h.event(egui::Event::Text("tor".into()));
+    h.run();
+    assert!(h.query_by_role_and_label(Role::TreeItem, "Cube").is_none());
+    assert!(h.query_by_role_and_label(Role::TreeItem, "Torus").is_some());
+    h.state_mut().objects.filter.clear();
+    h.run();
+    // Lock the cube from its row toggle: edits are refused and the refusal is announced.
+    h.get_by_label("Locked: Cube").click();
+    h.run();
+    assert!(h.state().doc.scene.get(ids[0]).unwrap().locked);
+    h.state_mut().selection = vec![ids[0]];
+    h.key_press(Key::Delete);
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 3, "a locked object is not deleted");
+    assert!(h.state().status.contains("locked"), "{}", h.state().status);
+    palette(&mut h, "Lock or Unlock");
+    assert!(!h.state().doc.scene.get(ids[0]).unwrap().locked, "{} {:?}", h.state().status, h.state().selection);
+    // Template from the palette.
+    h.state_mut().selection = vec![ids[2]];
+    palette(&mut h, "Template On or Off");
+    assert!(h.state().doc.scene.get(ids[2]).unwrap().template);
+    // Multi-edit: both selected, Position Y on the active one moves both, in one undo step.
+    h.state_mut().selection = vec![ids[0], ids[1]];
+    h.run();
+    let n = h.state().doc.undo.len();
+    h.get_by_label("Position Y").set_value_accesskit(2.0);
+    h.run();
+    for id in &ids[..2] {
+        assert!((h.state().doc.scene.get(*id).unwrap().transform.translation.y - 2.0).abs() < 1e-5);
+    }
+    assert_eq!(h.state().doc.undo.len(), n + 1);
+    // Copy the sphere's attributes, paste them onto the torus.
+    h.state_mut().selection = vec![ids[1]];
+    palette(&mut h, "Copy Attributes");
+    h.state_mut().selection = vec![ids[2]];
+    palette(&mut h, "Paste Attributes");
+    assert!((h.state().doc.scene.get(ids[2]).unwrap().transform.translation.y - 2.0).abs() < 1e-5);
+    // A selection set, then select it back by name.
+    h.state_mut().selection = vec![ids[0], ids[2]];
+    palette(&mut h, "Save Selection as Set");
+    assert_eq!(h.state().doc.scene.sets.len(), 1);
+    h.state_mut().selection.clear();
+    h.run();
+    h.get_by_label("Selection Sets").click();
+    h.run();
+    h.get_by_label("Select set Set 1").click();
+    h.run();
+    assert_eq!(h.state().selection, vec![ids[0], ids[2]]);
+}
+
+#[test]
+fn tree_rows_reparent_by_drag_and_drop() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    palette(&mut h, "Add Sphere");
+    let ids: Vec<_> = h.state().doc.scene.objects().iter().map(|o| o.id).collect();
+    let from = h.get_by_role_and_label(Role::TreeItem, "Sphere").rect().center();
+    let to = h.get_by_role_and_label(Role::TreeItem, "Cube").rect().center();
+    h.event(egui::Event::PointerMoved(from));
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run();
+    for k in 1..=6 {
+        h.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+        h.run();
+    }
+    h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run();
+    h.run();
+    assert_eq!(h.state().doc.scene.get(ids[1]).unwrap().parent, Some(ids[0]), "the sphere went under the cube");
+}
