@@ -1,0 +1,2 @@
+- Live Detail: with it on, a sculpt stroke adds triangles under the brush, so detail appears where you work (Shift+L in the Sculpt workspace).
+- Even Remesh rebuilds a closed model as evenly sized quads without changing its volume; it is a history step, so the cell size stays editable.

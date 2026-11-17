@@ -165,13 +165,13 @@ impl SculptMesh {
                 let Some(tri) = self.tris.get(*t as usize).copied() else { continue };
                 for c in 0..3 {
                     let (a, b) = (tri[c], tri[(c + 1) % 3]);
-                    let key = (a.min(b), a.max(b));
-                    if mids.contains_key(&key) {
-                        continue;
-                    }
                     let (Some(pa), Some(pb)) = (self.positions.get(a as usize).copied(), self.positions.get(b as usize).copied()) else { continue };
                     let mid = (pa + pb) * 0.5;
                     if pa.distance_squared(pb) <= e2 || mid.distance_squared(center) > r2 {
+                        continue;
+                    }
+                    let key = (a.min(b), a.max(b));
+                    if mids.contains_key(&key) {
                         continue;
                     }
                     let (ma, mb) = (self.mask.get(a as usize).copied().unwrap_or(0.0), self.mask.get(b as usize).copied().unwrap_or(0.0));

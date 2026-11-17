@@ -447,7 +447,8 @@ impl Action {
             AddPrimitive(_) | AddCage | AddDeformer(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
-            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd | LiveDetail | EvenRemesh => "Sculpt",
+            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd | LiveDetail
+            | EvenRemesh => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
             _ => "View",

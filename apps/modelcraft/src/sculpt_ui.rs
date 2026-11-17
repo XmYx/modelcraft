@@ -30,7 +30,8 @@ pub fn live_detail_edge(app: &mut ModelApp, radius: f32) -> Option<f32> {
 
 pub fn toggle_live_detail(app: &mut ModelApp) {
     app.brush.live_detail = if app.brush.live_detail.is_some() { None } else { Some(LIVE_DETAIL_SHARE) };
-    app.status = if app.brush.live_detail.is_some() { crate::tl!("Live detail on: strokes add triangles under the brush") } else { crate::tl!("Live detail off") };
+    app.status =
+        if app.brush.live_detail.is_some() { crate::tl!("Live detail on: strokes add triangles under the brush") } else { crate::tl!("Live detail off") };
 }
 
 /// Add an even-remesh step to the object being sculpted (or the selected mesh) and carry on
@@ -76,7 +77,9 @@ pub fn layers(app: &mut ModelApp, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(crate::tl!("Detail size"));
             let mut pct = *share * 100.0;
-            let r = ui.add(egui::DragValue::new(&mut pct).speed(0.5).range(2.0..=100.0).suffix(" %").max_decimals(0)).on_hover_text(crate::tl!("Longest edge left under the brush, as a share of the brush radius"));
+            let r = ui
+                .add(egui::DragValue::new(&mut pct).speed(0.5).range(2.0..=100.0).suffix(" %").max_decimals(0))
+                .on_hover_text(crate::tl!("Longest edge left under the brush, as a share of the brush radius"));
             name(ui, &r, crate::tl!("Detail size"));
             if r.changed() {
                 *share = pct / 100.0;

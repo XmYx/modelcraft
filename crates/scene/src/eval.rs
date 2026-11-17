@@ -199,7 +199,12 @@ fn same_source(a: &Source, b: &Source) -> bool {
 fn same_step(a: &Step, b: &Step) -> bool {
     match (&a.op, &b.op) {
         (StepOp::Sculpt { layer: x }, StepOp::Sculpt { layer: y }) => {
-            a.id == b.id && a.enabled == b.enabled && x.level == y.level && x.topology.as_ref().map(Arc::as_ptr) == y.topology.as_ref().map(Arc::as_ptr) && Arc::ptr_eq(&x.positions, &y.positions) && Arc::ptr_eq(&x.mask, &y.mask)
+            a.id == b.id
+                && a.enabled == b.enabled
+                && x.level == y.level
+                && x.topology.as_ref().map(Arc::as_ptr) == y.topology.as_ref().map(Arc::as_ptr)
+                && Arc::ptr_eq(&x.positions, &y.positions)
+                && Arc::ptr_eq(&x.mask, &y.mask)
         }
         _ => a == b,
     }

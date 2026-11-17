@@ -1,0 +1,1 @@
+| 2026-11-17 | Sculpt live detail (strokes split the triangles under the brush, exact undo and journal replay) and even remesh (a history step that rebuilds a closed mesh as even quads, volume kept); `live_detail` on brushes, `even_remesh` step, Sculpt panel controls |
