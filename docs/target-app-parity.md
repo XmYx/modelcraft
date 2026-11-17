@@ -193,7 +193,7 @@ Weight: 4
 | Extruded 3D text | C M | M | M | |
 | Terrain / landscape generator | C | M | M | |
 | Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
-| Array and symmetry generators (live) | C M | M | M | Mirror exists only as a destructive step |
+| Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |
 | Live polygon reduction generator | C | M | M | |
 | Volume mesher: combine shapes as distance fields, then mesh | C | M | L | |

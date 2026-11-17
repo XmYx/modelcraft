@@ -34,6 +34,8 @@ pub enum Action {
     AddPrimitive(&'static str),
     AddCage,
     AddDeformer(&'static str),
+    AddArray(&'static str),
+    AddSymmetry,
     AddGroup,
     Extrude,
     Inset,
@@ -81,7 +83,9 @@ pub enum Action {
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
-pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
+pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
+/// The array layouts (`modelcraft_ops::array::KINDS`).
+pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 
 pub fn all() -> Vec<Action> {
     use Action::*;
@@ -117,6 +121,8 @@ pub fn all() -> Vec<Action> {
     v.extend(PRIMITIVES.iter().map(|p| AddPrimitive(p)));
     v.extend([AddCage, AddGroup]);
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
+    v.extend(ARRAYS.iter().map(|a| AddArray(a)));
+    v.push(AddSymmetry);
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
@@ -167,6 +173,7 @@ pub fn deformer_label(d: &str) -> String {
         "taper" => tl!("Taper"),
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
+        "shear" => tl!("Shear"),
         _ => d.to_string(),
     }
 }
@@ -252,6 +259,8 @@ impl Action {
             AddPrimitive(p) => crate::tlf!("Add {shape}", shape = prim_label(p)),
             AddCage => tl!("Add Smooth Cage"),
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
+            AddArray(a) => crate::tlf!("Add {layout} Array", layout = crate::generator_ui::array_label(a)),
+            AddSymmetry => tl!("Add Symmetry"),
             AddGroup => tl!("Add Group"),
             Extrude => tl!("Extrude"),
             Inset => tl!("Inset"),
@@ -335,6 +344,8 @@ impl Action {
             AddPrimitive(p) => return format!("create.{p}"),
             AddCage => "create.smooth_cage",
             AddDeformer(d) => return format!("create.deformer.{d}"),
+            AddArray(a) => return format!("create.array.{a}"),
+            AddSymmetry => "create.symmetry",
             AddGroup => "create.group",
             Extrude => "mesh.extrude",
             Inset => "mesh.inset",
@@ -474,7 +485,7 @@ impl Action {
         match self {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddGroup => "Create",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddArray(_) | AddSymmetry | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd | LiveDetail

@@ -46,6 +46,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
+| Array, Symmetry, Shear | array / symmetry generators and the shear deformer | Generic modeling words | Use |
 
 Names deliberately **not** used as labels: the reference products' names and their branded features
 (their remesher, sculpt-mesh, layer and brush product names, object/attribute manager names,

@@ -180,10 +180,35 @@ impl Evaluator {
                     }
                 }
             }
+            ObjectKind::Array { array } => self.generate(scene, id, depth, |m| array.build(m)),
+            ObjectKind::Symmetry { axis, weld } => self.generate(scene, id, depth, |m| edit::mirror(m, *axis as usize, *weld)),
             ObjectKind::Group | ObjectKind::Deformer { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result
+    }
+}
+
+impl Evaluator {
+    /// A generator that turns its input mesh (in the generator's space) into another mesh. When
+    /// the operation fails the input is shown unchanged with the reason.
+    fn generate(&mut self, scene: &Scene, id: ObjectId, depth: usize, op: impl FnOnce(&PolyMesh) -> Result<PolyMesh, OpError>) -> Evaluated {
+        let Some(c) = scene.generator_input(id) else {
+            return Evaluated { errors: vec![StepError { step: usize::MAX, message: "needs a mesh inside it".into() }], ..Evaluated::default() };
+        };
+        let inner = self.evaluate_depth(scene, c, depth + 1);
+        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+        let mut m = (*inner.mesh).clone();
+        m.map_positions(|_, p| local.transform_point3(p));
+        self.runs += 1;
+        let mut errors = inner.errors;
+        match op(&m) {
+            Ok(r) => Evaluated { mesh: Arc::new(r), errors },
+            Err(e) => {
+                errors.push(StepError { step: usize::MAX, message: e.to_string() });
+                Evaluated { mesh: Arc::new(m), errors }
+            }
+        }
     }
 }
 

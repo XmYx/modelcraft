@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Array, Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MaskOp, Outcome};
@@ -535,6 +535,33 @@ impl Document {
         }
     }
 
+    /// Add a generator object around `input` (which moves inside it); without an input it makes a
+    /// cube to work on, so a first click shows something.
+    fn add_generator(&mut self, name: &str, kind: ObjectKind, input: Option<ObjectId>, out: &mut Outcome) -> Result<(), EngineError> {
+        if let Some(i) = input
+            && !matches!(
+                self.scene.get(i).map(|o| &o.kind),
+                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+            )
+        {
+            return invalid("a generator needs a mesh or another generator as its input");
+        }
+        let parent = input.and_then(|i| self.scene.get(i)).and_then(|o| o.parent);
+        let unique = self.scene.unique_name(name);
+        let id = self.scene.add(unique, kind, parent)?;
+        match input {
+            Some(i) => self.scene.reparent(i, Some(id))?,
+            None => {
+                let primitive = Primitive::Cube { size: glam::Vec3::splat(1.0), segments: 1 };
+                let cube = self.scene.unique_name("Cube");
+                self.scene.add(cube, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(id))?;
+            }
+        }
+        out.warnings.extend(self.eval.evaluate(&self.scene, id).errors.iter().map(|e| e.message.clone()));
+        out.created.push(id);
+        Ok(())
+    }
+
     fn apply_scene(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
         let mut out = Outcome::default();
         match cmd {
@@ -557,6 +584,13 @@ impl Document {
                     self.scene.reparent(*i, Some(cage))?;
                 }
                 out.created.push(cage);
+            }
+            Command::AddArray { kind, input } => {
+                let array = Array::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown array layout {kind:?}")))?;
+                self.add_generator("Array", ObjectKind::Array { array }, *input, &mut out)?;
+            }
+            Command::AddSymmetry { input, axis } => {
+                self.add_generator("Symmetry", ObjectKind::Symmetry { axis: (*axis).min(2), weld: 1e-4 }, *input, &mut out)?;
             }
             Command::AddDeformer { kind, target } => {
                 let deformer = Deformer::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown deformer {kind:?}")))?;
@@ -617,6 +651,17 @@ impl Document {
             Command::SetCageLevels { id, levels } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::SmoothCage { levels: l } => *l = (*levels).min(6),
                 _ => return invalid("not a smooth cage"),
+            },
+            Command::SetArray { id, array } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Array { array: a } => *a = array.sanitized(),
+                _ => return invalid("not an array"),
+            },
+            Command::SetSymmetry { id, axis, weld } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Symmetry { axis: a, weld: w } => {
+                    *a = (*axis).min(2);
+                    *w = if weld.is_finite() { weld.abs().min(10.0) } else { 1e-4 };
+                }
+                _ => return invalid("not a symmetry generator"),
             },
             Command::SetDeformer { id, deformer } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::Deformer { deformer: d } => *d = *deformer,

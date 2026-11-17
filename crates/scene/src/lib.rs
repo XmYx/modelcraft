@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
 pub use modelcraft_mesh::PolyMesh;
+pub use modelcraft_ops::array::Array;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 use serde::{Deserialize, Serialize};
@@ -358,6 +359,16 @@ pub enum ObjectKind {
     Deformer {
         deformer: Deformer,
     },
+    /// Shows real copies of its first mesh child joined into one mesh, in a row or a ring.
+    Array {
+        array: Array,
+    },
+    /// Shows its first mesh child mirrored across a plane through its origin (0 = X, 1 = Y,
+    /// 2 = Z), joined at the seam.
+    Symmetry {
+        axis: u32,
+        weld: f32,
+    },
 }
 
 impl ObjectKind {
@@ -367,6 +378,8 @@ impl ObjectKind {
             ObjectKind::Mesh { .. } => "Mesh",
             ObjectKind::SmoothCage { .. } => "Smooth cage",
             ObjectKind::Deformer { .. } => "Deformer",
+            ObjectKind::Array { .. } => "Array",
+            ObjectKind::Symmetry { .. } => "Symmetry",
         }
     }
 }
@@ -660,9 +673,26 @@ impl Scene {
         m
     }
 
-    /// True if an ancestor is a smooth cage (the object is shown through it, not directly).
+    /// True if the object is the input of its parent generator (a smooth cage, array or symmetry)
+    /// and so is shown through it, not directly. The input of an array or symmetry is its first
+    /// child that makes geometry; other children are ordinary objects.
     pub fn is_cage_input(&self, id: ObjectId) -> bool {
-        self.get(id).and_then(|o| o.parent).and_then(|p| self.get(p)).is_some_and(|p| matches!(p.kind, ObjectKind::SmoothCage { .. }))
+        let Some(parent) = self.get(id).and_then(|o| o.parent) else { return false };
+        match self.get(parent).map(|p| &p.kind) {
+            Some(ObjectKind::SmoothCage { .. }) => true,
+            Some(ObjectKind::Array { .. } | ObjectKind::Symmetry { .. }) => self.generator_input(parent) == Some(id),
+            _ => false,
+        }
+    }
+
+    /// The input a generator shows: its first child that makes geometry (a mesh or another
+    /// generator).
+    pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
+        self.children(id).into_iter().find(|c| {
+            self.get(*c).is_some_and(|o| {
+                matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+            })
+        })
     }
 
     pub fn visible(&self, id: ObjectId) -> bool {
