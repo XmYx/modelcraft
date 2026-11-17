@@ -108,10 +108,16 @@ fn stacks_blend_in_their_own_frames() {
     t.push(Mat4::from_translation(Vec3::new(-2.0, 0.0, 0.0)), other);
     assert_eq!(t.weight(Vec3::new(-2.0, 0.0, 0.0)), 1.0);
     assert_eq!(t.weight(Vec3::new(2.0, 0.0, 0.0)), 1.0);
-    // Singular frames are ignored.
+    // A field scaled to nothing covers nothing: weight 0, and with Max it leaves the rest alone.
     let before = t.len();
-    t.push(Mat4::ZERO, Field::default_of("box").expect("b"));
-    assert_eq!(t.len(), before);
+    let mut nothing = Field::default_of("box").expect("b");
+    nothing.blend = Blend::Max;
+    t.push(Mat4::ZERO, nothing);
+    assert_eq!(t.len(), before + 1);
+    assert_eq!(t.weight(Vec3::new(2.0, 0.0, 0.0)), 1.0);
+    let mut alone = FieldStack::new();
+    alone.push(Mat4::from_scale(Vec3::ZERO).inverse(), Field::default_of("sphere").expect("s"));
+    assert_eq!(alone.weight(Vec3::ZERO), 0.0, "a lone field with no extent weighs nothing, rather than everything");
 }
 
 #[test]

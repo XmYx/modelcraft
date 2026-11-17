@@ -3,7 +3,7 @@
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use modelcraft_engine::field::{Blend, Curve, Shape};
 use modelcraft_engine::scene::{Field, ObjectKind};
 
@@ -93,55 +93,85 @@ fn shape_fields_edit_through_the_accessibility_tree_with_one_undo_step_each() {
     assert_eq!(selected_field(&h).shape, Shape::Sphere { radius: 1.8, inner: 0.0 });
 }
 
-#[test]
-fn the_shape_blend_and_curve_pickers_work_from_the_keyboard_tree() {
-    let mut h = harness();
-    with_field(&mut h);
-    h.get_by_role_and_label(Role::ComboBox, "Shape").click();
+/// Focus a control and press a key, the way a keyboard user does.
+fn press_on(h: &mut Harness<'static, ModelApp>, role: Role, name: &str, key: Key) {
+    h.get_by_role_and_label(role, name).focus();
     h.run();
-    h.get_by_role_and_label(Role::Button, "Box").click();
+    h.key_press(key);
     h.run();
     h.run();
-    assert!(matches!(selected_field(&h).shape, Shape::Box { .. }));
-    h.get_by_role_and_label(Role::SpinButton, "Box size X");
-    h.get_by_role_and_label(Role::ComboBox, "Curve").click();
+}
+
+fn focused_label(h: &Harness<'static, ModelApp>) -> Option<String> {
+    h.root().query_all(egui_kittest::kittest::by()).find(|n| n.is_focused()).and_then(|n| n.accesskit_node().label())
+}
+
+/// Pick an option of a combo from the keyboard: focus it, Space opens it, Arrow Down enters the
+/// list (first option), Tab walks on to `option`, Enter picks it; focus ends on the combo again.
+fn pick_by_keyboard(h: &mut Harness<'static, ModelApp>, combo: &str, options: &[&str], option: &str) {
+    press_on(h, Role::ComboBox, combo, Key::Space);
+    assert!(h.get_by_role_and_label(Role::ComboBox, combo).is_focused(), "focus stays on the {combo} combo when it opens");
+    h.key_press(Key::ArrowDown);
     h.run();
-    h.get_by_role_and_label(Role::Button, "Slow start").click();
+    let at = options.iter().position(|o| *o == option).expect("option in list");
+    assert_eq!(focused_label(h).as_deref(), Some(options[0]), "Arrow Down enters the list");
+    for next in &options[1..=at] {
+        h.key_press(Key::Tab);
+        h.run();
+        assert_eq!(focused_label(h).as_deref(), Some(*next));
+    }
+    h.key_press(Key::Enter);
     h.run();
     h.run();
-    assert_eq!(selected_field(&h).remap.curve, Curve::preset("ease_in").unwrap());
-    h.get_by_role_and_label(Role::ComboBox, "Combine with earlier fields").click();
-    h.run();
-    h.get_by_role_and_label(Role::Button, "Smallest").click();
-    h.run();
-    h.run();
-    assert_eq!(selected_field(&h).blend, Blend::Min);
-    h.get_by_label("Invert").click();
-    h.run();
-    h.run();
-    assert!(selected_field(&h).remap.invert);
+    assert!(h.get_by_role_and_label(Role::ComboBox, combo).is_focused(), "focus returns to the {combo} combo, now on {:?}", focused_label(h));
 }
 
 #[test]
-fn curve_points_can_be_added_edited_and_removed_without_dragging() {
+fn the_shape_blend_and_curve_pickers_work_from_the_keyboard() {
     let mut h = harness();
     with_field(&mut h);
-    h.get_by_label("Curve points").click();
+    pick_by_keyboard(&mut h, "Shape", &["Sphere", "Box", "Linear", "Noise"], "Box");
+    assert!(matches!(selected_field(&h).shape, Shape::Box { .. }));
+    h.get_by_role_and_label(Role::SpinButton, "Box size X");
+    pick_by_keyboard(&mut h, "Curve", &["Straight", "Smooth", "Slow start"], "Slow start");
+    assert_eq!(selected_field(&h).remap.curve, Curve::preset("ease_in").unwrap());
+    pick_by_keyboard(&mut h, "Combine with earlier fields", &["Multiply", "Add", "Subtract", "Smallest"], "Smallest");
+    assert_eq!(selected_field(&h).blend, Blend::Min);
+    // The Invert checkbox toggles with Space, and keeps focus.
+    press_on(&mut h, Role::CheckBox, "Invert", Key::Space);
+    assert!(selected_field(&h).remap.invert);
+    assert!(h.get_by_role_and_label(Role::CheckBox, "Invert").is_focused());
+    press_on(&mut h, Role::CheckBox, "Invert", Key::Space);
+    assert!(!selected_field(&h).remap.invert);
+}
+
+#[test]
+fn curve_points_can_be_added_edited_and_removed_from_the_keyboard() {
+    let mut h = harness();
+    with_field(&mut h);
+    h.get_by_label("Curve points").focus();
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
     h.run();
     assert_eq!(selected_field(&h).remap.curve.points.len(), 2);
-    h.get_by_role_and_label(Role::Button, "Add point").click();
-    h.run();
-    h.run();
+    press_on(&mut h, Role::Button, "Add point", Key::Enter);
     assert_eq!(selected_field(&h).remap.curve.points.len(), 3);
     h.get_by_role_and_label(Role::SpinButton, "Point 2 output").set_value_accesskit(0.2);
     h.run();
     h.run();
     assert!((selected_field(&h).remap.curve.points[1][1] - 0.2).abs() < 1e-4);
-    h.get_by_label("Remove point 2").click();
+    // The remove button's visible text is "Remove", and its name starts with it.
+    h.get_by_role_and_label(Role::Button, "Remove point 2");
+    h.get_by_role_and_label(Role::Button, "Remove point 2").focus();
+    h.run();
+    h.key_press(Key::Space);
     h.run();
     h.run();
     assert_eq!(selected_field(&h).remap.curve.points.len(), 2);
     assert!(h.query_by_label("Remove point 3").is_none());
+    // At two points the remove buttons are disabled: a curve needs two.
+    assert!(h.get_by_role_and_label(Role::Button, "Remove point 1").accesskit_node().is_disabled());
 }
 
 #[test]

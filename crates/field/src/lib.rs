@@ -249,11 +249,15 @@ impl Shape {
 
     /// The raw 0..1 value at `p`, in the field's own frame.
     pub fn value(&self, p: Vec3) -> f32 {
+        self.sanitized().raw(p)
+    }
+
+    /// [`Shape::value`] for a shape that is already sanitized (the per-point path of a stack).
+    fn raw(&self, p: Vec3) -> f32 {
         let p = if p.is_finite() { p } else { Vec3::ZERO };
-        let s = self.sanitized();
         // 1 at or inside `inner`, 0 at 1, linear between (`d` is a fraction of the extent).
         let ramp = |d: f32, inner: f32| unit(1.0 - (d - inner) / (1.0 - inner));
-        match s {
+        match *self {
             Shape::Sphere { radius, inner } => ramp(p.length() / radius, inner),
             Shape::Box { size, inner } => {
                 let q = (p.abs() / (size * 0.5)).max_element();
@@ -381,7 +385,9 @@ impl Field {
 /// Several fields, each with the matrix that takes points into its own frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FieldStack {
-    layers: Vec<(Mat4, Field, CompiledRemap)>,
+    /// The frame is `None` for a field whose transform cannot be inverted (a scale of zero): it
+    /// covers nothing, so it weighs 0 everywhere.
+    layers: Vec<(Option<Mat4>, Field, CompiledRemap)>,
 }
 
 /// Most fields one stack holds.
@@ -392,13 +398,16 @@ impl FieldStack {
         FieldStack::default()
     }
 
-    /// Add a field; `to_field` maps the stack's space into the field's frame (a singular or
-    /// non-finite matrix is ignored). Fields past [`MAX_LAYERS`] are left out.
+    /// Add a field; `to_field` maps the stack's space into the field's frame. A matrix that is
+    /// singular or not finite (the field was scaled to nothing) makes a field that covers nothing,
+    /// so it weighs 0 and does not switch the others' falloff off. Fields past [`MAX_LAYERS`] are
+    /// left out.
     pub fn push(&mut self, to_field: Mat4, field: Field) {
-        if self.layers.len() < MAX_LAYERS && to_field.is_finite() && to_field.determinant().abs() > 1e-20 {
+        if self.layers.len() < MAX_LAYERS {
+            let frame = (to_field.is_finite() && to_field.determinant().abs() > 1e-20).then_some(to_field);
             let field = field.sanitized();
             let remap = field.remap.compile();
-            self.layers.push((to_field, field, remap));
+            self.layers.push((frame, field, remap));
         }
     }
 
@@ -415,7 +424,7 @@ impl FieldStack {
     pub fn weight(&self, p: Vec3) -> f32 {
         let mut acc: Option<f32> = None;
         for (m, f, remap) in &self.layers {
-            let v = remap.apply(f.shape.value(m.transform_point3(p)));
+            let v = m.map_or(0.0, |m| remap.apply(f.shape.raw(m.transform_point3(p))));
             acc = Some(match acc {
                 None => v,
                 Some(a) => f.blend.combine(a, v),

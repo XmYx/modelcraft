@@ -43,11 +43,16 @@ fn curve_label(preset: Option<&str>) -> String {
     }
 }
 
-fn labelled_combo<R>(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, name: String, shown: String, add: impl FnOnce(&mut egui::Ui) -> R) {
+/// A named combo box. `add` returns true when it picked something, and focus then goes back to
+/// the combo (its popup closes), as keyboard users expect.
+fn labelled_combo(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, name: String, shown: String, add: impl FnOnce(&mut egui::Ui) -> bool) {
     ui.horizontal(|ui| {
         ui.label(name.clone());
         let r = egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, add);
         set_name(ui, &r.response, name);
+        if r.inner == Some(true) {
+            r.response.request_focus();
+        }
     });
 }
 
@@ -57,6 +62,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
     let mut discrete = false;
 
     labelled_combo(ui, ("field-shape", id.0), tl!("Shape"), shape_label(q.kind()), |ui| {
+        let mut picked = false;
         for k in SHAPES {
             if ui.selectable_label(q.kind() == *k, shape_label(k)).clicked()
                 && q.kind() != *k
@@ -64,8 +70,10 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
             {
                 q.shape = s;
                 discrete = true;
+                picked = true;
             }
         }
+        picked
     });
     match &mut q.shape {
         Shape::Sphere { radius, inner } => {
@@ -95,25 +103,31 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
     }
 
     labelled_combo(ui, ("field-blend", id.0), tl!("Combine with earlier fields"), blend_label(q.blend.name()), |ui| {
+        let mut picked = false;
         for b in BLENDS {
             let Some(blend) = Blend::from_name(b) else { continue };
             if ui.selectable_label(q.blend == blend, blend_label(b)).clicked() && q.blend != blend {
                 q.blend = blend;
                 discrete = true;
+                picked = true;
             }
         }
+        picked
     });
 
     ui.label(RichText::new(tl!("Remap")).strong());
     labelled_combo(ui, ("field-curve", id.0), tl!("Curve"), curve_label(q.remap.curve.preset_name()), |ui| {
+        let mut picked = false;
         for p in CURVE_PRESETS {
             if ui.selectable_label(q.remap.curve.preset_name() == Some(*p), curve_label(Some(p))).clicked()
                 && let Some(c) = Curve::preset(p)
             {
                 q.remap.curve = c;
                 discrete = true;
+                picked = true;
             }
         }
+        picked
     });
     let r = ui.checkbox(&mut q.remap.invert, tl!("Invert"));
     discrete |= r.changed();
@@ -131,7 +145,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
                 set_name(ui, &ry, crate::tlf!("Point {n} output", n = i + 1));
                 drags.push(rx);
                 drags.push(ry);
-                let x = ui.add_enabled(n > 2, egui::Button::new("x").small());
+                let x = ui.add_enabled(n > 2, egui::Button::new(tl!("Remove")).small());
                 set_name(ui, &x, crate::tlf!("Remove point {n}", n = i + 1));
                 if x.clicked() {
                     remove = Some(i);
