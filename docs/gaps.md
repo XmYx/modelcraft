@@ -205,6 +205,14 @@ Limits of what exists:
   cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
   `Scene::get` is a linear search, which shows with thousands of objects. glTF export writes
   the posed mesh, not the skin or the animation.
+- Constraints and IK: no joint limits, stretch or spline IK; constraints act on whole channels
+  (no per-axis skipping); FABRIK cannot fold a chain that lies exactly on the line to its goal.
+  Dependencies are tracked per object and channel (translate, rotate, scale, or one other
+  attribute), so two axes of one channel that drive each other count as a cycle. Motion paths and
+  `world_matrix_at` show curves only, not constraints: bake first. Editing one channel of a
+  constrained object by number takes the other channels' solved values as authored. The driven
+  key's curve has no editor yet (keys are set from poses or by command). Formulas give one
+  number; when the scripting crate lands they can call into it instead of growing.
 - Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
   be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
 - Motion paths are drawn, not edited, and there are no ghosts. Point caches are written

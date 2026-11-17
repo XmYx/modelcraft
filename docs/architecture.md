@@ -50,6 +50,14 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   matrices (`rig::pose_key`), so moving a joint re-runs the skin and nothing else. The maths
   (weights, linear blend, dual quaternions, heat weights, aiming and mirroring joints) is in
   `modelcraft-anim`, free of the scene.
+- **Constraints**: `Scene::constraints` holds constraints, IK, driven keys and formulas
+  (`modelcraft_scene::constraint`). Each names what it reads and writes (object and channel);
+  `Scene::solve_constraints` sorts them topologically (a reader after its writers), skips and
+  reports the ones in a cycle, and writes the results into the objects, after every command and
+  frame change. The transform an object has without its constraints is kept beside it, and every
+  solve starts from those, so weights and the IK/FK blend never accumulate and switching a
+  constraint off restores the object. The solvers (two-bone, FABRIK, CCD) and the formula
+  language are in `modelcraft-anim`.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.

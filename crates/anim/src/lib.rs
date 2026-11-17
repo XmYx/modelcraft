@@ -3,6 +3,8 @@
 //! - [`curve`]: a [`Curve`] of [`Key`]s with stepped, linear and Bézier segments, automatic
 //!   clamped tangents, weighted handles, extrapolation, baking and simplifying.
 //! - [`euler`]: removing whole-turn and flip jumps from keyed Euler rotations.
+//! - [`ik`]: two-bone, FABRIK and CCD inverse kinematics on a chain of points.
+//! - [`expr`]: a tiny, safe expression language for numbers.
 //! - [`skeleton`]: aiming a joint along its bone, mirroring joints, the bone shape.
 //! - [`skin`]: joint weights, linear-blend and dual-quaternion skinning, automatic weights.
 //! - [`clock`]: frame rate, playback range and a [`Playback`] that advances the current frame from
@@ -17,6 +19,8 @@
 pub mod clock;
 pub mod curve;
 pub mod euler;
+pub mod expr;
+pub mod ik;
 pub mod skeleton;
 pub mod skin;
 

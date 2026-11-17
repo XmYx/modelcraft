@@ -10,6 +10,7 @@
 
 pub mod anim;
 mod command;
+mod constraints;
 pub mod control;
 mod document;
 mod layers;
@@ -33,5 +34,7 @@ pub use modelcraft_sculpt as sculpt;
 
 #[cfg(test)]
 mod anim_tests;
+#[cfg(test)]
+mod constraint_tests;
 #[cfg(test)]
 mod rig_tests;

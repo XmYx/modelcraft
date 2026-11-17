@@ -532,6 +532,8 @@ impl Document {
                 if self.scene.anim.auto_key && !matches!(cmd, Command::Anim(_)) {
                     modelcraft_scene::anim::auto_key(&before, &mut self.scene);
                 }
+                // Constraints follow whatever the command moved.
+                self.scene.solve_constraints();
                 let after = self.scene.clone();
                 let bytes = 512 + self.scene.len() * 300 + self.scene.anim.heap_bytes();
                 self.undo.push(UndoEntry::Scene { label: cmd.label(), cmd: Box::new(cmd.clone()), before: Box::new(before), after: Box::new(after), bytes });
