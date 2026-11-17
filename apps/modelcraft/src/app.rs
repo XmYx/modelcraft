@@ -229,6 +229,8 @@ pub struct ModelApp {
     pub rename: Option<(ObjectId, String)>,
     pub about: bool,
     pub render_view: crate::render_view::RenderView,
+    /// Up axis and unit of files read and written (File ▸ Exchange Settings).
+    pub exchange: modelcraft_engine::formats::exchange::Convert,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -332,6 +334,7 @@ impl ModelApp {
             rename: None,
             about: false,
             render_view: Default::default(),
+            exchange: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -659,6 +662,7 @@ impl ModelApp {
             ExportGlb => self.export_dialog("glb"),
             ExportObj => self.export_dialog("obj"),
             ExportStl => self.export_dialog("stl"),
+            ExportFbx => self.export_dialog("fbx"),
             Undo => {
                 self.drag = None;
                 self.run(Command::Undo);
@@ -995,28 +999,30 @@ impl ModelApp {
                 Err(e) => self.status = crate::tlf!("Could not open {file}: {error}", file = path.display(), error = e),
             }
         } else {
-            self.run(Command::Import { path: path.display().to_string() });
+            self.run(Command::Import { path: path.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
             self.frame_selection();
         }
     }
 
     pub fn open_dialog(&mut self) {
-        if let Some(p) =
-            rfd::FileDialog::new().add_filter("ModelCraft", &["modelcraft"]).add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply"]).pick_file()
+        if let Some(p) = rfd::FileDialog::new()
+            .add_filter("ModelCraft", &["modelcraft"])
+            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"])
+            .pick_file()
         {
             self.open_path(p);
         }
     }
 
     fn import_dialog(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply"]).pick_file() {
-            self.run(Command::Import { path: p.display().to_string() });
+        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"]).pick_file() {
+            self.run(Command::Import { path: p.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
         }
     }
 
     fn export_dialog(&mut self, ext: &str) {
         if let Some(p) = rfd::FileDialog::new().add_filter(ext.to_uppercase(), &[ext]).set_file_name(format!("model.{ext}")).save_file() {
-            match self.doc.export(&p) {
+            match self.doc.export_with(&p, modelcraft_engine::formats::exchange::Convert { up: self.exchange.up, scale: self.exchange.scale }) {
                 Ok(()) => self.status = crate::tlf!("Exported {file}", file = p.display()),
                 Err(e) => self.status = crate::tlf!("Export failed: {error}", error = e),
             }

@@ -19,6 +19,7 @@ mod clone_ui;
 #[cfg(test)]
 mod clone_ui_tests;
 mod demo;
+mod exchange_ui;
 mod gpu;
 mod keys;
 mod material_ui;

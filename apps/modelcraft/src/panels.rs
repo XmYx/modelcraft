@@ -50,10 +50,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 ui.menu_button(tl!("Export"), |ui| {
-                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl] {
+                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx] {
                         action_button(app, ui, a);
                     }
                 });
+                ui.menu_button(tl!("Exchange Settings"), |ui| crate::exchange_ui::menu(app, ui));
                 ui.separator();
                 if ui.button(tl!("Quit")).clicked() {
                     app.guard(crate::app::Pending::Quit);

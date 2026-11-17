@@ -149,11 +149,11 @@ fn import_export_round_trip_and_hostile_paths() {
         let p = dir.join(format!("out.{ext}"));
         d.export(&p).unwrap();
         let mut e = Document::new();
-        let out = e.execute(Command::Import { path: p.display().to_string() }).unwrap();
+        let out = e.execute(Command::Import { path: p.display().to_string(), up: Default::default(), scale: None }).unwrap();
         assert!(!out.created.is_empty(), "{ext}");
     }
-    assert!(d.execute(Command::Import { path: dir.join("nope.glb").display().to_string() }).is_err());
-    assert!(d.execute(Command::Import { path: "/etc/passwd".into() }).is_err());
+    assert!(d.execute(Command::Import { path: dir.join("nope.glb").display().to_string(), up: Default::default(), scale: None }).is_err());
+    assert!(d.execute(Command::Import { path: "/etc/passwd".into(), up: Default::default(), scale: None }).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -438,7 +438,7 @@ fn a_history_that_no_longer_replays_is_dropped_not_fatal() {
     src.export(&mesh_file).unwrap();
     let p = dir.join("h.modelcraft");
     let mut d = Document::new();
-    d.execute(Command::Import { path: mesh_file.display().to_string() }).unwrap();
+    d.execute(Command::Import { path: mesh_file.display().to_string(), up: Default::default(), scale: None }).unwrap();
     d.save_as(&p).unwrap();
     // The imported file moved away: replaying the history cannot rebuild the scene.
     std::fs::remove_file(&mesh_file).unwrap();
@@ -478,6 +478,30 @@ fn history_storage_is_optional_and_bounded() {
     let r = Document::open(&p).unwrap();
     assert_eq!(r.undo.len(), e.undo.len());
     assert_eq!(r.scene.len(), 10);
+}
+
+#[test]
+fn fbx_export_and_import_with_axis_and_unit_conversion() {
+    use modelcraft_formats::exchange::{Convert, Up};
+    let dir = tmp("fbx");
+    let mut d = Document::new();
+    let cube = add(&mut d, "cube");
+    d.execute(Command::SetTransform { id: cube, transform: Transform { translation: Vec3::new(0.0, 2.0, 0.0), ..Default::default() } }).unwrap();
+    let p = dir.join("z.fbx");
+    d.export_with(&p, Convert { up: Up::Z, scale: Some(0.01) }).unwrap();
+    // The file says Z up in centimetres, so a plain import puts the cube back where it was.
+    let mut e = Document::new();
+    let out = e.execute(Command::Import { path: p.display().to_string(), up: Up::Auto, scale: None }).unwrap();
+    let t = e.scene.get(out.created[0]).unwrap().transform.translation;
+    assert!((t - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-4, "{t:?}");
+    // Told it is Y up in metres, the raw numbers come through: 200 units along +Z.
+    let mut f = Document::new();
+    let out = f.execute(Command::Import { path: p.display().to_string(), up: Up::Y, scale: Some(1.0) }).unwrap();
+    let t = f.scene.get(out.created[0]).unwrap().transform.translation;
+    assert!((t - Vec3::new(0.0, 0.0, 200.0)).length() < 1e-2, "{t:?}");
+    // The command keeps its old JSON form when no conversion is asked for.
+    let j = serde_json::to_string(&Command::Import { path: "a.fbx".into(), up: Up::Auto, scale: None }).unwrap();
+    assert_eq!(j, r#"{"cmd":"import","path":"a.fbx"}"#);
     let _ = std::fs::remove_dir_all(dir);
 }
 

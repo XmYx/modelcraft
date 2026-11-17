@@ -29,8 +29,11 @@ Commands:
                                     apply one JSON command per line, then save
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
-  export <project> <out.glb|obj|stl>
-  convert <in> <out>                any readable file to .glb, .obj, .stl or .modelcraft
+  export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
+  convert <in> <out> [--up auto|y|z] [--scale M]
+                                    any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
+                                    .glb, .obj, .stl, .fbx or .modelcraft; --up and --scale
+                                    (metres per file unit) convert axes and units
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
                                     one command per line in, {\"ok\":…} per line out
@@ -102,7 +105,7 @@ pub(crate) fn load(path: &str) -> Result<Document, String> {
         Ok(d)
     } else {
         let mut d = Document::new();
-        let out = d.execute(Command::Import { path: path.to_string() }).map_err(|e| e.to_string())?;
+        let out = d.execute(Command::Import { path: path.to_string(), up: Default::default(), scale: None }).map_err(|e| e.to_string())?;
         for w in out.warnings {
             eprintln!("warning: {w}");
         }
@@ -110,9 +113,29 @@ pub(crate) fn load(path: &str) -> Result<Document, String> {
     }
 }
 
+/// `--up` and `--scale` (metres per file unit).
+fn convert_flags(a: &[String]) -> Result<modelcraft_engine::formats::exchange::Convert, String> {
+    use modelcraft_engine::formats::exchange::{Convert, Up};
+    let up = match flag(a, "--up").as_deref() {
+        None | Some("auto") => Up::Auto,
+        Some("y") | Some("Y") => Up::Y,
+        Some("z") | Some("Z") => Up::Z,
+        Some(other) => return Err(format!("--up takes auto, y or z, not {other:?}")),
+    };
+    let scale = match flag(a, "--scale") {
+        None => None,
+        Some(s) => Some(s.parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).ok_or_else(|| format!("--scale takes a positive number, not {s:?}"))?),
+    };
+    Ok(Convert { up, scale })
+}
+
 fn save(d: &mut Document, out: &str) -> Result<(), String> {
+    save_with(d, out, Default::default())
+}
+
+fn save_with(d: &mut Document, out: &str, convert: modelcraft_engine::formats::exchange::Convert) -> Result<(), String> {
     let p = Path::new(out);
-    if is_project(p) { d.save_as(p) } else { d.export(p) }.map_err(|e| e.to_string())?;
+    if is_project(p) { d.save_as(p) } else { d.export_with(p, convert) }.map_err(|e| e.to_string())?;
     // A CLI save is final: no journal left behind.
     d.detach_journal();
     Ok(())
@@ -154,8 +177,27 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             save(&mut d, &flag(a, "-o").unwrap_or_else(|| project.to_string()))
         }
-        "export" => save(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?),
-        "convert" => save(&mut load(arg(a, 0, "input")?)?, arg(a, 1, "output")?),
+        "export" => {
+            let c = convert_flags(a)?;
+            save_with(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?, c)
+        }
+        "convert" => {
+            let c = convert_flags(a)?;
+            let input = arg(a, 0, "input")?;
+            let mut d = if is_project(Path::new(input)) {
+                load(input)?
+            } else {
+                let mut d = Document::new();
+                let out = d.execute(Command::Import { path: input.to_string(), up: c.up, scale: c.scale }).map_err(|e| e.to_string())?;
+                for w in out.warnings {
+                    eprintln!("warning: {w}");
+                }
+                d
+            };
+            // The conversion applies on the way in; the output is written as the scene is.
+            let out = if is_project(Path::new(input)) { c } else { Default::default() };
+            save_with(&mut d, arg(a, 1, "output")?, out)
+        }
         "recover" => {
             let p = PathBuf::from(arg(a, 0, "project")?);
             let mut d = Document::open(&p).map_err(|e| e.to_string())?;

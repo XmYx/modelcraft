@@ -929,6 +929,10 @@ name = "craft-mesh"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
 dependencies = [
+ "craft-opc",
+ "craft-xml",
+ "craft-zip",
+ "miniz_oxide 0.9.1",
  "serde_json",
 ]
 
@@ -942,6 +946,17 @@ dependencies = [
  "craft-tiff",
  "quick-xml",
  "serde",
+]
+
+[[package]]
+name = "craft-opc"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
+dependencies = [
+ "craft-xml",
+ "craft-zip",
+ "log",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

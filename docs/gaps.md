@@ -61,7 +61,7 @@ formats, UI/UX.
 | 6 | **M14** Patch grouping tools and mesh cleanup in the UI | Modeling | 3 | 0.13 | 4.3 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 65 | 2.71 | 4.2 |
 | 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 54 | 2.24 | 4.1 |
-| 9 | **F1** FBX import and export, up-axis and unit conversion | Pipeline formats | 11 | 0.44 | 4.0 |
+| 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 11 | 0.44 | 4.0 |
 | 10 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | Scripting and node graph | 54.5 | 2.12 | 3.9 |
 
 These are cheap because they finish areas that are already partly built (undo, docking, the object
@@ -82,7 +82,7 @@ users and sit lower only because they are expensive.
 | 6 | **M14** Patch grouping tools and mesh cleanup in the UI | Modeling | 2 | 3 | 0.13 | 4.3 | — | 19.1 % | 94 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 6 | 65 | 2.71 | 4.2 | A1 | 21.8 % | 159 |
 | 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
-| 9 | **F1** FBX import and export, up-axis and unit conversion | Pipeline formats | 2 | 11 | 0.44 | 4.0 | — | 24.5 % | 224 |
+| 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 2 | 11 | 0.44 | 4.0 | — | 24.5 % | 224 |
 | 10 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | Scripting and node graph | 6 | 54.5 | 2.12 | 3.9 | — | 26.6 % | 278.5 |
 | 11 | **F5** Live link with suite apps, EXR/HDR images, 3MF | Pipeline formats | 3 | 19 | 0.73 | 3.8 | — | 27.3 % | 297.5 |
 | 12 | **M1** Modeling essentials II: knife, multi-segment bevel, vertex bevel, slide, connect, collapse, quadrangulate, spin/poke, separate/combine, shell, relax, loop bridge, grid fill, edge extrude | Modeling | 13 | 55 | 2.07 | 3.8 | — | 29.4 % | 352.5 |
@@ -278,11 +278,10 @@ Not started. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ran
 
 ## Pipeline formats
 
-craft-mesh already reads FBX, so **F1** is mostly wiring plus a writer; FBX is proprietary, and the suite prefers glTF, so the writer must follow public descriptions only. USD (**F3**) waits for a scene-level reader in craft-libs (craft-usd has wire primitives only). glTF stores triangles only, so our GLB round trip loses quads; quad hints in `extras` wait for craft-mesh to keep `extras`. craft-mesh writes GLB only; a `.gltf` JSON writer belongs there.
+FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/formats/src/fbx_write.rs`, from public descriptions of the syntax and scene objects only; it belongs next to craft-mesh's reader once craft-libs takes writers. 3MF is read too; 3MF export (F5) remains. USD (**F3**) waits for a scene-level reader in craft-libs (craft-usd has wire primitives only). glTF stores triangles only, so our GLB round trip loses quads; quad hints in `extras` wait for craft-mesh to keep `extras`. craft-mesh writes GLB only; a `.gltf` JSON writer belongs there.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
-| **F1** FBX import and export, up-axis and unit conversion | 2 | 11 | 0.44 | 9 | — |
 | **F2** Alembic caches | 1 | 25 | 0.58 | 42 | A1 |
 | **F3** USD layers, references and variants | 1 | 60 | 1.16 | 53 | — |
 | **F4** File references, proxies and an asset browser | 2 | 33 | 0.87 | 32 | — |

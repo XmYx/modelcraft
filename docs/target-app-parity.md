@@ -570,7 +570,7 @@ Weight: 6
 | GLB export | C M Z | D | S | Hierarchy, TRS, materials, UVs, normals; triangulated (glTF has no quads) |
 | OBJ import and export | C M Z | D | S | Quads kept |
 | STL export, STL and PLY import | C M Z | D | S | |
-| FBX import and export | C M Z | M | M | Read-only support exists in craft-mesh, not wired |
+| FBX import and export | C M Z | D | M | Import binary and ASCII 6.x/7.x through craft-mesh; export FBX 7.4 ASCII (meshes with quads, UVs, normals, material colour, hierarchy, TRS); round-trip tested |
 | USD: layers, references, variants, import and export | C M | M | XL | Later, with craft-usd |
 | Alembic caches: import and export | C M | M | L | |
 | File references and proxies | C M | M | L | |
@@ -578,7 +578,7 @@ Weight: 6
 | Live link with other apps (send and receive meshes) | C M Z | M | M | Planned with TextureCraft |
 | EXR and HDR images as textures and lighting | C M R | M | M | |
 | 3MF export for printing | C Z | M | S | |
-| Up-axis and unit conversion on import and export | C M Z | M | S | |
+| Up-axis and unit conversion on import and export | C M Z | D | S | FBX axes and unit read from the file; Y/Z up and metres/cm/mm/inches for any format (File ▸ Exchange Settings, `--up`, `--scale`) |
 | Native project, atomic saves | C M Z | D | S | `.modelcraft` ZIP |
 | Crash journal with exact replay | | X | S | Every command, sculpt strokes included |
 | Reading and writing the references' native files (.c4d, .ma/.mb, .ztl/.zpr) | C M Z | O | XL | Undocumented proprietary formats; the open exchange formats above cover interchange |
