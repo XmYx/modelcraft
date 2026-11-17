@@ -14,8 +14,9 @@ and the score below is counted from it.
 
 ## Headline
 
-`cargo xtask parity` counts every table below and writes this block; `cargo xtask ci` fails when
-the block is stale. Numbers here and in [ROADMAP.md](../ROADMAP.md) are copied from its output,
+`cargo xtask parity` counts every table below and writes this block; `cargo xtask ci` validates the
+rows strictly but only warns when the block is stale (feature PRs flip rows only; a maintainer
+refreshes the block with `cargo xtask parity --write` in a separate PR). Numbers here and in [ROADMAP.md](../ROADMAP.md) are copied from its output,
 never estimated by hand.
 
 <!-- parity:start -->
