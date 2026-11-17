@@ -57,7 +57,7 @@ formats, UI/UX.
 | 2 | **A1** Keyframes and timeline: key any attribute, auto key, timeline, dope sheet, playblast, follow spline, audio, turntable | Animation and rigging | 36 | 1.94 | 5.4 |
 | 3 | **U3** Vertex colour painting and conversion to textures | UV and paint | 17.5 | 0.83 | 4.7 |
 | 4 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | UI/UX | 25.5 | 1.19 | 4.6 |
-| 5 | **G2** Control channel over a socket and an MCP server | Scripting and node graph | 4 | 0.18 | 4.6 |
+| 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 4 | 0.18 | 4.6 |
 | 6 | **M14** Patch grouping tools and mesh cleanup in the UI | Modeling | 3 | 0.13 | 4.3 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 65 | 2.71 | 4.2 |
 | 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 54 | 2.24 | 4.1 |
@@ -78,7 +78,7 @@ users and sit lower only because they are expensive.
 | 2 | **A1** Keyframes and timeline: key any attribute, auto key, timeline, dope sheet, playblast, follow spline, audio, turntable | Animation and rigging | 7 | 36 | 1.94 | 5.4 | — | 16.8 % | 44 |
 | 3 | **U3** Vertex colour painting and conversion to textures | UV and paint | 3 | 17.5 | 0.83 | 4.7 | — | 17.6 % | 61.5 |
 | 4 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | UI/UX | 5 | 25.5 | 1.19 | 4.6 | — | 18.8 % | 87 |
-| 5 | **G2** Control channel over a socket and an MCP server | Scripting and node graph | 1 | 4 | 0.18 | 4.6 | — | 19.0 % | 91 |
+| 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 1 | 4 | 0.18 | 4.6 | — | 19.0 % | 91 |
 | 6 | **M14** Patch grouping tools and mesh cleanup in the UI | Modeling | 2 | 3 | 0.13 | 4.3 | — | 19.1 % | 94 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 6 | 65 | 2.71 | 4.2 | A1 | 21.8 % | 159 |
 | 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
@@ -253,12 +253,11 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 ## Scripting and node graph
 
-Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. G1's language (Rhai, see [scripting.md](scripting.md)), object-model API and headless API are in; the script editor, event callbacks and user tools remain. **G2** wires craft-control (token auth) and craft-mcp-server, which exist in craft-libs. The node view (**G3**) shows the dependency graph the evaluator already has.
+Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1's language (Rhai, see [scripting.md](scripting.md)), object-model API and headless API are in; the script editor, event callbacks and user tools remain. The node view (**G3**) shows the dependency graph the evaluator already has.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | 6 | 54.5 | 2.12 | 10 | — |
-| **G2** Control channel over a socket and an MCP server | 1 | 4 | 0.18 | 5 | — |
 | **G3** Node view of the graph, attribute connections, utility nodes, expressions and driven keys | 4 | 49 | 1.17 | 38 | — |
 | **G4** Procedural geometry node graph | 1 | 60 | 0.94 | 66 | G3 |
 | **G5** Plugin SDK | 1 | 25 | 0.74 | 21 | — |

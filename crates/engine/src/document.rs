@@ -73,6 +73,8 @@ pub struct Document {
     pub history_max_bytes: usize,
     /// What happened to the stored history on open, for the status bar.
     pub history_note: Option<String>,
+    /// Counts the changes made in this session (control clients watch it).
+    pub revision: u64,
 }
 
 /// Default bound on the history a save stores: 256 MiB of commands.
@@ -101,6 +103,7 @@ impl Document {
             keep_history: true,
             history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
             history_note: None,
+            revision: 0,
         }
     }
 
@@ -418,6 +421,7 @@ impl Document {
         self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
         self.log(&cmd);
         self.dirty = true;
+        self.revision += 1;
     }
 
     // ---- execution ----
@@ -528,6 +532,7 @@ impl Document {
         self.log(&cmd);
         if !matches!(cmd, Command::BeginSculpt { .. } | Command::EndSculpt) {
             self.dirty = true;
+            self.revision += 1;
         }
         Ok(out)
     }
