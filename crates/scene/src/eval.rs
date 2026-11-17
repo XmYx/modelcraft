@@ -220,11 +220,8 @@ impl Evaluator {
                             _ => None,
                         };
                         self.runs += 1;
-                        match cloner.generate(target_mesh.as_ref().map(|(m, _)| m.as_ref())) {
+                        match cloner.generate_in(target_mesh.as_ref().map(|(m, _)| m.as_ref()), target_mesh.as_ref().map_or(Mat4::IDENTITY, |(_, f)| *f)) {
                             Ok(mut set) => {
-                                if let Some((_, to_gen)) = &target_mesh {
-                                    set.transform_all(*to_gen);
-                                }
                                 for i in &mut set.instances {
                                     i.matrix *= local;
                                 }

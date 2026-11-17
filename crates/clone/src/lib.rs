@@ -199,9 +199,20 @@ impl Cloner {
         Cloner { layout: self.layout.sanitized(), seed: self.seed }
     }
 
-    /// Lay out the clones. `target` is the mesh the surface and vertices layouts sit on (in the
-    /// target's own space; the caller moves the set into the generator's space).
+    /// Lay out the clones. `target` is the mesh the surface and vertices layouts sit on, in the
+    /// generator's own space.
     pub fn generate(&self, target: Option<&PolyMesh>) -> Result<CloneSet, CloneError> {
+        self.generate_in(target, Mat4::IDENTITY)
+    }
+
+    /// Lay out the clones with the target mesh seen through `frame` (the matrix from the target's
+    /// space into the generator's). Points are spread by area in the generator's space, and a
+    /// clone that stands on the surface follows the true surface normal even when the frame
+    /// scales unevenly (normals move by the inverse transpose, not as directions).
+    pub fn generate_in(&self, target: Option<&PolyMesh>, frame: Mat4) -> Result<CloneSet, CloneError> {
+        let frame = if frame.is_finite() && frame.determinant().abs() > 1e-20 { frame } else { Mat4::IDENTITY };
+        let flip = if frame.determinant() < 0.0 { -1.0 } else { 1.0 };
+        let normal_matrix = frame.inverse().transpose();
         let layout = self.layout.sanitized();
         let mut rng = Rng::new(self.seed);
         let mut set = CloneSet::default();
@@ -249,7 +260,7 @@ impl Cloner {
                 let mesh = target.ok_or(CloneError::NeedsTarget)?;
                 let (tris, _) = mesh.triangulate();
                 let pos = mesh.positions();
-                let corner = |i: u32| pos.get(i as usize).copied().unwrap_or(Vec3::ZERO);
+                let corner = |i: u32| frame.transform_point3(pos.get(i as usize).copied().unwrap_or(Vec3::ZERO));
                 let mut cumulative = Vec::with_capacity(tris.len());
                 let mut total = 0.0f32;
                 for t in &tris {
@@ -267,7 +278,7 @@ impl Cloner {
                     let (a, b, c) = (corner(t[0]), corner(t[1]), corner(t[2]));
                     let (r1, r2) = (rng.next_f32().sqrt(), rng.next_f32());
                     let p = a * (1.0 - r1) + b * (r1 * (1.0 - r2)) + c * (r1 * r2);
-                    let rot = if align { up_to((b - a).cross(c - a)) } else { Quat::IDENTITY };
+                    let rot = if align { up_to((b - a).cross(c - a) * flip) } else { Quat::IDENTITY };
                     set.push(Mat4::from_rotation_translation(rot, p));
                 }
             }
@@ -280,8 +291,8 @@ impl Cloner {
                 set.truncated = mesh.vertex_count() > n;
                 let normals = if align { mesh.vertex_normals() } else { Vec::new() };
                 for (i, p) in mesh.positions().iter().take(n).enumerate() {
-                    let rot = if align { up_to(normals.get(i).copied().unwrap_or(Vec3::Y)) } else { Quat::IDENTITY };
-                    set.push(Mat4::from_rotation_translation(rot, *p));
+                    let rot = if align { up_to(normal_matrix.transform_vector3(normals.get(i).copied().unwrap_or(Vec3::Y))) } else { Quat::IDENTITY };
+                    set.push(Mat4::from_rotation_translation(rot, frame.transform_point3(*p)));
                 }
             }
         }

@@ -209,3 +209,15 @@ fn clone_generators_survive_a_save_and_load() {
     let mut ev = Evaluator::new();
     assert_eq!(ev.evaluate(&back, id).instances.unwrap().clones.len(), 8);
 }
+
+#[test]
+fn only_the_source_is_hidden_other_children_of_a_clone_generator_draw() {
+    let (mut s, id, src) = cloner_scene("linear");
+    let extra = s.add("Extra", cube_kind(), Some(id)).unwrap();
+    assert!(s.is_cage_input(src));
+    assert!(!s.is_cage_input(extra), "a second mesh inside is an ordinary object");
+    // A smooth cage still hides its mesh child.
+    let cage = s.add("Cage", ObjectKind::SmoothCage { levels: 1 }, None).unwrap();
+    let inner = s.add("Inner", cube_kind(), Some(cage)).unwrap();
+    assert!(s.is_cage_input(inner));
+}

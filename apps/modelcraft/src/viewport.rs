@@ -610,7 +610,8 @@ fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
         for id in drawables(&app.doc.scene) {
             let e = app.doc.eval.evaluate(&app.doc.scene, id);
             let (lo, hi) = match &e.instances {
-                // A clone generator is as wide as its clones.
+                // A clone generator is as wide as its clones; with none there is nothing to select.
+                Some(inst) if inst.clones.is_empty() => continue,
                 Some(inst) => inst.clones.instances.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), c| {
                     let p = c.matrix.w_axis.truncate();
                     (a.min(p), b.max(p))

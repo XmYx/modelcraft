@@ -50,6 +50,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
     ui.horizontal(|ui| {
         ui.label(tl!("Layout"));
         let before = q.kind();
+        let picked_before = discrete;
         let r = egui::ComboBox::from_id_salt(("clone-layout", id.0)).selected_text(layout_label(before)).show_ui(ui, |ui| {
             for k in KINDS {
                 if ui.selectable_label(before == *k, layout_label(k)).clicked() && before != *k {
@@ -59,6 +60,9 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
             }
         });
         set_name(ui, &r.response, tl!("Layout"));
+        if discrete && !picked_before {
+            r.response.request_focus();
+        }
     });
 
     match &mut q.layout {
@@ -77,6 +81,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
             });
             ui.horizontal(|ui| {
                 ui.label(tl!("Axis"));
+                let picked_before = discrete;
                 let r = egui::ComboBox::from_id_salt(("clone-axis", id.0)).selected_text(axis_label(*axis)).show_ui(ui, |ui| {
                     for a in [Axis::X, Axis::Y, Axis::Z] {
                         if ui.selectable_label(*axis == a, axis_label(a)).clicked() && *axis != a {
@@ -86,6 +91,9 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
                     }
                 });
                 set_name(ui, &r.response, tl!("Axis"));
+                if discrete && !picked_before {
+                    r.response.request_focus();
+                }
             });
             let r = ui.checkbox(align, tl!("Face outwards"));
             discrete |= r.changed();
@@ -134,6 +142,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
         let shown = t.and_then(|x| candidates.iter().find(|(i, _)| *i == x)).map_or_else(|| tl!("None"), |(_, n)| n.clone());
         ui.horizontal(|ui| {
             ui.label(tl!("Target object"));
+            let picked_before = discrete;
             let r = egui::ComboBox::from_id_salt(("clone-target", id.0)).selected_text(shown).show_ui(ui, |ui| {
                 if ui.selectable_label(t.is_none(), tl!("None")).clicked() && t.is_some() {
                     t = None;
@@ -147,6 +156,9 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
                 }
             });
             set_name(ui, &r.response, tl!("Target object"));
+            if discrete && !picked_before {
+                r.response.request_focus();
+            }
         });
     }
 
@@ -167,8 +179,11 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
         ui.label(RichText::new(&err.message).color(theme::TEXT_DIM).small());
     }
     ui.label(
-        RichText::new(crate::tlf!("Up to {max} clones. The source object is the child inside this generator.", max = MAX_CLONES))
-            .color(theme::TEXT_DIM)
-            .small(),
+        RichText::new(crate::tlf!(
+            "Up to {max} clones. The first mesh inside this generator is the source; any other object inside it is drawn as it is.",
+            max = MAX_CLONES
+        ))
+        .color(theme::TEXT_DIM)
+        .small(),
     );
 }

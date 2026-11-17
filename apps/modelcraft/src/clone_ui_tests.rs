@@ -77,6 +77,21 @@ fn the_clone_count_changes_from_the_properties_panel_with_one_undo_step() {
     assert!((inst.clones.instances[1].matrix.w_axis.x - 3.0).abs() < 1e-4);
 }
 
+/// Open a combo box from the keyboard: focus it, press Space, then Arrow Down lands on the first
+/// option and Tab walks to the next ones.
+fn open_combo(h: &mut Harness<'static, ModelApp>, name: &str) {
+    h.get_by_role_and_label(Role::ComboBox, name).focus();
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+    h.run();
+    assert!(h.get_by_role_and_label(Role::ComboBox, name).is_focused(), "focus starts on the {name} combo");
+}
+
+fn focused_label(h: &Harness<'static, ModelApp>) -> Option<String> {
+    h.root().query_all(egui_kittest::kittest::by()).find(|n| n.is_focused()).and_then(|n| n.accesskit_node().label())
+}
+
 #[test]
 fn the_layout_combo_switches_layouts_by_keyboard_and_shows_that_layouts_fields() {
     let mut h = harness();
@@ -85,9 +100,16 @@ fn the_layout_combo_switches_layouts_by_keyboard_and_shows_that_layouts_fields()
     assert_eq!(clone_count(&mut h), 8);
     h.get_by_role_and_label(Role::SpinButton, "Radius");
     h.get_by_label("Face outwards");
-    h.get_by_role_and_label(Role::ComboBox, "Layout").click();
+    open_combo(&mut h, "Layout");
+    h.key_press(Key::ArrowDown);
     h.run();
-    h.get_by_role_and_label(Role::Button, "Grid").click();
+    assert_eq!(focused_label(&h).as_deref(), Some("Linear"), "Arrow Down enters the list");
+    for expected in ["Radial", "Grid"] {
+        h.key_press(Key::Tab);
+        h.run();
+        assert_eq!(focused_label(&h).as_deref(), Some(expected));
+    }
+    h.key_press(Key::Enter);
     h.run();
     h.run();
     let id = h.state().selection[0];
@@ -96,31 +118,48 @@ fn the_layout_combo_switches_layouts_by_keyboard_and_shows_that_layouts_fields()
     h.get_by_role_and_label(Role::SpinButton, "Count X");
     h.get_by_label("Spacing X");
     assert!(h.query_by_role_and_label(Role::SpinButton, "Radius").is_none(), "the radial fields are gone");
+    // The status line is a live region: it announces the change; focus is back on the combo.
+    assert_eq!(h.state().status, "Clone settings");
+    assert!(h.get_by_role_and_label(Role::ComboBox, "Layout").is_focused(), "focus returns to the combo, now on {:?}", focused_label(&h));
 }
 
 #[test]
-fn a_surface_layout_asks_for_a_target_and_then_fills_it() {
+fn a_surface_layout_asks_for_a_target_and_the_target_combo_works_by_keyboard() {
     let mut h = harness();
     h.run();
     palette(&mut h, "Add Cube");
-    palette(&mut h, "Add Surface Clones");
+    palette(&mut h, "Add Surface Clones"); // the selected cube becomes the source
     h.run();
     assert_eq!(clone_count(&mut h), 0, "no target yet");
-    h.get_by_label_contains("needs a target object");
-    h.get_by_role_and_label(Role::ComboBox, "Target object");
+    assert!(h.get_all_by_label_contains("needs a target object").count() >= 1, "shown in Properties");
+    assert!(h.state().status.contains("target"), "announced through the status line: {}", h.state().status);
     h.get_by_role_and_label(Role::SpinButton, "Seed");
-    // Choose the target through the command the combo issues.
     let gen_id = h.state().selection[0];
     let cube = h.state().doc.scene.objects().iter().find(|o| o.name == "Cube").map(|o| o.id).unwrap();
-    let cloner = match &h.state().doc.scene.get(gen_id).unwrap().kind {
-        ObjectKind::Cloner { cloner, .. } => *cloner,
-        _ => unreachable!(),
-    };
-    h.state_mut().run(Command::SetCloner { id: gen_id, cloner, target: Some(cube) });
+    assert_eq!(h.state().doc.scene.get(cube).unwrap().parent, Some(gen_id));
+    palette(&mut h, "Add Sphere");
+    h.state_mut().select_only(gen_id);
+    h.run();
+    h.run();
+    open_combo(&mut h, "Target object");
+    h.key_press(Key::ArrowDown);
+    h.run();
+    assert_eq!(focused_label(&h).as_deref(), Some("None"));
+    h.key_press(Key::Tab);
+    h.run();
+    assert_eq!(focused_label(&h).as_deref(), Some("Sphere"), "the next candidate is the sphere");
+    // Nothing from the generator's own subtree is offered as a target.
+    let offered: Vec<String> = h.get_all_by_role(Role::Button).filter_map(|n| n.accesskit_node().label()).collect();
+    for own in ["Clones", "Cube"] {
+        assert!(!offered.iter().any(|l| l == own), "{own} must not be offered: {offered:?}");
+    }
+    h.key_press(Key::Enter);
     h.run();
     h.run();
     assert_eq!(clone_count(&mut h), 60);
     h.get_by_label("60 clones of one mesh");
+    let sphere = h.state().doc.scene.objects().iter().find(|o| o.name == "Sphere").map(|o| o.id);
+    assert!(matches!(h.state().doc.scene.get(gen_id).unwrap().kind, ObjectKind::Cloner { target, .. } if target == sphere));
 }
 
 #[test]
@@ -134,7 +173,8 @@ fn a_huge_request_is_capped_and_said_so() {
     h.run();
     h.run();
     assert_eq!(clone_count(&mut h), MAX_CLONES);
-    h.get_by_label_contains("more than");
+    assert!(h.get_all_by_label_contains("more than").count() >= 1, "shown in Properties and announced in the status line");
+    assert!(h.state().status.contains("more than"), "{}", h.state().status);
 }
 
 #[test]
@@ -147,5 +187,5 @@ fn deleting_the_source_leaves_a_message_not_a_crash() {
     h.run();
     h.run();
     assert_eq!(clone_count(&mut h), 0);
-    h.get_by_label_contains("needs a source object");
+    assert!(h.get_all_by_label_contains("needs a source object").count() >= 1);
 }

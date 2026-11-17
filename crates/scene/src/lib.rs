@@ -670,13 +670,16 @@ impl Scene {
         m
     }
 
-    /// True if the parent is a smooth cage or a clone generator (the object is the generator's
-    /// input and is shown through it, not directly).
+    /// True if the object is the input of its parent generator (a smooth cage's mesh child, or
+    /// the source a clone generator clones) and so is shown through it, not directly. Other
+    /// children of a clone generator are ordinary objects and draw as they are.
     pub fn is_cage_input(&self, id: ObjectId) -> bool {
-        self.get(id)
-            .and_then(|o| o.parent)
-            .and_then(|p| self.get(p))
-            .is_some_and(|p| matches!(p.kind, ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. }))
+        let Some(parent) = self.get(id).and_then(|o| o.parent) else { return false };
+        match self.get(parent).map(|p| &p.kind) {
+            Some(ObjectKind::SmoothCage { .. }) => true,
+            Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            _ => false,
+        }
     }
 
     /// The input a generator shows: the first mesh or smooth cage child.

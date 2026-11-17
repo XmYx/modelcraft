@@ -576,6 +576,7 @@ impl Document {
                         self.scene.add(name, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(id))?;
                     }
                 }
+                out.warnings.extend(self.eval.evaluate(&self.scene, id).errors.iter().map(|e| e.message.clone()));
                 out.created.push(id);
             }
             Command::AddDeformer { kind, target } => {
@@ -653,6 +654,9 @@ impl Document {
                     }
                     _ => return invalid("not a clone generator"),
                 }
+                // A missing source or target, or a cut-off count, reaches the status line (a
+                // live region) so it is announced where the edit was made.
+                out.warnings.extend(self.eval.evaluate(&self.scene, *id).errors.iter().map(|e| e.message.clone()));
             }
             Command::AddStep { id, op } => {
                 if matches!(op, StepOp::Sculpt { .. }) {
@@ -762,14 +766,14 @@ impl Document {
             items.push(Item { name: o.name.clone(), parent, transform: o.transform, mesh, material: o.material.clone() });
             if let Some(inst) = instances {
                 let material = inst.source_object.and_then(|s| self.scene.get(s)).map(|s| s.material.clone()).unwrap_or_default();
+                let mut baked_vertices = 0usize;
                 for c in &inst.clones.instances {
-                    let (scale, rotation, translation) = c.matrix.to_scale_rotation_translation();
-                    let transform = modelcraft_scene::Transform { translation, rotation, scale }.sanitized();
+                    let (transform, mesh) = clone_node(c.matrix, &inst.source, &mut baked_vertices);
                     items.push(Item {
                         name: format!("{} {}", o.name, c.index + 1),
                         parent: Some(here),
                         transform,
-                        mesh: Some(inst.source.clone()),
+                        mesh: Some(mesh),
                         material: material.clone(),
                     });
                 }
@@ -841,6 +845,39 @@ impl Document {
             })
             .sum()
     }
+}
+
+/// Most vertices all the baked clones of one generator may add to an export.
+const MAX_BAKED_VERTICES: usize = 16_000_000;
+
+/// The node for one clone. A glTF node carries translation, rotation and scale only, so a clone
+/// whose matrix has shear (a stretch applied after a rotation) cannot be one node over the shared
+/// mesh: it gets its own copy of the mesh with the matrix applied to the points, and an identity
+/// transform. `baked_vertices` counts those copies; past [`MAX_BAKED_VERTICES`] a sheared clone
+/// falls back to its nearest rotation and scale.
+fn clone_node(
+    matrix: glam::Mat4,
+    source: &std::sync::Arc<modelcraft_scene::PolyMesh>,
+    baked_vertices: &mut usize,
+) -> (modelcraft_scene::Transform, std::sync::Arc<modelcraft_scene::PolyMesh>) {
+    let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
+    let rebuilt = glam::Mat4::from_scale_rotation_translation(scale, rotation, translation);
+    let tolerance = 1e-4 * matrix.to_cols_array().iter().fold(1.0f32, |m, v| m.max(v.abs()));
+    let trs = rebuilt.to_cols_array().iter().zip(matrix.to_cols_array()).all(|(a, b)| (a - b).abs() <= tolerance);
+    if trs || !matrix.is_finite() || *baked_vertices + source.vertex_count() > MAX_BAKED_VERTICES {
+        return (modelcraft_scene::Transform { translation, rotation, scale }.sanitized(), source.clone());
+    }
+    *baked_vertices += source.vertex_count();
+    let mut baked = (**source).clone();
+    baked.map_positions(|_, p| matrix.transform_point3(p));
+    // A matrix that mirrors turns the faces inside out; put them back the right way round.
+    if matrix.determinant() < 0.0 {
+        let all: Vec<u32> = (0..baked.face_count() as u32).collect();
+        if let Ok(flipped) = modelcraft_ops::edit::flip_faces(&baked, &all) {
+            baked = flipped;
+        }
+    }
+    (modelcraft_scene::Transform::default(), std::sync::Arc::new(baked))
 }
 
 fn craft_atomic_write(path: &Path, bytes: &[u8]) -> Result<(), EngineError> {

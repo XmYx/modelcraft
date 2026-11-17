@@ -119,6 +119,45 @@ fn surface_clones_sit_on_the_target_and_stand_on_it() {
 }
 
 #[test]
+fn clones_on_an_unevenly_scaled_target_follow_the_true_normal() {
+    // Rotate first, then stretch: a direction pushed through this matrix would tilt off the
+    // surface, a normal moved by the inverse transpose does not.
+    let frame = Mat4::from_scale(Vec3::new(3.0, 1.0, 1.0)) * Mat4::from_rotation_z(0.6);
+    let normal_matrix = frame.inverse().transpose();
+    let cube = cube();
+    let set = Cloner::default_of("surface").expect("surface").generate_in(Some(&cube), frame).expect("layout");
+    let mut checked = 0;
+    for i in &set.instances {
+        let local = frame.inverse().transform_point3(i.matrix.w_axis.truncate());
+        let faces: Vec<usize> = (0..3).filter(|k| (local[*k].abs() - 0.5).abs() < 1e-3).collect();
+        // A point on an edge lies on two faces; either normal is right, so skip those.
+        let [k] = faces[..] else { continue };
+        let mut n = Vec3::ZERO;
+        n[k] = local[k].signum();
+        let expect = normal_matrix.transform_vector3(n).normalize();
+        let up = i.matrix.transform_vector3(Vec3::Y);
+        assert!(up.dot(expect) > 0.999, "stands along {up:?}, the surface normal is {expect:?}");
+        checked += 1;
+    }
+    assert!(checked > 20, "most points are inside a face, got {checked}");
+    // Vertices: the vertex normal moves by the inverse transpose too.
+    let set = Cloner::default_of("vertices").expect("vertices").generate_in(Some(&cube), frame).expect("layout");
+    let normals = cube.vertex_normals();
+    for (n, i) in set.instances.iter().enumerate() {
+        let expect = normal_matrix.transform_vector3(normals[n]).normalize();
+        assert!(i.matrix.transform_vector3(Vec3::Y).dot(expect) > 0.999);
+    }
+    // A mirroring frame still stands the clones outwards, and a broken frame is ignored.
+    let mirror = Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0));
+    let set = Cloner::default_of("surface").expect("surface").generate_in(Some(&cube), mirror).expect("layout");
+    for i in &set.instances {
+        assert!(i.matrix.transform_vector3(Vec3::Y).dot(i.matrix.w_axis.truncate()) > 0.0, "outwards");
+    }
+    let plain = Cloner::default_of("surface").expect("surface");
+    assert_eq!(plain.generate_in(Some(&cube), Mat4::ZERO), plain.generate(Some(&cube)));
+}
+
+#[test]
 fn vertices_puts_one_clone_on_each_vertex() {
     let cube = cube();
     let set = lay("vertices", Some(&cube));
