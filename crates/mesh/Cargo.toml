@@ -1,0 +1,20 @@
+[package]
+name = "modelcraft-mesh"
+description = "ModelCraft polygon mesh: a validated half-edge structure with per-corner UVs and patches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }

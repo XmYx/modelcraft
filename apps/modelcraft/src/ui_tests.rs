@@ -1,0 +1,149 @@
+//! UI tests with egui_kittest, driven by the keyboard. Every `run()` also checks that each input
+//! widget has an accessible name (house rule: accessibility).
+
+use egui::accesskit::Role;
+use egui::{Key, Modifiers};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT, Queryable};
+
+use crate::app::{ModelApp, SelectMode, Workspace};
+use crate::args::Cli;
+
+fn harness() -> Harness<'static, ModelApp> {
+    let ctx = egui::Context::default();
+    let app = ModelApp::with_context(&ctx, Cli::default());
+    Harness::builder().with_size(egui::vec2(1500.0, 950.0)).build_ui_state(|ui, app: &mut ModelApp| app.draw(ui), app)
+}
+
+/// Open the command palette with Ctrl+K, type, press Enter.
+fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    h.run();
+    h.event(egui::Event::Text(text.to_string()));
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+}
+
+#[test]
+fn command_palette_adds_a_cube_and_the_tree_shows_it() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    assert_eq!(h.state().doc.scene.len(), 1);
+    assert!(h.state().palette.is_none(), "Enter closes the palette");
+    let item = h.get_by_role_and_label(Role::TreeItem, "Cube");
+    assert!(item.accesskit_node().is_selected().unwrap_or(false), "the new cube is selected in the tree");
+    // The viewport publishes the object as a selected list item for screen readers.
+    let vp = h.get_by_label_contains("Viewport, Perspective");
+    assert!(vp.accesskit_node().label().is_some_and(|l| l.contains("Cube selected")));
+    assert!(h.get_all_by_role(Role::ListItem).any(|n| n.accesskit_node().label().as_deref() == Some("Cube") && n.accesskit_node().is_selected() == Some(true)));
+}
+
+#[test]
+fn keyboard_modeling_builds_history_and_undoes_it() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    h.key_press(Key::Num4); // face mode
+    h.run();
+    assert_eq!(h.state().mode, SelectMode::Face);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    assert_eq!(h.state().components.len(), 6);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::E); // extrude
+    h.run();
+    let id = h.state().selection[0];
+    assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 1);
+    // The history panel lists the step with an accessible name.
+    h.get_by_label("Step 1: Extrude");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 0);
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 1);
+}
+
+#[test]
+fn numeric_transform_replaces_the_gizmo_drag() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Torus");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::T);
+    h.run();
+    assert!(h.state().numeric.is_some());
+    h.get_by_label("Move X").set_value_accesskit(2.5);
+    h.run();
+    h.get_by_label("Apply").click();
+    h.run();
+    let id = h.state().selection[0];
+    assert!((h.state().doc.scene.get(id).unwrap().transform.translation.x - 2.5).abs() < 1e-5);
+    // The properties panel takes typed values too: one undo step per edit.
+    let before = h.state().doc.undo.len();
+    h.get_by_label("Position Y").set_value_accesskit(1.25);
+    h.run();
+    assert!((h.state().doc.scene.get(id).unwrap().transform.translation.y - 1.25).abs() < 1e-5);
+    assert_eq!(h.state().doc.undo.len(), before + 1);
+}
+
+#[test]
+fn tree_moves_selection_with_arrow_keys() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    palette(&mut h, "Add Sphere");
+    h.get_by_role_and_label(Role::TreeItem, "Cube").focus();
+    h.run();
+    h.key_press(Key::ArrowDown);
+    h.run();
+    h.run();
+    let sel = h.state().selection.clone();
+    let name = h.state().doc.scene.get(sel[0]).unwrap().name.clone();
+    assert_eq!(name, "Sphere");
+    assert!(h.get_by_role_and_label(Role::TreeItem, "Sphere").is_focused());
+}
+
+#[test]
+fn sculpt_workspace_by_keyboard() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    assert_eq!(h.state().workspace, Workspace::Sculpt);
+    assert!(h.state().doc.sculpt.is_some(), "entering the workspace starts a sculpt session");
+    h.key_press(Key::C);
+    h.run();
+    assert_eq!(h.state().brush.kind, modelcraft_engine::sculpt::BrushKind::Clay);
+    let r = h.state().brush_px;
+    h.key_press(Key::CloseBracket);
+    h.run();
+    assert!(h.state().brush_px > r);
+    h.key_press(Key::X);
+    h.run();
+    assert!(h.state().brush.symmetry.x);
+    h.get_by_label("Mask All").click();
+    h.run();
+    assert!(h.state().doc.sculpt.as_ref().unwrap().mesh.mask.iter().all(|m| *m == 1.0));
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!(h.state().doc.sculpt.as_ref().unwrap().mesh.mask.iter().all(|m| *m == 0.0));
+}
+
+#[test]
+fn four_views_and_focus_navigation() {
+    let mut h = harness();
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+    assert!(h.state().quad);
+    for v in ["Perspective", "Front", "Right", "Top"] {
+        h.get_by_label_contains(&format!("Viewport, {v}"));
+    }
+    // F6 moves focus between the panels.
+    h.key_press(Key::F6);
+    h.run();
+    h.run();
+    assert!(h.root().query_all(egui_kittest::kittest::by()).any(|n| n.is_focused()));
+}

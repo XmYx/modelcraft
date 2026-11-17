@@ -1,0 +1,27 @@
+[package]
+name = "modelcraft-engine"
+description = "ModelCraft engine: the document, every action as a serializable command, unlimited undo within a memory budget, and journaling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+modelcraft-mesh = { workspace = true }
+modelcraft-ops = { workspace = true }
+modelcraft-scene = { workspace = true }
+modelcraft-sculpt = { workspace = true }
+modelcraft-formats = { workspace = true }
+glam = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+craft-atomic = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+proptest = { workspace = true }

@@ -1,0 +1,22 @@
+ModelCraft
+Copyright (c) 2026 ArtCraft Team and the ModelCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+ModelCraft is an independent, clean-room project. It is not affiliated with, endorsed by or
+sponsored by the makers of any commercial 3D modeling, animation or sculpting application, and it
+contains none of their code, assets or documentation. Product names mentioned in
+docs/target-app-parity.md are trademarks of their owners, used only to describe the comparison.
+
+The ArtCraft name and logos are trademarks of the ArtCraft Team. They are not open source and are
+not covered by the license above. This repository does not include them yet.
+
+Third-party material
+
+This repository contains no third-party assets. Rust dependencies are listed in Cargo.lock under
+their own permissive licenses (checked by `cargo xtask licenses`). Through egui
+(epaint_default_fonts) the binaries contain egui's default fonts: Ubuntu Light (Ubuntu Font
+Licence 1.0), Hack (MIT; DejaVu parts public domain), Noto Emoji (OFL-1.1) and the emoji icon font
+(MIT). Builds made with craft-fonts (CRAFT_FONTS_DIR) also embed the fonts listed in its
+ATTRIBUTION.md; builds made with craft-i18n (CRAFT_I18N_DIR) embed its translation catalogs. The
+per-file asset list is in ATTRIBUTION.md.

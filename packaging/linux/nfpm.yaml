@@ -1,0 +1,52 @@
+# .deb and .rpm packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages the
+# file tree, substitutes its path for ${STAGE} and exports VERSION, NFPM_ARCH and
+# MODELCRAFT_MAINTAINER.
+name: modelcraft
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+release: 1
+section: graphics
+priority: optional
+maintainer: ${MODELCRAFT_MAINTAINER}
+vendor: Learning Machines LLC
+homepage: https://github.com/storytold/modelcraft
+license: MIT OR Apache-2.0
+description: |-
+  Open-source 3D modeling and sculpting.
+  Parametric primitives with an editable build history, smooth cages, deformers, polygon tools
+  and million-polygon sculpting with symmetric brushes and masks. glTF/GLB, OBJ and STL exchange;
+  crash-safe journaled saves. Includes modelcraft-cli for scripts and agents.
+
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.35)
+      - libgcc-s1
+      - libxkbcommon0
+      - libvulkan1 | libegl1
+    recommends:
+      - libwayland-client0
+      - libx11-6
+      - xdg-desktop-portal
+  rpm:
+    depends:
+      - glibc >= 2.35
+      - libxkbcommon
+      - (vulkan-loader or libglvnd-egl)
+    recommends:
+      - libwayland-client
+      - libX11
+      - xdg-desktop-portal
+
+contents:
+  - src: ${STAGE}/usr/bin/modelcraft
+    dst: /usr/bin/modelcraft
+    file_info: { mode: 0755 }
+  - src: ${STAGE}/usr/bin/modelcraft-cli
+    dst: /usr/bin/modelcraft-cli
+    file_info: { mode: 0755 }
+  - src: ${STAGE}/usr/share/
+    dst: /usr/share/
+    type: tree

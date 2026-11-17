@@ -1,0 +1,27 @@
+[package]
+name = "modelcraft-cli"
+description = "ModelCraft command line: build, convert, inspect and benchmark models without the window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "modelcraft-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+modelcraft-engine = { workspace = true }
+modelcraft-scene = { workspace = true }
+modelcraft-ops = { workspace = true }
+modelcraft-sculpt = { workspace = true }
+modelcraft-formats = { workspace = true }
+modelcraft-mesh = { workspace = true }
+glam = { workspace = true }
+serde_json = { workspace = true }
+modelcraft-render = { workspace = true }
+wgpu = { workspace = true }

@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+*.modelcraft.tmp
+/dist
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts

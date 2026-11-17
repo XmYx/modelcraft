@@ -1,0 +1,212 @@
+//! The command set. `cmd` is the tag in JSON: `{"cmd":"add_primitive","kind":"cube"}`.
+
+use modelcraft_ops::deform::Deformer;
+use modelcraft_ops::primitives::Primitive;
+use modelcraft_scene::{Material, ObjectId, StepOp, Transform};
+use modelcraft_sculpt::Stroke;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskOp {
+    Clear,
+    Fill,
+    Invert,
+    /// Mask the patch of a triangle.
+    Patch {
+        triangle: u32,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+pub enum Command {
+    /// Add a parametric primitive (`cube`, `plane`, `sphere`, `round_cube`, `cylinder`, `cone`, `torus`).
+    AddPrimitive {
+        kind: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        parent: Option<ObjectId>,
+    },
+    /// Add an empty group.
+    AddGroup {
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Add a smooth cage generator; the given object becomes its input.
+    AddSmoothCage {
+        #[serde(default)]
+        input: Option<ObjectId>,
+        #[serde(default = "two")]
+        levels: u32,
+    },
+    /// Add a deformer (`bend`, `twist`, `taper`, `ripple`, `round`) under a mesh.
+    AddDeformer {
+        kind: String,
+        target: ObjectId,
+    },
+    Delete {
+        ids: Vec<ObjectId>,
+    },
+    Duplicate {
+        id: ObjectId,
+    },
+    Rename {
+        id: ObjectId,
+        name: String,
+    },
+    Reparent {
+        id: ObjectId,
+        parent: Option<ObjectId>,
+    },
+    SetTransform {
+        id: ObjectId,
+        transform: Transform,
+    },
+    SetVisible {
+        id: ObjectId,
+        visible: bool,
+    },
+    SetMaterial {
+        id: ObjectId,
+        material: Material,
+    },
+    SetPrimitive {
+        id: ObjectId,
+        primitive: Primitive,
+    },
+    SetCageLevels {
+        id: ObjectId,
+        levels: u32,
+    },
+    SetDeformer {
+        id: ObjectId,
+        deformer: Deformer,
+    },
+    /// Append a build-history step to a mesh object.
+    AddStep {
+        id: ObjectId,
+        op: StepOp,
+    },
+    /// Change a step's parameters (its selection or amounts).
+    SetStep {
+        id: ObjectId,
+        index: usize,
+        op: StepOp,
+    },
+    EnableStep {
+        id: ObjectId,
+        index: usize,
+        enabled: bool,
+    },
+    RemoveStep {
+        id: ObjectId,
+        index: usize,
+    },
+    /// Bake the history into the source mesh.
+    Collapse {
+        id: ObjectId,
+    },
+    /// Import a glTF/GLB/OBJ/STL/PLY file as new objects.
+    Import {
+        path: String,
+    },
+    /// Start sculpting a mesh object (adds a sculpt layer if its last step is not one).
+    BeginSculpt {
+        id: ObjectId,
+    },
+    EndSculpt,
+    SculptStroke {
+        id: ObjectId,
+        stroke: Stroke,
+    },
+    SculptMask {
+        id: ObjectId,
+        op: MaskOp,
+    },
+    Undo,
+    Redo,
+}
+
+fn two() -> u32 {
+    2
+}
+
+/// Command names with a one-line description (for `modelcraft-cli commands` and the agent channel).
+pub const COMMANDS: &[(&str, &str)] = &[
+    ("add_primitive", "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent?"),
+    ("add_group", "Add an empty group: name?"),
+    ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
+    ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round) under target"),
+    ("delete", "Delete objects and their children: ids"),
+    ("duplicate", "Duplicate an object and its children: id"),
+    ("rename", "Rename an object: id, name"),
+    ("reparent", "Move an object under parent (null: top level)"),
+    ("set_transform", "Set translation, rotation (quaternion x,y,z,w) and scale: id, transform"),
+    ("set_visible", "Show or hide an object: id, visible"),
+    ("set_material", "Set base_color, metallic, roughness: id, material"),
+    ("set_primitive", "Change a primitive's parameters: id, primitive"),
+    ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
+    ("set_deformer", "Change a deformer's parameters: id, deformer"),
+    (
+        "add_step",
+        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch): id, op",
+    ),
+    ("set_step", "Change a history step: id, index, op"),
+    ("enable_step", "Switch a history step on or off: id, index, enabled"),
+    ("remove_step", "Remove a history step: id, index"),
+    ("collapse", "Bake an object's history into its mesh: id"),
+    ("import", "Import a glTF, GLB, OBJ, STL or PLY file: path"),
+    ("begin_sculpt", "Start sculpting a mesh object: id"),
+    ("end_sculpt", "Stop sculpting"),
+    ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush, dabs}"),
+    ("sculpt_mask", "Clear, fill or invert the mask, or mask a patch: id, op"),
+    ("undo", "Undo the last change"),
+    ("redo", "Redo the last undone change"),
+];
+
+impl Command {
+    /// The English label for menus and the undo history.
+    pub fn label(&self) -> String {
+        match self {
+            Command::AddPrimitive { kind, .. } => format!("Add {kind}"),
+            Command::AddGroup { .. } => "Add group".into(),
+            Command::AddSmoothCage { .. } => "Add smooth cage".into(),
+            Command::AddDeformer { kind, .. } => format!("Add {kind}"),
+            Command::Delete { .. } => "Delete".into(),
+            Command::Duplicate { .. } => "Duplicate".into(),
+            Command::Rename { .. } => "Rename".into(),
+            Command::Reparent { .. } => "Move in tree".into(),
+            Command::SetTransform { .. } => "Transform".into(),
+            Command::SetVisible { .. } => "Visibility".into(),
+            Command::SetMaterial { .. } => "Material".into(),
+            Command::SetPrimitive { .. } => "Primitive settings".into(),
+            Command::SetCageLevels { .. } => "Smooth cage levels".into(),
+            Command::SetDeformer { .. } => "Deformer settings".into(),
+            Command::AddStep { op, .. } => op.name().into(),
+            Command::SetStep { op, .. } => format!("Edit {}", op.name()),
+            Command::EnableStep { .. } => "Toggle step".into(),
+            Command::RemoveStep { .. } => "Remove step".into(),
+            Command::Collapse { .. } => "Collapse history".into(),
+            Command::Import { .. } => "Import".into(),
+            Command::BeginSculpt { .. } => "Start sculpting".into(),
+            Command::EndSculpt => "Stop sculpting".into(),
+            Command::SculptStroke { stroke, .. } => format!("{} stroke", stroke.brush.kind.label()),
+            Command::SculptMask { .. } => "Mask".into(),
+            Command::Undo => "Undo".into(),
+            Command::Redo => "Redo".into(),
+        }
+    }
+}
+
+/// What a command did.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Outcome {
+    /// Objects it created (the first is the main one).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created: Vec<ObjectId>,
+    /// Warnings worth showing (import repairs, stale steps).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}

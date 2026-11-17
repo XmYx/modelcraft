@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=ModelCraft
+GenericName=3D Modeler
+Comment=3D modeling and sculpting
+Exec=modelcraft %F
+TryExec=modelcraft
+Icon=ai.storyteller.modelcraft
+Terminal=false
+StartupNotify=true
+StartupWMClass=ai.storyteller.modelcraft
+Categories=Graphics;3DGraphics;
+MimeType=application/vnd.storytold.modelcraft+zip;model/gltf-binary;model/gltf+json;model/obj;model/stl;
+Keywords=3d;model;modeling;sculpt;sculpting;mesh;subdivision;gltf;glb;obj;

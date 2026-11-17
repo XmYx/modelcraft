@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- ModelCraft draft icon: a faceted owl carved from a polygon cage. Ink #0b0b0c, Paper #f2f1ee, ModelCraft violet #8a6cf0. -->
+  <defs><clipPath id="c"><rect x="6" y="6" width="500" height="500" rx="106"/></clipPath></defs>
+  <rect width="512" height="512" rx="112" fill="#0b0b0c"/>
+  <g clip-path="url(#c)" stroke="#0b0b0c" stroke-width="6" stroke-linejoin="round">
+    <rect x="6" y="6" width="500" height="500" fill="#8a6cf0" stroke="none"/>
+    <polygon points="256,92 352,140 380,250 256,214 132,250 160,140" fill="#f2f1ee"/>
+    <polygon points="132,250 256,214 380,250 360,370 256,430 152,370" fill="#f2f1ee"/>
+    <polygon points="160,140 132,250 104,150" fill="#f2f1ee"/>
+    <polygon points="352,140 380,250 408,150" fill="#f2f1ee"/>
+    <polygon points="256,214 256,430 152,370 132,250" fill="#d9d6ef"/>
+    <circle cx="200" cy="200" r="34" fill="#0b0b0c"/>
+    <circle cx="312" cy="200" r="34" fill="#0b0b0c"/>
+    <circle cx="210" cy="192" r="10" fill="#f2f1ee" stroke="none"/>
+    <circle cx="322" cy="192" r="10" fill="#f2f1ee" stroke="none"/>
+    <polygon points="256,230 274,262 256,292 238,262" fill="#8a6cf0"/>
+    <polyline points="152,370 256,320 360,370" fill="none"/>
+    <polyline points="256,320 256,430" fill="none"/>
+    <polyline points="40,470 472,470" fill="none" stroke="#f2f1ee" stroke-width="6" stroke-dasharray="18 14"/>
+  </g>
+</svg>

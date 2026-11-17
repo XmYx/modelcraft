@@ -1,0 +1,1 @@
+- First preview: model with parametric primitives and an editable build history, smooth cages and deformers; sculpt million-polygon meshes with symmetric brushes and masks; crash-safe saves; glTF/GLB, OBJ and STL exchange with the other Crafting Apps.

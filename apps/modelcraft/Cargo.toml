@@ -1,0 +1,39 @@
+[package]
+name = "modelcraft"
+description = "ModelCraft desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+default-run = "modelcraft"
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+modelcraft-mesh = { workspace = true }
+modelcraft-ops = { workspace = true }
+modelcraft-scene = { workspace = true }
+modelcraft-sculpt = { workspace = true }
+modelcraft-formats = { workspace = true }
+modelcraft-engine = { workspace = true }
+modelcraft-render = { workspace = true }
+glam = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+egui-wgpu = { workspace = true }
+wgpu = { workspace = true }
+rfd = { workspace = true }
+log = { workspace = true }
+craft-i18n = { workspace = true }
+craft-fonts-build = { workspace = true }
+craft-image-codecs = { workspace = true }
+chrono = { workspace = true }
+
+[build-dependencies]
+craft-fonts-build = { workspace = true }
+
+[dev-dependencies]
+egui_kittest = { workspace = true }

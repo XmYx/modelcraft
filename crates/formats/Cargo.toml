@@ -1,0 +1,27 @@
+[package]
+name = "modelcraft-formats"
+description = "ModelCraft file formats: the native .modelcraft project with a crash-safe journal, and glTF/GLB/OBJ/STL/PLY exchange through craft-mesh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+modelcraft-mesh = { workspace = true }
+modelcraft-scene = { workspace = true }
+modelcraft-ops = { workspace = true }
+glam = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+craft-mesh = { workspace = true }
+craft-zip = { workspace = true }
+craft-atomic = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
