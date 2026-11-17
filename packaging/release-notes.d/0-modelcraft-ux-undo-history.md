@@ -1,0 +1,1 @@
+- Undo now reaches back into earlier sessions: saved files keep their undo history (Edit ▸ Keep Undo History in Saved Files turns it off).

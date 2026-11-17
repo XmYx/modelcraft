@@ -195,6 +195,14 @@ without SIMD packets or wide nodes, so it is certainly slower per ray than their
 GPU path traverses the BVH in a compute shader rather than through hardware ray queries. A fair
 comparison needs the same scene, hardware and noise level in both renderers; until someone runs
 that, the honest statement is the absolute rates above.
+## Undo history on open
+
+A project whose history holds 502 steps (a sphere, a subdivision step and 500 transforms) is
+2.8 KB on disk and opens with its history rebuilt and checked in **62 ms** in total, mesh
+evaluation included (`modelcraft-cli info`, release build, Core i9-12900K). Reproduce: run the
+502-line script with `modelcraft-cli run h.modelcraft h.jsonl`, then `time modelcraft-cli info
+h.modelcraft`. Sculpt strokes replay at their dab cost (table above), so a history with many long
+strokes on a dense mesh opens proportionally slower.
 
 ## How the numbers stay low
 

@@ -72,6 +72,8 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                ui.separator();
+                ui.checkbox(&mut app.doc.keep_history, tl!("Keep Undo History in Saved Files"));
             });
             ui.menu_button(tl!("Select"), |ui| {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
