@@ -337,6 +337,51 @@ fn live_detail_strokes_are_undoable_saved_and_replayed_by_the_journal() {
 }
 
 #[test]
+fn undo_history_survives_save_and_open() {
+    let dir = tmp("history");
+    let p = dir.join("h.modelcraft");
+    let mut d = Document::new();
+    let cube = add(&mut d, "cube");
+    d.execute(Command::AddStep { id: cube, op: StepOp::Subdivide { levels: 1 } }).unwrap();
+    d.execute(Command::BeginSculpt { id: cube }).unwrap();
+    d.stroke_begin(modelcraft_sculpt::BrushSettings::new(BrushKind::Clay, 0.5));
+    for dab in stroke(BrushKind::Clay).dabs {
+        d.stroke_dab(dab);
+    }
+    d.stroke_end();
+    d.execute(Command::SculptDetail { id: cube, op: crate::DetailOp::Up }).unwrap();
+    d.execute(Command::EndSculpt).unwrap();
+    let sphere = add(&mut d, "sphere");
+    d.execute(Command::Undo).unwrap(); // the sphere waits on the redo side
+    let labels = d.undo.labels();
+    let sculpted = d.eval.evaluate(&d.scene, cube).mesh;
+    d.save_as(&p).unwrap();
+    drop(d);
+
+    let mut r = Document::open(&p).unwrap();
+    assert_eq!(r.undo.labels(), labels);
+    assert_eq!(r.undo.redo_labels(), vec!["Add sphere".to_string()]);
+    assert!(r.history_note.as_deref().unwrap_or("").contains("Restored 5"), "{:?}", r.history_note);
+    assert!(!r.dirty);
+    assert!(*r.eval.evaluate(&r.scene, cube).mesh == *sculpted, "the sculpted mesh opens as saved");
+    // Undo reaches back past the open: the detail level, the stroke, the sculpt layer, the
+    // step, the cube.
+    r.execute(Command::Undo).unwrap();
+    r.execute(Command::Undo).unwrap();
+    r.sync_sculpt();
+    assert!(*r.eval.evaluate(&r.scene, cube).mesh != *sculpted, "the stroke was undone");
+    for _ in 0..3 {
+        r.execute(Command::Undo).unwrap();
+    }
+    assert!(r.scene.is_empty());
+    for _ in 0..6 {
+        r.execute(Command::Redo).unwrap();
+    }
+    assert!(r.scene.get(sphere).is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn even_remesh_is_a_history_step() {
     let mut d = Document::new();
     let ball = d.execute(Command::AddPrimitive { kind: "torus".into(), name: None, parent: None }).unwrap().created[0];
@@ -380,4 +425,56 @@ fn strokes_and_presets_keep_their_json_form() {
         d.execute(Command::SculptStroke { id: ball, stroke: st }).unwrap();
         assert!(d.undo.len() >= 3, "{} changed nothing", p.name);
     }
+}
+
+#[test]
+fn a_history_that_no_longer_replays_is_dropped_not_fatal() {
+    let dir = tmp("history-bad");
+    let mesh_file = dir.join("part.obj");
+    let mut src = Document::new();
+    add(&mut src, "cube");
+    src.export(&mesh_file).unwrap();
+    let p = dir.join("h.modelcraft");
+    let mut d = Document::new();
+    d.execute(Command::Import { path: mesh_file.display().to_string() }).unwrap();
+    d.save_as(&p).unwrap();
+    // The imported file moved away: replaying the history cannot rebuild the scene.
+    std::fs::remove_file(&mesh_file).unwrap();
+    let r = Document::open(&p).unwrap();
+    assert_eq!(r.scene.len(), 1, "the saved scene still opens");
+    assert!(r.undo.is_empty());
+    assert!(r.history_note.as_deref().unwrap_or("").contains("left out"), "{:?}", r.history_note);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn history_storage_is_optional_and_bounded() {
+    let dir = tmp("history-opt");
+    let p = dir.join("h.modelcraft");
+    let mut d = Document::new();
+    for _ in 0..3 {
+        add(&mut d, "cube");
+    }
+    d.keep_history = false;
+    d.save_as(&p).unwrap();
+    assert!(Document::open(&p).unwrap().undo.is_empty());
+    // A tight bound keeps only the newest steps; the base moves forward with the cut.
+    d.keep_history = true;
+    d.history_max_bytes = 130;
+    d.save_as(&p).unwrap();
+    let r = Document::open(&p).unwrap();
+    assert_eq!(r.undo.len(), 2);
+    assert_eq!(r.scene.len(), 3);
+    // After the budget drops old entries, the base follows the oldest kept one.
+    let mut e = Document::new();
+    e.undo.budget = 2_000;
+    for _ in 0..10 {
+        add(&mut e, "cube");
+    }
+    assert!(e.undo.dropped > 0);
+    e.save_as(&p).unwrap();
+    let r = Document::open(&p).unwrap();
+    assert_eq!(r.undo.len(), e.undo.len());
+    assert_eq!(r.scene.len(), 10);
+    let _ = std::fs::remove_dir_all(dir);
 }
