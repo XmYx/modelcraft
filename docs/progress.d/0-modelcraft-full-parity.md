@@ -1,0 +1,1 @@
+| 2026-11-17 | Full-product parity map: 330 in-scope rows in 25 weighted areas with per-row effort sizes and justified out-of-scope rows, scored by the new `cargo xtask parity` (part of `ci`): 24.5 % row parity, 14.2 % weighted parity; `docs/gaps.md` rewritten as a ranked plan toward 90 % in nine workstreams |

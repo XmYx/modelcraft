@@ -8,8 +8,9 @@
 
 | | Value | Kind |
 |---|---|---|
-| Essentials in the parity map | 59 % of 125 rows | counted |
-| Distance to the full products | ≈ 12 % | estimated |
+| Weighted parity with the full products (goal: 90 %) | 14.2 % | counted (`cargo xtask parity`) |
+| Row parity, 330 in-scope rows of the full-product map | 24.5 % | counted |
+| Effort to 90 % weighted parity | ≈ 2,760 agent hours | estimated from row sizes ([gaps.md](docs/gaps.md)) |
 | Viewport, 2.0 M triangles (RTX 4090) | 296 fps orbit, 283 fps sculpting | measured |
 | Sculpt dab, 1.0 M quads | 0.2–0.4 ms engine, 1.2 ms in app | measured |
 | Tests | 84 unit, property and UI tests | counted |
@@ -46,4 +47,5 @@ planned. See [docs/cli.md](docs/cli.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | minor | Headline numbers from the full-product parity map (330 rows, area weights, row sizes) |
 | 2026-11-17 | major | First roadmap with the vertical slice |
