@@ -241,10 +241,6 @@ fn project_dir(app: &ModelApp) -> Option<PathBuf> {
 /// A folder a script may be given write access to: not a filesystem root and not the user's home
 /// folder (a project saved straight into the home folder would otherwise give a script the
 /// dot-files that run at the next login).
-fn safe_write_root(dir: &Path) -> bool {
-    safe_write_root_given(dir, &home_folders())
-}
-
 fn home_folders() -> Vec<PathBuf> {
     ["HOME", "USERPROFILE"].into_iter().filter_map(std::env::var_os).filter_map(|h| std::fs::canonicalize(h).ok()).collect()
 }
@@ -1276,8 +1272,8 @@ mod tests {
 
     #[test]
     fn writes_are_never_granted_to_a_home_folder_or_a_root() {
-        assert!(!safe_write_root(Path::new("/")));
-        assert!(!safe_write_root(Path::new("/definitely/not/a/folder")));
+        assert!(!safe_write_root_given(Path::new("/"), &[]));
+        assert!(!safe_write_root_given(Path::new("/definitely/not/a/folder"), &[]));
         let dir = tmp("safe-root");
         assert!(safe_write_root_given(&dir, &[]));
         // The home folder is refused, and a project saved there gets a subfolder instead.
