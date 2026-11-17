@@ -546,6 +546,106 @@ pub fn set_patch(m: &PolyMesh, faces: &[u32], patch: u32) -> OpResult {
     rebuild(pos, polys)
 }
 
+/// Connect two faces with a tube: both are removed and their borders joined by quads. The faces
+/// need the same number of corners; the pairing that keeps the tube least twisted is chosen.
+pub fn bridge_faces(m: &PolyMesh, a: u32, b: u32) -> OpResult {
+    let n = m.face_count() as u32;
+    if a >= n || b >= n || a == b {
+        return Err(OpError::Invalid("pick two different faces".into()));
+    }
+    let va: Vec<u32> = m.face_vertices(a).collect();
+    let mut vb: Vec<u32> = m.face_vertices(b).collect();
+    if va.len() != vb.len() {
+        return Err(OpError::Invalid(format!("the faces have {} and {} corners", va.len(), vb.len())));
+    }
+    if va.iter().any(|v| vb.contains(v)) {
+        return Err(OpError::Invalid("the faces share a vertex".into()));
+    }
+    // Facing faces run in opposite directions: walk b backwards and find the best start.
+    vb.reverse();
+    let k = va.len();
+    let cost = |off: usize| -> f32 { (0..k).map(|i| m.position(va[i]).distance(m.position(vb[(i + off) % k]))).sum() };
+    let off = (0..k).min_by(|x, y| cost(*x).total_cmp(&cost(*y))).unwrap_or(0);
+    let (pos, polys) = polys_of(m);
+    let mut out: Vec<Polygon> = polys.into_iter().enumerate().filter(|(i, _)| *i as u32 != a && *i as u32 != b).map(|(_, p)| p).collect();
+    let uv_mode = m.has_uvs();
+    for i in 0..k {
+        let j = (i + 1) % k;
+        let (a0, a1) = (va[i], va[j]);
+        let (b0, b1) = (vb[(i + off) % k], vb[(j + off) % k]);
+        let mut p = Polygon::new(vec![a0, a1, b1, b0]);
+        if uv_mode {
+            let u0 = i as f32 / k as f32;
+            let u1 = (i + 1) as f32 / k as f32;
+            p.uvs = Some(vec![Vec2::new(u0, 0.0), Vec2::new(u1, 0.0), Vec2::new(u1, 1.0), Vec2::new(u0, 1.0)]);
+        }
+        p.patch = m.patch(a);
+        out.push(p);
+    }
+    rebuild(pos, out)
+}
+
+/// Close the hole whose border contains `edge` with one polygon.
+pub fn fill_hole(m: &PolyMesh, edge: u32) -> OpResult {
+    let Some(mut lp) = crate::select::boundary_loop(m, edge) else {
+        return Err(OpError::Invalid("pick an edge on the border of a hole".into()));
+    };
+    if lp.len() < 3 || lp.len() > modelcraft_mesh::MAX_POLYGON_CORNERS {
+        return Err(OpError::Invalid(format!("a hole with {} corners cannot be filled", lp.len())));
+    }
+    // The boundary half-edges run against the faces; the new face runs with them.
+    lp.reverse();
+    lp.rotate_right(1);
+    let (pos, mut polys) = polys_of(m);
+    let mut p = Polygon::new(lp.clone());
+    if m.has_uvs() {
+        p.uvs = Some(vec![Vec2::ZERO; lp.len()]);
+    }
+    polys.push(p);
+    rebuild(pos, polys)
+}
+
+/// Mirror the mesh across a plane through the origin (axis 0 = X, 1 = Y, 2 = Z) and join the
+/// halves: vertices within `weld` of the plane are shared, faces lying on it are dropped.
+pub fn mirror(m: &PolyMesh, axis: usize, weld: f32) -> OpResult {
+    let axis = axis.min(2);
+    let eps = if weld.is_finite() { weld.abs().max(1e-7) } else { 1e-4 };
+    let n = m.vertex_count();
+    if n.saturating_mul(2) > modelcraft_mesh::MAX_ELEMENTS || m.face_count().saturating_mul(2) > crate::MAX_RESULT_FACES {
+        return Err(OpError::TooLarge(m.face_count().saturating_mul(2)));
+    }
+    let (mut pos, polys) = polys_of(m);
+    let on_plane: Vec<bool> = pos.iter().map(|p| p[axis].abs() <= eps).collect();
+    // Snap on-plane vertices exactly onto the plane.
+    for (p, on) in pos.iter_mut().zip(&on_plane) {
+        if *on {
+            p[axis] = 0.0;
+        }
+    }
+    let mut twin = vec![0u32; n];
+    for i in 0..n {
+        if on_plane.get(i).copied().unwrap_or(false) {
+            twin[i] = i as u32;
+        } else {
+            let mut q = pos.get(i).copied().unwrap_or_default();
+            q[axis] = -q[axis];
+            twin[i] = push(&mut pos, q);
+        }
+    }
+    let mut out = Vec::with_capacity(polys.len() * 2);
+    for p in polys {
+        if p.verts.iter().all(|v| on_plane.get(*v as usize).copied().unwrap_or(false)) {
+            continue;
+        }
+        let mut q = p.clone();
+        q.verts = p.verts.iter().rev().map(|v| twin.get(*v as usize).copied().unwrap_or(*v)).collect();
+        q.uvs = p.uvs.as_ref().map(|u| u.iter().rev().copied().collect());
+        out.push(p);
+        out.push(q);
+    }
+    compact(pos, out)
+}
+
 /// Check a selection fits the mesh (used by history steps to report stale selections).
 pub fn check_selection(sel: &[u32], len: usize, what: &str) -> Result<(), OpError> {
     match sel.iter().find(|i| **i as usize >= len) {
@@ -683,6 +783,31 @@ mod tests {
     }
 
     #[test]
+    fn bridge_fill_and_mirror() {
+        let c = cube();
+        // Bridging two opposite faces drills a tunnel: a closed surface of genus one.
+        let holes = inset_faces(&c, &[0, 1], 0.5).unwrap();
+        let t = bridge_faces(&holes, 0, 1).unwrap();
+        assert!(closed(&t));
+        assert_eq!(euler(&t), 0);
+        assert!(bridge_faces(&c, 0, 0).is_err());
+        let open = delete_faces(&c, &[3]).unwrap();
+        let e = (0..open.edge_count() as u32).find(|e| open.is_boundary_edge(*e)).unwrap();
+        let filled = fill_hole(&open, e).unwrap();
+        assert!(closed(&filled));
+        assert_eq!(euler(&filled), 2);
+        assert!(filled.face_normal(5).dot(filled.face_center(5)) > 0.0, "filled face points out");
+        // A box whose -X side sits on the mirror plane becomes a closed box twice as wide.
+        let mut half = delete_faces(&c, &[1]).unwrap();
+        half.map_positions(|_, p| p + Vec3::X);
+        let m = mirror(&half, 0, 1e-4).unwrap();
+        assert!(closed(&m), "mirror left the seam open");
+        assert_eq!((m.vertex_count(), m.face_count()), (12, 10));
+        let (lo, hi) = m.bounds();
+        assert!((lo.x + 2.0).abs() < 1e-5 && (hi.x - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
     fn stale_selections_are_ignored() {
         let c = cube();
         assert_eq!(extrude_faces(&c, &[99], 1.0).unwrap(), c);
@@ -695,7 +820,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(64))]
         /// Random sequences of edits on random primitives always validate.
         #[test]
-        fn random_edit_sequences_stay_valid(kind in 0usize..7, ops in prop::collection::vec((0u8..9, 0u32..200, -1.0f32..1.0), 1..6)) {
+        fn random_edit_sequences_stay_valid(kind in 0usize..7, ops in prop::collection::vec((0u8..12, 0u32..200, -1.0f32..1.0), 1..6)) {
             let kind = crate::primitives::KINDS[kind];
             let mut m = Primitive::default_of(kind).unwrap();
             if let Primitive::Sphere { segments, rings, .. } = &mut m { *segments = 8; *rings = 5; }
@@ -711,6 +836,9 @@ mod tests {
                     4 => merge_vertices(&m, &[f, f + 1]),
                     5 => delete_faces(&m, &[f]),
                     6 => crate::subdivide::catmull_clark(&m, 1),
+                    9 => mirror(&m, (i % 3) as usize, 1e-3),
+                    10 => fill_hole(&m, e).or_else(|_| Ok(m.clone())),
+                    11 => bridge_faces(&m, f, (f + 3) % m.face_count().max(1) as u32).or_else(|_| Ok(m.clone())),
                     7 => bevel_edges(&m, &[e, e + 1, e + 2], x.abs() * 0.2),
                     _ => flip_faces(&m, &[f]),
                 };

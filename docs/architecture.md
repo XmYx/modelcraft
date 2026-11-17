@@ -46,7 +46,14 @@ viewport paints a bounded wireframe with the egui painter (also used by the UI t
 ## Shared libraries and gaps (house rule 16)
 
 Used from craft-libs at `0649a07`: `craft-mesh` (readers/writers), `craft-zip`, `craft-atomic`,
-`craft-image-codecs` (screenshots), `craft-i18n`, `craft-fonts-build`.
+`craft-image-codecs` (screenshots), `craft-i18n`, `craft-fonts-build`, `craft-keymap` (catalog,
+dispatch, the shared Keyboard Shortcuts dialog), `craft-settings` (preferences: navigation, recent
+files, snapping, shortcut overrides), and `craft-svg` in xtask (icons).
+
+Crash recovery is ModelCraft's own command journal (`modelcraft-formats::journal` plus
+`Document::recover`), because it replays engine commands, sculpt strokes included. BoardCraft has an
+app-local snapshot autosave; the two are candidates for one shared recovery crate in craft-libs
+(see the sibling apps' shared plan), not to be copied between apps.
 
 Gaps found, to raise in craft-libs rather than copy:
 - `craft-mesh` ignores glTF `extras` and writes GLB only (no `.gltf` JSON); it cannot carry quads.
@@ -59,5 +66,4 @@ Gaps found, to raise in craft-libs rather than copy:
   renders, thumbnails and the no-GPU fallback. Our material is the glTF metallic-roughness core it
   names.
 
-Not used yet but planned: `craft-ui` docking, `craft-keymap`, `craft-settings`, `craft-control` and
-`craft-mcp-server`.
+Not used yet but planned: `craft-ui` docking, `craft-control` and `craft-mcp-server`.

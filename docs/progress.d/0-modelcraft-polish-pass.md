@@ -1,0 +1,1 @@
+| 2026-11-17 | Polish pass from user research: save prompt before New/Open/Quit, Open Recent, Save Incremental, rebindable shortcuts (craft-keymap) with preferences in craft-settings, Undo History panel, loop/ring/grow/shrink selection, bridge, fill hole, mirror, gizmo snapping; `docs/user-research.md`; parity re-measured (59 % of 125 rows) |

@@ -4,8 +4,8 @@
 
 | | Value |
 |---|---|
-| Interface source texts (`tl!`/`tlf!`) | 233 |
-| Already in craft-i18n's shared `common.tsv` | 70 |
+| Interface source texts (`tl!`/`tlf!`) | 264 |
+| Already in craft-i18n's shared `common.tsv` | 75 |
 | ModelCraft's own catalog (`locales/<locale>/modelcraft.tsv` in craft-i18n) | not yet created |
 | Languages offered | English; the 14 left-to-right languages in `apps/modelcraft/src/i18n.rs` as soon as craft-i18n has `modelcraft.tsv` for them |
 

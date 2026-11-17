@@ -13,7 +13,9 @@ mod app;
 mod args;
 mod demo;
 mod gpu;
+mod keys;
 mod panels;
+mod prefs;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

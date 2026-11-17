@@ -82,16 +82,18 @@ pub enum PanelId {
     Properties,
     Brushes,
     Paint,
+    History,
 }
 
 impl PanelId {
-    pub const ALL: [PanelId; 4] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint];
+    pub const ALL: [PanelId; 5] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History];
     pub fn label(self) -> String {
         match self {
             PanelId::Tree => tl!("Scene"),
             PanelId::Properties => tl!("Properties"),
             PanelId::Brushes => tl!("Brushes"),
             PanelId::Paint => tl!("Paint"),
+            PanelId::History => tl!("Undo History"),
         }
     }
 }
@@ -113,6 +115,9 @@ impl Default for Layout {
             (Model, Properties, Right),
             (Model, Brushes, Hidden),
             (Model, PanelId::Paint, Hidden),
+            (Model, History, Left),
+            (Sculpt, History, Hidden),
+            (Workspace::Paint, History, Hidden),
             (Sculpt, Tree, Hidden),
             (Sculpt, Brushes, Left),
             (Sculpt, Properties, Right),
@@ -174,8 +179,28 @@ impl Default for NumericTransform {
     }
 }
 
+/// An action waiting for the answer to "save changes?".
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pending {
+    New,
+    Open,
+    OpenPath(PathBuf),
+    Quit,
+}
+
 pub struct ModelApp {
     pub doc: Document,
+    pub keymap: craft_keymap::Keymap,
+    pub dispatcher: craft_keymap::egui::Dispatcher,
+    pub shortcuts_state: Option<craft_keymap::ui::DialogState>,
+    /// Preferences on disk (`None` in tests: nothing is read or written).
+    pub prefs: Option<craft_settings::store::SettingsStore<crate::prefs::Prefs>>,
+    pub recent: Vec<String>,
+    pub snap: bool,
+    pub snap_steps: (f32, f32, f32),
+    pub pending: Option<Pending>,
+    pub close_confirmed: bool,
+    pub quit_requested: bool,
     pub workspace: Workspace,
     pub mode: SelectMode,
     pub tool: Tool,
@@ -183,6 +208,8 @@ pub struct ModelApp {
     pub components: BTreeSet<u32>,
     /// The vertices of the component selection when a gizmo drag started.
     pub component_vertices_cached: Vec<u32>,
+    /// The scene-tree row that takes keyboard focus when it is drawn next.
+    pub tree_focus: Option<ObjectId>,
     /// Scene before a live property drag (restored before the command commits).
     pub prop_snapshot: Option<Box<modelcraft_engine::scene::Scene>>,
     pub views: [View; 4],
@@ -229,6 +256,9 @@ pub fn recovery_dir() -> Option<PathBuf> {
 impl ModelApp {
     pub fn new(cc: &eframe::CreationContext<'_>, cli: Cli) -> Self {
         let mut app = Self::with_context(&cc.egui_ctx, cli);
+        let (store, _report) = craft_settings::store::SettingsStore::<crate::prefs::Prefs>::open(craft_settings::paths::Location::Auto);
+        app.apply_prefs(store.get().clone());
+        app.prefs = Some(store);
         app.recovery_dir = recovery_dir();
         app.start_autosave();
         app
@@ -247,12 +277,23 @@ impl ModelApp {
         ];
         let mut app = ModelApp {
             doc: Document::new(),
+            keymap: crate::keys::keymap(Default::default()),
+            dispatcher: craft_keymap::egui::Dispatcher::new(),
+            shortcuts_state: None,
+            prefs: None,
+            recent: Vec::new(),
+            snap: false,
+            snap_steps: (0.25, 15.0, 0.1),
+            pending: None,
+            close_confirmed: false,
+            quit_requested: false,
             workspace: Workspace::Model,
             mode: SelectMode::Object,
             tool: Tool::Move,
             selection: Vec::new(),
             components: BTreeSet::new(),
             component_vertices_cached: Vec::new(),
+            tree_focus: None,
             prop_snapshot: None,
             views,
             quad: cli.quad,
@@ -324,6 +365,106 @@ impl ModelApp {
         }
         app.doc.dirty = false;
         app
+    }
+
+    fn apply_prefs(&mut self, p: crate::prefs::Prefs) {
+        self.nav = match p.navigation.as_str() {
+            "middle" => NavPreset::MiddleMouse,
+            "right" => NavPreset::RightMouse,
+            _ => NavPreset::AltMouse,
+        };
+        self.recent = p.recent.clone();
+        self.snap = p.snap;
+        let pos = |v: f32, d: f32| if v.is_finite() && v > 0.0 { v } else { d };
+        self.snap_steps = (pos(p.snap_move, 0.25), pos(p.snap_rotate_deg, 15.0), pos(p.snap_scale, 0.1));
+        self.brush_px = p.brush_px.clamp(4.0, 800.0);
+        self.keymap = crate::keys::keymap(p.shortcuts);
+    }
+
+    /// Write changed preferences (debounced by craft-settings).
+    fn store_prefs(&mut self) {
+        let nav = match self.nav {
+            NavPreset::AltMouse => "alt",
+            NavPreset::MiddleMouse => "middle",
+            NavPreset::RightMouse => "right",
+        };
+        let (recent, snap, brush_px) = (self.recent.clone(), self.snap, self.brush_px);
+        if let Some(store) = &mut self.prefs {
+            store.update(|p| {
+                p.navigation = nav.into();
+                p.recent = recent;
+                p.snap = snap;
+                p.brush_px = brush_px;
+            });
+            let _ = store.tick(std::time::Instant::now());
+        }
+    }
+
+    pub fn touch_recent(&mut self, path: &std::path::Path) {
+        let mut p = crate::prefs::Prefs { recent: std::mem::take(&mut self.recent), ..Default::default() };
+        p.touch_recent(path);
+        self.recent = p.recent;
+    }
+
+    /// Run `p` now, or ask to save first when there are unsaved changes.
+    pub fn guard(&mut self, p: Pending) {
+        if self.doc.dirty && !self.doc.scene.is_empty() {
+            self.pending = Some(p);
+        } else {
+            self.run_pending(p);
+        }
+    }
+
+    pub fn run_pending(&mut self, p: Pending) {
+        match p {
+            Pending::New => {
+                self.doc = Document::new();
+                self.selection.clear();
+                self.components.clear();
+                self.start_autosave();
+                self.status = tl!("New scene");
+            }
+            Pending::Open => self.open_dialog(),
+            Pending::OpenPath(path) => self.open_path(path),
+            Pending::Quit => {
+                self.close_confirmed = true;
+                self.quit_requested = true;
+            }
+        }
+    }
+
+    /// Answer to the save prompt: `Some(true)` save first, `Some(false)` discard, `None` cancel.
+    pub fn answer_pending(&mut self, save: Option<bool>) {
+        let Some(p) = self.pending.take() else { return };
+        match save {
+            None => {}
+            Some(true) => {
+                self.save();
+                if !self.doc.dirty {
+                    self.run_pending(p);
+                }
+            }
+            Some(false) => {
+                self.doc.dirty = false;
+                self.run_pending(p);
+            }
+        }
+    }
+
+    /// Save a numbered copy next to the file (`name_v002.modelcraft`) and continue in it.
+    pub fn save_incremental(&mut self) {
+        let Some(path) = self.doc.path.clone() else {
+            self.save_as();
+            return;
+        };
+        let next = next_increment(&path);
+        match self.doc.save_as(&next) {
+            Ok(()) => {
+                self.touch_recent(&next);
+                self.status = crate::tlf!("Saved {file}", file = next.display());
+            }
+            Err(e) => self.status = crate::tlf!("Save failed: {error}", error = e),
+        }
     }
 
     // ---- selection helpers ----
@@ -446,14 +587,27 @@ impl ModelApp {
     pub fn act(&mut self, ctx: &egui::Context, a: Action) {
         use Action::*;
         match a {
-            New => {
-                self.doc = Document::new();
-                self.selection.clear();
-                self.components.clear();
-                self.start_autosave();
-                self.status = tl!("New scene");
+            New => self.guard(Pending::New),
+            Open => self.guard(Pending::Open),
+            SaveIncremental => self.save_incremental(),
+            KeyboardShortcuts => self.shortcuts_state = Some(craft_keymap::ui::DialogState::new()),
+            ToggleSnap => {
+                self.snap = !self.snap;
+                self.status = if self.snap { tl!("Snapping on") } else { tl!("Snapping off") };
             }
-            Open => self.open_dialog(),
+            SelectLoop | SelectRing | GrowSelection | ShrinkSelection => self.selection_op(a),
+            Bridge => {
+                let faces = self.selected_vec();
+                match (self.mode, faces.as_slice()) {
+                    (SelectMode::Face, [a, b]) => self.add_step(StepOp::Bridge { a: *a, b: *b }),
+                    _ => self.status = tl!("Bridge needs exactly two selected faces (face mode)"),
+                }
+            }
+            FillHole => match (self.mode, self.components.iter().next()) {
+                (SelectMode::Edge, Some(&edge)) => self.add_step(StepOp::FillHole { edge }),
+                _ => self.status = tl!("Fill hole needs a selected border edge (edge mode)"),
+            },
+            Mirror(axis) => self.add_step(StepOp::Mirror { axis: u32::from(axis), weld: 1e-4 }),
             Save => self.save(),
             SaveAs => self.save_as(),
             Import => self.import_dialog(),
@@ -605,11 +759,45 @@ impl ModelApp {
             TransformDialog => self.numeric = Some(NumericTransform::default()),
             Palette => self.palette = Some(crate::panels::Palette::default()),
             NextPanel => {
-                self.focus_panel = self.focus_panel.wrapping_add(1);
-                ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("panel-focus", self.focus_panel % 3))));
+                // Next panel that is shown in this workspace.
+                let shown: Vec<usize> =
+                    PanelId::ALL.iter().enumerate().filter(|(_, p)| self.layout.dock(self.workspace, **p) != Dock::Hidden).map(|(i, _)| i).collect();
+                if !shown.is_empty() {
+                    self.focus_panel = self.focus_panel.wrapping_add(1);
+                    let idx = shown.get(self.focus_panel % shown.len()).copied().unwrap_or(0);
+                    ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("panel-focus", idx))));
+                }
             }
             About => self.about = true,
         }
+    }
+
+    fn selection_op(&mut self, a: Action) {
+        use modelcraft_engine::ops::select;
+        let Some(id) = self.edit_target() else { return };
+        let m = self.doc.eval.steps_output(&self.doc.scene, id, usize::MAX).mesh;
+        let kind = match self.mode {
+            SelectMode::Vertex => select::Kind::Vertex,
+            SelectMode::Edge => select::Kind::Edge,
+            SelectMode::Face => select::Kind::Face,
+            SelectMode::Object => {
+                self.status = tl!("Pick a component mode first");
+                return;
+            }
+        };
+        let sel = self.selected_vec();
+        let new: BTreeSet<u32> = match a {
+            Action::SelectLoop | Action::SelectRing if kind != select::Kind::Edge => {
+                self.status = tl!("Loops and rings work in edge mode");
+                return;
+            }
+            Action::SelectLoop => select::loops(&m, &sel).into_iter().collect(),
+            Action::SelectRing => select::rings(&m, &sel).into_iter().collect(),
+            Action::GrowSelection => select::grow(&m, kind, &self.components),
+            _ => select::shrink(&m, kind, &self.components),
+        };
+        self.components = new;
+        self.status = crate::tlf!("{count} components selected", count = self.components.len());
     }
 
     fn mask(&mut self, op: modelcraft_engine::MaskOp) {
@@ -714,6 +902,7 @@ impl ModelApp {
     // ---- files ----
 
     pub fn open_path(&mut self, path: PathBuf) {
+        self.touch_recent(&path);
         let is_project = path.extension().is_some_and(|e| e == modelcraft_engine::formats::project::EXTENSION);
         if is_project {
             match Document::open(&path) {
@@ -736,7 +925,7 @@ impl ModelApp {
         }
     }
 
-    fn open_dialog(&mut self) {
+    pub fn open_dialog(&mut self) {
         if let Some(p) =
             rfd::FileDialog::new().add_filter("ModelCraft", &["modelcraft"]).add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply"]).pick_file()
         {
@@ -765,15 +954,23 @@ impl ModelApp {
             return;
         }
         match self.doc.save() {
-            Ok(()) => self.status = tl!("Saved"),
+            Ok(()) => {
+                if let Some(p) = self.doc.path.clone() {
+                    self.touch_recent(&p);
+                }
+                self.status = tl!("Saved");
+            }
             Err(e) => self.status = crate::tlf!("Save failed: {error}", error = e),
         }
     }
 
-    fn save_as(&mut self) {
+    pub fn save_as(&mut self) {
         if let Some(p) = rfd::FileDialog::new().add_filter("ModelCraft", &["modelcraft"]).set_file_name("scene.modelcraft").save_file() {
             match self.doc.save_as(&p) {
-                Ok(()) => self.status = crate::tlf!("Saved {file}", file = p.display()),
+                Ok(()) => {
+                    self.touch_recent(&p);
+                    self.status = crate::tlf!("Saved {file}", file = p.display());
+                }
                 Err(e) => self.status = crate::tlf!("Save failed: {error}", error = e),
             }
         }
@@ -864,6 +1061,22 @@ impl eframe::App for ModelApp {
             }
         }
         self.autosave_tick();
+        self.store_prefs();
+        // Closing with unsaved changes asks first (screenshots and benchmarks close on their own).
+        if ctx.input(|i| i.viewport().close_requested())
+            && self.doc.dirty
+            && !self.doc.scene.is_empty()
+            && !self.close_confirmed
+            && self.screenshot.is_none()
+            && self.bench.is_none()
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending = Some(Pending::Quit);
+        }
+        if self.quit_requested {
+            self.quit_requested = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
     }
 
@@ -872,6 +1085,10 @@ impl eframe::App for ModelApp {
     }
 
     fn on_exit(&mut self) {
+        self.store_prefs();
+        if let Some(store) = &mut self.prefs {
+            let _ = store.flush();
+        }
         if let Some(dir) = &self.recovery_dir
             && !self.doc.dirty
         {
@@ -934,21 +1151,18 @@ impl ModelApp {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.palette.is_some() {
+        if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 self.palette = None;
                 self.numeric = None;
                 self.rename = None;
+                self.pending = None;
             }
             return;
         }
-        let ws = self.workspace;
-        // Longer modifier combinations first, so Ctrl+Shift+Z is not taken as Ctrl+Z.
-        let mut all: Vec<(Action, egui::KeyboardShortcut)> = crate::actions::all().into_iter().filter_map(|a| a.shortcut(ws).map(|s| (a, s))).collect();
-        all.sort_by_key(|(_, s)| std::cmp::Reverse(s.modifiers.shift as u8 + s.modifiers.command as u8 + s.modifiers.alt as u8 + s.modifiers.ctrl as u8));
-        let hit: Vec<Action> = ctx.input_mut(|i| all.iter().filter(|(_, s)| i.consume_shortcut(s)).map(|(a, _)| *a).collect());
-        let redo_y = ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y)));
-        for a in hit {
+        let redo_y =
+            !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y)));
+        for a in crate::keys::dispatch(self, ctx) {
             self.act(ctx, a);
         }
         if redo_y {
@@ -982,5 +1196,24 @@ impl ModelApp {
             self.screenshot = None;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+}
+
+/// `scene.modelcraft` → `scene_v002.modelcraft`; `scene_v002` → `scene_v003` (skipping files that exist).
+pub fn next_increment(path: &std::path::Path) -> PathBuf {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("scene");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("modelcraft");
+    let (base, n) = match stem.rsplit_once("_v") {
+        Some((b, d)) if !d.is_empty() && d.chars().all(|c| c.is_ascii_digit()) => (b.to_string(), d.parse::<u32>().unwrap_or(1)),
+        _ => (stem.to_string(), 1),
+    };
+    let dir = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let mut k = n.saturating_add(1);
+    loop {
+        let candidate = dir.join(format!("{base}_v{k:03}.{ext}"));
+        if !candidate.exists() || k == u32::MAX {
+            return candidate;
+        }
+        k = k.saturating_add(1);
     }
 }

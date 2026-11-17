@@ -30,6 +30,9 @@ log = { workspace = true }
 craft-i18n = { workspace = true }
 craft-fonts-build = { workspace = true }
 craft-image-codecs = { workspace = true }
+craft-keymap = { workspace = true, features = ["ui"] }
+craft-settings = { workspace = true }
+serde = { workspace = true }
 chrono = { workspace = true }
 
 [build-dependencies]

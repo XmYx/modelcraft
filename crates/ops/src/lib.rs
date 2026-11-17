@@ -11,6 +11,7 @@
 pub mod deform;
 pub mod edit;
 pub mod primitives;
+pub mod select;
 pub mod subdivide;
 
 pub use modelcraft_mesh::{MeshError, PolyMesh, Polygon};

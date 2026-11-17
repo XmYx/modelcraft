@@ -117,21 +117,71 @@ pub struct SculptLayer {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum StepOp {
-    Extrude { faces: Vec<u32>, distance: f32 },
-    Inset { faces: Vec<u32>, amount: f32 },
-    Bevel { edges: Vec<u32>, width: f32 },
-    LoopCut { edge: u32, cuts: u32 },
-    Merge { verts: Vec<u32> },
-    Weld { distance: f32 },
-    DeleteFaces { faces: Vec<u32> },
-    DeleteEdges { edges: Vec<u32> },
-    DeleteVertices { verts: Vec<u32> },
-    MoveVertices { verts: Vec<u32>, translate: Vec3, rotate: Quat, scale: Vec3 },
-    Flip { faces: Vec<u32> },
+    Extrude {
+        faces: Vec<u32>,
+        distance: f32,
+    },
+    Inset {
+        faces: Vec<u32>,
+        amount: f32,
+    },
+    Bevel {
+        edges: Vec<u32>,
+        width: f32,
+    },
+    LoopCut {
+        edge: u32,
+        cuts: u32,
+    },
+    Merge {
+        verts: Vec<u32>,
+    },
+    Weld {
+        distance: f32,
+    },
+    DeleteFaces {
+        faces: Vec<u32>,
+    },
+    DeleteEdges {
+        edges: Vec<u32>,
+    },
+    DeleteVertices {
+        verts: Vec<u32>,
+    },
+    MoveVertices {
+        verts: Vec<u32>,
+        translate: Vec3,
+        rotate: Quat,
+        scale: Vec3,
+    },
+    Flip {
+        faces: Vec<u32>,
+    },
     Triangulate,
-    Subdivide { levels: u32 },
-    SetPatch { faces: Vec<u32>, patch: u32 },
-    Sculpt { layer: SculptLayer },
+    Subdivide {
+        levels: u32,
+    },
+    SetPatch {
+        faces: Vec<u32>,
+        patch: u32,
+    },
+    /// Join two faces with a tube.
+    Bridge {
+        a: u32,
+        b: u32,
+    },
+    /// Close the hole bordered by an edge.
+    FillHole {
+        edge: u32,
+    },
+    /// Mirror across a plane through the object's origin (0 = X, 1 = Y, 2 = Z), welding the seam.
+    Mirror {
+        axis: u32,
+        weld: f32,
+    },
+    Sculpt {
+        layer: SculptLayer,
+    },
 }
 
 impl StepOp {
@@ -152,6 +202,9 @@ impl StepOp {
             StepOp::Triangulate => "Triangulate",
             StepOp::Subdivide { .. } => "Subdivide",
             StepOp::SetPatch { .. } => "Set patch",
+            StepOp::Bridge { .. } => "Bridge",
+            StepOp::FillHole { .. } => "Fill hole",
+            StepOp::Mirror { .. } => "Mirror",
             StepOp::Sculpt { .. } => "Sculpt layer",
         }
     }

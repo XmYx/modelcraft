@@ -8,11 +8,11 @@
 
 | | Value | Kind |
 |---|---|---|
-| Essentials in the parity map | 55 % of 121 rows | counted |
-| Distance to the full products | ≈ 10 % | estimated |
+| Essentials in the parity map | 59 % of 125 rows | counted |
+| Distance to the full products | ≈ 12 % | estimated |
 | Viewport, 2.0 M triangles (RTX 4090) | 296 fps orbit, 283 fps sculpting | measured |
 | Sculpt dab, 1.0 M quads | 0.2–0.4 ms engine, 1.2 ms in app | measured |
-| Tests | 73 unit, property and UI tests | counted |
+| Tests | 84 unit, property and UI tests | counted |
 
 ### Readiness by audience
 

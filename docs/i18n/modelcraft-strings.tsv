@@ -17,10 +17,13 @@ app	Base colour
 app	Bend
 app	Bevel
 app	Bevel needs selected edges (edge mode)
+app	Bridge Faces
+app	Bridge needs exactly two selected faces (face mode)
 app	Brush radius
 app	Brush strength
 shared	Brushes
 app	Build History
+shared	Cancel
 app	Caps
 app	Clay
 app	Clear Mask
@@ -43,6 +46,7 @@ shared	Distance
 app	Dock Left
 app	Dock Right
 app	Dome
+shared	Don't Save
 shared	Draw
 shared	Duplicate
 shared	Edge
@@ -60,6 +64,8 @@ app	Face
 app	Face Mode
 app	Falloff
 shared	File
+app	Fill Hole
+app	Fill hole needs a selected border edge (edge mode)
 app	Flat
 shared	Flatten
 app	Flip Normals
@@ -71,14 +77,17 @@ shared	Frequency
 app	Front
 app	Front View
 app	Grab
+app	Grow Selection
 shared	Height
 shared	Help
 shared	Hide
+app	History step {n}: {name}
 shared	Import…
 shared	Inflate
 app	Inset
 shared	Invert
 shared	Invert Mask
+shared	Keyboard Shortcuts…
 app	Larger Brush
 shared	Levels
 app	Licensed under MIT or Apache-2.0.
@@ -86,6 +95,7 @@ shared	Linear
 app	Link .mcmat…
 app	Loop Cut
 app	Loop cut needs a selected edge (edge mode)
+app	Loops and rings work in edge mode
 shared	Mask
 app	Mask All
 app	Masks work in the Sculpt workspace
@@ -97,6 +107,8 @@ shared	Mesh
 app	Metallic
 app	Middle mouse button
 app	Mirror X
+app	Mirror Y
+app	Mirror Z
 shared	Model
 app	Model Workspace
 app	ModelCraft closed before your last changes were saved. Replay them from the journal?
@@ -107,12 +119,15 @@ shared	Navigation
 shared	New
 app	New name
 app	New scene
+shared	No recent files
 app	No steps yet: edit components to build history.
 shared	Noise
 shared	None
 app	Nothing selected.
+app	Nothing to undo yet.
 shared	Object
 app	Object Mode
+shared	Open Recent
 app	Open-source 3D modeling and sculpting, built in pure Rust. Part of the ArtCraft Crafting Apps.
 app	Opened {file}
 shared	Open…
@@ -123,6 +138,7 @@ app	Panel {label}
 shared	Panels
 shared	Perspective
 app	Perspective View
+app	Pick a component mode first
 app	Pinch
 app	Plane
 shared	Position
@@ -152,6 +168,8 @@ app	Roughness
 app	Round
 shared	Save
 shared	Save As…
+app	Save Incremental
+app	Save changes?
 app	Save failed: {error}
 shared	Saved
 app	Saved {file}
@@ -163,6 +181,8 @@ app	Sculpt Workspace
 shared	Segments
 shared	Select
 shared	Select All
+app	Select Edge Loop
+app	Select Edge Ring
 app	Select None
 app	Select Tool
 app	Select a mesh first
@@ -172,14 +192,19 @@ app	Select a mesh to sculpt
 app	Select faces first (face mode)
 shared	Shape
 app	Sharp
+app	Shortcuts saved
 app	Show Patches
 app	Shows its first mesh child subdivided. Edit the child; the cage follows.
+app	Shrink Selection
 app	Sides
 shared	Size
 app	Smaller Brush
 app	Smooth
 app	Smooth Cage
 app	Smooth cage levels
+app	Snap
+app	Snapping off
+app	Snapping on
 app	Source: stored mesh
 app	Source: {shape}
 app	Sphere
@@ -191,8 +216,10 @@ app	Subdivide
 app	Symmetry
 shared	Taper
 app	Texture and vertex painting are planned for a later milestone. Today, paint in TextureCraft: export a GLB (Y up, metres, UVs kept) and open it there.
+app	The crash journal keeps them until you choose.
 app	The scene is empty. Add a shape from the Create menu or the command palette.
 app	Toggle Four Views
+app	Toggle Snapping
 app	Toggle X Symmetry
 shared	Top
 app	Top Level
@@ -206,6 +233,8 @@ app	Tube
 shared	Twist
 app	Type a command…
 shared	Undo
+app	Undo History
+app	Undone step {n}: {name}
 shared	Untitled
 app	Vertex
 app	Vertex Mode
@@ -228,8 +257,10 @@ app	{action}: {warning}
 app	{brush} Brush
 app	{brush} brush
 app	{count} components selected
+app	{count} earlier steps
 app	{count} history steps
 app	{count} triangles
 app	{count} vertices
+app	{file} has changes that are not saved.
 app	{fps} fps
 app	{workspace} workspace

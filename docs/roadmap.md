@@ -1,10 +1,12 @@
 # ModelCraft roadmap
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** major (first plan)
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (polish pass)
 
 ## Current focus
 
-The vertical slice is in: half-edge mesh, parametric primitives, history steps, smooth cage,
+The polish pass is in (driven by [user-research.md](user-research.md)): data-safety prompts, recent
+files, incremental saves, rebindable shortcuts, an undo history panel, loop/ring selection, bridge,
+fill, mirror and snapping. Before that, the vertical slice: half-edge mesh, parametric primitives, history steps, smooth cage,
 deformers, nine sculpt brushes on 1 M+ polygons, journaled saves, glTF/OBJ/STL, a keyboard- and
 screen-reader-ready UI. Next is making it useful for a full day of work: UVs, snapping, the missing
 polygon tools and sculpt detail.
@@ -14,7 +16,8 @@ polygon tools and sculpt detail.
 | Milestone | Scope | Exit criteria |
 |---|---|---|
 | **M0 Vertical slice** (done) | Everything in [target-app-parity.md](target-app-parity.md) marked D | `cargo xtask ci` green, screenshots, measured performance |
-| **M1 Modeling essentials** | Bridge, fill, knife, loop/ring select, bevel segments + creases, snapping, tree drag-and-drop, multi-object Properties | Model a stylised character body and prop set from primitives without leaving the app |
+| **M0.5 Polish pass** (done) | Save prompt, Open Recent, Save Incremental, rebindable shortcuts, Undo History panel, loop/ring/grow selection, bridge, fill, mirror, gizmo snapping | [user-research.md](user-research.md) items covered; `cargo xtask ci` green |
+| **M1 Modeling essentials** | Retopology tools, knife, edge-loop bridge, grid fill, bevel segments + creases, vertex/edge/surface snapping, units and measure, reference images, booleans, tree drag-and-drop, multi-object Properties | Model a stylised character body and prop set from primitives without leaving the app |
 | **M2 UVs and hand-off** | Seams, unwrap, pack (shared with TextureCraft through craft-mesh-ops), live link to TextureCraft and MaterialCraft over craft-control | Model → unwrap → paint in TextureCraft → see it in ModelCraft |
 | **M3 Sculpt detail (beta)** | Detail levels (multiresolution), live detail (dynamic topology), even remesh, image stamps, layer blending, threaded dabs | Sculpt a 10 M-polygon bust at interactive rates |
 | **M4 Paint** | Vertex colour and PBR texture painting on the GPU, sharing TextureCraft's paint core | Paint albedo/roughness/normal on a sculpt |

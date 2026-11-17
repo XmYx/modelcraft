@@ -369,6 +369,16 @@ fn ring(cam: &Camera, rect: Rect, p: Vec3, axis: Vec3, r: f32) -> Vec<Pos2> {
 }
 
 /// The transform a gizmo drag stands for: (translate, rotate, scale) in world space.
+/// Round a gizmo transform to the snapping steps (move in scene units, rotate in degrees, scale).
+pub fn snapped(t: Vec3, r: Quat, s: Vec3, steps: (f32, f32, f32)) -> (Vec3, Quat, Vec3) {
+    let q = |v: f32, step: f32| if step > 0.0 { (v / step).round() * step } else { v };
+    let t = Vec3::new(q(t.x, steps.0), q(t.y, steps.0), q(t.z, steps.0));
+    let (axis, angle) = r.to_axis_angle();
+    let r = if angle.is_finite() && axis.is_finite() { Quat::from_axis_angle(axis, q(angle.to_degrees(), steps.1).to_radians()) } else { r };
+    let s = s.map(|v| if (v - 1.0).abs() < 1e-6 { v } else { q(v, steps.2).max(steps.2.max(0.01)) });
+    (t, r, s)
+}
+
 fn drag_transform(cam: &Camera, rect: Rect, tool: Tool, handle: Handle, pivot: Vec3, start: Pos2, cur: Pos2) -> (Vec3, Quat, Vec3) {
     let d = cur - start;
     let l = gizmo_len(cam, rect, pivot);
@@ -463,6 +473,7 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
         {
             let cam = app.views[i].camera;
             let (t, r, s) = drag_transform(&cam, rect, *tool, *handle, *pivot, *start, cur);
+            let (t, r, s) = if snap_on(app, ui) { snapped(t, r, s, app.snap_steps) } else { (t, r, s) };
             let mut preview = (**scene).clone();
             apply_drag(app, &mut preview, t, r, s, *pivot, false);
             app.doc.scene = preview;
@@ -478,6 +489,7 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
                 DragKind::Gizmo { tool, handle, pivot, scene } => {
                     let cam = app.views[i].camera;
                     let (t, r, s) = drag_transform(&cam, rect, tool, handle, pivot, drag.start, cur);
+                    let (t, r, s) = if snap_on(app, ui) { snapped(t, r, s, app.snap_steps) } else { (t, r, s) };
                     app.doc.scene = *scene;
                     let mut base = app.doc.scene.clone();
                     let cmds = apply_drag(app, &mut base, t, r, s, pivot, true);
@@ -494,6 +506,15 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
     {
         click_select(app, i, rect, at, shift);
     }
+    // Double-click an edge: select its loop.
+    if resp.double_clicked() && app.mode == SelectMode::Edge && !app.components.is_empty() {
+        app.act(ui.ctx(), crate::actions::Action::SelectLoop);
+    }
+}
+
+/// Snapping is on when the toggle is on, or for this drag while Ctrl is held (and the reverse).
+fn snap_on(app: &ModelApp, ui: &egui::Ui) -> bool {
+    app.snap != ui.input(|i| i.modifiers.command)
 }
 
 fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
@@ -935,5 +956,18 @@ fn gizmo(app: &mut ModelApp, painter: &egui::Painter, i: usize, rect: Rect) {
     if app.tool != Tool::Rotate {
         let c = if active == Some(Handle::Free) { Color32::from_rgb(255, 220, 90) } else { Color32::from_rgb(230, 230, 230) };
         painter.rect_stroke(Rect::from_center_size(ps, egui::vec2(12.0, 12.0)), 1.0, Stroke::new(1.5, c), egui::StrokeKind::Inside);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapping_rounds_each_part() {
+        let (t, r, s) = snapped(Vec3::new(0.3, -0.62, 0.0), Quat::from_rotation_y(20f32.to_radians()), Vec3::new(1.0, 1.26, 1.0), (0.25, 15.0, 0.1));
+        assert!((t - Vec3::new(0.25, -0.5, 0.0)).length() < 1e-5);
+        assert!((r.to_axis_angle().1.to_degrees() - 15.0).abs() < 1e-3);
+        assert!((s.y - 1.3).abs() < 1e-5 && s.x == 1.0);
     }
 }

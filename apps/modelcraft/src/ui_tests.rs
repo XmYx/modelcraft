@@ -147,3 +147,95 @@ fn four_views_and_focus_navigation() {
     h.run();
     assert!(h.root().query_all(egui_kittest::kittest::by()).any(|n| n.is_focused()));
 }
+
+#[test]
+fn new_scene_asks_before_discarding_changes() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    assert!(h.state().doc.dirty);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+    h.run();
+    assert!(h.state().pending.is_some(), "unsaved changes open the prompt");
+    assert_eq!(h.state().doc.scene.len(), 1);
+    // Esc cancels and keeps the work.
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(h.state().pending.is_none());
+    assert_eq!(h.state().doc.scene.len(), 1);
+    // Don't Save discards.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+    h.run();
+    h.get_by_label("Don't Save").click();
+    h.run();
+    assert!(h.state().doc.scene.is_empty());
+}
+
+#[test]
+fn undo_history_panel_jumps_back_and_forth() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    palette(&mut h, "Add Sphere");
+    palette(&mut h, "Add Torus");
+    assert_eq!(h.state().doc.scene.len(), 3);
+    h.get_by_label("History step 1: Add cube").click();
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 1);
+    h.get_by_label("Undone step 3: Add torus").click();
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 3);
+}
+
+#[test]
+fn keyboard_selection_tools_and_new_mesh_steps() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Torus");
+    let id = h.state().selection[0];
+    h.key_press(Key::Num3); // edge mode
+    h.run();
+    h.state_mut().components = [0].into_iter().collect();
+    h.key_press_modifiers(Modifiers::ALT, Key::L);
+    h.run();
+    let n = h.state().components.len();
+    assert!(n == 32 || n == 16, "a torus loop, got {n}");
+    // Face mode: grow, then bridge two faces, then mirror.
+    h.key_press(Key::Num4);
+    h.run();
+    h.state_mut().components = [0].into_iter().collect();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Equals);
+    h.run();
+    assert_eq!(h.state().components.len(), 9);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::X);
+    h.run();
+    let steps = h.state().doc.scene.get(id).unwrap().steps().to_vec();
+    assert!(matches!(steps.last().map(|s| &s.op), Some(modelcraft_engine::scene::StepOp::Mirror { axis: 0, .. })));
+    // Snapping toggles from the keyboard.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::S);
+    h.run();
+    assert!(h.state().snap);
+}
+
+#[test]
+fn shortcuts_dialog_opens_from_the_palette() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Keyboard Shortcuts");
+    h.run();
+    assert!(h.state().shortcuts_state.is_some());
+}
+
+#[test]
+fn incremental_save_names() {
+    use crate::app::next_increment;
+    use std::path::Path;
+    let d = std::env::temp_dir().join(format!("mc-incr-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    assert_eq!(next_increment(&d.join("scene.modelcraft")), d.join("scene_v002.modelcraft"));
+    assert_eq!(next_increment(&d.join("scene_v009.modelcraft")), d.join("scene_v010.modelcraft"));
+    std::fs::write(d.join("a_v002.modelcraft"), b"x").unwrap();
+    assert_eq!(next_increment(&d.join("a.modelcraft")), d.join("a_v003.modelcraft"));
+    let _ = std::fs::remove_dir_all(&d);
+    let _ = Path::new("");
+}

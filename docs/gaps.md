@@ -1,31 +1,46 @@
 # Where ModelCraft falls short of the references
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** major (first list) · **Target:** see [target-app-parity.md](target-app-parity.md)
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (polish-pass re-rank) · **Target:** see [target-app-parity.md](target-app-parity.md)
 
 This is the work list: pick from the top. `B` marks a beta blocker. Hours are rough Opus 5.5 agent
 hours. When a gap closes, delete its entry (the progress log records what landed).
 
 ## Ranked: the top 15
 
+Re-ranked on 2026-11-17 with [user-research.md](user-research.md) (frequency in brackets is how
+many independent sources raised it).
+
 | # | Gap | Category | Beta | Hours | Doc |
 |---|---|---|---|---|---|
-| 1 | UV unwrap, seams and packing (adopt craft-mesh-ops `unwrap_uvs` when craft-libs #1233 lands) | UVs | B | 20 | [UVs](#uvs) |
-| 2 | Multiresolution sculpting ("Detail levels") | Sculpt | B | 25 | [Sculpt](#sculpt) |
-| 3 | Dynamic topology ("Live detail") and even remesh | Sculpt | B | 30 | [Sculpt](#sculpt) |
-| 4 | Bridge, fill hole, knife/slice, loop and ring selection commands | Modeling | B | 12 | [Modeling](#modeling) |
-| 5 | Bevel with segments and profile; edge creases for the smooth cage | Modeling | B | 10 | [Modeling](#modeling) |
-| 6 | Snapping (grid, vertex, edge, face) and pivot editing | Viewport | B | 8 | [Viewport](#viewport) |
-| 7 | Vertex-colour and texture painting in the Paint workspace, live link with TextureCraft | Paint | B | 30 | [Paint](#paint) |
-| 8 | Image stamps (PNG through craft-image-codecs) and a stamp library | Sculpt | | 4 | [Sculpt](#sculpt) |
-| 9 | Drag-and-drop in the scene tree; multi-object Properties editing | UI | B | 6 | [UI](#ui) |
-| 10 | Tabbed/split docking through craft-ui `docking` | UI | | 10 | [UI](#ui) |
-| 11 | Control channel over craft-control (token auth) and an MCP server (craft-mcp-server) | Agents | | 8 | [Agents](#agents) |
-| 12 | Multithreaded evaluation and brush dabs (rayon), parallel BVH build | Performance | | 8 | [Performance](#performance) |
-| 13 | Booleans (mesh/mesh, robust predicates) | Modeling | | 30 | [Modeling](#modeling) |
-| 14 | Packaging: macOS/Windows/Flatpak recipes, launcher catalog entry and screenshots | Release | B | 6 | [Release](#release) |
-| 15 | Rigging and animation foundations (joints, skin weights, keyframes) | Animation | | 80 | [Animation](#animation) |
+| 1 | Retopology: quad remesh plus surface-snapped manual tools (most requested, High 6) | Modeling | B | 40 | [Modeling](#modeling) |
+| 2 | UV unwrap, seams and packing; adopt craft-mesh-ops `unwrap_uvs` when craft-libs #1233 lands (High 5) | UVs | B | 20 | [UVs](#uvs) |
+| 3 | Reference images in the viewport (High 6) | Viewport | B | 6 | [Viewport](#viewport) |
+| 4 | Vertex, edge and surface snapping; units and a measure tool (High 5 for scale problems) | Viewport | B | 10 | [Viewport](#viewport) |
+| 5 | Multiresolution sculpting ("Detail levels") and sculpt layers (Medium 4) | Sculpt | B | 25 | [Sculpt](#sculpt) |
+| 6 | Dynamic topology ("Live detail") and even remesh, with crash-safe undo (Medium 3) | Sculpt | B | 30 | [Sculpt](#sculpt) |
+| 7 | Booleans as history steps that do not break (Medium 4) | Modeling | | 30 | [Modeling](#modeling) |
+| 8 | Multi-segment bevel with profile; edge creases for the smooth cage (Medium 4) | Modeling | B | 10 | [Modeling](#modeling) |
+| 9 | Knife/slice, edge-loop bridge, grid fill, partial loops | Modeling | B | 10 | [Modeling](#modeling) |
+| 10 | Vertex-colour and texture painting, live link with TextureCraft (Medium 3) | Paint | B | 30 | [Paint](#paint) |
+| 11 | Separate view undo and persistent undo history across sessions (Medium 3) | Stability | | 6 | [Stability](#stability) |
+| 12 | Radial menus and macros on top of the keymap | UI | | 8 | [UI](#ui) |
+| 13 | Tabbed/split docking through craft-ui `docking`; tree drag-and-drop; multi-object Properties | UI | B | 14 | [UI](#ui) |
+| 14 | Control channel over craft-control (token auth) and an MCP server (craft-mcp-server) | Agents | | 8 | [Agents](#agents) |
+| 15 | Multithreaded dabs, evaluation and BVH build (rayon) | Performance | | 8 | [Performance](#performance) |
+
+Closed in the polish pass (2026-11-17): unsaved-changes prompt, Open Recent, Save Incremental,
+rebindable shortcuts with conflict detection (craft-keymap), Undo History panel, loop/ring/grow/shrink
+selection, bridge two faces, fill hole, mirror modeling, gizmo snapping.
 
 ## Stability
+
+### View changes are not undoable
+Camera moves never enter the edit history (good: they do not flood it) but cannot be undone either.
+Add a separate view history (previous/next view).
+
+### Undo history does not survive a restart
+The journal holds every command; replaying it into an undo history on open would make history
+persistent.
 
 ### Undo budget is estimated, not measured
 Scene-change entries count a flat ~300 bytes per object because meshes are shared; a scene with
@@ -53,9 +68,9 @@ craft-mesh writes GLB only. Add a JSON writer to craft-mesh rather than here.
 
 ## Modeling
 
-Bridge, fill hole, knife, booleans, retopology, edge creases, multi-segment bevel, loop/ring selection
-commands, grow/shrink selection and spline-based generators (extrude, lathe, loft, sweep) are
-missing. Bevel is one flat segment and skips boundary edges.
+Knife, booleans, retopology, edge creases, multi-segment bevel, edge-loop bridge, grid fill, partial
+loops and spline-based generators (extrude, lathe, loft, sweep) are missing. Bevel is one flat
+segment and skips boundary edges. Bridge joins two faces with the same corner count.
 
 ## UVs
 
@@ -75,13 +90,14 @@ texture painting and PBR channels are not implemented.
 
 ## Viewport
 
-No snapping, no IBL or shadows, no matcap library, no camera bookmarks. Vertex points are drawn by
+Snapping covers gizmo steps only (grid, angle, scale); no vertex/edge/surface snapping, units or
+measure tool, no reference images, no IBL or shadows, no matcap library, no camera bookmarks. Vertex points are drawn by
 the UI painter and capped at 100 k.
 
 ## UI
 
 Panels dock left/right/float/hide per workspace; no tabs, splits or saved layouts. Shortcuts are
-fixed (no editor; craft-keymap is the intended path). The tree has no drag-and-drop reparenting
+rebindable (craft-keymap); radial menus and macros are missing. The tree has no drag-and-drop reparenting
 (the row menu does it). Properties edits only the active object.
 
 ## Agents

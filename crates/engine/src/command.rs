@@ -151,7 +151,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
     (
         "add_step",
-        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch): id, op",
+        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror): id, op",
     ),
     ("set_step", "Change a history step: id, index, op"),
     ("enable_step", "Switch a history step on or off: id, index, enabled"),

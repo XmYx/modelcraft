@@ -1,6 +1,6 @@
 # ModelCraft vs Cinema 4D, Maya and ZBrush: parity assessment
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** major (first assessment) · **Target:** Maxon Cinema 4D 2026 (ease of use), Autodesk Maya 2026 (depth and modularity), Maxon ZBrush 2026 (sculpting and painting)
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (polish-pass re-measure) · **Target:** Maxon Cinema 4D 2026 (ease of use), Autodesk Maya 2026 (depth and modularity), Maxon ZBrush 2026 (sculpting and painting)
 
 This is the only file that names the reference products. Everything here was learned from their
 public manuals, tutorials and observed behaviour; no code, assets or file internals were read
@@ -11,11 +11,11 @@ public manuals, tutorials and observed behaviour; no code, assets or file intern
 
 | | Value | Kind |
 |---|---|---|
-| Share of the 121 rows in this map (D and X = 1, P = ½) | **55 %** | counted |
-| Against the full products (thousands of features this map does not list: rigging, animation, dynamics, rendering, scripting depth) | **≈ 10 %** | estimated |
+| Share of the 125 rows in this map (D and X = 1, P = ½) | **59 %** (was 55 % of 121 before the polish pass) | counted |
+| Against the full products (thousands of features this map does not list: rigging, animation, dynamics, rendering, scripting depth) | **≈ 12 %** (was ≈ 10 %) | estimated |
 | Viewport, 2.0 M triangles, RTX 4090, 1600×1000 window, no vsync | 296 fps orbiting, 283 fps while sculpting | measured |
 | Sculpt dab, 1.0 M quads, radius ≈ 30 k vertices, X symmetry | 0.2–0.4 ms (CLI), 1.2 ms in the app | measured |
-| Rows: done / partial / missing / exceeds | 51 / 17 / 46 / 7 | counted |
+| Rows: done / partial / missing / exceeds | 58 / 17 / 43 / 7 | counted |
 
 Status per row: **D** done (works, tested), **P** partial (works with a stated limit), **M** missing,
 **X** exceeds the references in a way we mean to keep. A dot in a reference column means the
@@ -25,12 +25,12 @@ reference app has the feature in a comparable form.
 
 | Area | Rows | Done | Partial | Missing | Exceeds | Share of rows |
 |---|---|---|---|---|---|---|
-| Viewport and navigation | 13 | 7 | 4 | 2 | 0 | 69 % |
+| Viewport and navigation | 13 | 7 | 5 | 1 | 0 | 73 % |
 | Scene graph, object manager, attributes | 10 | 5 | 1 | 4 | 0 | 55 % |
 | Dependency graph and history | 9 | 6 | 0 | 2 | 1 | 78 % |
 | Primitives and generators | 7 | 2 | 0 | 5 | 0 | 29 % |
 | Deformers | 5 | 2 | 0 | 3 | 0 | 40 % |
-| Polygon modeling | 17 | 8 | 3 | 5 | 1 | 62 % |
+| Polygon modeling | 18 | 11 | 2 | 4 | 1 | 72 % |
 | Subdivision surfaces | 6 | 3 | 0 | 3 | 0 | 50 % |
 | UVs | 4 | 0 | 1 | 3 | 0 | 12 % |
 | Sculpting | 14 | 5 | 3 | 5 | 1 | 54 % |
@@ -40,11 +40,11 @@ reference app has the feature in a comparable form.
 | Rendering | 3 | 0 | 1 | 2 | 0 | 17 % |
 | Import and export | 8 | 5 | 0 | 2 | 1 | 75 % |
 | Scripting, CLI, agent control | 4 | 1 | 1 | 1 | 1 | 62 % |
-| UI and workspaces | 7 | 4 | 1 | 1 | 1 | 79 % |
-| Stability and performance | 4 | 2 | 0 | 1 | 1 | 75 % |
+| UI and workspaces | 9 | 7 | 1 | 0 | 1 | 94 % |
+| Stability and performance | 5 | 3 | 0 | 1 | 1 | 80 % |
 
 The map lists the essentials a modeler or sculptor reaches for first, so its share is far above
-the share of the whole products. Read the 55 % as "how much of the first-year essentials exist",
+the share of the whole products. Read the share as "how much of the first-year essentials exist",
 and the ≈ 10 % as the honest distance to the references.
 
 ## Readiness by audience
@@ -77,7 +77,7 @@ agent hours, rough.
 | Ground grid, axis triad | • | • | • | D | |
 | Shaded + wireframe-on-selection display | • | • | • | D | Auto-smoothed normals (40°) |
 | Gizmos: move / rotate / scale | • | • | • | D | Axis and free handles; numeric alternative |
-| Snapping (grid, vertex, edge) | • | • | | M | |
+| Snapping (grid, vertex, edge) | • | • | | P | Gizmo snaps to grid steps, 15° and 0.1 scale (Shift+S, Ctrl inverts per drag); no vertex/edge/surface snapping |
 | Isolate / hide selection | • | • | • | P | Per-object visibility only |
 | Camera bookmarks, saved views | • | • | | M | |
 | Viewport PBR (lights, IBL, shadows) | • | • | | P | Studio three-light rig, roughness; no IBL/shadows |
@@ -148,13 +148,14 @@ agent hours, rough.
 | Delete vertices / edges / faces | • | • | • | D | |
 | Move / rotate / scale components | • | • | • | D | Gizmo or numbers, recorded as a history step |
 | Triangulate, flip normals | • | • | | D | |
-| Bridge, fill hole | • | • | • | M | |
+| Bridge, fill hole | • | • | • | D | Bridge two faces, fill one hole, both as history steps; no edge-loop bridge or grid fill |
 | Knife / slice | • | • | | M | |
-| Loop / ring selection, grow/shrink | • | • | | P | Ring computed for loop cut; no selection command yet |
+| Loop / ring selection, grow/shrink | • | • | | D | Alt+L / double-click, Alt+R, Ctrl+= / Ctrl+- |
 | Booleans | • | • | • | M | |
 | Retopology tools | • | • | • | M | |
 | Edge creases / hard edges | • | • | • | M | Auto-smoothing angle only |
 | Patches (face groups) | | | • | P | Stored per face, tinted, masked by patch; no grouping tools in the UI yet |
+| Mirror modeling (symmetry with a welded seam) | • | • | • | D | Mirror X/Y/Z history step, keeps UVs |
 | Topology validated after every operation | | | | X | Every result rebuilds through `PolyMesh::build`; property-tested |
 
 ### Subdivision surfaces
@@ -260,7 +261,9 @@ agent hours, rough.
 | Dockable panels | • | • | | P | Dock left/right, float, hide per workspace; no tabs or splits |
 | Tool options bar | • | • | • | D | |
 | Command palette, shortcut for every action | • | • | | D | Ctrl+K |
-| Customisable shortcuts | • | • | • | M | |
+| Customisable shortcuts | • | • | • | D | Suite Keyboard Shortcuts dialog (craft-keymap): conflicts, saved sets, per-workspace contexts |
+| Undo history panel (jump to any step) | | • | • | D | Undo History panel |
+| Open Recent, incremental save | • | • | • | D | File ▸ Open Recent; Save Incremental (Ctrl+Alt+S) |
 | Accessibility: keyboard paths, screen-reader tree | | | | X | Tree items, viewport object nodes, numeric gizmo path, kittest tests |
 
 ### Stability and performance
@@ -268,6 +271,7 @@ agent hours, rough.
 | Feature | C4D | Maya | ZB | ModelCraft | Notes |
 |---|---|---|---|---|---|
 | Autosave | • | • | • | D | Journal plus snapshots for untitled scenes |
+| Prompt before discarding unsaved changes | • | • | • | D | New, Open, Open Recent and Quit ask Save / Don't Save / Cancel |
 | Never-panic policy, hostile-input tests | | | | X | Lints deny panics; proptests for mesh ops and formats |
 | Bounded undo memory | | | | D | 1 GiB budget, oldest dropped |
 | Multithreaded evaluation | • | • | • | M | Single-threaded today |
@@ -281,7 +285,8 @@ agent hours, rough.
 - Files: `crates/formats` (project round trip with blobs, corrupted-project proptest, GLB/OBJ/STL round trips, torn journal).
 - Engine: `crates/engine/src/tests.rs` (`journal_recovers_unsaved_work_after_a_crash`, `undo_memory_is_bounded`).
 - GPU: `crates/render/src/gpu.rs` `renders_a_quad_when_a_gpu_is_present` (renders and reads back).
-- UI: `apps/modelcraft/src/ui_tests.rs`, six keyboard-driven kittest flows with the accessibility check on.
+- UI: `apps/modelcraft/src/ui_tests.rs`, eleven keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
+- Selection and new ops: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
 ## Where we mean to exceed the references
@@ -307,4 +312,5 @@ with all three references is several thousand hours; the roadmap aims at the ess
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | minor | Polish pass: snapping, loop/ring/grow, bridge, fill, mirror, rebindable shortcuts, undo history, recent files, incremental save, save prompt; 6 rows added |
 | 2026-11-17 | major | First assessment with the vertical slice |

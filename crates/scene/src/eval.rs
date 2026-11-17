@@ -250,6 +250,15 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         StepOp::Triangulate => edit::triangulate(m),
         StepOp::Subdivide { levels } => subdivide::catmull_clark(m, *levels),
         StepOp::SetPatch { faces, patch } => edit::set_patch(m, faces, *patch),
+        StepOp::Bridge { a, b } => {
+            edit::check_selection(&[*a, *b], nf, "face")?;
+            edit::bridge_faces(m, *a, *b)
+        }
+        StepOp::FillHole { edge } => {
+            edit::check_selection(&[*edge], ne, "edge")?;
+            edit::fill_hole(m, *edge)
+        }
+        StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
         StepOp::Sculpt { layer } => {
             if layer.positions.len() != nv {
                 return Err(OpError::Invalid(format!("the sculpt layer has {} points but the mesh now has {nv}", layer.positions.len())));

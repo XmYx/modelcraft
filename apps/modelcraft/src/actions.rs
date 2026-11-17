@@ -1,7 +1,6 @@
 //! Every user action, with its label and keyboard shortcut. Menus, the command palette and the
 //! shortcut handler all read this one table, so every command has a keyboard path.
 
-use egui::{Key, KeyboardShortcut, Modifiers};
 use modelcraft_engine::sculpt::BrushKind;
 
 use crate::app::Workspace;
@@ -62,6 +61,16 @@ pub enum Action {
     NextPanel,
     TransformDialog,
     About,
+    SaveIncremental,
+    SelectLoop,
+    SelectRing,
+    GrowSelection,
+    ShrinkSelection,
+    Bridge,
+    FillHole,
+    Mirror(u8),
+    ToggleSnap,
+    KeyboardShortcuts,
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -74,6 +83,7 @@ pub fn all() -> Vec<Action> {
         Open,
         Save,
         SaveAs,
+        SaveIncremental,
         Import,
         ExportGlb,
         ExportObj,
@@ -100,7 +110,8 @@ pub fn all() -> Vec<Action> {
     v.extend(PRIMITIVES.iter().map(|p| AddPrimitive(p)));
     v.extend([AddCage, AddGroup]);
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
-    v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Subdivide, Triangulate, Flip, Collapse, SelectAll, SelectNone]);
+    v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
+    v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
         Symmetry,
@@ -115,6 +126,7 @@ pub fn all() -> Vec<Action> {
         ViewTop,
         TransformDialog,
         Palette,
+        KeyboardShortcuts,
         NextPanel,
         About,
     ]);
@@ -142,6 +154,20 @@ pub fn deformer_label(d: &str) -> String {
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
         _ => d.to_string(),
+    }
+}
+
+fn brush_label_id(k: BrushKind) -> &'static str {
+    match k {
+        BrushKind::Draw => "draw",
+        BrushKind::Clay => "clay",
+        BrushKind::Smooth => "smooth",
+        BrushKind::Inflate => "inflate",
+        BrushKind::Grab => "grab",
+        BrushKind::Pinch => "pinch",
+        BrushKind::Flatten => "flatten",
+        BrushKind::Crease => "crease",
+        BrushKind::Mask => "mask",
     }
 }
 
@@ -219,81 +245,187 @@ impl Action {
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
+            SaveIncremental => tl!("Save Incremental"),
+            SelectLoop => tl!("Select Edge Loop"),
+            SelectRing => tl!("Select Edge Ring"),
+            GrowSelection => tl!("Grow Selection"),
+            ShrinkSelection => tl!("Shrink Selection"),
+            Bridge => tl!("Bridge Faces"),
+            FillHole => tl!("Fill Hole"),
+            Mirror(0) => tl!("Mirror X"),
+            Mirror(1) => tl!("Mirror Y"),
+            Mirror(_) => tl!("Mirror Z"),
+            ToggleSnap => tl!("Toggle Snapping"),
+            KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
         }
     }
 
-    /// The shortcut in a workspace (single letters mean different things when sculpting).
-    pub fn shortcut(self, ws: Workspace) -> Option<KeyboardShortcut> {
+    /// Stable command id (keymap, settings, control).
+    pub fn id(self) -> String {
         use Action::*;
-        let cmd = |k| Some(KeyboardShortcut::new(Modifiers::COMMAND, k));
-        let cmd_shift = |k| Some(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, k));
-        let shift = |k| Some(KeyboardShortcut::new(Modifiers::SHIFT, k));
-        let alt = |k| Some(KeyboardShortcut::new(Modifiers::ALT, k));
-        let key = |k| Some(KeyboardShortcut::new(Modifiers::NONE, k));
-        let model = ws == crate::app::Workspace::Model;
-        let sculpt = ws == crate::app::Workspace::Sculpt;
+        let s = match self {
+            New => "file.new",
+            Open => "file.open",
+            Save => "file.save",
+            SaveAs => "file.save_as",
+            SaveIncremental => "file.save_incremental",
+            Import => "file.import",
+            ExportGlb => "file.export_glb",
+            ExportObj => "file.export_obj",
+            ExportStl => "file.export_stl",
+            Undo => "edit.undo",
+            Redo => "edit.redo",
+            Delete => "edit.delete",
+            Duplicate => "edit.duplicate",
+            Rename => "edit.rename",
+            Frame => "view.frame",
+            ToggleQuad => "view.four_views",
+            Workspace(crate::app::Workspace::Model) => "workspace.model",
+            Workspace(crate::app::Workspace::Sculpt) => "workspace.sculpt",
+            Workspace(crate::app::Workspace::Paint) => "workspace.paint",
+            ModeObject => "mode.object",
+            ModeVertex => "mode.vertex",
+            ModeEdge => "mode.edge",
+            ModeFace => "mode.face",
+            ToolSelect => "tool.select",
+            ToolMove => "tool.move",
+            ToolRotate => "tool.rotate",
+            ToolScale => "tool.scale",
+            AddPrimitive(p) => return format!("create.{p}"),
+            AddCage => "create.smooth_cage",
+            AddDeformer(d) => return format!("create.deformer.{d}"),
+            AddGroup => "create.group",
+            Extrude => "mesh.extrude",
+            Inset => "mesh.inset",
+            Bevel => "mesh.bevel",
+            LoopCut => "mesh.loop_cut",
+            Merge => "mesh.merge",
+            Bridge => "mesh.bridge",
+            FillHole => "mesh.fill_hole",
+            Mirror(a) => return format!("mesh.mirror.{}", ["x", "y", "z"].get(a as usize).copied().unwrap_or("z")),
+            Subdivide => "mesh.subdivide",
+            Triangulate => "mesh.triangulate",
+            Flip => "mesh.flip",
+            Collapse => "mesh.collapse",
+            SelectAll => "select.all",
+            SelectNone => "select.none",
+            SelectLoop => "select.loop",
+            SelectRing => "select.ring",
+            GrowSelection => "select.grow",
+            ShrinkSelection => "select.shrink",
+            ToggleSnap => "view.snap",
+            Brush(k) => return format!("sculpt.brush.{}", brush_label_id(k)),
+            Symmetry => "sculpt.symmetry_x",
+            MaskClear => "sculpt.mask_clear",
+            MaskInvert => "sculpt.mask_invert",
+            MaskFill => "sculpt.mask_fill",
+            BrushBigger => "sculpt.brush_bigger",
+            BrushSmaller => "sculpt.brush_smaller",
+            ViewPerspective => "view.perspective",
+            ViewFront => "view.front",
+            ViewRight => "view.right",
+            ViewTop => "view.top",
+            TransformDialog => "edit.transform_numbers",
+            Palette => "help.palette",
+            KeyboardShortcuts => "help.shortcuts",
+            NextPanel => "view.next_panel",
+            About => "help.about",
+        };
+        s.to_string()
+    }
+
+    /// Default key binding in craft-keymap text form; `Model: …`/`Sculpt: …` work only in that
+    /// workspace (single letters mean different things when sculpting).
+    pub fn default_binding(self) -> Option<&'static str> {
+        use Action::*;
+        Some(match self {
+            New => "Cmd+N",
+            Open => "Cmd+O",
+            Save => "Cmd+S",
+            SaveAs => "Cmd+Shift+S",
+            SaveIncremental => "Cmd+Alt+S",
+            Import => "Cmd+I",
+            ExportGlb => "Cmd+Shift+E",
+            Undo => "Cmd+Z",
+            Redo => "Cmd+Shift+Z",
+            Delete => "Delete",
+            Duplicate => "Cmd+D",
+            Rename => "F2",
+            Frame => "F",
+            ToggleQuad => "Space",
+            Workspace(crate::app::Workspace::Model) => "Cmd+1",
+            Workspace(crate::app::Workspace::Sculpt) => "Cmd+2",
+            Workspace(crate::app::Workspace::Paint) => "Cmd+3",
+            ModeObject => "Model: 1",
+            ModeVertex => "Model: 2",
+            ModeEdge => "Model: 3",
+            ModeFace => "Model: 4",
+            ToolSelect => "Model: Q",
+            ToolMove => "Model: W",
+            ToolRotate => "Model: E",
+            ToolScale => "Model: R",
+            Extrude => "Model: Shift+E",
+            Inset => "Model: Shift+I",
+            Bevel => "Model: Shift+B",
+            LoopCut => "Model: Shift+L",
+            Merge => "Model: Shift+M",
+            Bridge => "Model: Shift+G",
+            FillHole => "Model: Shift+F",
+            Mirror(0) => "Model: Shift+X",
+            Subdivide => "Model: Shift+D",
+            Collapse => "Cmd+Shift+C",
+            SelectAll => "Cmd+A",
+            SelectNone => "Escape",
+            SelectLoop => "Model: Alt+L",
+            SelectRing => "Model: Alt+R",
+            GrowSelection => "Model: Cmd+=",
+            ShrinkSelection => "Model: Cmd+-",
+            ToggleSnap => "Model: Shift+S",
+            Brush(k) => match k {
+                BrushKind::Draw => "Sculpt: D",
+                BrushKind::Clay => "Sculpt: C",
+                BrushKind::Smooth => "Sculpt: S",
+                BrushKind::Inflate => "Sculpt: I",
+                BrushKind::Grab => "Sculpt: G",
+                BrushKind::Pinch => "Sculpt: P",
+                BrushKind::Flatten => "Sculpt: L",
+                BrushKind::Crease => "Sculpt: K",
+                BrushKind::Mask => "Sculpt: M",
+            },
+            Symmetry => "Sculpt: X",
+            MaskInvert => "Sculpt: Cmd+9",
+            MaskClear => "Sculpt: Alt+M",
+            BrushBigger => "]",
+            BrushSmaller => "[",
+            ViewPerspective => "Alt+1",
+            ViewFront => "Alt+2",
+            ViewRight => "Alt+3",
+            ViewTop => "Alt+4",
+            TransformDialog => "Cmd+T",
+            Palette => "Cmd+K",
+            KeyboardShortcuts => "Cmd+Alt+K",
+            NextPanel => "F6",
+            _ => return None,
+        })
+    }
+
+    /// The menu path (for the shortcuts editor's tree).
+    pub fn menu(self) -> &'static str {
+        use Action::*;
         match self {
-            New => cmd(Key::N),
-            Open => cmd(Key::O),
-            Save => cmd(Key::S),
-            SaveAs => cmd_shift(Key::S),
-            Import => cmd(Key::I),
-            ExportGlb => cmd_shift(Key::E),
-            Undo => cmd(Key::Z),
-            Redo => cmd_shift(Key::Z),
-            Delete => key(Key::Delete),
-            Duplicate => cmd(Key::D),
-            Rename => key(Key::F2),
-            Frame => key(Key::F),
-            ToggleQuad => key(Key::Space),
-            Workspace(crate::app::Workspace::Model) => cmd(Key::Num1),
-            Workspace(crate::app::Workspace::Sculpt) => cmd(Key::Num2),
-            Workspace(crate::app::Workspace::Paint) => cmd(Key::Num3),
-            ModeObject if model => key(Key::Num1),
-            ModeVertex if model => key(Key::Num2),
-            ModeEdge if model => key(Key::Num3),
-            ModeFace if model => key(Key::Num4),
-            ToolSelect if model => key(Key::Q),
-            ToolMove if model => key(Key::W),
-            ToolRotate if model => key(Key::E),
-            ToolScale if model => key(Key::R),
-            Extrude if model => shift(Key::E),
-            Inset if model => shift(Key::I),
-            Bevel if model => shift(Key::B),
-            LoopCut if model => shift(Key::L),
-            Merge if model => shift(Key::M),
-            Subdivide if model => shift(Key::D),
-            Collapse => cmd_shift(Key::C),
-            SelectAll => cmd(Key::A),
-            SelectNone => key(Key::Escape),
-            Brush(k) if sculpt => key(match k {
-                BrushKind::Draw => Key::D,
-                BrushKind::Clay => Key::C,
-                BrushKind::Smooth => Key::S,
-                BrushKind::Inflate => Key::I,
-                BrushKind::Grab => Key::G,
-                BrushKind::Pinch => Key::P,
-                BrushKind::Flatten => Key::L,
-                BrushKind::Crease => Key::K,
-                BrushKind::Mask => Key::M,
-            }),
-            Symmetry if sculpt => key(Key::X),
-            MaskInvert if sculpt => cmd(Key::Num9),
-            MaskClear if sculpt => alt(Key::M),
-            BrushBigger => key(Key::CloseBracket),
-            BrushSmaller => key(Key::OpenBracket),
-            ViewPerspective => alt(Key::Num1),
-            ViewFront => alt(Key::Num2),
-            ViewRight => alt(Key::Num3),
-            ViewTop => alt(Key::Num4),
-            TransformDialog => cmd(Key::T),
-            Palette => cmd(Key::K),
-            NextPanel => key(Key::F6),
-            _ => None,
+            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl => "File",
+            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddGroup => "Create",
+            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
+            SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
+            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | BrushBigger | BrushSmaller => "Sculpt",
+            ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
+            Palette | KeyboardShortcuts | About => "Help",
+            _ => "View",
         }
     }
 
-    pub fn shortcut_text(self, ctx: &egui::Context, ws: Workspace) -> String {
-        self.shortcut(ws).map(|s| ctx.format_shortcut(&s)).unwrap_or_default()
+    pub fn shortcut_text(self, app: &crate::app::ModelApp) -> String {
+        crate::keys::shortcut_text(app, self)
     }
 }

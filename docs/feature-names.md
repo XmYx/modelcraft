@@ -23,6 +23,12 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Transform by Numbers | numeric transform dialogs | Generic phrase | Use |
 | Four Views | quad view | Generic | Use |
 | Command Palette | command search | Generic (widely used) | Use |
+| Undo History (panel) | history/undo list panels | Generic | Use |
+| Save Incremental | versioned save commands | Generic description | Use |
+| Snap, Toggle Snapping | snapping | Generic | Use |
+| Select Edge Loop, Select Edge Ring, Grow Selection, Shrink Selection | selection tools | Generic modeling terms | Use |
+| Bridge Faces, Fill Hole, Mirror X/Y/Z | polygon tools | Generic modeling terms | Use |
+| Keyboard Shortcuts (dialog) | shortcut editors | Generic; the dialog is the suite's shared craft-keymap one | Use |
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |

@@ -1,0 +1,1 @@
+- Safer and faster to work with: a Save / Don't Save / Cancel prompt, Open Recent, Save Incremental, rebindable keyboard shortcuts, an Undo History panel, edge loop and ring selection, bridge, fill hole, mirror and gizmo snapping.

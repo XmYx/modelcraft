@@ -42,14 +42,19 @@ MaterialCraft or ArtCraft as glTF.
   everything after the change re-runs. Collapse bakes the history into the mesh.
 - **Smooth cages and deformers.** A smooth cage shows its child subdivided (0–6 levels); bend,
   twist, taper, ripple and round deformers work as children of the mesh they shape.
-- **Polygon editing.** Vertex, edge and face modes, click and box selection, move/rotate/scale gizmos
-  with axis and free handles, and Transform by Numbers for every gizmo action.
+- **Polygon editing.** Vertex, edge and face modes, click and box selection, edge loops and rings,
+  grow/shrink, move/rotate/scale gizmos with snapping, Transform by Numbers for every gizmo action,
+  and bridge, fill hole and mirror as history steps.
 - **Sculpting.** Draw, clay, smooth, inflate, grab, pinch, flatten, crease and mask brushes with
   falloff curves, stamps, X/Y/Z symmetry and pen pressure on meshes of a million polygons and more
   (about 280 fps while sculpting two million triangles on an RTX 4090; see
   [docs/performance.md](docs/performance.md)).
 - **Your work is safe.** Atomic saves, a journal of every command (sculpt strokes included) that
-  replays after a crash, autosave for untitled scenes, unlimited undo within a memory budget.
+  replays after a crash, autosave for untitled scenes, a Save / Don't Save / Cancel prompt before
+  anything discards changes, Save Incremental, Open Recent, and unlimited undo within a memory
+  budget with an Undo History panel to jump to any step.
+- **Your keys.** Every command can be rebound in the suite's Keyboard Shortcuts dialog, with
+  conflict detection; workspace-only keys never collide across modes.
 - **Exchange.** glTF/GLB, OBJ and STL in and out, PLY in, through the shared `craft-mesh` crate (Y up,
   metres, UVs, materials, hierarchy).
 - **Professional layout.** Dense dark theme; Model, Sculpt and Paint workspaces; panels you can dock
@@ -71,6 +76,10 @@ cargo run --release -p modelcraft -- --demo sculpt
 | 1 2 3 4 | object / vertex / edge / face mode (Model) |
 | Q W E R | select / move / rotate / scale |
 | Shift+E, Shift+I, Shift+B, Shift+L, Shift+M, Shift+D | extrude, inset, bevel, loop cut, merge, subdivide |
+| Shift+G, Shift+F, Shift+X | bridge two faces, fill hole, mirror X |
+| Alt+L (or double-click), Alt+R, Ctrl+= / Ctrl+- | edge loop, edge ring, grow / shrink selection |
+| Shift+S, Ctrl while dragging | snapping on/off, invert snapping for one drag |
+| Ctrl+Alt+S, Ctrl+Alt+K | save incremental (`_v002`…), keyboard shortcuts editor |
 | Ctrl+T | Transform by Numbers |
 | D C S I G P L K M | draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask brush (Sculpt) |
 | [ ] , X | brush size, X symmetry |

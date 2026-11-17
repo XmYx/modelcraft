@@ -21,7 +21,7 @@ fn set_name(ui: &egui::Ui, resp: &egui::Response, name: impl Into<String>) {
 
 fn action_button(app: &mut ModelApp, ui: &mut egui::Ui, a: Action) {
     let ctx = ui.ctx().clone();
-    let b = egui::Button::new(a.label()).shortcut_text(a.shortcut_text(&ctx, app.workspace));
+    let b = egui::Button::new(a.label()).shortcut_text(a.shortcut_text(app));
     if ui.add(b).clicked() {
         app.act(&ctx, a);
         ui.close();
@@ -32,7 +32,21 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
     egui::Panel::top("menu").show(ui, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button(tl!("File"), |ui| {
-                for a in [Action::New, Action::Open, Action::Save, Action::SaveAs, Action::Import] {
+                for a in [Action::New, Action::Open] {
+                    action_button(app, ui, a);
+                }
+                ui.menu_button(tl!("Open Recent"), |ui| {
+                    if app.recent.is_empty() {
+                        ui.label(RichText::new(tl!("No recent files")).color(theme::TEXT_DIM));
+                    }
+                    for r in app.recent.clone() {
+                        if ui.button(&r).clicked() {
+                            app.guard(crate::app::Pending::OpenPath(r.into()));
+                            ui.close();
+                        }
+                    }
+                });
+                for a in [Action::Save, Action::SaveAs, Action::SaveIncremental, Action::Import] {
                     action_button(app, ui, a);
                 }
                 ui.menu_button(tl!("Export"), |ui| {
@@ -42,7 +56,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 });
                 ui.separator();
                 if ui.button(tl!("Quit")).clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    app.guard(crate::app::Pending::Quit);
                 }
             });
             ui.menu_button(tl!("Edit"), |ui| {
@@ -52,11 +66,15 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::Delete,
                     Action::Duplicate,
                     Action::Rename,
-                    Action::SelectAll,
-                    Action::SelectNone,
                     Action::TransformDialog,
                     Action::Palette,
+                    Action::KeyboardShortcuts,
                 ] {
+                    action_button(app, ui, a);
+                }
+            });
+            ui.menu_button(tl!("Select"), |ui| {
+                for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
                     action_button(app, ui, a);
                 }
             });
@@ -79,6 +97,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::Bevel,
                     Action::LoopCut,
                     Action::Merge,
+                    Action::Bridge,
+                    Action::FillHole,
+                    Action::Mirror(0),
+                    Action::Mirror(1),
+                    Action::Mirror(2),
                     Action::Subdivide,
                     Action::Triangulate,
                     Action::Flip,
@@ -101,8 +124,16 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, Action::Workspace(ws));
                 }
                 ui.separator();
-                for a in [Action::ToggleQuad, Action::Frame, Action::ViewPerspective, Action::ViewFront, Action::ViewRight, Action::ViewTop, Action::NextPanel]
-                {
+                for a in [
+                    Action::ToggleSnap,
+                    Action::ToggleQuad,
+                    Action::Frame,
+                    Action::ViewPerspective,
+                    Action::ViewFront,
+                    Action::ViewRight,
+                    Action::ViewTop,
+                    Action::NextPanel,
+                ] {
                     action_button(app, ui, a);
                 }
                 ui.checkbox(&mut app.show_wire, tl!("Wireframe on Selection"));
@@ -123,6 +154,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
+                action_button(app, ui, Action::KeyboardShortcuts);
                 action_button(app, ui, Action::About);
             });
         });
@@ -140,7 +172,7 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
                 let a = Action::Workspace(ws);
-                if tab(ui, app.workspace == ws, ws.label(), format!("{} ({})", a.label(), a.shortcut_text(&ctx, app.workspace))) {
+                if tab(ui, app.workspace == ws, ws.label(), format!("{} ({})", a.label(), a.shortcut_text(app))) {
                     app.act(&ctx, a);
                 }
             }
@@ -152,7 +184,7 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     (SelectMode::Edge, Action::ModeEdge, tl!("Edge")),
                     (SelectMode::Face, Action::ModeFace, tl!("Face")),
                 ] {
-                    if tab(ui, app.mode == m, l, format!("{} ({})", a.label(), a.shortcut_text(&ctx, app.workspace))) {
+                    if tab(ui, app.mode == m, l, format!("{} ({})", a.label(), a.shortcut_text(app))) {
                         app.act(&ctx, a);
                     }
                 }
@@ -163,7 +195,7 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     (Tool::Rotate, Action::ToolRotate, tl!("Rotate")),
                     (Tool::Scale, Action::ToolScale, tl!("Scale")),
                 ] {
-                    if tab(ui, app.tool == t, l, format!("{} ({})", a.label(), a.shortcut_text(&ctx, app.workspace))) {
+                    if tab(ui, app.tool == t, l, format!("{} ({})", a.label(), a.shortcut_text(app))) {
                         app.act(&ctx, a);
                     }
                 }
@@ -178,6 +210,12 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                         action_button(app, ui, Action::AddDeformer(d));
                     }
                 });
+            }
+            if app.workspace == Workspace::Model {
+                let tip = format!("{} ({})", Action::ToggleSnap.label(), Action::ToggleSnap.shortcut_text(app));
+                if tab(ui, app.snap, tl!("Snap"), tip) {
+                    app.act(&ctx, Action::ToggleSnap);
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if tab(ui, app.quad, tl!("Four Views"), Action::ToggleQuad.label()) {
@@ -222,7 +260,7 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                     }
                     drag(ui, &mut p.inset, 0.01, 0.0..=0.99, tl!("Amount"));
                     ui.separator();
-                    for a in [Action::Flip, Action::Delete] {
+                    for a in [Action::Bridge, Action::GrowSelection, Action::ShrinkSelection, Action::Flip, Action::Delete] {
                         if ui.button(a.label()).clicked() {
                             app.act(&ctx, a);
                         }
@@ -243,8 +281,10 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                     let r = ui.add(egui::DragValue::new(&mut p.cuts).range(1..=64));
                     set_name(ui, &r, tl!("Cuts"));
                     ui.separator();
-                    if ui.button(Action::Delete.label()).clicked() {
-                        app.act(&ctx, Action::Delete);
+                    for a in [Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
+                        if ui.button(a.label()).clicked() {
+                            app.act(&ctx, a);
+                        }
                     }
                     app.ops = p;
                 }
@@ -265,7 +305,7 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                     set_name(ui, &r, tl!("Levels"));
                     app.ops = p;
                     ui.separator();
-                    for a in [Action::AddCage, Action::Collapse, Action::TransformDialog] {
+                    for a in [Action::AddCage, Action::Mirror(0), Action::Collapse, Action::TransformDialog] {
                         if ui.button(a.label()).clicked() {
                             app.act(&ctx, a);
                         }
@@ -343,7 +383,7 @@ pub fn group_digits(n: usize) -> String {
 pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
     let idx = PanelId::ALL.iter().position(|x| *x == p).unwrap_or(0);
     ui.horizontal(|ui| {
-        let header_id = egui::Id::unique(("panel-focus", idx % 3));
+        let header_id = egui::Id::unique(("panel-focus", idx));
         let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 30.0, 20.0), egui::Sense::hover());
         let resp = ui.interact(rect, header_id, egui::Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, p.label()));
@@ -376,6 +416,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
         PanelId::Properties => properties(app, ui),
         PanelId::Brushes => brushes(app, ui),
         PanelId::Paint => paint(app, ui),
+        PanelId::History => undo_history(app, ui),
     }
 }
 
@@ -471,9 +512,15 @@ fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
             if r.double_clicked() {
                 app.rename = Some((*id, name.clone()));
             }
+            if app.tree_focus == Some(*id) {
+                r.request_focus();
+                app.tree_focus = None;
+            }
             if r.has_focus() {
                 ui.memory_mut(|m| m.data.insert_temp(tree_id, row));
-                let (up, down) = ui.input(|i| (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown)));
+                // Take the arrows so egui's own focus navigation does not move focus elsewhere.
+                let (up, down) =
+                    ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)));
                 if up {
                     move_to = Some((row, -1));
                 } else if down {
@@ -520,6 +567,7 @@ fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
         let next = (row as i32 + dir).clamp(0, order.len() as i32 - 1) as usize;
         if let Some((id, _)) = order.get(next) {
             app.select_only(*id);
+            app.tree_focus = Some(*id);
             if let Some(wid) = ui.memory(|m| m.data.get_temp::<egui::Id>(tree_id.with(next))) {
                 ui.memory_mut(|m| m.request_focus(wid));
             }
@@ -848,6 +896,44 @@ fn deformer_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Defor
     }
 }
 
+/// The undo history as a list: activating an entry undoes or redoes to just after it.
+fn undo_history(app: &mut ModelApp, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    let done = app.doc.undo.labels();
+    let undone = app.doc.undo.redo_labels();
+    if done.is_empty() && undone.is_empty() {
+        ui.label(RichText::new(tl!("Nothing to undo yet.")).color(theme::TEXT_DIM));
+        return;
+    }
+    let mut target: Option<isize> = None;
+    let n = done.len();
+    let first = n.saturating_sub(200);
+    if first > 0 {
+        ui.label(RichText::new(crate::tlf!("{count} earlier steps", count = first)).color(theme::TEXT_DIM).small());
+    }
+    for (i, l) in done.iter().enumerate().skip(first) {
+        let r = ui.add(egui::Button::selectable(i + 1 == n, format!("{}. {}", i + 1, l)).frame_when_inactive(false));
+        set_name(ui, &r, crate::tlf!("History step {n}: {name}", n = i + 1, name = l));
+        if r.clicked() {
+            target = Some(i as isize + 1);
+        }
+    }
+    for (k, l) in undone.iter().enumerate() {
+        let r = ui.add(egui::Button::selectable(false, RichText::new(format!("{}. {}", n + k + 1, l)).color(theme::TEXT_DIM)).frame_when_inactive(false));
+        set_name(ui, &r, crate::tlf!("Undone step {n}: {name}", n = n + k + 1, name = l));
+        if r.clicked() {
+            target = Some((n + k + 1) as isize);
+        }
+    }
+    if let Some(t) = target {
+        let delta = t - n as isize;
+        let a = if delta < 0 { Action::Undo } else { Action::Redo };
+        for _ in 0..delta.unsigned_abs() {
+            app.act(&ctx, a);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- brushes and paint
 
 fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
@@ -856,11 +942,8 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
         for (n, k) in modelcraft_engine::sculpt::brush::KINDS.iter().enumerate() {
             let a = Action::Brush(*k);
             let on = app.brush.kind == *k;
-            let r = ui.add_sized([104.0, 22.0], egui::Button::selectable(on, actions::brush_label(*k))).on_hover_text(format!(
-                "{} ({})",
-                a.label(),
-                a.shortcut_text(&ctx, Workspace::Sculpt)
-            ));
+            let tip = format!("{} ({})", a.label(), a.shortcut_text(app));
+            let r = ui.add_sized([104.0, 22.0], egui::Button::selectable(on, actions::brush_label(*k))).on_hover_text(tip);
             if r.clicked() {
                 app.act(&ctx, a);
             }
@@ -946,6 +1029,8 @@ pub struct Palette {
 }
 
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
+    crate::keys::dialog(app, ctx);
+    save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
     rename(app, ctx);
@@ -976,11 +1061,42 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     }
 }
 
+/// "Save changes?" before New, Open or Quit. Save is focused, so Enter saves and Esc cancels.
+fn save_prompt(app: &mut ModelApp, ctx: &egui::Context) {
+    if app.pending.is_none() {
+        return;
+    }
+    let mut answer: Option<Option<bool>> = None;
+    let name = app.doc.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| tl!("Untitled"));
+    egui::Window::new(tl!("Save changes?")).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+        ui.label(crate::tlf!("{file} has changes that are not saved.", file = name));
+        ui.label(RichText::new(tl!("The crash journal keeps them until you choose.")).color(theme::TEXT_DIM).small());
+        ui.horizontal(|ui| {
+            let save = ui.button(tl!("Save"));
+            if !ui.memory(|m| m.focused().is_some()) {
+                save.request_focus();
+            }
+            if save.clicked() {
+                answer = Some(Some(true));
+            }
+            if ui.button(tl!("Don't Save")).clicked() {
+                answer = Some(Some(false));
+            }
+            if ui.button(tl!("Cancel")).clicked() {
+                answer = Some(None);
+            }
+        });
+    });
+    if let Some(a) = answer {
+        app.answer_pending(a);
+    }
+}
+
 fn palette(app: &mut ModelApp, ctx: &egui::Context) {
     let Some(mut p) = app.palette.take() else { return };
-    let ws = app.workspace;
     let q = p.query.to_lowercase();
-    let matches: Vec<Action> = actions::all().into_iter().filter(|a| q.is_empty() || a.label().to_lowercase().contains(&q)).collect();
+    let matches: Vec<(Action, String)> =
+        actions::all().into_iter().filter(|a| q.is_empty() || a.label().to_lowercase().contains(&q)).map(|a| (a, a.shortcut_text(app))).collect();
     let mut run = None;
     let mut keep = true;
     egui::Window::new(tl!("Command Palette")).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_TOP, [0.0, 80.0]).default_width(420.0).show(
@@ -1005,13 +1121,13 @@ fn palette(app: &mut ModelApp, ctx: &egui::Context) {
                 p.index = p.index.saturating_sub(1);
             }
             if enter {
-                run = matches.get(p.index).copied();
+                run = matches.get(p.index).map(|m| m.0);
             }
             if esc {
                 keep = false;
             }
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                for (i, a) in matches.iter().enumerate().take(200) {
+                for (i, (a, keys)) in matches.iter().enumerate().take(200) {
                     ui.horizontal(|ui| {
                         let r = ui.add(egui::Button::selectable(i == p.index, a.label()));
                         if i == p.index {
@@ -1021,7 +1137,7 @@ fn palette(app: &mut ModelApp, ctx: &egui::Context) {
                             run = Some(*a);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(a.shortcut_text(ctx, ws)).color(theme::TEXT_DIM).small());
+                            ui.label(RichText::new(keys.as_str()).color(theme::TEXT_DIM).small());
                         });
                     });
                 }
