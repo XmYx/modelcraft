@@ -70,6 +70,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::TransformDialog,
                     Action::Palette,
                     Action::KeyboardShortcuts,
+                    Action::Preferences,
                 ] {
                     action_button(app, ui, a);
                 }
@@ -154,6 +155,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::RadialMenu,
                     Action::RenderView,
                 ] {
                     action_button(app, ui, a);
@@ -686,7 +688,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(tl!("Transform")).default_open(true).show(ui, |ui| {
         let mut t = obj.transform;
         let mut euler = t.euler_degrees();
-        let pos = vec3_row(ui, &tl!("Position"), &mut t.translation, 0.01);
+        let per = app.unit.per_metre();
+        let mut shown = t.translation * per;
+        let pos = vec3_row(ui, &tl!("Position"), &mut shown, 0.01);
+        if pos.iter().any(|r| r.changed()) {
+            t.translation = shown / per;
+        }
         let rot = vec3_row(ui, &tl!("Rotation"), &mut euler, 0.5);
         let scl = vec3_row(ui, &tl!("Scale"), &mut t.scale, 0.01);
         t.set_euler_degrees(euler);
