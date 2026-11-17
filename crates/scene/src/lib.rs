@@ -174,6 +174,10 @@ pub struct SculptLayer {
     /// difference to `positions` is what has been sculpted into it since.
     #[serde(default, skip_serializing_if = "arc_is_empty")]
     pub anchor: Arc<Vec<Vec3>>,
+    /// Set once live detail has changed the triangles: the mesh this layer sculpts instead of
+    /// the step's input (triangles; patches kept, UVs not).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topology: Option<Arc<PolyMesh>>,
 }
 
 fn is_zero(v: &u8) -> bool {
@@ -203,7 +207,7 @@ impl SculptLayer {
             + self.anchor.len()
             + self.finer.iter().map(|f| f.len()).sum::<usize>()
             + self.shapes.iter().map(|s| s.delta.len()).sum::<usize>();
-        v3 * 12 + self.mask.len() * 4
+        v3 * 12 + self.mask.len() * 4 + self.topology.as_ref().map(|t| t.heap_bytes()).unwrap_or(0)
     }
 }
 
@@ -276,6 +280,11 @@ pub enum StepOp {
     Sculpt {
         layer: SculptLayer,
     },
+    /// Rebuild a closed mesh as even quads of about `cell` size (keeps the volume; loses UVs
+    /// and patches).
+    EvenRemesh {
+        cell: f32,
+    },
     /// Flatten the surface into UVs: cut along `seams` (and along every edge sharper than
     /// `angle` degrees), solve a least-squares conformal map per island and lay the islands out
     /// in the unit square. Seams are vertex pairs and pins name a face corner, both in the
@@ -329,6 +338,7 @@ impl StepOp {
             StepOp::FillHole { .. } => "Fill hole",
             StepOp::Mirror { .. } => "Mirror",
             StepOp::Sculpt { .. } => "Sculpt layer",
+            StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::Unwrap { .. } => "Unwrap UVs",
         }
     }

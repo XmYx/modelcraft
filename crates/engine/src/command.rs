@@ -199,7 +199,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
     (
         "add_step",
-        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror): id, op",
+        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op",
     ),
     ("set_step", "Change a history step: id, index, op"),
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
@@ -208,7 +208,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("import", "Import a glTF, GLB, OBJ, STL or PLY file: path"),
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
-    ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush, dabs}"),
+    ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs}"),
     ("sculpt_mask", "Clear, fill or invert the mask, or mask a patch: id, op"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (

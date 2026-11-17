@@ -11,9 +11,10 @@
 //! UV space follows glTF: the origin is the top left corner of the image and v grows downwards, so
 //! a triangle that is not mirrored has a negative signed area in (u, v) (see [`measure`]).
 //!
-//! Only published papers were used (see each module). The linear solver is a block-sparse
-//! preconditioned conjugate-gradient written here; the crate has no dependencies beyond `glam`,
-//! `serde` and `thiserror`.
+//! Only published papers were used (see each module). The linear solver is a sparse Cholesky
+//! factorisation with a nested-dissection ordering, with block-sparse preconditioned conjugate
+//! gradients as the fallback for systems too large to factor, both written here; the crate has no
+//! dependencies beyond `glam`, `serde` and `thiserror`.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -35,7 +36,7 @@ use glam::{DVec2, Vec2};
 use modelcraft_mesh::{MeshError, PolyMesh};
 
 /// Most faces one unwrap accepts.
-pub const MAX_FACES: usize = 4_000_000;
+pub const MAX_FACES: usize = 1_000_000;
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum UvError {
@@ -119,7 +120,8 @@ pub fn unwrap(mesh: &PolyMesh, seams: &SeamSet, opts: &UnwrapOptions) -> Result<
         for u in &mut solved.uv {
             u.y = -u.y;
         }
-        let fixed = !mine.is_empty();
+        // Pins the solver dropped (a vertex no triangle uses, coincident pins) do not fix the island.
+        let fixed = solved.report.pinned;
         if !fixed {
             // Scale to the surface area, then rotate the long axis to u.
             let (mut a3, mut auv) = (0.0, 0.0);

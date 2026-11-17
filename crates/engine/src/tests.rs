@@ -289,3 +289,66 @@ fn shape_layers_blend_with_their_strength_and_survive_undo_and_reload() {
     assert_eq!(r.sculpt_layer(ball).unwrap().shapes[0].strength, 1.0);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn live_detail_strokes_are_undoable_saved_and_replayed_by_the_journal() {
+    let dir = tmp("live");
+    let p = dir.join("live.modelcraft");
+    let mut d = Document::new();
+    let ball = d.execute(Command::AddPrimitive { kind: "round_cube".into(), name: None, parent: None }).unwrap().created[0];
+    d.save_as(&p).unwrap();
+    d.execute(Command::BeginSculpt { id: ball }).unwrap();
+    let (v0, t0) = (d.sculpt.as_ref().unwrap().mesh.vertex_count(), d.sculpt.as_ref().unwrap().mesh.triangle_count());
+    let mut st = stroke(BrushKind::Draw);
+    st.brush.live_detail = Some(0.02);
+    d.execute(Command::SculptStroke { id: ball, stroke: st.clone() }).unwrap();
+    let (v1, t1) = (d.sculpt.as_ref().unwrap().mesh.vertex_count(), d.sculpt.as_ref().unwrap().mesh.triangle_count());
+    assert!(v1 > v0 && t1 > t0);
+    // The object now evaluates to the refined triangles.
+    d.sync_sculpt();
+    let m = d.eval.evaluate(&d.scene, ball);
+    assert!(m.errors.is_empty(), "{:?}", m.errors);
+    assert_eq!((m.mesh.vertex_count(), m.mesh.triangle_count()), (v1, t1));
+    assert!(m.mesh.validate().is_ok());
+    // A crash now: the journal replays the stroke to the same mesh.
+    let after = sculpt_positions(&d);
+    let mut r = Document::open(&p).unwrap();
+    assert!(r.recover().unwrap() > 0);
+    r.ensure_session(ball).unwrap();
+    assert_eq!(sculpt_positions(&r), after);
+    // Undo gives the quads back; redo, save and reload keep the triangles.
+    d.execute(Command::Undo).unwrap();
+    d.sync_sculpt();
+    assert!(d.sculpt_layer(ball).unwrap().topology.is_none());
+    assert_eq!(d.eval.evaluate(&d.scene, ball).mesh.vertex_count(), v0);
+    d.execute(Command::Redo).unwrap();
+    d.save_as(&p).unwrap();
+    let mut r = Document::open(&p).unwrap();
+    assert_eq!(r.eval.evaluate(&r.scene, ball).mesh.triangle_count(), t1);
+    r.ensure_session(ball).unwrap();
+    assert_eq!(sculpt_positions(&r), after);
+    // Detail levels work on top of the live-detail triangles; live detail is then refused.
+    r.execute(Command::SculptDetail { id: ball, op: crate::DetailOp::Up }).unwrap();
+    assert!(r.sculpt.as_ref().unwrap().mesh.triangle_count() > t1 * 3);
+    assert!(matches!(r.execute(Command::SculptStroke { id: ball, stroke: st.clone() }), Err(EngineError::Invalid(_))));
+    assert!(r.live_detail_blocked(ball).is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn even_remesh_is_a_history_step() {
+    let mut d = Document::new();
+    let ball = d.execute(Command::AddPrimitive { kind: "torus".into(), name: None, parent: None }).unwrap().created[0];
+    d.execute(Command::AddStep { id: ball, op: StepOp::EvenRemesh { cell: 0.08 } }).unwrap();
+    let m = d.eval.evaluate(&d.scene, ball);
+    assert!(m.errors.is_empty(), "{:?}", m.errors);
+    assert!((0..m.mesh.face_count() as u32).all(|f| m.mesh.face_len(f) == 4));
+    // A plane is open: the step reports why and the object keeps its input.
+    let plane = d.execute(Command::AddPrimitive { kind: "plane".into(), name: None, parent: None }).unwrap().created[0];
+    d.execute(Command::AddStep { id: plane, op: StepOp::EvenRemesh { cell: 0.1 } }).unwrap();
+    let m = d.eval.evaluate(&d.scene, plane);
+    assert!(m.errors.iter().any(|e| e.message.contains("closed mesh")), "{:?}", m.errors);
+    // Sculpting continues on the remeshed surface.
+    d.execute(Command::BeginSculpt { id: ball }).unwrap();
+    d.execute(Command::SculptStroke { id: ball, stroke: stroke(BrushKind::Draw) }).unwrap();
+}

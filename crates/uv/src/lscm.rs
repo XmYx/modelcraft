@@ -14,7 +14,8 @@
 //! and the energy `Σ_T A_T (r² + s²)` is a quadratic form in the `u` and `v` of the vertices. At
 //! least two vertices are pinned to remove the similarity freedom (a map is conformal up to a
 //! rotation, scale and shift); the rest is the minimiser of the quadratic form, found from its
-//! normal equations by preconditioned conjugate gradients (`sparse.rs`). The map is orientation
+//! normal equations by a sparse Cholesky factorisation (`cholesky.rs`), or by preconditioned
+//! conjugate gradients (`sparse.rs`) when the factor would be too large. The map is orientation
 //! preserving by construction, and exact (zero energy) for developable surfaces.
 
 use glam::{DVec2, DVec3, Vec2};
@@ -25,7 +26,7 @@ use crate::cholesky::{Factor, nested_dissection};
 use crate::sparse::{BlockCsr, solve_cg};
 
 /// Largest Cholesky factor (entries) before the solver falls back to conjugate gradients.
-const MAX_FACTOR_NNZ: usize = 40_000_000;
+const MAX_FACTOR_NNZ: usize = 24_000_000;
 
 /// A vertex pinned to a UV position, named by one of its corners (the UV vertex of that corner).
 #[derive(Clone, Copy, Debug, PartialEq)]

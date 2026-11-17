@@ -254,6 +254,7 @@ mod tests {
             shapes: vec![modelcraft_scene::ShapeLayer { name: "A".into(), strength: 1.0, delta: p.clone().into() }],
             active_shape: None,
             anchor: p.clone().into(),
+            topology: None,
         };
         assert_eq!(read_layer(&write_layer(&layer)).unwrap(), l);
         // A version 1 blob (positions and mask only) still reads.

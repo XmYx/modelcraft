@@ -740,9 +740,9 @@ impl ModelApp {
                 }
             }
             Brush(k) => {
-                let keep = (self.brush.symmetry, self.brush.falloff);
+                let keep = (self.brush.symmetry, self.brush.falloff, self.brush.live_detail);
                 self.brush = BrushSettings::new(k, self.brush.radius);
-                (self.brush.symmetry, self.brush.falloff) = keep;
+                (self.brush.symmetry, self.brush.falloff, self.brush.live_detail) = keep;
                 self.status = crate::tlf!("{brush} brush", brush = crate::actions::brush_label(k));
             }
             Symmetry => {
@@ -756,6 +756,8 @@ impl ModelApp {
             BrushSmaller => self.brush_px = (self.brush_px / 1.15).max(4.0),
             DetailUp => self.sculpt_layer_command(|id| Command::SculptDetail { id, op: modelcraft_engine::DetailOp::Up }),
             DetailDown => self.sculpt_layer_command(|id| Command::SculptDetail { id, op: modelcraft_engine::DetailOp::Down }),
+            LiveDetail => crate::sculpt_ui::toggle_live_detail(self),
+            EvenRemesh => crate::sculpt_ui::even_remesh(self),
             ShapeAdd => self.sculpt_layer_command(|id| Command::SculptShape { id, op: modelcraft_engine::ShapeOp::Add { name: None } }),
             ViewPerspective => self.set_view(ViewPreset::Perspective),
             ViewFront => self.set_view(ViewPreset::Front),

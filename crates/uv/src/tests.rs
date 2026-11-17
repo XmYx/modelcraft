@@ -477,3 +477,73 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn concave_polygons_are_triangulated_without_folds() {
+    // A "C": the fan from its first corner folds over the notch.
+    let pts = [(0.0, 0.0), (3.0, 0.0), (3.0, 1.0), (1.0, 1.0), (1.0, 2.0), (3.0, 2.0), (3.0, 3.0), (0.0, 3.0)];
+    let pos: Vec<Vec3> = pts.iter().map(|(x, z)| Vec3::new(*x, 0.0, *z)).collect();
+    let m = PolyMesh::from_faces(pos, &[(0..8).collect()]).unwrap();
+    let mut tris = Vec::new();
+    face_triangles(&m, 0, &mut tris);
+    assert_eq!(tris.len(), 6);
+    let normal = m.face_normal(0);
+    let mut area = 0.0;
+    for t in &tris {
+        let p = t.map(|c| m.position(m.origin(c)));
+        let cross = (p[1] - p[0]).cross(p[2] - p[0]);
+        assert!(cross.dot(normal) > 0.0, "a triangle folds: {t:?}");
+        area += 0.5 * cross.length();
+    }
+    assert!((area - 7.0).abs() < 1e-4, "{area}");
+    // Quads: the shorter diagonal, or the only one inside a concave (dart) quad.
+    let dart =
+        PolyMesh::from_faces(vec![Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 4.0)], &[vec![0, 1, 2, 3]]).unwrap();
+    let mut t = Vec::new();
+    face_triangles(&dart, 0, &mut t);
+    let n = dart.face_normal(0);
+    assert_eq!(t.len(), 2);
+    assert!(t.iter().all(|t| {
+        let p = t.map(|c| dart.position(dart.origin(c)));
+        (p[1] - p[0]).cross(p[2] - p[0]).dot(n) > 0.0
+    }));
+}
+
+#[test]
+fn a_pin_the_solver_drops_does_not_fix_the_island() {
+    // A grid with a zero-area sliver on its bottom edge: the sliver's third corner touches no
+    // usable triangle, so a pin on it is dropped and the island must still be scaled and laid out.
+    let n = 3u32;
+    let mut pos = Vec::new();
+    for j in 0..=n {
+        for i in 0..=n {
+            pos.push(Vec3::new(i as f32 * 5.0, 0.0, j as f32 * 5.0));
+        }
+    }
+    let mut faces = Vec::new();
+    for j in 0..n {
+        for i in 0..n {
+            let a = j * (n + 1) + i;
+            faces.push(vec![a, a + n + 1, a + n + 2, a + 1]);
+        }
+    }
+    let c = pos.len() as u32;
+    pos.push(Vec3::new(2.5, 0.0, 0.0));
+    faces.push(vec![0, 1, c]);
+    let m = PolyMesh::from_faces(pos, &faces).unwrap();
+    let corner = (0..m.corner_count() as u32).find(|h| m.origin(*h) == c).unwrap();
+    let opts = UnwrapOptions { pins: vec![Pin { corner, uv: glam::Vec2::new(40.0, 40.0) }], ..UnwrapOptions::default() };
+    let (out, res) = unwrap_mesh(&m, &SeamSet::new(), &opts).unwrap();
+    assert!(!res.islands[0].pinned, "{:?}", res.islands[0]);
+    assert!(out.corner_uvs().iter().all(|u| u.min_element() >= -1e-6 && u.max_element() <= 1.0 + 1e-6), "the island was laid out in the unit square");
+    // Two pins at the same UV keep only one: the island is fixed by it and keeps that position.
+    let a = (0..m.corner_count() as u32).find(|h| m.origin(*h) == 5).unwrap();
+    let b = (0..m.corner_count() as u32).find(|h| m.origin(*h) == 6).unwrap();
+    let opts = UnwrapOptions {
+        pins: vec![Pin { corner: a, uv: glam::Vec2::new(7.0, 7.0) }, Pin { corner: b, uv: glam::Vec2::new(7.0, 7.0) }],
+        ..UnwrapOptions::default()
+    };
+    let (out, res) = unwrap_mesh(&m, &SeamSet::new(), &opts).unwrap();
+    assert!(res.islands[0].pinned);
+    assert!((out.uv(a) - glam::Vec2::new(7.0, 7.0)).length() < 1e-4 || (out.uv(b) - glam::Vec2::new(7.0, 7.0)).length() < 1e-4);
+}

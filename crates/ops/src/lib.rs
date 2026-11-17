@@ -11,6 +11,7 @@
 pub mod deform;
 pub mod edit;
 pub mod primitives;
+pub mod remesh;
 pub mod select;
 pub mod subdivide;
 

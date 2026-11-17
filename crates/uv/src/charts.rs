@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use glam::DVec3;
+use glam::{DVec2, DVec3};
 use modelcraft_mesh::{NONE, PolyMesh};
 
 use crate::seams::SeamSet;
@@ -192,31 +192,91 @@ impl Charts {
     }
 }
 
-/// The triangles of a face as triples of corner ids: a triangle as it is, a quad split along its
-/// shorter diagonal, a larger polygon as a fan from its first corner.
+/// The triangles of a face as triples of corner ids, in the face's winding order.
+///
+/// A triangle is itself. A quad is split along its shorter diagonal, unless that diagonal lies
+/// outside a concave quad, and a larger polygon is cut by ear clipping (Meisters 1975: every
+/// simple polygon with more than three corners has an ear, a convex corner whose triangle holds no
+/// other corner). Polygons of more than [`EAR_CLIP_LIMIT`] corners, and polygons that are not
+/// simple, fall back to a fan from the first corner.
 pub fn face_triangles(mesh: &PolyMesh, f: u32, out: &mut Vec<[u32; 3]>) {
     let c: Vec<u32> = mesh.face_half_edges(f).collect();
+    let n = c.len();
     let at = |i: usize| c.get(i).copied().unwrap_or(NONE);
-    match c.len() {
+    let p = |i: usize| mesh.position(mesh.origin(at(i))).as_dvec3();
+    match n {
         0..=2 => {}
         3 => out.push([at(0), at(1), at(2)]),
-        4 => {
-            let p = |i: usize| mesh.position(mesh.origin(at(i)));
-            if p(0).distance_squared(p(2)) <= p(1).distance_squared(p(3)) {
-                out.push([at(0), at(1), at(2)]);
-                out.push([at(0), at(2), at(3)]);
-            } else {
-                out.push([at(1), at(2), at(3)]);
-                out.push([at(1), at(3), at(0)]);
+        _ => {
+            // Work in the plane of the polygon: project onto its Newell normal.
+            let mut normal = DVec3::ZERO;
+            for i in 0..n {
+                let (a, b) = (p(i), p((i + 1) % n));
+                normal += DVec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
             }
-        }
-        n => {
-            for i in 1..n - 1 {
-                out.push([at(0), at(i), at(i + 1)]);
+            let normal = normal.normalize_or_zero();
+            let fan = |out: &mut Vec<[u32; 3]>| {
+                for i in 1..n - 1 {
+                    out.push([at(0), at(i), at(i + 1)]);
+                }
+            };
+            if normal == DVec3::ZERO {
+                return fan(out);
+            }
+            let helper = if normal.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+            let u = normal.cross(helper).normalize_or_zero();
+            let w = normal.cross(u);
+            // 2D points, counter-clockwise when seen along the normal: u, w, normal are right-handed.
+            let q: Vec<DVec2> = (0..n).map(|i| DVec2::new(p(i).dot(u), p(i).dot(w))).collect();
+            let convex =
+                |a: usize, b: usize, d: usize| (q[b] - q[a]).perp_dot(q[d] - q[a]) > 1e-12 * (q[b] - q[a]).length_squared().max((q[d] - q[a]).length_squared());
+            if n == 4 {
+                // Shorter diagonal first; both triangles must wind with the polygon.
+                let (d02, d13) = (q[0].distance_squared(q[2]), q[1].distance_squared(q[3]));
+                let options: [[[usize; 3]; 2]; 2] = [[[0, 1, 2], [0, 2, 3]], [[1, 2, 3], [1, 3, 0]]];
+                let order = if d02 <= d13 { [0, 1] } else { [1, 0] };
+                for o in order {
+                    if options[o].iter().all(|t| convex(t[0], t[1], t[2])) {
+                        for t in options[o] {
+                            out.push(t.map(at));
+                        }
+                        return;
+                    }
+                }
+                return fan(out);
+            }
+            if n > EAR_CLIP_LIMIT {
+                return fan(out);
+            }
+            let mut ring: Vec<usize> = (0..n).collect();
+            let inside = |a: usize, b: usize, d: usize, x: usize| {
+                let (e1, e2, e3) = ((q[b] - q[a]).perp_dot(q[x] - q[a]), (q[d] - q[b]).perp_dot(q[x] - q[b]), (q[a] - q[d]).perp_dot(q[x] - q[d]));
+                e1 >= 0.0 && e2 >= 0.0 && e3 >= 0.0
+            };
+            let first = out.len();
+            while ring.len() > 3 {
+                let m = ring.len();
+                let ear = (0..m).find(|&i| {
+                    let (a, b, d) = (ring[(i + m - 1) % m], ring[i], ring[(i + 1) % m]);
+                    convex(a, b, d) && !ring.iter().any(|&x| x != a && x != b && x != d && inside(a, b, d, x))
+                });
+                let Some(i) = ear else {
+                    // Not a simple polygon: give up on clipping.
+                    out.truncate(first);
+                    return fan(out);
+                };
+                out.push([at(ring[(i + m - 1) % m]), at(ring[i]), at(ring[(i + 1) % m])]);
+                ring.remove(i);
+            }
+            if let [a, b, d] = ring[..] {
+                out.push([at(a), at(b), at(d)]);
             }
         }
     }
 }
+
+/// Largest polygon (in corners) that is ear-clipped; bigger ones are fanned.
+const EAR_CLIP_LIMIT: usize = 64;
 
 /// What [`cut_to_disks`] did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

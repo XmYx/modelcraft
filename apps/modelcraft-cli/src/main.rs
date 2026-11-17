@@ -467,5 +467,52 @@ fn detail_bench(d: &mut Document, id: modelcraft_engine::scene::ObjectId) -> Res
     let t = Instant::now();
     run(d, Command::SculptShape { id, op: ShapeOp::Strength { index: 0, strength: 0.5 } })?;
     println!("shape layers at {} vertices: add {add_ms:.0} ms, change strength {:.0} ms", count(d), ms(t));
+    live_bench()
+}
+
+/// Live detail (a stroke that splits triangles as it goes) and even remesh, on quad spheres.
+fn live_bench() -> Result<(), String> {
+    use modelcraft_engine::ops::remesh;
+    let ball = |seg: u32| modelcraft_engine::ops::primitives::Primitive::RoundCube { radius: 1.0, segments: seg }.build().map_err(|e| e.to_string());
+    for (seg, radius, edge) in [(64u32, 0.2f32, 0.01f32), (288, 0.1, 0.004)] {
+        let mesh = ball(seg)?;
+        let mut s = SculptMesh::new(&mesh, None, None);
+        let before = s.triangle_count();
+        let mut b = BrushSettings::new(BrushKind::Draw, radius);
+        b.live_detail = Some(edge);
+        s.begin_stroke(b);
+        let mut times = Vec::new();
+        for i in 0..200 {
+            let a = i as f32 * 0.01;
+            let c = Vec3::new(a.cos() * 0.6, 0.55, a.sin() * 0.6).normalize();
+            let t = Instant::now();
+            s.dab(Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO });
+            times.push(ms(t));
+        }
+        let t = Instant::now();
+        let undo = s.end_stroke().map(|(u, _)| u).unwrap_or_default();
+        let end_ms = ms(t);
+        let mean = times.iter().sum::<f64>() / times.len() as f64;
+        let after = s.triangle_count();
+        let t = Instant::now();
+        s.apply_undo(&undo, false);
+        println!(
+            "live detail: {before} -> {after} triangles over 200 dabs (radius {radius}, edge {edge}): dab mean {mean:.2} ms p95 {:.2} ms, stroke end {end_ms:.0} ms, undo {:.0} ms",
+            pct(&mut times, 0.95),
+            ms(t)
+        );
+    }
+    for (seg, cell) in [(64u32, 0.02f32), (410, 0.01), (410, 0.006)] {
+        let mesh = ball(seg)?;
+        let t = Instant::now();
+        let out = remesh::even_remesh(&mesh, cell).map_err(|e| e.to_string())?;
+        println!(
+            "even remesh: {} -> {} quads at cell {cell}: {:.0} ms, volume kept to {:.3} %",
+            mesh.face_count(),
+            out.face_count(),
+            ms(t),
+            (remesh::volume(&out) / remesh::volume(&mesh) - 1.0).abs() * 100.0
+        );
+    }
     Ok(())
 }
