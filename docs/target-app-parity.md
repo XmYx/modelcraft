@@ -32,7 +32,7 @@ never estimated by hand.
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
 | Viewport, navigation and display | 6 (5 %) | 25 | 8 | 0 | 7 | 10 | 0 | 46 % | 39 % |
-| Scene graph, object manager and attributes | 5 (4 %) | 17 | 10 | 0 | 1 | 6 | 0 | 62 % | 48 % |
+| Scene graph, object manager and attributes | 5 (4 %) | 17 | 5 | 0 | 1 | 11 | 0 | 32 % | 27 % |
 | Dependency graph, history and node editing | 5 (4 %) | 14 | 7 | 1 | 0 | 6 | 0 | 57 % | 33 % |
 | Primitives and generators | 4 (3 %) | 12 | 2 | 0 | 0 | 10 | 0 | 17 % | 8 % |
 | Splines, curves and NURBS | 4 (3 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
