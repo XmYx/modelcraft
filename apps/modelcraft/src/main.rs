@@ -26,6 +26,8 @@ mod rig_ui;
 #[cfg(test)]
 mod rig_ui_tests;
 mod sculpt_ui;
+#[cfg(test)]
+mod sculpt_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
