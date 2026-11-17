@@ -285,6 +285,14 @@ pub enum StepOp {
         axis: u32,
         weld: f32,
     },
+    /// Rebuild the patches from the shape (by angle or by connected shells).
+    GroupPatches {
+        grouping: modelcraft_ops::patches::Grouping,
+    },
+    /// Weld vertices closer than `distance` and remove faces with no area.
+    CleanUp {
+        distance: f32,
+    },
     Sculpt {
         layer: SculptLayer,
     },
@@ -345,6 +353,8 @@ impl StepOp {
             StepOp::Bridge { .. } => "Bridge",
             StepOp::FillHole { .. } => "Fill hole",
             StepOp::Mirror { .. } => "Mirror",
+            StepOp::GroupPatches { .. } => "Group patches",
+            StepOp::CleanUp { .. } => "Clean up",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::Unwrap { .. } => "Unwrap UVs",

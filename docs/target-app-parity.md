@@ -36,7 +36,7 @@ never estimated by hand.
 | Dependency graph, history and node editing | 5 (4 %) | 14 | 7 | 1 | 0 | 6 | 0 | 57 % | 33 % |
 | Primitives and generators | 4 (3 %) | 12 | 2 | 0 | 0 | 10 | 0 | 17 % | 8 % |
 | Splines, curves and NURBS | 4 (3 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
-| Polygon modeling | 9 (7 %) | 36 | 11 | 1 | 3 | 21 | 0 | 38 % | 30 % |
+| Polygon modeling | 9 (7 %) | 36 | 13 | 1 | 1 | 21 | 0 | 40 % | 31 % |
 | Subdivision surfaces | 2 (2 %) | 6 | 3 | 0 | 0 | 3 | 0 | 50 % | 36 % |
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
@@ -255,8 +255,8 @@ Weight: 9
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
 | Custom normals: harden, average, weighted by face area | C M | M | M | |
-| Polygon groups (patches) and grouping tools | C M Z | P | S | Stored per face, tinted, masked by patch; no grouping tools in the UI |
-| Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | P | S | `PolyMesh::build` repairs and reports; no cleanup tool in the UI |
+| Polygon groups (patches) and grouping tools | C M Z | D | S | Group by crease angle or by shell, new patch from selection, select patch; history steps (`crates/ops/src/patches.rs`) |
+| Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | D | S | `PolyMesh::build` repairs non-manifold and lamina faces on every result; Mesh ▸ Patches and Cleanup finds n-gons, triangles, open borders, faces with no area and poles, and Clean Up Mesh welds and removes no-area faces |
 | Transfer attributes between meshes (positions, UVs, normals) | M | M | M | |
 | Align, distribute and snap objects together | C M | M | S | |
 | Polygon pen: draw polygons point by point | C M | M | M | |
