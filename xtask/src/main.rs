@@ -500,6 +500,33 @@ fn parity_ci() -> Result<(), String> {
     Ok(())
 }
 
+/// `docs/scripting-api.md`, generated from the script function table and the command registry.
+/// With `--write` it is rewritten; otherwise `cargo xtask ci` fails when it is out of date.
+fn script_docs(write: bool) -> Result<(), String> {
+    let out = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(["run", "-q", "-p", "modelcraft-script", "--example", "api_docs"])
+        .current_dir(root())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("could not generate the script API reference:\n{}", String::from_utf8_lossy(&out.stderr)));
+    }
+    let fresh = String::from_utf8(out.stdout).map_err(|e| e.to_string())?;
+    let path = root().join("docs/scripting-api.md");
+    if write {
+        std::fs::write(&path, &fresh).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("script-docs: wrote docs/scripting-api.md ({} lines)", fresh.lines().count());
+        return Ok(());
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    if have == fresh {
+        println!("script-docs: docs/scripting-api.md is current");
+        Ok(())
+    } else {
+        Err("docs/scripting-api.md is out of date: run `cargo xtask script-docs --write`".into())
+    }
+}
+
 fn ci() -> Result<(), String> {
     cargo(&["fmt", "--all", "--check"])?;
     cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])?;
@@ -508,6 +535,7 @@ fn ci() -> Result<(), String> {
     assets()?;
     licenses()?;
     parity_ci()?;
+    script_docs(false)?;
     progress(true)
 }
 
@@ -521,10 +549,11 @@ fn main() -> ExitCode {
         "licenses" => licenses(),
         "progress" => progress(rest.first().is_some_and(|a| a == "--check")),
         "parity" => parity(rest.first().is_some_and(|a| a == "--write")),
+        "script-docs" => script_docs(rest.first().is_some_and(|a| a == "--write")),
         "version" => version(rest),
         "strings" => strings(rest),
         "icons" => icons(),
-        _ => Err("usage: cargo xtask <ci|layers|assets|licenses|progress [--check]|parity [--write]|version [set X]|strings [craft-i18n dir]|icons>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|assets|licenses|progress [--check]|parity [--write]|script-docs [--write]|version [set X]|strings [craft-i18n dir]|icons>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
