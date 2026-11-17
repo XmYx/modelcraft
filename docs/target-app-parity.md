@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 73 / 7 / 36 / 214 | counted |
+| Done / exceeds / partial / missing | 73 / 7 / 39 / 211 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **29.7 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **20.9 %** | counted |
-| Size-weighted parity over all rows, no area weights | 21.2 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **30.2 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **21.2 %** | counted |
+| Size-weighted parity over all rows, no area weights | 21.6 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -45,7 +45,7 @@ never estimated by hand.
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
 | Materials and shading | 5 (4 %) | 9 | 2 | 0 | 3 | 4 | 0 | 39 % | 30 % |
 | Render engine: core | 8 (6 %) | 17 | 5 | 0 | 5 | 7 | 2 | 44 % | 53 % |
-| Render engine: lights, camera effects and output | 6 (5 %) | 19 | 2 | 0 | 3 | 14 | 0 | 18 % | 15 % |
+| Render engine: lights, camera effects and output | 6 (5 %) | 19 | 2 | 0 | 6 | 11 | 0 | 26 % | 20 % |
 | Rigging | 6 (5 %) | 15 | 0 | 0 | 0 | 15 | 0 | 0 % | 0 % |
 | Animation | 8 (6 %) | 17 | 0 | 0 | 0 | 17 | 0 | 0 % | 0 % |
 | Simulation | 6 (5 %) | 10 | 0 | 0 | 0 | 10 | 0 | 0 % | 0 % |
@@ -448,11 +448,11 @@ Weight: 6
 | Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); no aperture control in the app or CLI yet |
 | Physical camera: exposure, white balance, lens distortion | C M R | M | S | |
 | Caustics and path guiding | R | M | L | |
-| Render passes (AOVs) and ID mattes | C M R | M | M | |
-| OpenEXR output: multi-layer, half and float | C M R | M | M | |
+| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU path and are written into the `.exr`; no ID mattes, no per-light or per-lobe passes, none on the GPU path |
+| OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
-| Render statistics and time limits | R | M | S | |
+| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference; no time limit or per-ray statistics |
 
 ## Rigging
 
@@ -622,7 +622,7 @@ Weight: 3
 - Files: `crates/formats` (project round trip with blobs, corrupted-project proptest, GLB/OBJ/STL round trips, torn journal).
 - Engine: `crates/engine/src/tests.rs` (`journal_recovers_unsaved_work_after_a_crash`, `undo_memory_is_bounded`).
 - GPU: `crates/render/src/gpu.rs` `renders_a_quad_when_a_gpu_is_present` (renders and reads back).
-- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs` (`material_layers_uvs_and_linked_maps_reach_the_render`), `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/material_ui.rs`, the light tests `spot_sun_and_image_lighting_match_their_formulas`, `the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights`, `sky.rs` (`the_sky_is_blue_at_noon_and_red_at_sunset`), the material tests `layers_conserve_energy_and_glass_passes_light`, `fresnel_and_thin_film_follow_optics`, `glass_is_invisible_in_a_furnace_and_absorbs_by_distance`, `cutouts_textures_and_normal_maps_change_the_picture`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
+- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs` (`material_layers_uvs_and_linked_maps_reach_the_render`), `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/material_ui.rs`, the output tests `feature_images_describe_the_first_surface`, `z_curve_pixel_order_moves_error_to_high_frequencies`, `mis_compensation_lowers_the_noise_of_image_lighting`, `apps/modelcraft-cli/src/bench_cmd.rs`, the light tests `spot_sun_and_image_lighting_match_their_formulas`, `the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights`, `sky.rs` (`the_sky_is_blue_at_noon_and_red_at_sunset`), the material tests `layers_conserve_energy_and_glass_passes_light`, `fresnel_and_thin_film_follow_optics`, `glass_is_invisible_in_a_furnace_and_absorbs_by_distance`, `cutouts_textures_and_normal_maps_change_the_picture`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).

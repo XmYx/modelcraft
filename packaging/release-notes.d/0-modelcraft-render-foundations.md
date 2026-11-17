@@ -1,0 +1,1 @@
+- `modelcraft-cli render` can write OpenEXR files that carry albedo, normal, depth, motion and variance images next to the picture, and `modelcraft-cli render-bench` measures the renderer's noise against time on built-in scenes. Low-sample renders look smoother because neighbouring pixels now share samples more cleverly.
