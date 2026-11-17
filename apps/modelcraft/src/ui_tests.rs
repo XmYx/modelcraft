@@ -458,3 +458,21 @@ fn agents_drive_the_window_over_the_control_channel() {
     crate::agents::stop(h.state_mut());
     assert!(!h.state().agents.is_on());
 }
+
+#[test]
+fn exchange_settings_from_the_file_menu() {
+    let mut h = harness();
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    h.get_by_label("Exchange Settings").click();
+    h.run();
+    h.get_by_role_and_label(Role::RadioButton, "Z up").click();
+    h.run();
+    h.get_by_role_and_label(Role::RadioButton, "Centimetres").click();
+    h.run();
+    let c = h.state().exchange;
+    assert_eq!(c.up, modelcraft_engine::formats::exchange::Up::Z);
+    assert_eq!(c.scale, Some(0.01));
+    assert!(crate::actions::all().contains(&crate::actions::Action::ExportFbx), "Export FBX is in the palette");
+}

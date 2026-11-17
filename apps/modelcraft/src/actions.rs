@@ -97,7 +97,7 @@ pub fn all() -> Vec<Action> {
         ExportGlb,
         ExportObj,
         ExportStl,
-    ExportFbx,
+        ExportFbx,
         Undo,
         Redo,
         Delete,

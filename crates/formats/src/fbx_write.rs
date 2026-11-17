@@ -122,7 +122,8 @@ pub fn write_in(items: &[Item], z_up: bool, metres_per_unit: f32) -> Result<Vec<
             links.push((geo, model));
             let mat = id(3, i);
             let c = it.material.base_color;
-            let _ = writeln!(o, "\tMaterial: {mat}, \"Material::{name} material\", \"\" {{\n\t\tVersion: 102\n\t\tShadingModel: \"phong\"\n\t\tProperties70:  {{");
+            let _ =
+                writeln!(o, "\tMaterial: {mat}, \"Material::{name} material\", \"\" {{\n\t\tVersion: 102\n\t\tShadingModel: \"phong\"\n\t\tProperties70:  {{");
             p70(&mut o, "DiffuseColor", "Color", "", "A", &[f64::from(c[0]), f64::from(c[1]), f64::from(c[2])]);
             p70(&mut o, "Opacity", "double", "Number", "", &[f64::from(c[3])]);
             o.push_str("\t\t}\n\t}\n");

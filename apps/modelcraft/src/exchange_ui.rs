@@ -7,7 +7,8 @@ use modelcraft_engine::formats::exchange::Up;
 use crate::app::ModelApp;
 
 /// Units offered, as metres per file unit (`None`: from the file).
-pub const UNITS: &[(Option<f32>, &str)] = &[(None, "From the file"), (Some(1.0), "Metres"), (Some(0.01), "Centimetres"), (Some(0.001), "Millimetres"), (Some(0.0254), "Inches")];
+pub const UNITS: &[(Option<f32>, &str)] =
+    &[(None, "From the file"), (Some(1.0), "Metres"), (Some(0.01), "Centimetres"), (Some(0.001), "Millimetres"), (Some(0.0254), "Inches")];
 
 pub fn up_label(u: Up) -> String {
     match u {

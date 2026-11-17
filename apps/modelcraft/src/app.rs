@@ -997,8 +997,10 @@ impl ModelApp {
     }
 
     pub fn open_dialog(&mut self) {
-        if let Some(p) =
-            rfd::FileDialog::new().add_filter("ModelCraft", &["modelcraft"]).add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"]).pick_file()
+        if let Some(p) = rfd::FileDialog::new()
+            .add_filter("ModelCraft", &["modelcraft"])
+            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"])
+            .pick_file()
         {
             self.open_path(p);
         }
