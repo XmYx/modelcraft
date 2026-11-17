@@ -2432,6 +2432,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "modelcraft-anim"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "modelcraft-cli"
 version = "0.1.0"
 dependencies = [
@@ -2454,6 +2465,7 @@ version = "0.1.0"
 dependencies = [
  "craft-atomic",
  "glam",
+ "modelcraft-anim",
  "modelcraft-formats",
  "modelcraft-mesh",
  "modelcraft-ops",
@@ -2529,6 +2541,7 @@ name = "modelcraft-scene"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "modelcraft-anim",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-uvpack",

@@ -4,6 +4,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 
 | Layer | Crate | What it holds | Depends on |
 |---|---|---|---|
+| L0 | `modelcraft-anim` | Keyed curves (stepped, linear, Bézier with automatic clamped tangents and weighted handles), extrapolation, baking, the scene clock and playback | glam |
 | L0 | `modelcraft-mesh` | `PolyMesh`: validated half-edge mesh, per-corner UVs, patches, polygon-list (de)serialisation | glam |
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
 | L1 | `modelcraft-uvpack` | UV island packing (MaxRects, margin, rotation, even texel density) and planar, box, cylindrical, spherical and camera projections | mesh |
@@ -33,6 +34,14 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   compares the new step list with the cached one and re-runs only from the first difference. Final
   meshes (with deformers and cages) are cached by a combined revision of the subtree. A step whose
   selection no longer fits is skipped and reported (`StepError`).
+- **Animation**: `Scene::anim` holds tracks (object + attribute path + curve), the time settings
+  and the current frame. Every number an object stores is an attribute with a dotted path
+  (`modelcraft_scene::attr`): the transform has fast paths, everything else is reached through the
+  part's saved form, so a new parameter is keyable without animation code. The scene always holds
+  the pose of the current frame: `Scene::set_frame` writes the curve values into the objects and
+  bumps the revision only of objects whose values changed, so the evaluator re-runs exactly what
+  the frame touched. Going to a frame is not an undo step and is journaled lazily (before the next
+  command). Auto-key compares the scene before and after a command and keys what changed.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.
@@ -87,5 +96,12 @@ Gaps found, to raise in craft-libs rather than copy:
 - RFC-0032 (`craft-pbr`, `craft-raster3d`): ModelCraft can be the second consumer for headless
   renders, thumbnails and the no-GPU fallback. Our material is the glTF metallic-roughness core it
   names.
+
+Checked for animation (house rule 16): `craft-timeline` is editorial interchange (EDL, FCPXML,
+OTIO); it carries keyframes as data (`model::Keyframe`) but has no curve evaluation, tangent rules
+or key editing. `craft-anicraft-format` is the file envelope only: AniCraft's document, keys
+included, stays in the app, and there is no shared EffectCraft crate. So the curve kernel is
+`modelcraft-anim`, which depends only on glam and serde and can move to craft-libs as the shared
+one (API gap to raise there: curve evaluation and editing behind `craft-timeline`'s key model).
 
 Not used yet but planned: `craft-ui` docking, `craft-control` and `craft-mcp-server`.

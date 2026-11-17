@@ -1,0 +1,1 @@
+- Animation: key any number (position, rotation, scale, visibility, material, shape and history-step parameters), edit keys in the Key Sheet and the Curve Editor, play back at the scene frame rate, and let Auto-Key set keys as you edit.
