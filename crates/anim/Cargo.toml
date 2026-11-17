@@ -1,0 +1,20 @@
+[package]
+name = "modelcraft-anim"
+description = "ModelCraft animation kernel: keyed curves with tangents, time and playback, with no scene or UI dependency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+proptest = { workspace = true }

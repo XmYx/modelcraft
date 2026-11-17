@@ -107,6 +107,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             for (name, help) in COMMANDS {
                 println!("{name}\t{help}");
             }
+            for (name, help) in modelcraft_engine::anim::COMMANDS {
+                println!("anim op={name}\t{help}");
+            }
             Ok(())
         }
         "new" => save(&mut Document::new(), arg(a, 0, "output file")?),
@@ -154,6 +157,21 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
 }
 
 fn info(d: &mut Document) {
+    let anim = &d.scene.anim;
+    if !anim.is_empty() {
+        let keys: usize = anim.tracks().iter().map(|t| t.curve.len()).sum();
+        println!(
+            "animation: {} curves, {keys} keys, frames {}..{} at {} fps, current frame {}",
+            anim.tracks().len(),
+            anim.time.start,
+            anim.time.end,
+            anim.time.fps,
+            anim.frame
+        );
+        for t in anim.tracks() {
+            println!("  curve id={} {} keys={}", t.target.0, t.path, t.curve.len());
+        }
+    }
     let order = d.scene.tree_order();
     for (id, depth) in order {
         let Some(o) = d.scene.get(id).cloned() else { continue };
