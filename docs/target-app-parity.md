@@ -103,7 +103,7 @@ full 3D suite stays in the denominator, however large.
 | Professional modeler | No | Missing knife, booleans, vertex snapping, UV tools, normals editing, splines |
 | Motion designer | No | No cloners, effectors, fields or animation |
 | Animator keying objects and parameters | Preview | Keys on any number, curves, timeline, auto-key, Key Sheet and Curve Editor; no layers, clips or motion paths |
-| Rigging, character animation | No | Joints, automatic skin weights and both skinning methods work; no IK, constraints, blend shapes or weight brush yet |
+| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending and constraints work; no blend shapes, weight brush or control shapes yet |
 | Simulation | No | Not started |
 | Look development and final rendering | No | Viewport shading only; no offline renderer |
 
@@ -180,7 +180,7 @@ Weight: 5
 | Node view of the dependency graph | M | M | L | |
 | Connect any attribute to any other | M | M | M | |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
-| Expressions and driven keys | C M | M | M | |
+| Expressions and driven keys | C M | P | M | Formulas over the frame, time and any attribute of any object (a small safe language: arithmetic, comparisons, 24 functions; property-tested against hostile text) and driven keys through a curve, both ordered with the constraints; the driven curve has no editor yet, formulas give one number (no vectors or strings) |
 | Procedural geometry node graph (scene nodes, graph-based effects) | C M | M | XL | |
 | Parallel graph evaluation | C M | M | L | Single-threaded today |
 
@@ -301,11 +301,11 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Cloner: linear, radial, grid, honeycomb, on-object modes | C M | M | L | |
+| Cloner: linear, radial, grid, honeycomb, on-object modes | C M | P | L | Clones object: linear, radial, grid, scatter, surface and vertex layouts, seeded; no honeycomb or per-clone selections |
 | Effectors: plain, random, shader, step, delay, time, target, formula | C M | M | L | |
 | Fields drive effectors | C | M | M | |
 | Clone selections and weight maps | C | M | M | |
-| Instancing at scale (millions of points, render instances) | C M | M | M | |
+| Instancing at scale (millions of points, render instances) | C M | P | M | Clones share one GPU mesh and one evaluated mesh; capped at 10,000 per generator, one draw call each |
 | Voronoi fracture | C M | M | L | |
 | Animated text per letter / word / line | C | M | M | |
 | Trace clone paths into splines | C | M | S | |
@@ -319,7 +319,7 @@ Weight: 4
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | M | L | |
-| Seams and unwrap (conformal / angle-based) | C M Z | M | L | Waits for craft-mesh-ops `unwrap_uvs` (craft-libs #1233) |
+| Seams and unwrap (conformal / angle-based) | C M Z | P | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as a history step and CLI; no seam UI yet, no angle-based solver |
 | Packing | C M | M | M | |
 | UDIM tiles | C M Z | M | M | |
 | Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
@@ -339,7 +339,7 @@ Weight: 7
 | Flatten, crease | C M Z | D | S | |
 | Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | P | L | Ten more, nineteen in all: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge. No rotate, elastic move or scrape yet |
 | Mask brush; clear, invert, fill; mask by patch | C M Z | D | S | |
-| Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | M | M | |
+| Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | P | M | Mask hollows, mask ridges, blur, sharpen, grow, shrink; no occlusion mask |
 | Lasso and rectangle masks; clip, trim and slice brushes | Z | M | M | |
 | X, Y, Z symmetry | C M Z | D | S | |
 | Radial and topological symmetry | C Z | M | M | |
@@ -355,7 +355,7 @@ Weight: 7
 | Insert-mesh brushes and curve brushes | Z | M | L | |
 | Live booleans between sculpted parts | Z | M | L | |
 | 1 M+ polygons interactive | C M Z | D | M | 2.0 M triangles at ~280 fps while sculpting (measured) |
-| 20 M+ polygons interactive | Z | M | XL | Not measured above 2 M |
+| 20 M+ polygons interactive | Z | M | XL | Not reached: measured at 12.6 M triangles in the engine only (3–5 ms per dab with ~10 k vertices under the brush); 20 M and the app window at that size are not measured, and a session takes 6–10 s to start there |
 | Strokes are data: per-stroke undo, bit-exact replay after a crash | C M Z | X | S | Journaled |
 
 ## Sculpting: resolution and topology
@@ -398,7 +398,7 @@ Weight: 5
 |---|---|---|---|---|
 | Per-object PBR material (base colour, metallic, roughness) | C M Z | D | S | glTF metallic-roughness core, exported to GLB |
 | Link a MaterialCraft `.mcmat` | | D | M | Stored and saved; the path tracer reads its base colour, roughness, metallic, normal, height and opacity maps (the viewport still shows the flat colour, counted under viewport textures) |
-| Full layered surface model (OpenPBR-class: coat, sheen, transmission, thin film) | C M R | P | L | The engine evaluates fuzz, coat, anisotropic metal with edge tint, dielectric with thin film, rough diffuse, rough transmission with absorption, emission and opacity on the CPU, energy-checked by a furnace test; Properties exposes coat, sheen, transmission, index of refraction and emission; the GPU path declines these layers and the render falls back to the CPU; no nested dielectrics or dispersion |
+| Full layered surface model (OpenPBR-class: coat, sheen, transmission, thin film) | C M R | P | L | The engine evaluates fuzz, coat, anisotropic metal with edge tint, dielectric with thin film, rough diffuse, rough transmission with absorption, emission and opacity on the CPU and the GPU (the same model in both, held together by tests), energy-checked by a furnace test; Properties exposes coat, sheen, transmission, index of refraction and emission; no nested dielectrics or dispersion |
 | Texture inputs: images, procedural noise, ramps, triplanar | C M R | P | L | Image maps for base colour, roughness, metalness, normal, height and opacity, bilinear, through a linked `.mcmat`; no mip filtering, procedural textures, ramps or triplanar, and no per-map controls in the app |
 | Bump, normal and displacement inputs | C M R | P | M | Tangent-space normal maps and height bump in the path tracer (a test checks the lit result against the tilted normal); no displacement |
 | Node material editor | C M R | M | XL | Planned with MaterialCraft |
@@ -414,8 +414,8 @@ Weight: 8
 |---|---|---|---|---|
 | Real-time viewport PBR | C M Z | P | M | Rasterized studio lighting; no shadows or image lighting |
 | Path tracing on the CPU | C M R | D | XL | `craft-render-core`: unidirectional, all cores, deterministic per seed; checked against analytic lights and a furnace test. Which surface, light and output features it carries is counted in their own rows |
-| Path tracing on the GPU | C R | P | XL | `craft-render-gpu`: the base surface model and point, spot, directional, sun, mesh and uniform-sky lights as a wgpu compute pipeline (Vulkan, Metal, DX12), 30–50× the 24-thread CPU on an RTX 4090 ([performance.md](performance.md)); it declines layered materials, textures and image lighting, and the render then runs on the CPU; software BVH traversal, no hardware ray queries; lights chosen by power, not the tree |
-| One scene, matching CPU and GPU results | R | D | L | Same samples, same estimator: a test holds the two images to a relative MSE under 0.002, on hardware and on a software Vulkan driver |
+| Path tracing on the GPU | C R | D | XL | `craft-render-gpu`: everything the CPU path renders, as one wgpu compute pipeline (Vulkan, Metal, DX12): the full layered surface model, textures, normal and bump maps, cut-outs, absorbing glass, every light type, panorama lighting with importance sampling, the light tree and the feature images; 30–50× the 24-thread CPU on an RTX 4090 ([performance.md](performance.md)); software BVH traversal, no hardware ray queries; a scene too large for the device's buffers falls back to the CPU |
+| One scene, matching CPU and GPU results | R | D | L | Same samples, same estimator: tests hold the two images to a relative MSE under 0.002 on the Cornell box, the layered-material showcase, a panorama-lit studio, a many-light street, an interior and a scene of cut-outs and maps (measured: 0.0001 or less), and the feature images to matching means |
 | Multiple importance sampling and next-event estimation | R | D | L | Power heuristic over light and BSDF sampling; a test checks that light-only, BSDF-only and combined estimators agree |
 | Ray-tracing acceleration structure for the whole scene | R | D | L | `craft-render-bvh`: binned-SAH BVH built in parallel (2.0 M triangles in 0.56 s), one flat layout for CPU and GPU; no instancing or motion yet (their own rows) |
 | Adaptive sampling with a noise threshold | R | M | M | |
@@ -440,7 +440,7 @@ Weight: 6
 |---|---|---|---|---|
 | Point, spot and directional lights | C M R | P | M | Point, spot (cone with soft edge), directional and sun-disk lights in the engine on CPU and GPU, tested against their formulas; no light objects in the scene graph yet, so the app cannot place them |
 | Area lights: rectangle, disk, sphere, mesh | C M R | P | M | Any object with emission is a light of its own shape (plane, disk, sphere or any mesh), sampled through a light tree and checked against a rectangle's closed-form irradiance; no dedicated light objects with units, spread or camera visibility |
-| Dome / image-based lighting with importance sampling | C M R | D | M | Radiance `.hdr` panoramas, sampled in proportion to brightness and solid angle with MIS (a test compares its variance with BSDF sampling), rotation; Render View (Panorama image) and `modelcraft-cli render --env`; CPU path (the GPU path declines and falls back); no EXR panoramas yet |
+| Dome / image-based lighting with importance sampling | C M R | D | M | Radiance `.hdr` panoramas, sampled in proportion to brightness and solid angle with MIS (a test compares its variance with BSDF sampling), rotation; Render View (Panorama image) and `modelcraft-cli render --env`; on the CPU and the GPU; no EXR panoramas yet |
 | Physical sun and sky | C M R | D | M | Daylight: single-scattering Rayleigh and Mie atmosphere baked per render plus a sun disk attenuated by the same air; sun height and direction in the Render View and `--sun`; no multiple scattering, ozone or night sky |
 | Light linking (include / exclude) | C M R | M | M | |
 | Light groups and per-light outputs | R | M | M | |
@@ -452,7 +452,7 @@ Weight: 6
 | Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); no aperture control in the app or CLI yet |
 | Physical camera: exposure, white balance, lens distortion | C M R | M | S | |
 | Caustics and path guiding | R | M | L | |
-| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU path and are written into the `.exr`; no ID mattes, no per-light or per-lobe passes, none on the GPU path |
+| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU and the GPU path and are written into the `.exr`; no ID mattes, no per-light or per-lobe passes |
 | OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
@@ -468,9 +468,9 @@ Weight: 6
 | Skinning with linear blend and weight painting | C M | P | L | A skin under a mesh binds it to joints and evaluates through the graph (only the skin re-runs when a joint moves); weights are painted by a command dab with falloff, not yet by a viewport brush; weights are saved as JSON |
 | Dual-quaternion skinning | C M | D | S | Per skin switch (keyable); a half twist keeps the radius where linear blending collapses (tests) |
 | Weight tools: normalize, mirror, copy, prune, automatic binding | C M | P | M | Automatic binding by heat equilibrium over the surface (from the 2007 paper, without its visibility test) or by distance; normalize, prune, limit, mirror with joint renaming, set by number; no copying between meshes |
-| IK solvers: two-bone, multi-chain, spline IK | C M | M | L | |
-| FK / IK switching and blending | C M | M | M | |
-| Constraints: parent, point, orient, aim, scale, pole vector | C M | M | M | |
+| IK solvers: two-bone, multi-chain, spline IK | C M | P | L | Closed-form two-bone with a pole, FABRIK and CCD for longer chains (a pole turns the solved chain), solved in dependency order after the goal's own constraints; bone lengths kept (property tests); no spline IK, no joint limits, no stretch |
+| FK / IK switching and blending | C M | D | M | An IK constraint's weight blends from the joints' own rotations to the solved ones and is keyable (`constraint.<id>.weight`); Match FK to IK and Match IK to FK switch without a jump (tests) |
+| Constraints: parent, point, orient, aim, scale, pole vector | C M | D | M | Position, rotation, scale, as-child and look-at constraints with several weighted sources, kept offsets and a keyable weight; the pole is part of the IK constraint; evaluated in dependency order with cycles reported and skipped (tests); no per-axis skipping |
 | Blend shapes with in-betweens | C M Z | M | M | |
 | Corrective shapes driven by pose | C M | M | M | |
 | Control shapes and character sets | C M | M | M | |
@@ -494,7 +494,7 @@ Weight: 8
 | Animation layers | C M | P | M | Adding and replacing layers with weight and mute; keys go to the active layer and keying a pose solves for the layer's value; flatten to the base; no solo or lock, weights are not keyable, layers cannot be reordered |
 | Motion paths and ghosting | C M | P | M | Paths of selected moving objects in the viewport with a tick per frame and a mark per key, following animated parents; no ghosts, paths are not editable |
 | Viewport preview capture (playblast) | C M | M | S | |
-| Bake constraints and simulations to keys | C M | M | S | |
+| Bake constraints and simulations to keys | C M | P | S | Bake Constraints to Keys samples the solved transforms over a range into curves (angles kept continuous) and switches the constraints off, in one undo step; there are no simulations to bake |
 | Curve cleanup: Euler filter, simplify | C M | D | S | Smooth Rotation Keys removes whole-turn and flip jumps (property test: every rotation kept); simplify within a tolerance; bake to linear keys |
 | Follow a spline | C M | M | S | |
 | Audio in the timeline | C M | M | S | |
@@ -549,11 +549,11 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Embedded scripting language | C M Z | M | L | |
-| Object-model API over every command | C M Z | P | M | Every action is a serializable command; no language binds it |
+| Embedded scripting language | C M Z | P | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant ([scripting.md](scripting.md)); runs from `modelcraft-cli run-script`, no in-app way to run a script yet |
+| Object-model API over every command | C M Z | D | M | `cmd::<name>` for every registry command, scene queries, dependency graph, history-node evaluation, mesh handles, undo groups |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
-| Headless scene API (batch interpreter) | C M | P | S | `run` and `exec` take command files; no queries or control flow |
-| Machine control channel and MCP server | M | P | M | JSON lines on stdin/stdout; no socket or MCP server |
+| Headless scene API (batch interpreter) | C M | D | S | `modelcraft-cli run-script`: queries, control flow and commands over a project |
+| Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | M | M | |
 | User tools, shelves and recorded macros | C M Z | M | M | |
@@ -571,7 +571,7 @@ Weight: 6
 | GLB export | C M Z | D | S | Hierarchy, TRS, materials, UVs, normals; triangulated (glTF has no quads) |
 | OBJ import and export | C M Z | D | S | Quads kept |
 | STL export, STL and PLY import | C M Z | D | S | |
-| FBX import and export | C M Z | M | M | Read-only support exists in craft-mesh, not wired |
+| FBX import and export | C M Z | D | M | Import binary and ASCII 6.x/7.x through craft-mesh; export FBX 7.4 ASCII (meshes with quads, UVs, normals, material colour, hierarchy, TRS); round-trip tested |
 | USD: layers, references, variants, import and export | C M | M | XL | Later, with craft-usd |
 | Alembic caches: import and export | C M | M | L | |
 | File references and proxies | C M | M | L | |
@@ -579,7 +579,7 @@ Weight: 6
 | Live link with other apps (send and receive meshes) | C M Z | M | M | Planned with TextureCraft |
 | EXR and HDR images as textures and lighting | C M R | M | M | |
 | 3MF export for printing | C Z | M | S | |
-| Up-axis and unit conversion on import and export | C M Z | M | S | |
+| Up-axis and unit conversion on import and export | C M Z | D | S | FBX axes and unit read from the file; Y/Z up and metres/cm/mm/inches for any format (File ▸ Exchange Settings, `--up`, `--scale`) |
 | Native project, atomic saves | C M Z | D | S | `.modelcraft` ZIP |
 | Crash journal with exact replay | | X | S | Every command, sculpt strokes included |
 | Reading and writing the references' native files (.c4d, .ma/.mb, .ztl/.zpr) | C M Z | O | XL | Undocumented proprietary formats; the open exchange formats above cover interchange |
@@ -626,10 +626,11 @@ Weight: 3
 - Files: `crates/formats` (project round trip with blobs, corrupted-project proptest, GLB/OBJ/STL round trips, torn journal).
 - Engine: `crates/engine/src/tests.rs` (`journal_recovers_unsaved_work_after_a_crash`, `undo_memory_is_bounded`).
 - GPU: `crates/render/src/gpu.rs` `renders_a_quad_when_a_gpu_is_present` (renders and reads back).
-- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`), `crates/render/src/trace.rs` (`material_layers_uvs_and_linked_maps_reach_the_render`), `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/material_ui.rs`, the output tests `feature_images_describe_the_first_surface`, `z_curve_pixel_order_moves_error_to_high_frequencies`, `mis_compensation_lowers_the_noise_of_image_lighting`, `apps/modelcraft-cli/src/bench_cmd.rs`, the light tests `spot_sun_and_image_lighting_match_their_formulas`, `the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights`, `sky.rs` (`the_sky_is_blue_at_noon_and_red_at_sunset`), the material tests `layers_conserve_energy_and_glass_passes_light`, `fresnel_and_thin_film_follow_optics`, `glass_is_invisible_in_a_furnace_and_absorbs_by_distance`, `cutouts_textures_and_normal_maps_change_the_picture`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
+- Render engine: `crates/craft-render-bvh` (`matches_brute_force` proptest), `crates/craft-render-core/src/tests.rs` (`white_furnace_is_invisible`, `analytic_lights_match_their_formulas`, `area_light_matches_the_form_factor`, `the_three_estimators_agree_on_the_cornell_box`, `rendering_is_deterministic_progressive_and_cancellable`), `bsdf.rs` (`never_creates_energy` proptest), `crates/craft-render-gpu` (`gpu_matches_the_cpu_reference_on_the_cornell_box`, `gpu_matches_the_cpu_on_layered_materials_and_textures`, `gpu_matches_the_cpu_under_a_panorama`, `gpu_matches_the_cpu_with_the_light_tree_and_by_power`, `gpu_matches_the_cpu_on_cutouts_and_normal_maps`, `gpu_fills_the_feature_images_like_the_cpu`), `crates/render/src/trace.rs` (`material_layers_uvs_and_linked_maps_reach_the_render`), `apps/modelcraft-cli/src/render_cmd.rs`, `apps/modelcraft/src/material_ui.rs`, the output tests `feature_images_describe_the_first_surface`, `z_curve_pixel_order_moves_error_to_high_frequencies`, `mis_compensation_lowers_the_noise_of_image_lighting`, `apps/modelcraft-cli/src/bench_cmd.rs`, the light tests `spot_sun_and_image_lighting_match_their_formulas`, `the_light_tree_is_unbiased_and_beats_power_sampling_with_many_lights`, `sky.rs` (`the_sky_is_blue_at_noon_and_red_at_sunset`), the material tests `layers_conserve_energy_and_glass_passes_light`, `fresnel_and_thin_film_follow_optics`, `glass_is_invisible_in_a_furnace_and_absorbs_by_distance`, `cutouts_textures_and_normal_maps_change_the_picture`, `apps/modelcraft/src/render_view.rs` (two keyboard-driven kittest flows).
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
@@ -656,6 +657,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | IK and constraints: constraints and FK/IK blending done; IK solvers, baking constraints, expressions and driven keys partial |
 | 2026-11-17 | minor | Rigging: dual-quaternion skinning done; joints, linear-blend skinning and weight tools partial |
 | 2026-11-17 | minor | Animation tools: rotation cleanup done; animation layers, motion paths, point cache and turntable partial |
 | 2026-11-17 | minor | Animation core: keys on any attribute, timeline, auto-key done; Curve Editor, Key Sheet and curve cleanup partial |

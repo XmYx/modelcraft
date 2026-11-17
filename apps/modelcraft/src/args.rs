@@ -15,6 +15,8 @@ Options:
   --bench-viewport <FRAMES>  orbit around a 1M-polygon sculpt for FRAMES frames, print frame
                              times and quit
   --bench-polys <N>          polygon count for --bench-viewport (default 1000000)
+  --control                  let agents control this window over the loopback channel
+  --control-port <PORT>      the same, on exactly this port
   -h, --help                 print this help
   -V, --version              print the version
 ";
@@ -44,6 +46,8 @@ pub struct Cli {
     pub bench_frames: Option<u32>,
     pub bench_polys: Option<u32>,
     pub file: Option<PathBuf>,
+    /// Open the agent channel (`Some(None)`: the default port).
+    pub control: Option<Option<u16>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -89,6 +93,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Launch, String> {
                 })
             }
             "--quad" => cli.quad = true,
+            "--control" => cli.control = Some(cli.control.flatten()),
+            "--control-port" => cli.control = Some(Some(value("--control-port")?.parse().map_err(|_| "--control-port takes a port number")?)),
             "--screenshot" => cli.screenshot = Some(PathBuf::from(value("--screenshot")?)),
             "--bench-viewport" => cli.bench_frames = Some(value("--bench-viewport")?.parse().map_err(|_| "--bench-viewport takes a frame count")?),
             "--bench-polys" => cli.bench_polys = Some(value("--bench-polys")?.parse().map_err(|_| "--bench-polys takes a number")?),
@@ -117,5 +123,10 @@ mod tests {
         assert!(parse(["--nope".to_string()]).is_err());
         assert!(parse(["--demo".to_string()]).is_err());
         assert!(matches!(parse(["--help".to_string()]), Ok(Launch::Print(_))));
+        let Ok(Launch::Run(c)) = parse(["--control-port", "29000"].map(String::from)) else { panic!() };
+        assert_eq!(c.control, Some(Some(29000)));
+        let Ok(Launch::Run(c)) = parse(["--control".to_string()]) else { panic!() };
+        assert_eq!(c.control, Some(None));
+        assert!(parse(["--control-port", "x"].map(String::from)).is_err());
     }
 }

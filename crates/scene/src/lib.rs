@@ -5,8 +5,10 @@
 //!   history*: an ordered list of [`Step`]s (extrude, bevel, subdivide, sculpt layer…). Each step
 //!   can be edited, switched off or removed later; [`Scene::collapse`] bakes them into the source.
 //! - A **smooth cage** object is a generator: it shows its first mesh child subdivided.
+//! - A **clone generator** lays out instances of its first mesh child ([`Cloner`]).
 //! - A **deformer** object bends, twists… its parent mesh, in its own frame.
 //! - A **group** only carries a transform.
+//! - **Constraints** pose objects from other objects, in dependency order ([`constraint`]).
 //!
 //! The [`Evaluator`] is the dependency graph: it caches every step's output per object and
 //! re-evaluates only what an edit invalidated (each object has a revision counter; a generator's
@@ -16,6 +18,7 @@
 
 pub mod anim;
 pub mod attr;
+pub mod constraint;
 mod eval;
 pub mod pick;
 pub mod rig;
@@ -23,13 +26,14 @@ pub mod rig;
 use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
+pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 use serde::{Deserialize, Serialize};
 
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
-pub use eval::{Evaluated, Evaluator, StepError};
+pub use eval::{Evaluated, Evaluator, Instances, StepError};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
 pub const MAX_DEPTH: usize = 64;
@@ -289,6 +293,35 @@ pub enum StepOp {
     EvenRemesh {
         cell: f32,
     },
+    /// Flatten the surface into UVs: cut along `seams` (and along every edge sharper than
+    /// `angle` degrees), solve a least-squares conformal map per island and lay the islands out
+    /// in the unit square. Seams are vertex pairs and pins name a face corner, both in the
+    /// numbering of the step's input mesh.
+    Unwrap {
+        #[serde(default)]
+        seams: Vec<[u32; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<f32>,
+        #[serde(default)]
+        pins: Vec<UvPin>,
+        /// Add the cuts an island needs to be flattenable (a sphere gets a path, a tube a line).
+        #[serde(default = "yes")]
+        auto_cut: bool,
+        /// Margin around and between islands, as a fraction of the unit square.
+        #[serde(default = "default_margin")]
+        margin: f32,
+    },
+}
+
+/// A face corner held at a UV position while unwrapping.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UvPin {
+    pub corner: u32,
+    pub uv: [f32; 2],
+}
+
+fn default_margin() -> f32 {
+    0.01
 }
 
 impl StepOp {
@@ -314,6 +347,7 @@ impl StepOp {
             StepOp::Mirror { .. } => "Mirror",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
+            StepOp::Unwrap { .. } => "Unwrap UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -325,6 +359,7 @@ impl StepOp {
             | StepOp::Flip { faces }
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
+            StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }
@@ -367,6 +402,13 @@ pub enum ObjectKind {
     Skin {
         skin: Arc<rig::Skin>,
     },
+    /// Lays out clones of its first mesh child (or smooth cage child). The clones are instances of
+    /// that child's evaluated mesh; `target` is the object the surface and vertices layouts sit on.
+    Cloner {
+        cloner: Cloner,
+        #[serde(default)]
+        target: Option<ObjectId>,
+    },
 }
 
 impl ObjectKind {
@@ -378,6 +420,7 @@ impl ObjectKind {
             ObjectKind::Deformer { .. } => "Deformer",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
+            ObjectKind::Cloner { .. } => "Clone generator",
         }
     }
 }
@@ -434,6 +477,15 @@ pub struct Scene {
     /// Curves, the current frame and the time settings ([`anim`]).
     #[serde(default, skip_serializing_if = "Animation::is_default")]
     pub anim: Animation,
+    /// Constraints, IK, driven keys and expressions ([`constraint`]).
+    /// Boxed: a scene is moved around by value (history entries, snapshots).
+    #[serde(default, skip_serializing_if = "no_constraints")]
+    pub constraints: Box<constraint::Constraints>,
+}
+
+#[allow(clippy::borrowed_box)]
+fn no_constraints(c: &Box<constraint::Constraints>) -> bool {
+    c.is_empty()
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -483,6 +535,7 @@ impl Scene {
             o.rev = next_rev();
         }
         self.anim.repair(|id| ids.contains(&id));
+        self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
         Ok(self)
     }
@@ -569,6 +622,7 @@ impl Scene {
         self.bump_ancestors_of_removed(&out);
         for (_, o) in &out {
             self.anim.remove_object(o.id);
+            self.constraints.remove_object(o.id);
         }
         out
     }
@@ -673,9 +727,21 @@ impl Scene {
         m
     }
 
-    /// True if an ancestor is a smooth cage (the object is shown through it, not directly).
+    /// True if the object is the input of its parent generator (a smooth cage's mesh child, or
+    /// the source a clone generator clones) and so is shown through it, not directly. Other
+    /// children of a clone generator are ordinary objects and draw as they are.
     pub fn is_cage_input(&self, id: ObjectId) -> bool {
-        self.get(id).and_then(|o| o.parent).and_then(|p| self.get(p)).is_some_and(|p| matches!(p.kind, ObjectKind::SmoothCage { .. }))
+        let Some(parent) = self.get(id).and_then(|o| o.parent) else { return false };
+        match self.get(parent).map(|p| &p.kind) {
+            Some(ObjectKind::SmoothCage { .. }) => true,
+            Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            _ => false,
+        }
+    }
+
+    /// The input a generator shows: the first mesh or smooth cage child.
+    pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
+        self.children(id).into_iter().find(|c| self.get(*c).is_some_and(|o| matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })))
     }
 
     pub fn visible(&self, id: ObjectId) -> bool {

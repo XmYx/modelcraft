@@ -1,0 +1,1 @@
+| 2026-11-17 | Agent control: the control requests answered on a document (engine `control`), a token-authenticated loopback socket in the window (`--control`, Edit ▸ Allow Agents to Control ModelCraft) and in `modelcraft-cli serve`, `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
