@@ -57,7 +57,16 @@ pub struct Document {
     pub pending_recovery: usize,
     /// The frame the journal last recorded (scrubbing is journaled lazily, see `execute`).
     journal_frame: f64,
+    /// Store the undo history in saved files, so the next session can undo past the open.
+    pub keep_history: bool,
+    /// Largest history (in command bytes) a save stores; older steps are left out.
+    pub history_max_bytes: usize,
+    /// What happened to the stored history on open, for the status bar.
+    pub history_note: Option<String>,
 }
+
+/// Default bound on the history a save stores: 256 MiB of commands.
+pub const DEFAULT_HISTORY_MAX_BYTES: usize = 256 << 20;
 
 impl Default for Document {
     fn default() -> Self {
@@ -78,12 +87,17 @@ impl Document {
             replaying: false,
             pending_recovery: 0,
             journal_frame: 0.0,
+            keep_history: true,
+            history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
+            history_note: None,
         }
     }
 
     pub fn from_scene(scene: Scene) -> Self {
         let journal_frame = scene.anim.frame;
-        Document { scene, journal_frame, ..Self::new() }
+        let mut d = Document { scene, journal_frame, ..Self::new() };
+        d.undo.set_base(d.scene.clone());
+        d
     }
 
     /// Go to a frame and pose the scene there. Not an undo step and not a change to save; the
@@ -95,9 +109,35 @@ impl Document {
     /// Open a project. If a journal of unsaved work lies next to it, `pending_recovery` says how
     /// many commands it holds; call [`Document::recover`] to replay them or
     /// [`Document::discard_recovery`] to drop them.
+    ///
+    /// When the file stores an undo history, it is rebuilt by replaying its commands on the
+    /// stored base scene; if the replay does not reproduce the saved scene exactly, the history is
+    /// dropped, the saved scene opens as it is, and `history_note` says why.
     pub fn open(path: &Path) -> Result<Document, EngineError> {
-        let scene = project::open(path)?;
-        let mut d = Document::from_scene(scene);
+        let (scene, history) = project::open_with_history::<Command>(path)?;
+        let mut d = match history {
+            project::HistoryRead::None => Document::from_scene(scene),
+            project::HistoryRead::Dropped(why) => {
+                let mut d = Document::from_scene(scene);
+                d.history_note = Some(format!("The undo history in the file could not be read ({why}); it starts here."));
+                d
+            }
+            project::HistoryRead::Found(h) => {
+                let steps = h.done.len();
+                match Document::rebuilt(h, &scene) {
+                    Ok(d) => {
+                        let mut d = d;
+                        d.history_note = (steps > 0).then(|| format!("Restored {steps} undo steps from the last session."));
+                        d
+                    }
+                    Err(why) => {
+                        let mut d = Document::from_scene(scene);
+                        d.history_note = Some(format!("The undo history in the file was left out ({why}); it starts here."));
+                        d
+                    }
+                }
+            }
+        };
         d.path = Some(path.to_path_buf());
         let jp = journal::path_for(path);
         if jp.is_file() {
@@ -106,6 +146,35 @@ impl Document {
         if d.pending_recovery == 0 {
             d.journal = journal::Journal::create(&jp).ok();
         }
+        Ok(d)
+    }
+
+    /// Rebuild a document with its undo history: replay `done` and `undone` on the base, undo
+    /// the `undone` part, and check that the result is the `saved` scene.
+    fn rebuilt(h: project::History<Command>, saved: &Scene) -> Result<Document, String> {
+        let mut d = Document::from_scene(h.base);
+        d.replaying = true;
+        let redo = h.undone.len();
+        for (n, c) in h.done.into_iter().chain(h.undone).enumerate() {
+            if matches!(c, Command::Undo | Command::Redo | Command::EndSculpt) {
+                return Err(format!("step {} is not an edit", n + 1));
+            }
+            let label = c.label();
+            d.execute(c).map_err(|e| format!("step {} ({label}) failed: {e}", n + 1))?;
+        }
+        for _ in 0..redo {
+            d.undo_once();
+        }
+        d.sync_sculpt();
+        d.sculpt = None;
+        d.replaying = false;
+        d.dirty = false;
+        if !same_content(&d.scene, saved) {
+            return Err("replaying it does not give the saved scene".into());
+        }
+        // The saved scene is the truth; keep it (revisions included) with the rebuilt stack.
+        d.scene = saved.clone();
+        d.eval = Evaluator::new();
         Ok(d)
     }
 
@@ -164,9 +233,17 @@ impl Document {
     /// untitled document).
     pub fn checkpoint(&mut self, snapshot: &Path) -> Result<(), EngineError> {
         self.sync_sculpt();
-        project::save(&self.scene, snapshot)?;
+        project::save_with_history(&self.scene, self.stored_history().as_ref(), snapshot)?;
         self.journal = Some(journal::Journal::create(&journal::path_for(snapshot))?);
         Ok(())
+    }
+
+    /// The history a save stores, if any (see [`Document::keep_history`]).
+    fn stored_history(&self) -> Option<project::History<Command>> {
+        if !self.keep_history {
+            return None;
+        }
+        self.undo.persisted(self.history_max_bytes).map(|(base, done, undone)| project::History { base, done, undone })
     }
 
     pub fn save(&mut self) -> Result<(), EngineError> {
@@ -177,7 +254,7 @@ impl Document {
     /// Atomic save; the journal restarts empty next to the new file.
     pub fn save_as(&mut self, path: &Path) -> Result<(), EngineError> {
         self.sync_sculpt();
-        project::save(&self.scene, path)?;
+        project::save_with_history(&self.scene, self.stored_history().as_ref(), path)?;
         self.path = Some(path.to_path_buf());
         self.journal = journal::Journal::create(&journal::path_for(path)).ok();
         self.dirty = false;
@@ -327,7 +404,7 @@ impl Document {
             return;
         }
         let cmd = Command::SculptStroke { id, stroke };
-        self.undo.push(UndoEntry::Sculpt { label: cmd.label(), id, change });
+        self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
         self.log(&cmd);
         self.dirty = true;
     }
@@ -395,7 +472,7 @@ impl Document {
                 let change = s.mesh.replay(stroke);
                 s.unsynced = true;
                 if !change.is_empty() {
-                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), id: *id, change });
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
                 }
                 Outcome::default()
             }
@@ -410,7 +487,7 @@ impl Document {
                 };
                 s.unsynced = true;
                 if !change.is_empty() {
-                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), id: *id, change });
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
                 }
                 Outcome::default()
             }
@@ -452,7 +529,7 @@ impl Document {
                 }
                 let after = self.scene.clone();
                 let bytes = 512 + self.scene.len() * 300 + self.scene.anim.heap_bytes();
-                self.undo.push(UndoEntry::Scene { label: cmd.label(), before: Box::new(before), after: Box::new(after), bytes });
+                self.undo.push(UndoEntry::Scene { label: cmd.label(), cmd: Box::new(cmd.clone()), before: Box::new(before), after: Box::new(after), bytes });
                 self.check_session();
                 self.eval.retain(&self.scene);
                 Ok(out)
@@ -689,6 +766,7 @@ impl Document {
                 out.created.extend(ids);
             }
             Command::Anim(a) => crate::anim::apply(&mut self.scene, a, &mut out)?,
+            Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
             Command::Undo
             | Command::Redo
             | Command::BeginSculpt { .. }
@@ -713,11 +791,12 @@ impl Document {
         let mut items = Vec::new();
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
-            if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. }) || !self.scene.visible(id) {
+            if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. }) || !self.scene.visible(id) {
                 continue;
             }
             let mesh = match o.kind {
-                ObjectKind::Group => None,
+                // Joints export as empty nodes; a skinned mesh exports in its current pose.
+                ObjectKind::Group | ObjectKind::Joint { .. } => None,
                 _ => Some(self.eval.evaluate(&self.scene, id).mesh),
             };
             let parent = o.parent.and_then(|p| index.get(&p).copied());
@@ -800,6 +879,16 @@ fn title(kind: &str) -> String {
         Some(f) => f.to_uppercase().chain(c).collect(),
         None => s,
     }
+}
+
+/// Two scenes hold the same objects (revisions, which are cache keys, aside).
+fn same_content(a: &Scene, b: &Scene) -> bool {
+    a.len() == b.len()
+        && a.objects().iter().zip(b.objects()).all(|(x, y)| {
+            let mut x = x.clone();
+            x.rev = y.rev;
+            x == *y
+        })
 }
 
 trait RepairedOr {
