@@ -1,0 +1,1 @@
+| 2026-11-17 | Repository set up the suite way (from DeckCraft): CI gate with font pin and a Vulkan software driver, house rules, lockfile, packaging lint, release (staging-home guarded), FreeBSD, Windows ARM64, SonarCloud (guarded), Dependabot, CodeRabbit, nextest, Sonar, omastore manifest, SECURITY.md, contributors header, full packaging tree |
