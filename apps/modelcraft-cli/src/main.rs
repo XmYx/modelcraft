@@ -28,6 +28,8 @@ Commands:
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
   export <project> <out.glb|obj|stl>
+  export-uv <project> <out.svg|png> [--size N] [--object ID]
+                                    the UV layout of a mesh object as a picture
   convert <in> <out>                any readable file to .glb, .obj, .stl or .modelcraft
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
@@ -139,6 +141,12 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             save(&mut d, &flag(a, "-o").unwrap_or_else(|| project.to_string()))
         }
         "export" => save(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?),
+        "export-uv" => {
+            let mut d = load(arg(a, 0, "project")?)?;
+            let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
+            let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
+            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+        }
         "convert" => save(&mut load(arg(a, 0, "input")?)?, arg(a, 1, "output")?),
         "recover" => {
             let p = PathBuf::from(arg(a, 0, "project")?);

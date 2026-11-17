@@ -8,6 +8,7 @@
 //! - [`exchange`]: glTF 2.0 / GLB, OBJ, STL and PLY through the shared `craft-mesh` crate.
 //! - [`pointcache`]: baked vertex positions per frame (`.mcpc`).
 //! - [`blob`]: the bounded binary mesh encoding used inside projects.
+//! - [`uvlayout`]: a mesh's UV layout as SVG or PNG.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -16,6 +17,7 @@ pub mod exchange;
 pub mod journal;
 pub mod pointcache;
 pub mod project;
+pub mod uvlayout;
 
 /// Name and version written into files.
 pub const GENERATOR: &str = concat!("ModelCraft ", env!("CARGO_PKG_VERSION"));

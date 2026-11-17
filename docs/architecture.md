@@ -9,7 +9,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
 | L1 | `modelcraft-sculpt` | `SculptMesh` (flat arrays, CSR adjacency, BVH), brushes, falloff, stamps, symmetry, masks, dirty chunks, stroke undo and replay | mesh |
 | L2 | `modelcraft-scene` | Objects, hierarchy, transforms, materials, history steps, the `Evaluator` (dependency graph with per-step caches), picking | mesh, ops |
-| L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh | scene, craft-mesh, craft-zip, craft-atomic |
+| L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh, UV layout pictures (SVG, PNG) | scene, craft-mesh, craft-zip, craft-atomic |
 | L4 | `modelcraft-engine` | `Document`, `Command`, undo (memory-bounded), journaling, sculpt session, export | all above |
 | L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries | glam, rayon |
 | L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator, the progressive film | craft-render-bvh |

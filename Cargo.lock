@@ -2466,11 +2466,8 @@ dependencies = [
 name = "modelcraft-cli"
 version = "0.1.0"
 dependencies = [
-<<<<<<< HEAD
- "craft-exr",
-=======
  "craft-atomic",
->>>>>>> origin/main
+ "craft-exr",
  "craft-image-codecs",
  "glam",
  "modelcraft-engine",
@@ -2508,6 +2505,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "craft-atomic",
+ "craft-image-codecs",
  "craft-mesh",
  "craft-zip",
  "glam",

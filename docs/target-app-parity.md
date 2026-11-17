@@ -21,8 +21,8 @@ never estimated by hand.
 <!-- parity:start -->
 | | Value | Kind |
 |---|---|---|
-| In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 73 / 7 / 39 / 211 | counted |
+| In-scope feature rows | 331 | counted |
+| Done / exceeds / partial / missing | 73 / 7 / 40 / 211 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
 | **Row parity**, (D + X + ½·P) / rows | **30.2 %** | counted |
 | **Weighted parity**, area weights × size-weighted rows | **21.2 %** | counted |
@@ -39,7 +39,7 @@ never estimated by hand.
 | Subdivision surfaces | 2 (2 %) | 6 | 3 | 0 | 0 | 3 | 0 | 50 % | 36 % |
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
-| UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
+| UVs | 4 (3 %) | 11 | 0 | 0 | 2 | 9 | 0 | 9 % | 5 % |
 | Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 8 | 1 | 4 | 9 | 0 | 50 % | 36 % |
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 2 | 0 | 2 | 5 | 0 | 33 % | 35 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
@@ -324,6 +324,7 @@ Weight: 4
 | Checker display, texel density, distortion heat map | C M Z | M | S | |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
+| UV layout export as an image | C M Z | P | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines, from the engine and `modelcraft-cli export-uv`; no menu entry yet. UVs round-trip exactly through GLB and OBJ (tested) |
 
 ## Sculpting: brushes, strokes and masks
 

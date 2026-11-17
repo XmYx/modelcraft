@@ -381,3 +381,27 @@ fn strokes_and_presets_keep_their_json_form() {
         assert!(d.undo.len() >= 3, "{} changed nothing", p.name);
     }
 }
+
+#[test]
+fn uv_layout_exports_as_svg_and_png() {
+    let dir = tmp("uvlayout");
+    let mut d = Document::new();
+    assert!(d.export_uv_layout(&dir.join("a.svg"), None, 256).is_err(), "nothing to draw yet");
+    let cube = add(&mut d, "cube");
+    let svg = dir.join("cube.svg");
+    d.export_uv_layout(&svg, None, 256).unwrap();
+    let text = std::fs::read_to_string(&svg).unwrap();
+    assert_eq!(text.lines().filter(|l| l.starts_with("<path")).count(), 6);
+    let png = dir.join("cube.png");
+    d.export_uv_layout(&png, Some(cube), 128).unwrap();
+    assert_eq!(&std::fs::read(&png).unwrap()[..4], b"\x89PNG");
+    // Wrong extension, missing object.
+    assert!(d.export_uv_layout(&dir.join("cube.jpg"), None, 128).is_err());
+    assert!(d.export_uv_layout(&svg, Some(ObjectId(99)), 128).is_err());
+    // A mesh without UVs (a plain triangle imported from OBJ) has no layout.
+    let obj = dir.join("tri.obj");
+    std::fs::write(&obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+    let mut e = Document::new();
+    e.execute(Command::Import { path: obj.display().to_string() }).unwrap();
+    assert!(e.export_uv_layout(&dir.join("t.svg"), None, 64).is_err());
+}
