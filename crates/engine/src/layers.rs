@@ -163,7 +163,9 @@ impl Document {
         if let ObjectKind::Mesh { steps, .. } = &mut self.scene.edit(id)?.kind
             && let Some(Step { op: StepOp::Sculpt { layer }, .. }) = steps.last_mut()
         {
-            return f(layer, &input);
+            // A layer changed by live detail sculpts its own triangles, not the step's input.
+            let base = layer.topology.clone().unwrap_or(input);
+            return f(layer, &base);
         }
         invalid("the object has no sculpt layer")
     }

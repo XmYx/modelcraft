@@ -12,6 +12,7 @@
 pub mod brush;
 mod bvh;
 pub mod detail;
+pub mod live;
 
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
@@ -29,17 +30,52 @@ pub struct SculptMesh {
     pub mask: Vec<f32>,
     tris: Vec<[u32; 3]>,
     tri_patch: Vec<u32>,
-    nbr_start: Vec<u32>,
-    nbr: Vec<u32>,
-    vtri_start: Vec<u32>,
-    vtri: Vec<u32>,
+    adj: Adj,
     bvh: Bvh,
+    /// Live-detail strokes applied minus undone since the session began.
+    topo_edits: i64,
+    /// Counts every change of the triangles (strokes, undo, redo).
+    topo_rev: u64,
     /// Largest distance any vertex moved since the BVH was last refitted.
     drift: f32,
     dirty_chunks: Vec<bool>,
     stamp: Vec<u32>,
     stamp_gen: u32,
     stroke: Option<StrokeState>,
+}
+
+/// Who is next to whom: packed lists while the triangles are fixed, growable ones once live
+/// detail starts changing them.
+pub(crate) enum Adj {
+    Csr { nbr_start: Vec<u32>, nbr: Vec<u32>, vtri_start: Vec<u32>, vtri: Vec<u32> },
+    Lists { nbr: Vec<Vec<u32>>, vtri: Vec<Vec<u32>> },
+}
+
+fn span<'a>(start: &[u32], data: &'a [u32], v: u32) -> &'a [u32] {
+    let a = start.get(v as usize).copied().unwrap_or(0) as usize;
+    let b = start.get(v as usize + 1).copied().unwrap_or(0) as usize;
+    data.get(a..b).unwrap_or_default()
+}
+
+impl Adj {
+    fn neighbors(&self, v: u32) -> &[u32] {
+        match self {
+            Adj::Csr { nbr_start, nbr, .. } => span(nbr_start, nbr, v),
+            Adj::Lists { nbr, .. } => nbr.get(v as usize).map(Vec::as_slice).unwrap_or_default(),
+        }
+    }
+    fn vertex_tris(&self, v: u32) -> &[u32] {
+        match self {
+            Adj::Csr { vtri_start, vtri, .. } => span(vtri_start, vtri, v),
+            Adj::Lists { vtri, .. } => vtri.get(v as usize).map(Vec::as_slice).unwrap_or_default(),
+        }
+    }
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Adj::Csr { nbr_start, nbr, vtri_start, vtri } => (nbr_start.len() + nbr.len() + vtri_start.len() + vtri.len()) * 4,
+            Adj::Lists { nbr, vtri } => nbr.iter().chain(vtri).map(|l| 24 + l.capacity() * 4).sum(),
+        }
+    }
 }
 
 /// What a finished stroke changed, for undo/redo.
@@ -50,14 +86,17 @@ pub struct StrokeUndo {
     pub after: Vec<Vec3>,
     pub mask_before: Vec<f32>,
     pub mask_after: Vec<f32>,
+    /// Triangles and vertices added by live detail (applied before the values above on redo,
+    /// after them on undo).
+    pub topo: Option<Box<live::TopoChange>>,
 }
 
 impl StrokeUndo {
     pub fn heap_bytes(&self) -> usize {
-        self.indices.len() * (4 + 24 + 8)
+        self.indices.len() * (4 + 24 + 8) + self.topo.as_ref().map(|t| t.heap_bytes()).unwrap_or(0)
     }
     pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
+        self.indices.is_empty() && self.topo.is_none()
     }
 }
 
@@ -68,6 +107,8 @@ struct StrokeState {
     /// Vertices captured by a grab brush at the first dab, with their weights, per symmetry pass.
     grabbed: Vec<Vec<(u32, f32)>>,
     dabs: Vec<Dab>,
+    /// Set once live detail has split something in this stroke.
+    topo: Option<live::TopoStart>,
 }
 
 fn csr(n: usize, lists: impl Iterator<Item = (u32, u32)>) -> (Vec<u32>, Vec<u32>) {
@@ -115,11 +156,10 @@ impl SculptMesh {
             mask,
             tris,
             tri_patch,
-            nbr_start,
-            nbr,
-            vtri_start,
-            vtri,
+            adj: Adj::Csr { nbr_start, nbr, vtri_start, vtri },
             bvh,
+            topo_edits: 0,
+            topo_rev: 0,
             drift: 0.0,
             dirty_chunks: vec![true; n.div_ceil(CHUNK)],
             stamp: vec![0; n],
@@ -140,18 +180,14 @@ impl SculptMesh {
         self.tris.len()
     }
     pub fn neighbors(&self, v: u32) -> &[u32] {
-        let a = self.nbr_start.get(v as usize).copied().unwrap_or(0) as usize;
-        let b = self.nbr_start.get(v as usize + 1).copied().unwrap_or(0) as usize;
-        self.nbr.get(a..b).unwrap_or_default()
+        self.adj.neighbors(v)
     }
     fn vertex_tris(&self, v: u32) -> &[u32] {
-        let a = self.vtri_start.get(v as usize).copied().unwrap_or(0) as usize;
-        let b = self.vtri_start.get(v as usize + 1).copied().unwrap_or(0) as usize;
-        self.vtri.get(a..b).unwrap_or_default()
+        self.adj.vertex_tris(v)
     }
 
     pub fn heap_bytes(&self) -> usize {
-        self.positions.len() * (12 + 12 + 4 + 4) + self.tris.len() * (12 + 4) + self.nbr.len() * 4 + self.vtri.len() * 4 + self.bvh.heap_bytes()
+        self.positions.len() * (12 + 12 + 4 + 4) + self.tris.len() * (12 + 4) + self.adj.heap_bytes() + self.bvh.heap_bytes()
     }
 
     fn tri_normal(&self, t: u32) -> Vec3 {
@@ -188,9 +224,7 @@ impl SculptMesh {
         let gen_ = self.stamp_gen;
         let mut ring = Vec::with_capacity(verts.len() * 2);
         for v in verts {
-            let a = self.vtri_start.get(*v as usize).copied().unwrap_or(0) as usize;
-            let b = self.vtri_start.get(*v as usize + 1).copied().unwrap_or(0) as usize;
-            for t in self.vtri.get(a..b).unwrap_or_default() {
+            for t in self.adj.vertex_tris(*v) {
                 if let Some(tri) = self.tris.get(*t as usize) {
                     for w in tri {
                         if let Some(s) = self.stamp.get_mut(*w as usize)
@@ -311,7 +345,7 @@ impl SculptMesh {
 
     /// Start a stroke with these brush settings.
     pub fn begin_stroke(&mut self, brush: BrushSettings) {
-        self.stroke = Some(StrokeState { brush, original: Default::default(), grabbed: Vec::new(), dabs: Vec::new() });
+        self.stroke = Some(StrokeState { brush, original: Default::default(), grabbed: Vec::new(), dabs: Vec::new(), topo: None });
     }
 
     /// Apply one dab of the current stroke (does nothing outside a stroke).
@@ -327,10 +361,20 @@ impl SculptMesh {
     /// Finish the stroke: refit, return the undo record and the replayable stroke.
     pub fn end_stroke(&mut self) -> Option<(StrokeUndo, Stroke)> {
         let st = self.stroke.take()?;
-        self.refit();
-        let mut idx: Vec<u32> = st.original.keys().copied().collect();
-        idx.sort_unstable();
         let mut u = StrokeUndo::default();
+        let old_verts = st.topo.as_ref().map(|t| t.verts).unwrap_or(usize::MAX);
+        if let Some(change) = st.topo.as_ref().and_then(|t| self.topo_change(t)) {
+            // The triangles changed: the picking tree is rebuilt rather than refitted.
+            self.topo_edits += 1;
+            self.topo_rev += 1;
+            self.bvh = Bvh::build(&self.positions, &self.tris);
+            self.drift = 0.0;
+            u.topo = Some(Box::new(change));
+        } else {
+            self.refit();
+        }
+        let mut idx: Vec<u32> = st.original.keys().copied().filter(|i| (*i as usize) < old_verts).collect();
+        idx.sort_unstable();
         for i in idx {
             let (p0, m0) = st.original.get(&i).copied().unwrap_or_default();
             let (p1, m1) = (self.positions.get(i as usize).copied().unwrap_or(p0), self.mask.get(i as usize).copied().unwrap_or(m0));
@@ -357,6 +401,11 @@ impl SculptMesh {
 
     /// Put the `before` (undo) or `after` (redo) values back.
     pub fn apply_undo(&mut self, u: &StrokeUndo, redo: bool) {
+        if let Some(t) = &u.topo
+            && !self.apply_topo(t, redo)
+        {
+            return;
+        }
         let (pos, mask) = if redo { (&u.after, &u.mask_after) } else { (&u.before, &u.mask_before) };
         for (k, i) in u.indices.iter().enumerate() {
             if let (Some(dst), Some(src)) = (self.positions.get_mut(*i as usize), pos.get(k)) {
