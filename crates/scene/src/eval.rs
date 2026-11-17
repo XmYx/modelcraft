@@ -200,6 +200,13 @@ impl Evaluator {
         let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
         let mut m = (*inner.mesh).clone();
         m.map_positions(|_, p| local.transform_point3(p));
+        // A mirroring transform (a negative scale) turns the faces inside out; put them back.
+        if local.determinant() < 0.0 {
+            let all: Vec<u32> = (0..m.face_count() as u32).collect();
+            if let Ok(flipped) = edit::flip_faces(&m, &all) {
+                m = flipped;
+            }
+        }
         self.runs += 1;
         let mut errors = inner.errors;
         match op(&m) {

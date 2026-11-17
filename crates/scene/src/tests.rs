@@ -158,3 +158,19 @@ fn array_and_symmetry_generators_join_and_mirror_their_input() {
     assert_eq!(back.get(arr).unwrap().kind, s.get(arr).unwrap().kind);
     assert_eq!(back.get(sym).unwrap().kind, s.get(sym).unwrap().kind);
 }
+
+#[test]
+fn a_mirrored_generator_input_keeps_its_faces_outward() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let arr = s.add("Array", ObjectKind::Array { array: Array::default_of("linear").unwrap() }, None).unwrap();
+    let cube = s.add("Cube", cube_kind(), Some(arr)).unwrap();
+    s.edit(cube).unwrap().transform.scale = Vec3::new(-1.0, 1.0, 1.0);
+    let m = ev.evaluate(&s, arr).mesh;
+    assert_eq!(m.face_count(), 24);
+    for f in 0..m.face_count() as u32 {
+        // Each copy is a convex cube whose six faces come in a row: faces point away from its own centre.
+        let centre = Vec3::new((f / 6) as f32 * 1.5, 0.0, 0.0);
+        assert!(m.face_normal(f).dot(m.face_center(f) - centre) > 0.0, "face {f} points inwards");
+    }
+}
