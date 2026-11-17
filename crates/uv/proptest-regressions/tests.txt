@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1514def1c0b5ebe750af4a32084f75863cbc16c83f4485aab799eaf48e068e9d # shrinks to n = 2, seed = 0, amp = 0.0
+cc cae9039682b514e1a0b59253c594a17429096f5ab3074cffa5d9c2917385a23e # shrinks to marks = []
+cc 0ac06da7e5f6f1f21c9186f6d6a803d70ed81d27e835243a8f31a536408cceda # shrinks to pts = [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, -0.46645877), (0.0, 0.5948153, 0.0)], faces = [[0, 6, 7]], angle = None

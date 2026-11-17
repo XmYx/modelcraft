@@ -31,6 +31,7 @@ pub use modelcraft_mesh as mesh;
 pub use modelcraft_ops as ops;
 pub use modelcraft_scene as scene;
 pub use modelcraft_sculpt as sculpt;
+pub use modelcraft_uv as uv;
 
 #[cfg(test)]
 mod anim_tests;
