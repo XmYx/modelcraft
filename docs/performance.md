@@ -100,7 +100,7 @@ symmetry on.
 
 So a dab plus its upload stays under 10 ms for the common brushes at 12.6 M triangles in the
 engine. The app window was not measured at this size, 20 M was not measured at all, and a session
-takes several seconds to start: that is why the parity row stays Partial.
+takes several seconds to start: that is why the parity row for 20 M+ polygons stays Missing.
 
 The end of a stroke now refits only the leaves of the picking tree that hold moved triangles
 (and the boxes above them). At 2 M triangles a stroke end takes 2.3–7.3 ms where the full refit
