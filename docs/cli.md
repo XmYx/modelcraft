@@ -11,6 +11,9 @@ modelcraft-cli export scene.modelcraft out.glb
 modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
+modelcraft-cli bake scene.modelcraft Cube out.mcpc --start 0 --end 48 --step 1 --world
+                                              # an object's vertices per frame (point cache)
+modelcraft-cli cache-info out.mcpc            # a point cache's header and bounds
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 ```
@@ -51,6 +54,7 @@ Object ids are numbers (`info` prints them).
 ### Animation
 
 One command, `anim`, with the operation in `op`: `{"cmd":"anim","op":"set_key",…}`.
+Key operations work in the active layer.
 Time is in frames. A key is named by its object, attribute path and frame: `{id, path, frame}`.
 Attribute paths: `translate.x|y|z`, `rotate.x|y|z` (XYZ Euler degrees), `scale.x|y|z`, `visible`,
 `material.metallic`, `material.roughness`, `material.base_color.0`…`3`, `primitive.<parameter>`,
@@ -70,6 +74,12 @@ names (`levels`, `deformer.angle`, …). Whole-number attributes round; switches
 | `remove_track` | `id`, `path?` (every curve of the object without it) |
 | `bake_track` | `id`, `path`, `start?`, `end?` (the playback range), `step` (default 1) |
 | `simplify_track` | `id`, `path`, `tolerance` |
+| `euler_filter` | `ids`: rewrite keyed rotations as the equal angles nearest to the key before |
+| `turntable` | `ids`, `axis` (x, y, z; default y), `turns` (default 1), `start?`, `end?`; replaces the rotation curves |
+| `add_layer` | `name?`, `mode?` (add, override); the new layer becomes active |
+| `remove_layer`, `set_active_layer` | `layer` (0 is the base layer) |
+| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?` |
+| `flatten_layers` | `step` (default 1): bake every layer into the base curves |
 | `set_time` | `frame` (poses the scene; not an undo step) |
 | `set_time_range` | `start?`, `end?`, `fps?` |
 | `set_auto_key` | `on` |

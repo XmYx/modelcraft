@@ -1,0 +1,1 @@
+| 2026-11-17 | Animation tools: animation layers (adding and replacing, weight, mute, flatten), motion paths in the viewport, Smooth Rotation Keys (Euler filter), Turntable, point-cache baking with `modelcraft-cli bake` and the `.mcpc` format; keying one rotation angle keys all three so poses never flip |

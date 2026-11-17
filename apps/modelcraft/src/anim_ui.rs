@@ -63,6 +63,8 @@ pub struct AnimUi {
     pub focus_key: Option<KeyRef>,
     /// The scene had curves in the last frame (the panel opens when the first one appears).
     pub had_curves: bool,
+    /// Draw the path of the selected moving objects in the viewport.
+    pub show_paths: bool,
 }
 
 impl Default for AnimUi {
@@ -84,6 +86,7 @@ impl Default for AnimUi {
             handle_drag: None,
             focus_key: None,
             had_curves: false,
+            show_paths: true,
         }
     }
 }
@@ -103,10 +106,13 @@ pub enum AnimAction {
     FirstFrame,
     LastFrame,
     DeleteKeys,
+    MotionPaths,
+    EulerFilter,
+    Turntable,
 }
 
 impl AnimAction {
-    pub const ALL: [AnimAction; 11] = [
+    pub const ALL: [AnimAction; 14] = [
         AnimAction::TogglePanel,
         AnimAction::PlayPause,
         AnimAction::KeyTransform,
@@ -118,6 +124,9 @@ impl AnimAction {
         AnimAction::FirstFrame,
         AnimAction::LastFrame,
         AnimAction::DeleteKeys,
+        AnimAction::MotionPaths,
+        AnimAction::EulerFilter,
+        AnimAction::Turntable,
     ];
 
     pub fn label(self) -> String {
@@ -133,6 +142,9 @@ impl AnimAction {
             AnimAction::FirstFrame => tl!("Go to Start"),
             AnimAction::LastFrame => tl!("Go to End"),
             AnimAction::DeleteKeys => tl!("Delete Selected Keys"),
+            AnimAction::MotionPaths => tl!("Show Motion Paths"),
+            AnimAction::EulerFilter => tl!("Smooth Rotation Keys"),
+            AnimAction::Turntable => tl!("Turntable"),
         }
     }
 
@@ -149,6 +161,9 @@ impl AnimAction {
             AnimAction::FirstFrame => "anim.first_frame",
             AnimAction::LastFrame => "anim.last_frame",
             AnimAction::DeleteKeys => "anim.delete_keys",
+            AnimAction::MotionPaths => "anim.motion_paths",
+            AnimAction::EulerFilter => "anim.euler_filter",
+            AnimAction::Turntable => "anim.turntable",
         }
     }
 
@@ -164,7 +179,7 @@ impl AnimAction {
             AnimAction::PrevKey => "Model: Alt+Comma",
             AnimAction::FirstFrame => "Model: Shift+Comma",
             AnimAction::LastFrame => "Model: Shift+Period",
-            AnimAction::DeleteKeys => return None,
+            AnimAction::DeleteKeys | AnimAction::MotionPaths | AnimAction::EulerFilter | AnimAction::Turntable => return None,
         })
     }
 }
@@ -250,6 +265,25 @@ pub fn act(app: &mut ModelApp, a: AnimAction) {
         AnimAction::DeleteKeys => {
             delete_selected(app);
         }
+        AnimAction::MotionPaths => {
+            app.anim.show_paths = !app.anim.show_paths;
+            app.status = if app.anim.show_paths { tl!("Motion paths shown for selected objects") } else { tl!("Motion paths hidden") };
+        }
+        AnimAction::EulerFilter | AnimAction::Turntable => {
+            if app.selection.is_empty() {
+                app.status = tl!("Select an object first");
+                return;
+            }
+            let ids = app.selection.clone();
+            let cmd = if a == AnimAction::EulerFilter {
+                AnimCommand::EulerFilter { ids }
+            } else {
+                AnimCommand::Turntable { ids, axis: "y".into(), turns: 1.0, start: None, end: None }
+            };
+            if app.run(Command::Anim(cmd)) && a == AnimAction::Turntable {
+                app.status = tl!("Turntable: one turn about Y over the range, repeating");
+            }
+        }
     }
 }
 
@@ -296,6 +330,51 @@ pub fn tick(app: &mut ModelApp, ctx: &egui::Context) {
         app.doc.set_frame(next);
     }
     ctx.request_repaint();
+}
+
+// ---------------------------------------------------------------- motion paths
+
+/// World-space line segments (pairs of points with a colour) for the motion paths of the
+/// selected objects that move: the path over the playback range, a tick at every whole frame, a
+/// larger mark at every key and a cross at the current frame. Empty when paths are off.
+pub fn path_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
+    let mut out = Vec::new();
+    if !app.anim.show_paths {
+        return out;
+    }
+    let scene = &app.doc.scene;
+    let time = scene.anim.time;
+    let path_color = [0.91, 0.54, 0.24, 0.95];
+    let tick_color = [0.87, 0.87, 0.89, 0.9];
+    for id in app.selection.iter().copied().filter(|id| scene.moves(*id)).take(16) {
+        let step = (time.span() / 1000.0).max(0.25);
+        let path = scene.motion_path(id, time.start, time.end, step);
+        let reach = path.iter().fold(0.0f32, |m, (_, p)| m.max((*p - path.first().map_or(*p, |f| f.1)).length()));
+        let size = (reach * 0.012).clamp(0.01, 0.2);
+        for w in path.windows(2) {
+            if let [(_, a), (_, b)] = w {
+                out.push((a.to_array(), b.to_array(), path_color));
+            }
+        }
+        let mut cross = |frame: f64, s: f32, color: [f32; 4]| {
+            let p = scene.world_matrix_at(id, frame).transform_point3(glam::Vec3::ZERO);
+            for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
+                out.push(((p - axis * s).to_array(), (p + axis * s).to_array(), color));
+            }
+        };
+        // Whole frames show the timing: ticks crowd where the object is slow.
+        let frames = time.span().floor() as usize;
+        if frames <= 2000 {
+            for i in 0..=frames {
+                cross(time.start.ceil() + i as f64, size, tick_color);
+            }
+        }
+        for t in scene.anim.key_times(&[id]).into_iter().filter(|t| *t >= time.start && *t <= time.end).take(2000) {
+            cross(t, size * 2.5, tick_color);
+        }
+        cross(scene.anim.frame, size * 4.0, [1.0, 1.0, 1.0, 1.0]);
+    }
+    out
 }
 
 // ---------------------------------------------------------------- panel
@@ -416,12 +495,16 @@ fn transport(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         attribute_keying(app, ui);
         ui.separator();
+        layer_controls(app, ui);
+        ui.separator();
         for (v, label) in [(AnimView::Sheet, tl!("Key Sheet")), (AnimView::Curves, tl!("Curve Editor"))] {
             if ui.add(egui::Button::selectable(app.anim.view == v, label)).clicked() {
                 app.anim.view = v;
             }
         }
         ui.checkbox(&mut app.anim.all_objects, tl!("All Objects"));
+        ui.checkbox(&mut app.anim.show_paths, tl!("Motion Paths"))
+            .on_hover_text(tl!("Draw the path of selected moving objects in the viewport, with a tick per frame"));
         if ui.button(tl!("Zoom In")).clicked() {
             zoom_by(app, 0.5);
         }
@@ -455,6 +538,55 @@ fn attribute_keying(app: &mut ModelApp, ui: &mut egui::Ui) {
         if app.run(Command::Anim(AnimCommand::SetKey { id, path, frame: Some(frame), value: None })) {
             app.status = crate::tlf!("{attribute} keyed at frame {frame}", attribute = label, frame = frame_text(frame));
         }
+    }
+}
+
+/// Animation layers: which layer keys go to, and the active layer's weight, mute and mode.
+fn layer_controls(app: &mut ModelApp, ui: &mut egui::Ui) {
+    use modelcraft_engine::scene::{BASE_LAYER, LayerMode};
+    let anim = &app.doc.scene.anim;
+    let active = anim.active_layer();
+    let layers: Vec<(u32, String)> = std::iter::once((BASE_LAYER, tl!("Base layer"))).chain(anim.layers().iter().map(|l| (l.id, l.name.clone()))).collect();
+    let current = layers.iter().find(|(id, _)| *id == active).map(|(_, n)| n.clone()).unwrap_or_default();
+    let mut pick = active;
+    let combo = egui::ComboBox::from_id_salt("anim-layer").selected_text(current).show_ui(ui, |ui| {
+        for (id, name) in &layers {
+            ui.selectable_value(&mut pick, *id, name);
+        }
+    });
+    set_name(ui, &combo.response, tl!("Animation layer"));
+    if pick != active && app.run(Command::Anim(AnimCommand::SetActiveLayer { layer: pick })) {
+        app.anim.selected.clear();
+    }
+    if ui.button(tl!("Add Layer")).on_hover_text(tl!("A new layer whose keys are added to the animation below")).clicked() {
+        app.run(Command::Anim(AnimCommand::AddLayer { name: None, mode: LayerMode::Add }));
+        app.anim.selected.clear();
+    }
+    let Some(layer) = app.doc.scene.anim.layer(active).cloned() else { return };
+    ui.label(tl!("Layer weight"));
+    if let Some(w) = number(ui, tl!("Layer weight"), layer.weight, 0.01, Some((0.0, 1.0)), 3) {
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: Some(w), mute: None, mode: None }));
+    }
+    let mut mute = layer.mute;
+    if ui.checkbox(&mut mute, tl!("Mute Layer")).changed() {
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: Some(mute), mode: None }));
+    }
+    let mut replace = layer.mode == LayerMode::Override;
+    if ui
+        .checkbox(&mut replace, tl!("Layer Replaces"))
+        .on_hover_text(tl!("On: the layer's curves replace the animation below. Off: they are added to it."))
+        .changed()
+    {
+        let mode = if replace { LayerMode::Override } else { LayerMode::Add };
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: None, mode: Some(mode) }));
+    }
+    if ui.button(tl!("Remove Layer")).clicked() {
+        app.run(Command::Anim(AnimCommand::RemoveLayer { layer: active }));
+        app.anim.selected.clear();
+    }
+    if ui.button(tl!("Flatten Layers")).on_hover_text(tl!("Bake every layer into the base curves and remove the layers")).clicked() {
+        app.run(Command::Anim(AnimCommand::FlattenLayers { step: 1.0 }));
+        app.anim.selected.clear();
     }
 }
 
@@ -640,12 +772,13 @@ impl Row {
 
 fn rows(app: &ModelApp) -> Vec<Row> {
     let ids = shown_objects(app);
+    let layer = app.doc.scene.anim.active_layer();
     app.doc
         .scene
         .anim
         .tracks()
         .iter()
-        .filter(|t| ids.is_empty() || ids.contains(&t.target))
+        .filter(|t| t.layer == layer && (ids.is_empty() || ids.contains(&t.target)))
         .take(MAX_ROWS)
         .map(|t| Row { id: t.target, name: object_name(app, t.target), path: t.path.clone(), curve: t.curve.clone() })
         .collect()
@@ -987,8 +1120,11 @@ fn paint_key(p: &egui::Painter, c: Pos2, selected: bool, focused: bool, interp: 
 // ---------------------------------------------------------------- key sheet
 
 fn empty_hint(app: &ModelApp, ui: &mut egui::Ui) {
-    let text = if app.doc.scene.anim.is_empty() {
+    let anim = &app.doc.scene.anim;
+    let text = if anim.is_empty() {
         tl!("No animation yet. Select an object and press Key Transform, or turn on Auto-Key and move something.")
+    } else if !anim.tracks().iter().any(|t| t.layer == anim.active_layer()) {
+        tl!("This layer has no keys yet. Keys you set now go to this layer and adjust the animation below it.")
     } else {
         tl!("The selected objects have no curves. Select an animated object or tick All Objects.")
     };

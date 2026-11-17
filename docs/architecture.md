@@ -41,6 +41,8 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   bumps the revision only of objects whose values changed, so the evaluator re-runs exactly what
   the frame touched. Going to a frame is not an undo step and is journaled lazily (before the next
   command). Auto-key compares the scene before and after a command and keys what changed.
+  Tracks live in layers: the base, then layers that add to or replace the value below by a weight
+  (`Animation::value_at`); key commands work in the active layer.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.
