@@ -1,0 +1,1 @@
+- The graphics-card renderer now handles every material, texture and lighting setup the processor renderer does (glass, coats, fuzz, thin films, image lighting, cut-outs), so renders no longer drop back to the slower path, and scenes with many lamps render with far less noise on the graphics card.
