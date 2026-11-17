@@ -41,6 +41,31 @@ pub fn ray_triangle(r: &Ray, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     (t > 0.0 && t.is_finite()).then_some(t)
 }
 
+/// Slab test: does the ray (in units of `dir`, forwards only) cross the box `lo..hi`?
+pub fn ray_aabb(r: &Ray, lo: Vec3, hi: Vec3) -> bool {
+    let mut t0 = 0.0f32;
+    let mut t1 = f32::INFINITY;
+    for k in 0..3 {
+        let (o, d, a, b) = (r.origin[k], r.dir[k], lo[k], hi[k]);
+        if d.abs() < 1e-12 {
+            if o < a || o > b {
+                return false;
+            }
+        } else {
+            let (mut n, mut f) = ((a - o) / d, (b - o) / d);
+            if n > f {
+                std::mem::swap(&mut n, &mut f);
+            }
+            t0 = t0.max(n);
+            t1 = t1.min(f);
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub t: f32,

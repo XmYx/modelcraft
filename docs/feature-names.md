@@ -48,6 +48,9 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
+| Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
+| Clone modifiers (planned) | effectors | "Effector" is the reference's term, so it is not used | Use |
+| Falloff fields (planned) | fields | Generic geometry words | Use |
 
 Names deliberately **not** used as labels: the reference products' names and their branded features
 (their remesher, sculpt-mesh, layer and brush product names, object/attribute manager names,

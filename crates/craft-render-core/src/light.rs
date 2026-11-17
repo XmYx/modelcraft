@@ -68,7 +68,7 @@ pub enum LightSampling {
     /// By the light tree: nearby and bright lights are preferred at every shading point.
     #[default]
     Tree,
-    /// By power alone, the same everywhere (what the GPU path does).
+    /// By power alone, the same everywhere.
     Power,
 }
 
@@ -138,6 +138,12 @@ impl EnvMap {
         }
         let turn = if rotation.is_finite() { (rotation / (2.0 * PI)).rem_euclid(1.0) } else { 0.0 };
         Some(EnvMap { image, turn, conditional, marginal, mean_luminance: (total / weight) as f32 })
+    }
+
+    /// The sampling tables, for an implementation that samples the image elsewhere (a GPU):
+    /// the running sum over rows, then one running sum of `width` entries per row.
+    pub fn sampling_tables(&self) -> (&[f32], &[f32]) {
+        (&self.marginal, &self.conditional)
     }
 
     #[inline]
@@ -441,9 +447,28 @@ impl Lights {
         hi - lo
     }
 
+    /// How many entries of [`Lights::selection_cdf`] have a position (and so are in the tree);
+    /// they come first.
+    pub fn positional_count(&self) -> usize {
+        self.positional
+    }
+
+    /// The light tree as plain words, eight per node, for an implementation that descends it
+    /// elsewhere (a GPU): the bits of the centre (3 floats), the squared radius and the power,
+    /// then the left and right child (a leaf has `u32::MAX` on the right and its light on the
+    /// left), then zero. The second list holds, per light, the left/right turns from the root to
+    /// its leaf (bit `i` set = right at depth `i`).
+    pub fn tree_words(&self) -> (Vec<u32>, &[u64]) {
+        let mut words = Vec::with_capacity(self.tree.nodes.len() * 8);
+        for n in &self.tree.nodes {
+            words.extend([n.centre.x.to_bits(), n.centre.y.to_bits(), n.centre.z.to_bits(), n.radius2.to_bits(), n.power.to_bits(), n.left, n.right, 0]);
+        }
+        (words, &self.tree.paths)
+    }
+
     /// Probability that a light with a position is chosen at all.
     #[inline]
-    fn positional_mass(&self) -> f32 {
+    pub fn positional_mass(&self) -> f32 {
         if self.positional == 0 { 0.0 } else { self.cdf.get(self.positional - 1).copied().unwrap_or(0.0) }
     }
 

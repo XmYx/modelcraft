@@ -176,6 +176,8 @@ impl Shared {
             | Command::SetPositions { .. }
             | Command::Anim(_)
             | Command::Rig(_)
+            | Command::AddCloner { .. }
+            | Command::SetCloner { .. }
             | Command::Undo
             | Command::Redo => {}
         }
