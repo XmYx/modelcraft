@@ -138,7 +138,7 @@ impl Shared {
         // that gains a file path must be given a decision here before this compiles. (A material's
         // linked file and similar paths are read only by the renderer, which scripts cannot call.)
         match cmd {
-            Command::Import { path } => {
+            Command::Import { path, .. } => {
                 let full = self.path(path, Access::Read)?;
                 *path = full.to_string_lossy().into_owned();
             }
