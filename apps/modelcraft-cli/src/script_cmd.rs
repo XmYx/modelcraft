@@ -244,12 +244,30 @@ pub fn output_path(dir: &Path, input: &str, format: Option<&str>) -> PathBuf {
     dir.join(format!("{stem}.{ext}"))
 }
 
+/// `path`, or `path` with `_2`, `_3`... added to its name until it is not in `taken`; the result is added to `taken`.
+pub fn unique_output(path: PathBuf, taken: &mut std::collections::HashSet<PathBuf>) -> PathBuf {
+    let mut candidate = path.clone();
+    let mut n = 2u32;
+    while !taken.insert(candidate.clone()) {
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = match path.extension() {
+            Some(e) => format!("{stem}_{n}.{}", e.to_string_lossy()),
+            None => format!("{stem}_{n}"),
+        };
+        candidate = path.with_file_name(name);
+        n += 1;
+    }
+    candidate
+}
+
 pub fn batch(a: &[String], load: fn(&str) -> Result<Document, String>, save: fn(&mut Document, &str) -> Result<(), String>) -> Result<(), String> {
     let o = parse_batch(a)?;
     if let Some(d) = &o.out_dir {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
     let mut failed = 0usize;
+    // Two inputs with the same file name (a/part.obj, b/part.obj) must not overwrite each other's result.
+    let mut taken: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     for f in &o.files {
         let result = (|| -> Result<(String, u64), String> {
             let mut d = load(f)?;
@@ -259,7 +277,7 @@ pub fn batch(a: &[String], load: fn(&str) -> Result<Document, String>, save: fn(
             }
             let target = match &o.out_dir {
                 Some(dir) if o.save => {
-                    let t = output_path(dir, f, o.format.as_deref());
+                    let t = unique_output(output_path(dir, f, o.format.as_deref()), &mut taken);
                     save(&mut d, &t.to_string_lossy())?;
                     t.display().to_string()
                 }
@@ -398,6 +416,50 @@ mod tests {
         let r = run_script(&mut Document::new(), &bad, None, true).unwrap();
         let j = report_json(&r);
         assert_eq!((j["ok"].as_bool(), j["error"]["line"].as_u64(), j["error"]["file"].as_str()), (Some(false), Some(2), Some("<script>")));
+    }
+
+    #[test]
+    fn two_inputs_with_one_file_name_do_not_overwrite_each_other() {
+        let mut taken = std::collections::HashSet::new();
+        let first = unique_output(PathBuf::from("out/part.glb"), &mut taken);
+        let second = unique_output(PathBuf::from("out/part.glb"), &mut taken);
+        let third = unique_output(PathBuf::from("out/part.glb"), &mut taken);
+        let other = unique_output(PathBuf::from("out/other.glb"), &mut taken);
+        assert_eq!(
+            (first, second, third, other),
+            (PathBuf::from("out/part.glb"), PathBuf::from("out/part_2.glb"), PathBuf::from("out/part_3.glb"), PathBuf::from("out/other.glb"))
+        );
+        // End to end: two projects named alike in different folders.
+        let dir = tmp("clash");
+        let script = dir.join("tag.rhai");
+        std::fs::write(&script, "add_group(\"Tagged\");").unwrap();
+        let mut d = Document::new();
+        d.execute(modelcraft_engine::Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }).unwrap();
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        d.save_as(&a.join("part.modelcraft")).unwrap();
+        d.detach_journal();
+        d.execute(modelcraft_engine::Command::AddGroup { name: Some("only in b".into()) }).unwrap();
+        d.save_as(&b.join("part.modelcraft")).unwrap();
+        d.detach_journal();
+        let load = |p: &str| Document::open(Path::new(p)).map_err(|e| e.to_string());
+        let save = |d: &mut Document, p: &str| d.save_as(Path::new(p)).map_err(|e| e.to_string());
+        let out = dir.join("out");
+        batch(
+            &s(&[
+                script.to_str().unwrap(),
+                a.join("part.modelcraft").to_str().unwrap(),
+                b.join("part.modelcraft").to_str().unwrap(),
+                "--out-dir",
+                out.to_str().unwrap(),
+            ]),
+            load,
+            save,
+        )
+        .unwrap();
+        assert_eq!(Document::open(&out.join("part.modelcraft")).unwrap().scene.len(), 2);
+        assert_eq!(Document::open(&out.join("part_2.modelcraft")).unwrap().scene.len(), 3, "the second input kept its own result");
     }
 
     #[test]
