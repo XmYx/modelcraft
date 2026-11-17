@@ -963,7 +963,7 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
     egui::Grid::new("brush-settings").num_columns(2).show(ui, |ui| {
         ui.label(tl!("Falloff"));
         let r = egui::ComboBox::from_id_salt("falloff").selected_text(falloff_label(app.brush.falloff)).show_ui(ui, |ui| {
-            for f in [Falloff::Smooth, Falloff::Sphere, Falloff::Linear, Falloff::Sharp, Falloff::Constant] {
+            for f in [Falloff::Smooth, Falloff::Sphere, Falloff::Linear, Falloff::Sharp, Falloff::Constant, Falloff::Root, Falloff::Needle] {
                 ui.selectable_value(&mut app.brush.falloff, f, falloff_label(f));
             }
         });
@@ -973,6 +973,13 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
         let r = egui::ComboBox::from_id_salt("stamp").selected_text(stamp_label(app.brush.stamp)).show_ui(ui, |ui| {
             for s in [Stamp::None, Stamp::Noise { scale: 6.0 }, Stamp::Rings { count: 4.0 }, Stamp::Square] {
                 ui.selectable_value(&mut app.brush.stamp, s, stamp_label(s));
+            }
+            for a in modelcraft_engine::sculpt::alpha::ALPHAS {
+                let s = Stamp::Image { alpha: *a, turn: 0.0 };
+                let on = matches!(app.brush.stamp, Stamp::Image { alpha, .. } if alpha == *a);
+                if ui.selectable_label(on, stamp_label(s)).clicked() {
+                    app.brush.stamp = s;
+                }
             }
         });
         set_name(ui, &r.response, tl!("Stamp"));
@@ -985,6 +992,7 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
         });
         ui.end_row();
     });
+    crate::sculpt_ui::brush_options(app, ui);
     ui.add_space(6.0);
     ui.label(RichText::new(tl!("Ctrl inverts, Shift smooths. Pen pressure scales strength (and size when enabled).")).color(theme::TEXT_DIM).small());
     if app.doc.sculpt.is_some() && app.brush.kind == BrushKind::Mask {
@@ -1006,6 +1014,8 @@ fn falloff_label(f: Falloff) -> String {
         Falloff::Linear => tl!("Linear"),
         Falloff::Sharp => tl!("Sharp"),
         Falloff::Constant => tl!("Flat"),
+        Falloff::Root => tl!("Shoulder"),
+        Falloff::Needle => tl!("Needle"),
     }
 }
 
@@ -1015,6 +1025,7 @@ fn stamp_label(s: Stamp) -> String {
         Stamp::Noise { .. } => tl!("Noise"),
         Stamp::Rings { .. } => tl!("Rings"),
         Stamp::Square => tl!("Square"),
+        Stamp::Image { alpha, .. } => crate::sculpt_ui::alpha_label(alpha),
     }
 }
 
