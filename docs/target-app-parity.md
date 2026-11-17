@@ -22,11 +22,11 @@ never estimated by hand.
 | | Value | Kind |
 |---|---|---|
 | In-scope feature rows | 330 | counted |
-| Done / exceeds / partial / missing | 69 / 7 / 33 / 221 | counted |
+| Done / exceeds / partial / missing | 69 / 7 / 35 / 219 | counted |
 | Out of scope (not in any denominator) | 4 | counted |
-| **Row parity**, (D + X + ½·P) / rows | **28.0 %** | counted |
-| **Weighted parity**, area weights × size-weighted rows | **19.2 %** | counted |
-| Size-weighted parity over all rows, no area weights | 19.3 % | counted |
+| **Row parity**, (D + X + ½·P) / rows | **28.3 %** | counted |
+| **Weighted parity**, area weights × size-weighted rows | **19.5 %** | counted |
+| Size-weighted parity over all rows, no area weights | 19.6 % | counted |
 
 | Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |
 |---|---|---|---|---|---|---|---|---|---|
@@ -39,7 +39,7 @@ never estimated by hand.
 | Subdivision surfaces | 2 (2 %) | 6 | 3 | 0 | 0 | 3 | 0 | 50 % | 36 % |
 | Deformers and fields | 4 (3 %) | 13 | 2 | 0 | 0 | 11 | 0 | 15 % | 8 % |
 | Procedural cloning and effectors | 5 (4 %) | 9 | 0 | 0 | 0 | 9 | 0 | 0 % | 0 % |
-| UVs | 4 (3 %) | 10 | 0 | 0 | 1 | 9 | 0 | 5 % | 2 % |
+| UVs | 4 (3 %) | 10 | 0 | 0 | 3 | 7 | 0 | 15 % | 12 % |
 | Sculpting: brushes, strokes and masks | 7 (5 %) | 22 | 7 | 1 | 2 | 12 | 0 | 41 % | 28 % |
 | Sculpting: resolution and topology | 6 (5 %) | 9 | 1 | 0 | 1 | 7 | 0 | 17 % | 15 % |
 | Painting, texturing and baking | 5 (4 %) | 9 | 0 | 0 | 1 | 8 | 0 | 6 % | 2 % |
@@ -317,9 +317,9 @@ Weight: 4
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | M | L | |
 | Seams and unwrap (conformal / angle-based) | C M Z | M | L | Waits for craft-mesh-ops `unwrap_uvs` (craft-libs #1233) |
-| Packing | C M | M | M | |
+| Packing | C M | P | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density as a history step and CLI; no UI yet |
 | UDIM tiles | C M Z | M | M | |
-| Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
+| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | `modelcraft-uvpack`: all five, per face selection, as a history step and CLI; no UI yet |
 | Relax, straighten, align and stitch tools | C M | M | M | |
 | Checker display, texel density, distortion heat map | C M Z | M | S | |
 | Automatic UVs from polygon groups | Z | M | M | |

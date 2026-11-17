@@ -32,6 +32,7 @@ Commands:
   control [project]                 JSON-lines control channel on stdin/stdout:
                                     one command per line in, {\"ok\":…} per line out
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
+  uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   -h, --help | -V, --version
 ";
 
@@ -142,6 +143,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             Ok(())
         }
         "control" => control(a.first().map(String::as_str)),
+        "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
@@ -243,6 +245,35 @@ fn control(project: Option<&str>) -> Result<(), String> {
         };
         writeln!(out, "{reply}").map_err(|e| e.to_string())?;
         out.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Pack N random rectangles (fixed seed) with the default options for each rotation mode.
+fn uv_pack_bench(n: usize) -> Result<(), String> {
+    use modelcraft_engine::uvpack::{Density, PackIsland, PackOptions, Rotation, pack};
+    let n = n.clamp(1, 20_000);
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut rnd = move || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 40) as f32 / (1u64 << 24) as f32
+    };
+    let islands: Vec<PackIsland> = (0..n)
+        .map(|_| {
+            let (w, h) = (0.05 + 1.5 * rnd() * rnd(), 0.05 + 1.5 * rnd() * rnd());
+            PackIsland {
+                triangles: vec![
+                    [glam::Vec2::ZERO, glam::Vec2::new(w, 0.0), glam::Vec2::new(w, h)],
+                    [glam::Vec2::ZERO, glam::Vec2::new(w, h), glam::Vec2::new(0.0, h)],
+                ],
+                area_3d: w * h,
+            }
+        })
+        .collect();
+    for rotation in [Rotation::None, Rotation::Quarter, Rotation::Fit] {
+        let t = Instant::now();
+        let r = pack(&islands, &PackOptions { margin: 0.004, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;
+        println!("{n} islands, rotation {rotation:?}: {:.0} ms, utilisation {:.1} %, scale {:.4}", ms(t), r.utilisation * 100.0, r.scale);
     }
     Ok(())
 }

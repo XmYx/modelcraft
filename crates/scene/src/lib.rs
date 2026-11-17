@@ -23,6 +23,7 @@ use glam::{Mat4, Quat, Vec3};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
+pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
 pub use eval::{Evaluated, Evaluator, StepError};
@@ -276,6 +277,37 @@ pub enum StepOp {
     Sculpt {
         layer: SculptLayer,
     },
+    /// Pack the islands the UVs already form into the unit square: `margin` between them as a
+    /// fraction of the square, optional rotation, and an even texel density.
+    PackUvs {
+        #[serde(default = "default_margin")]
+        margin: f32,
+        #[serde(default = "default_rotation")]
+        rotation: Rotation,
+        #[serde(default = "default_density")]
+        density: Density,
+    },
+    /// Give the corners of `faces` (all faces when empty) UVs from a planar, box, cylindrical,
+    /// spherical or camera projection of their positions.
+    ProjectUvs {
+        projection: Projection,
+        #[serde(default)]
+        fit: Fit,
+        #[serde(default)]
+        faces: Vec<u32>,
+    },
+}
+
+fn default_margin() -> f32 {
+    0.01
+}
+
+fn default_rotation() -> Rotation {
+    Rotation::Fit
+}
+
+fn default_density() -> Density {
+    Density::Uniform
 }
 
 impl StepOp {
@@ -300,6 +332,8 @@ impl StepOp {
             StepOp::FillHole { .. } => "Fill hole",
             StepOp::Mirror { .. } => "Mirror",
             StepOp::Sculpt { .. } => "Sculpt layer",
+            StepOp::PackUvs { .. } => "Pack UV islands",
+            StepOp::ProjectUvs { .. } => "Project UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -311,6 +345,7 @@ impl StepOp {
             | StepOp::Flip { faces }
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
+            StepOp::ProjectUvs { faces, .. } => faces.len() * 4,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }

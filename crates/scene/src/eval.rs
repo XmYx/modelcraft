@@ -259,6 +259,18 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
+        StepOp::PackUvs { margin, rotation, density } => {
+            let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
+            let (uvs, _) = modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            let mut out = m.clone();
+            out.set_uvs(&uvs)?;
+            Ok(out)
+        }
+        StepOp::ProjectUvs { projection, fit, faces } => {
+            edit::check_selection(faces, nf, "face")?;
+            let opts = modelcraft_uvpack::ProjectOptions { projection: *projection, fit: *fit, faces: faces.clone() };
+            modelcraft_uvpack::project_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))
+        }
         StepOp::Sculpt { layer } => {
             let mut out = if layer.level == 0 { m.clone() } else { modelcraft_ops::subdivide::catmull_clark(m, u32::from(layer.level))? };
             let nv = out.vertex_count();

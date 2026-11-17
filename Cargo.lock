@@ -2459,6 +2459,7 @@ dependencies = [
  "modelcraft-ops",
  "modelcraft-scene",
  "modelcraft-sculpt",
+ "modelcraft-uvpack",
  "proptest",
  "serde",
  "serde_json",
@@ -2530,6 +2531,7 @@ dependencies = [
  "glam",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-uvpack",
  "proptest",
  "serde",
  "serde_json",
@@ -2545,6 +2547,19 @@ dependencies = [
  "modelcraft-ops",
  "proptest",
  "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "modelcraft-uvpack"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "modelcraft-mesh",
+ "modelcraft-ops",
+ "proptest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

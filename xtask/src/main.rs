@@ -40,6 +40,7 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 const CORE: &[&str] = &[
     "modelcraft-mesh",
     "modelcraft-ops",
+    "modelcraft-uvpack",
     "modelcraft-scene",
     "modelcraft-sculpt",
     "modelcraft-formats",

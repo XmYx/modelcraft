@@ -102,6 +102,21 @@ GPU path traverses the BVH in a compute shader rather than through hardware ray 
 comparison needs the same scene, hardware and noise level in both renderers; until someone runs
 that, the honest statement is the absolute rates above.
 
+## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
+
+Random rectangular islands (fixed seed, sides 0.05 to 1.55, margin 0.004, even texel density), packed
+into the unit square by MaxRects; utilisation is the share of the square the islands cover. Same
+machine as above, release build. Above 400 islands only one packing order is tried per scale.
+
+| Islands | Rotation | Time | Utilisation |
+|---|---|---|---|
+| 50 | none / quarter turns / fit | 3 / 4 / 4 ms | 87.4 / 88.1 / 88.1 % |
+| 200 | none / quarter turns / fit | 66 / 59 / 58 ms | 84.0 / 84.8 / 84.8 % |
+| 1,000 | none / quarter turns / fit | 1,530 / 1,360 / 1,360 ms | 71.4 / 71.2 / 71.2 % |
+
+Rectangles gain little from rotation by definition; the rotation modes matter for slanted islands
+(a diagonal strip packs 1.8 times as densely once straightened, `fit_rotation_straightens_a_diagonal_strip`).
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have

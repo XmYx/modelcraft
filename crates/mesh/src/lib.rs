@@ -417,6 +417,35 @@ impl PolyMesh {
     pub fn has_uvs(&self) -> bool {
         !self.he_uv.is_empty()
     }
+    /// Number of face corners: the interior half-edges, which come first, so a corner id is also
+    /// its half-edge id. Boundary half-edges (no face) are not corners.
+    pub fn corner_count(&self) -> usize {
+        self.he_face.partition_point(|f| *f != NONE)
+    }
+    /// The UV of every corner, in corner order (empty when the mesh has no UVs).
+    pub fn corner_uvs(&self) -> &[Vec2] {
+        self.he_uv.get(..self.corner_count()).unwrap_or(&[])
+    }
+    /// Replace the UVs: one per corner, in corner order (see [`PolyMesh::corner_count`]).
+    /// Non-finite values are rejected and the mesh is left unchanged.
+    pub fn set_uvs(&mut self, corner_uvs: &[Vec2]) -> Result<(), MeshError> {
+        let n = self.corner_count();
+        if corner_uvs.len() != n {
+            return Err(MeshError::Topology(format!("{} UVs for {n} corners", corner_uvs.len())));
+        }
+        if let Some(c) = corner_uvs.iter().position(|u| !u.is_finite()) {
+            return Err(MeshError::NonFinite(c as u32));
+        }
+        let mut uv = Vec::with_capacity(self.he_origin.len());
+        uv.extend_from_slice(corner_uvs);
+        uv.resize(self.he_origin.len(), Vec2::ZERO);
+        self.he_uv = uv;
+        Ok(())
+    }
+    /// Remove the UVs.
+    pub fn clear_uvs(&mut self) {
+        self.he_uv = Vec::new();
+    }
     pub fn position(&self, v: u32) -> Vec3 {
         self.positions.get(idx(v)).copied().unwrap_or(Vec3::ZERO)
     }
