@@ -35,6 +35,8 @@ Commands:
   bake <project> <object id or name> <out.mcpc> [--start F] [--end F] [--step F] [--world]
                                     bake an object's vertices over the frames into a point cache
   cache-info <file.mcpc>            print a point cache's header and bounds
+  bench-skin [--verts N] [--joints N] [--frames N]
+                                    bind and play a skinned tube: weights, evaluation, playback
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
   -h, --help | -V, --version
 ";
@@ -82,6 +84,9 @@ fn load(path: &str) -> Result<Document, String> {
     let p = Path::new(path);
     if is_project(p) {
         let mut d = Document::open(p).map_err(|e| e.to_string())?;
+        if let Some(n) = d.history_note.take() {
+            eprintln!("note: {n}");
+        }
         if d.pending_recovery > 0 {
             eprintln!("note: {} unsaved commands wait in the crash journal; `modelcraft-cli recover` replays them", d.pending_recovery);
         }
@@ -113,6 +118,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             for (name, help) in modelcraft_engine::anim::COMMANDS {
                 println!("anim op={name}\t{help}");
+            }
+            for (name, help) in modelcraft_engine::rig::COMMANDS {
+                println!("rig op={name}\t{help}");
             }
             Ok(())
         }
@@ -160,6 +168,10 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
+        "bench-skin" => {
+            let n = |name: &str, default: usize| flag(a, name).and_then(|v| v.parse().ok()).unwrap_or(default);
+            bench_skin(n("--verts", 100_000), n("--joints", 60), n("--frames", 120))
+        }
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
         "render" => {
@@ -198,6 +210,102 @@ fn bake(a: &[String]) -> Result<(), String> {
     let bytes = cache.to_bytes().map_err(|e| e.to_string())?;
     craft_atomic::atomic_write(Path::new(out), &bytes).map_err(|e| format!("{out}: {e}"))?;
     println!("{} frames of {} vertices written to {out}", cache.frames(), cache.vertices);
+    Ok(())
+}
+
+/// A procedurally generated character stand-in: a tube of about `verts` points along Y with a
+/// chain of `joints` joints up its middle, bound with heat weights, every joint keyed to sway.
+/// Prints the bind time, the per-frame cost of posing and evaluating with both skinning methods,
+/// and the kernels alone.
+fn bench_skin(verts: usize, joints: usize, frames: usize) -> Result<(), String> {
+    use modelcraft_engine::animation::skin;
+    use modelcraft_engine::{AnimCommand, BindMethod, RigCommand};
+    let joints = joints.clamp(2, 1000);
+    let frames = frames.clamp(2, 100_000);
+    // Enough sides that the ring count stays within the primitive's limit.
+    let sides = (verts as u32).div_ceil(1000).clamp(64, 1024);
+    let rings = ((verts as u32 / sides).saturating_sub(1)).clamp(joints as u32, 1024);
+    let height = joints as f32;
+    let mut d = Document::new();
+    let run = |d: &mut Document, c: Command| d.execute(c).map_err(|e| e.to_string());
+    let mesh = run(&mut d, Command::AddPrimitive { kind: "cylinder".into(), name: None, parent: None })?.created.first().copied().ok_or("no mesh")?;
+    let primitive = modelcraft_engine::ops::primitives::Primitive::Cylinder { radius: 1.0, height, sides, rings, caps: false };
+    run(&mut d, Command::SetPrimitive { id: mesh, primitive })?;
+    let mut chain = Vec::with_capacity(joints);
+    for i in 0..joints {
+        let y = -height / 2.0 + height * i as f32 / (joints - 1) as f32;
+        let id = run(&mut d, Command::Rig(RigCommand::AddJoint { parent: chain.last().copied(), position: Some([0.0, y, 0.0]), name: None }))?
+            .created
+            .first()
+            .copied()
+            .ok_or("no joint")?;
+        chain.push(id);
+    }
+    let count = d.eval.evaluate(&d.scene, mesh).mesh.vertex_count();
+    let t = Instant::now();
+    let skin_id =
+        run(&mut d, Command::Rig(RigCommand::BindSkin { mesh, joints: chain.clone(), method: BindMethod::Heat, influences: 4, dual_quaternion: false }))?
+            .created
+            .first()
+            .copied()
+            .ok_or("no skin")?;
+    println!("mesh: {count} vertices, {joints} joints; bind with heat weights (4 influences) {:.0} ms", ms(t));
+    // Every joint sways on Z and twists on Y, out of phase, so every point moves every frame.
+    let end = frames as f64 - 1.0;
+    for (i, j) in chain.iter().enumerate() {
+        for (path, amount) in [("rotate.z", 4.0), ("rotate.y", 6.0)] {
+            for (frame, sign) in [(0.0, 1.0), (end / 2.0, -1.0), (end, 1.0)] {
+                let value = sign * amount * if i % 2 == 0 { 1.0 } else { -1.0 };
+                run(&mut d, Command::Anim(AnimCommand::SetKey { id: *j, path: path.into(), frame: Some(frame), value: Some(value) }))?;
+            }
+        }
+    }
+    run(&mut d, Command::Anim(AnimCommand::SetTimeRange { start: Some(0.0), end: Some(end), fps: Some(24.0) }))?;
+    println!("animation: {} curves on {joints} joints, {frames} frames at 24 fps", d.scene.anim.tracks().len());
+    for dq in [false, true] {
+        run(&mut d, Command::Rig(RigCommand::SetSkin { mesh, dual_quaternion: dq }))?;
+        let (mut pose, mut eval) = (Vec::with_capacity(frames), Vec::with_capacity(frames));
+        let mut checksum = 0.0f64;
+        for f in 0..frames {
+            let t = Instant::now();
+            d.set_frame(f as f64);
+            pose.push(ms(t));
+            let t = Instant::now();
+            let m = d.eval.evaluate(&d.scene, mesh).mesh;
+            eval.push(ms(t));
+            checksum += m.positions().first().map_or(0.0, |p| p.x as f64);
+        }
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+        let total = mean(&pose) + mean(&eval);
+        println!(
+            "{}: pose (curves → joints) {:.3} ms, evaluate (skin {count} points) mean {:.2} ms p95 {:.2} ms → {:.0} evaluated frames per second (checksum {checksum:.3})",
+            if dq { "dual quaternion" } else { "linear blend   " },
+            mean(&pose),
+            mean(&eval),
+            pct(&mut eval, 0.95),
+            1000.0 / total.max(1e-9)
+        );
+    }
+    // The kernels alone, on the same data.
+    let ObjectKind::Skin { skin: bound } = d.scene.get(skin_id).map(|o| o.kind.clone()).ok_or("no skin")? else { return Err("no skin".into()) };
+    let scene = d.scene.clone();
+    let mut hidden = scene.clone();
+    if let Ok(o) = hidden.edit(skin_id) {
+        o.visible = false;
+    }
+    let rest = d.eval.evaluate(&hidden, mesh).mesh.positions().to_vec();
+    let world: Vec<glam::Mat4> = bound.joints.iter().map(|j| scene.world_matrix(*j)).collect();
+    let mats = skin::skin_matrices(&world, &bound.inverse_bind);
+    let mut out = Vec::new();
+    for (name, f) in
+        [("linear blend", skin::linear_blend as fn(&[Vec3], &skin::SkinWeights, &[glam::Mat4], &mut Vec<Vec3>)), ("dual quaternion", skin::dual_quaternion)]
+    {
+        let t = Instant::now();
+        for _ in 0..20 {
+            f(&rest, &bound.weights, &mats, &mut out);
+        }
+        println!("kernel {name}: {:.2} ms per {count} points", ms(t) / 20.0);
+    }
     Ok(())
 }
 

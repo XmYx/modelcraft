@@ -3,6 +3,8 @@
 //! - [`curve`]: a [`Curve`] of [`Key`]s with stepped, linear and Bézier segments, automatic
 //!   clamped tangents, weighted handles, extrapolation, baking and simplifying.
 //! - [`euler`]: removing whole-turn and flip jumps from keyed Euler rotations.
+//! - [`skeleton`]: aiming a joint along its bone, mirroring joints, the bone shape.
+//! - [`skin`]: joint weights, linear-blend and dual-quaternion skinning, automatic weights.
 //! - [`clock`]: frame rate, playback range and a [`Playback`] that advances the current frame from
 //!   wall-clock time.
 //!
@@ -15,6 +17,8 @@
 pub mod clock;
 pub mod curve;
 pub mod euler;
+pub mod skeleton;
+pub mod skin;
 
 pub use clock::{LoopMode, Playback, TimeSettings};
 pub use curve::{Curve, Extrapolation, Interp, Key, Tangent};

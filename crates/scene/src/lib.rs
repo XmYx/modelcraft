@@ -18,6 +18,7 @@ pub mod anim;
 pub mod attr;
 mod eval;
 pub mod pick;
+pub mod rig;
 
 use std::sync::Arc;
 
@@ -364,6 +365,14 @@ pub enum ObjectKind {
     Field {
         field: Field,
     },
+    /// A joint of a skeleton: a transform drawn as a bone to each child joint ([`rig`]).
+    Joint {
+        radius: f32,
+    },
+    /// Binds its parent mesh to joints ([`rig::Skin`]).
+    Skin {
+        skin: Arc<rig::Skin>,
+    },
 }
 
 impl ObjectKind {
@@ -374,6 +383,8 @@ impl ObjectKind {
             ObjectKind::SmoothCage { .. } => "Smooth cage",
             ObjectKind::Deformer { .. } => "Deformer",
             ObjectKind::Field { .. } => "Falloff field",
+            ObjectKind::Joint { .. } => "Joint",
+            ObjectKind::Skin { .. } => "Skin",
         }
     }
 }
@@ -406,6 +417,7 @@ impl Object {
     pub fn heap_bytes(&self) -> usize {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
+            ObjectKind::Skin { skin } => skin.heap_bytes(),
             _ => 0,
         };
         256 + self.name.len() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
@@ -478,6 +490,7 @@ impl Scene {
             o.rev = next_rev();
         }
         self.anim.repair(|id| ids.contains(&id));
+        rig::repair(&mut self);
         Ok(self)
     }
 
