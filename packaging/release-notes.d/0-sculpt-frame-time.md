@@ -1,0 +1,1 @@
+- Sculpting a dense model in the window is about four times smoother: a stroke no longer copies the whole model every frame.

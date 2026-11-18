@@ -27,6 +27,8 @@ pub enum Kind {
     Ply,
     Fbx,
     ThreeMf,
+    /// USD in its text form.
+    Usda,
 }
 
 /// The up axis of a file.
@@ -85,11 +87,12 @@ impl Kind {
             "ply" => Kind::Ply,
             "fbx" => Kind::Fbx,
             "3mf" => Kind::ThreeMf,
+            "usda" | "usd" => Kind::Usda,
             _ => return None,
         })
     }
     pub fn can_write(self) -> bool {
-        matches!(self, Kind::Glb | Kind::Obj | Kind::Stl | Kind::Fbx)
+        matches!(self, Kind::Glb | Kind::Obj | Kind::Stl | Kind::Fbx | Kind::ThreeMf | Kind::Usda)
     }
 }
 
@@ -117,15 +120,27 @@ pub fn import(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<
 /// [`import`] with an axis and unit conversion.
 pub fn import_with(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<Vec<u8>>, convert: Convert) -> Result<(Vec<Item>, Vec<String>)> {
     let limits = cm::Limits::default();
-    // What the file says about its axes and unit (FBX only).
-    let (file_axes, file_scale) = match kind {
-        Kind::Fbx => match cm::fbx::read_document(bytes, &limits) {
-            Ok(d) => (Some(DMat4::from_cols_array(&d.axes_to_y_up()).as_mat4()), d.unit_scale().map(|cm| (cm / 100.0) as f32)),
-            Err(_) => (None, None),
-        },
-        _ => (None, None),
+    // What the file says about its axes and unit: FBX and USD say so in a header, 3MF is Z up in
+    // the unit its model names.
+    let (scene, file_axes, file_scale) = match kind {
+        Kind::Fbx => {
+            let (axes, scale) = match cm::fbx::read_document(bytes, &limits) {
+                Ok(d) => (Some(DMat4::from_cols_array(&d.axes_to_y_up()).as_mat4()), d.unit_scale().map(|cm| (cm / 100.0) as f32)),
+                Err(_) => (None, None),
+            };
+            (cm::fbx::read(bytes, &limits, resolve).map_err(mesh_err)?, axes, scale)
+        }
+        Kind::ThreeMf => {
+            let m = cm::threemf::read_model(bytes, &limits).map_err(mesh_err)?;
+            (m.scene, Some(z_to_y()), Some(m.unit.metres() as f32))
+        }
+        Kind::Usda => {
+            let (scene, stage) = crate::usd::read(bytes, &limits)?;
+            (scene, stage.z_up.then(z_to_y), stage.metres_per_unit.map(|m| m as f32))
+        }
+        other => (read_scene(bytes, other, resolve, &limits)?, None, None),
     };
-    let (mut items, warnings) = import_raw(bytes, kind, resolve, &limits)?;
+    let (mut items, warnings) = items_of(scene);
     let axes = match convert.up {
         Up::Auto => file_axes.unwrap_or(Mat4::IDENTITY),
         Up::Y => Mat4::IDENTITY,
@@ -136,17 +151,22 @@ pub fn import_with(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Op
     Ok((items, warnings))
 }
 
-fn import_raw(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<Vec<u8>>, limits: &cm::Limits) -> Result<(Vec<Item>, Vec<String>)> {
+fn read_scene(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<Vec<u8>>, limits: &cm::Limits) -> Result<cm::Scene> {
     let limits = limits.clone();
-    let scene = match kind {
+    match kind {
         Kind::Fbx => cm::fbx::read(bytes, &limits, resolve),
         Kind::ThreeMf => cm::threemf::read(bytes, &limits),
         Kind::Glb | Kind::Gltf => cm::gltf::read(bytes, &limits, resolve),
         Kind::Obj => cm::obj::read(bytes, &limits, resolve),
         Kind::Stl => cm::stl::read(bytes, &limits),
         Kind::Ply => cm::ply::read(bytes, &limits),
+        Kind::Usda => return crate::usd::read(bytes, &limits).map(|(s, _)| s),
     }
-    .map_err(mesh_err)?;
+    .map_err(mesh_err)
+}
+
+/// The scene's meshes and nodes as items (bounded: each node once).
+fn items_of(scene: cm::Scene) -> (Vec<Item>, Vec<String>) {
     let mut warnings = scene.warnings.clone();
     let mats: Vec<Material> = scene
         .materials
@@ -169,7 +189,7 @@ fn import_raw(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<
             let name = scene.meshes.get(i).map(|m| m.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Mesh {}", i + 1));
             items.push(Item { name, parent: None, transform: Transform::default(), mesh: Some(mesh), material });
         }
-        return Ok((items, warnings));
+        return (items, warnings);
     }
     // Walk the node tree from the roots (bounded: each node once, depth ≤ craft-mesh's limit).
     let mut index_of = vec![None; scene.nodes.len()];
@@ -195,7 +215,7 @@ fn import_raw(bytes: &[u8], kind: Kind, resolve: &mut dyn FnMut(&str) -> Option<
             stack.push((*c, Some(me)));
         }
     }
-    Ok((items, warnings))
+    (items, warnings)
 }
 
 fn convert_in(m: &cm::Mesh) -> (PolyMesh, Vec<String>) {
@@ -298,13 +318,21 @@ pub fn export(items: &[Item], kind: Kind) -> Result<Vec<u8>> {
 /// `1 / scale`).
 pub fn export_with(items: &[Item], kind: Kind, convert: Convert) -> Result<Vec<u8>> {
     let mut items = items.to_vec();
-    let axes = if convert.up == Up::Z { z_to_y().inverse() } else { Mat4::IDENTITY };
-    let scale = convert.scale.and_then(scale_ok).unwrap_or(1.0);
+    // 3MF is Z up unless the settings say otherwise; USD says its axis in the file.
+    let z = convert.up == Up::Z || (kind == Kind::ThreeMf && convert.up == Up::Auto);
+    let axes = if z { z_to_y().inverse() } else { Mat4::IDENTITY };
+    let mut scale = convert.scale.and_then(scale_ok).unwrap_or(1.0);
+    // 3MF names its unit from a short list; any other scale is written in metres.
+    if kind == Kind::ThreeMf && crate::threemf_write::unit_name(scale).is_none() {
+        scale = 1.0;
+    }
     convert_roots(&mut items, Mat4::from_scale(Vec3::splat(1.0 / scale)) * axes);
     let items = &items[..];
     let limits = cm::Limits::default();
     match kind {
         Kind::Fbx => crate::fbx_write::write_in(items, convert.up == Up::Z, scale),
+        Kind::ThreeMf => crate::threemf_write::write_in(items, crate::threemf_write::unit_name(scale).unwrap_or("meter")),
+        Kind::Usda => crate::usd::write_in(items, z, scale),
         Kind::Glb => cm::gltf::write_glb(&neutral(items), &limits).map_err(mesh_err),
         Kind::Obj | Kind::Stl => {
             let world = flatten(items);
@@ -453,7 +481,7 @@ mod tests {
 
     #[test]
     fn garbage_is_an_error() {
-        for kind in [Kind::Glb, Kind::Gltf, Kind::Obj, Kind::Stl, Kind::Ply, Kind::Fbx, Kind::ThreeMf] {
+        for kind in [Kind::Glb, Kind::Gltf, Kind::Obj, Kind::Stl, Kind::Ply, Kind::Fbx, Kind::ThreeMf, Kind::Usda] {
             let _ = import(b"\x00\x01garbage", kind, &mut |_| None);
         }
         assert!(import(b"", Kind::Glb, &mut |_| None).is_err());

@@ -1,0 +1,1 @@
+| 2026-11-18 | USD in its text form (.usda) and 3MF export: read and write hierarchy, transforms, meshes with UVs and preview-surface materials; 3MF import now reads its unit and Z up; File ▸ Export 3MF and Export USD |

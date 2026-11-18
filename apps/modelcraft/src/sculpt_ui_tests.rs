@@ -45,6 +45,33 @@ fn mask_tools_by_keyboard_and_buttons() {
     assert!(count(&h) > start, "undo brings the blurred mask back");
 }
 
+#[test]
+fn drawing_the_panels_does_not_copy_the_sculpt_into_the_scene() {
+    // The Sculpt panel used to sync the session into the scene on every frame; during a stroke
+    // that copied every vertex and made the Properties panel rebuild the object each frame.
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let brush = h.state().brush.clone();
+    assert!(h.state_mut().doc.stroke_begin(brush));
+    let dab = modelcraft_engine::sculpt::Dab { center: glam::Vec3::Y, view_dir: -glam::Vec3::Y, pressure: 1.0, grab_delta: glam::Vec3::ZERO, scale: 1.0 };
+    h.state_mut().doc.stroke_dab(dab);
+    assert!(h.state().doc.sculpt.as_ref().unwrap().unsynced);
+    let id = h.state().doc.sculpt.as_ref().unwrap().id;
+    let in_scene = std::sync::Arc::as_ptr(&h.state().doc.sculpt_layer(id).unwrap().positions);
+    for _ in 0..5 {
+        h.step();
+    }
+    assert!(h.state().doc.sculpt.as_ref().unwrap().unsynced, "a frame synced the session");
+    assert_eq!(std::sync::Arc::as_ptr(&h.state().doc.sculpt_layer(id).unwrap().positions), in_scene, "the scene's layer was replaced");
+    // Ending the stroke and saving still see the stroke.
+    h.state_mut().doc.stroke_end();
+    h.state_mut().doc.sync_sculpt();
+    assert_ne!(std::sync::Arc::as_ptr(&h.state().doc.sculpt_layer(id).unwrap().positions), in_scene);
+}
+
 /// Drag the primary button across the viewport, from `from` to `to` in screen points.
 fn drag(h: &mut Harness<'static, ModelApp>, from: egui::Pos2, to: egui::Pos2) {
     let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
@@ -402,4 +429,52 @@ fn the_panels_keep_their_width_from_frame_to_frame() {
         }
         assert_eq!(h.get_by_label_contains("Viewport, Perspective").rect(), before, "workspace {workspace:?}");
     }
+}
+
+#[test]
+fn decimate_and_project_detail_from_the_panel_and_the_palette() {
+    // Two balls: the first keeps the detail, the second is sculpted.
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let id = h.state().doc.sculpt.as_ref().unwrap().id;
+    let tris = h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count();
+    h.get_by_label("Triangles to keep").scroll_to_me();
+    h.run();
+    h.get_by_label("Triangles to keep").set_value_accesskit(20.0);
+    h.run();
+    press(&mut h, Role::Button, "Decimate");
+    let now = h.state().doc.sculpt.as_ref().expect("still sculpting after decimating").mesh.triangle_count();
+    assert!(now <= tris / 4 && now > 0, "{now} of {tris}");
+    assert!(h.state().status.starts_with("Decimate:"), "{}", h.state().status);
+    let steps = h.state().doc.scene.get(id).unwrap().steps();
+    assert!(steps.iter().any(|s| matches!(s.op, modelcraft_engine::scene::StepOp::Decimate { .. })));
+    // Flatten the top, then bring the other ball's shape back.
+    h.state_mut().run(modelcraft_engine::Command::SculptClip { id, point: glam::Vec3::new(0.0, 0.3, 0.0), normal: glam::Vec3::Y });
+    h.run();
+    let top = |h: &Harness<'static, ModelApp>| h.state().doc.sculpt.as_ref().unwrap().mesh.positions.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+    assert!(top(&h) < 0.31);
+    h.get_by_label("Mesh with the detail").scroll_to_me();
+    h.run();
+    h.get_by_label("Reach of the projection").set_value_accesskit(60.0);
+    h.run();
+    palette(&mut h, "Project Detail");
+    assert_eq!(h.state().status, "Project detail");
+    assert!(top(&h) > 0.9, "the top is round again: {}", top(&h));
+    h.get_by_label_contains("Viewport, Perspective").focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!(top(&h) < 0.31);
+}
+
+#[test]
+fn project_detail_says_what_it_needs_when_alone() {
+    let mut h = sculpting("Add Quad sphere");
+    palette(&mut h, "Project Detail");
+    assert!(h.state().status.contains("needs another mesh"), "{}", h.state().status);
+    h.get_by_label("Add or import the mesh that has the detail.");
 }

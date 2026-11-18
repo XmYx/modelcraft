@@ -371,7 +371,7 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
-        StepOp::Unwrap { seams, angle, pins, auto_cut, margin } => {
+        StepOp::Unwrap { seams, angle, pins, auto_cut, margin, method } => {
             use modelcraft_uv::{Pin, SeamSet, UnwrapOptions};
             let mut set = SeamSet::from_vertex_pairs(seams);
             set.retain_existing(m);
@@ -379,7 +379,7 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
                 set.mark_by_angle(m, *a);
             }
             let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
-            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1) };
+            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
             modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
         StepOp::Seams { .. } => Ok(m.clone()),
@@ -392,9 +392,16 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             };
             modelcraft_uv::transform_corners(m, corners, &t).map_err(|e| OpError::Invalid(e.to_string()))
         }
-        StepOp::StitchUvs { edges } => {
+        StepOp::StitchUvs { edges, align, scale } => {
             edit::check_selection(edges, ne, "edge")?;
-            modelcraft_uv::stitch_edges(m, edges).map_err(|e| OpError::Invalid(e.to_string()))
+            modelcraft_uv::stitch_islands(m, edges, &modelcraft_uv::StitchOptions { align: *align, scale: *scale }).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::RelaxUvs { corners, iterations, mode } => {
+            let opts = modelcraft_uv::RelaxOptions { iterations: *iterations, mode: *mode };
+            modelcraft_uv::relax_corners(m, corners, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::StraightenUvs { corners, strength } => {
+            modelcraft_uv::straighten_corners(m, corners, *strength).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
         StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
         StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
@@ -425,5 +432,6 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::EvenRemesh { cell } => modelcraft_ops::remesh::even_remesh(m, *cell),
         StepOp::TrimPlane { point, normal, cap } => modelcraft_ops::trim::trim_plane(m, *point, *normal, *cap),
+        StepOp::Decimate { ratio } => modelcraft_ops::decimate::decimate(m, *ratio),
     }
 }
