@@ -63,3 +63,5 @@ mod sim_cloth_tests;
 mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;
+#[cfg(test)]
+mod uv_udim_tests;
