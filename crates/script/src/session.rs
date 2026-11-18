@@ -202,6 +202,14 @@ impl Session {
         report
     }
 
+    /// Forget every tool and callback scripts registered (for sessions nobody lists or fires).
+    pub fn clear_registered(&mut self) {
+        if let Ok(mut r) = self.shared.registry.try_borrow_mut() {
+            r.tools.clear();
+            r.handlers.clear();
+        }
+    }
+
     /// The tools scripts registered, in registration order.
     pub fn tools(&self) -> Vec<ToolInfo> {
         self.shared.registry.try_borrow().map(|r| r.tools.iter().map(|t| t.info.clone()).collect()).unwrap_or_default()

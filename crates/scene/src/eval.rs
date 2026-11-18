@@ -233,6 +233,8 @@ impl Evaluator {
                     }
                 }
             }
+            ObjectKind::Array { array } => self.generate(scene, id, depth, |m| array.build(m)),
+            ObjectKind::Symmetry { axis, weld } => self.generate(scene, id, depth, |m| edit::mirror(m, *axis as usize, *weld)),
             ObjectKind::Cloner { cloner, target } => {
                 let mut errors = Vec::new();
                 let mut out = Evaluated::default();
@@ -308,6 +310,36 @@ impl Evaluator {
         };
         self.finals.insert(id, (key, result.clone()));
         result
+    }
+}
+
+impl Evaluator {
+    /// A generator that turns its input mesh (in the generator's space) into another mesh. When
+    /// the operation fails the input is shown unchanged with the reason.
+    fn generate(&mut self, scene: &Scene, id: ObjectId, depth: usize, op: impl FnOnce(&PolyMesh) -> Result<PolyMesh, OpError>) -> Evaluated {
+        let Some(c) = scene.generator_input(id) else {
+            return Evaluated { errors: vec![StepError { step: usize::MAX, message: "needs a mesh inside it".into() }], ..Evaluated::default() };
+        };
+        let inner = self.evaluate_depth(scene, c, depth + 1);
+        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+        let mut m = (*inner.mesh).clone();
+        m.map_positions(|_, p| local.transform_point3(p));
+        // A mirroring transform (a negative scale) turns the faces inside out; put them back.
+        if local.determinant() < 0.0 {
+            let all: Vec<u32> = (0..m.face_count() as u32).collect();
+            if let Ok(flipped) = edit::flip_faces(&m, &all) {
+                m = flipped;
+            }
+        }
+        self.runs += 1;
+        let mut errors = inner.errors;
+        match op(&m) {
+            Ok(r) => Evaluated { mesh: Arc::new(r), errors, ..Evaluated::default() },
+            Err(e) => {
+                errors.push(StepError { step: usize::MAX, message: e.to_string() });
+                Evaluated { mesh: Arc::new(m), errors, ..Evaluated::default() }
+            }
+        }
     }
 }
 

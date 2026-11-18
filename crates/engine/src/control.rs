@@ -10,6 +10,7 @@
 //! | `document.revision` | — | `{document_id, revision}` |
 //! | `document.save` | `{path?}` | `{path}` |
 //! | `document.export` | `{path}` (.glb, .obj, .stl) | `{path}` |
+//! | `script.run` | `{source, name?, args?}` | the script's report (answered by the hosts that link the scripting crate: the window, `modelcraft-cli serve`, `control` and `mcp`; see `modelcraft_script::channel`) |
 //!
 //! Every reply is `{"ok": true, "result": …}` or `{"ok": false, "error": "…"}`.
 
@@ -23,7 +24,7 @@ use crate::{COMMANDS, Command, Document};
 pub const MAX_LINE: usize = 64 << 20;
 
 /// The methods [`handle`] answers.
-pub const METHODS: &[&str] = &["engine.execute", "engine.commands", "document.info", "document.revision", "document.save", "document.export"];
+pub const METHODS: &[&str] = &["engine.execute", "engine.commands", "document.info", "document.revision", "document.save", "document.export", "script.run"];
 
 fn ok(result: Value) -> Value {
     json!({"ok": true, "result": result})
@@ -86,7 +87,20 @@ pub fn handle(doc: &mut Document, method: &str, params: &Value) -> Value {
                 Err(e) => fail(e.to_string()),
             }
         }
+        "script.run" => fail("script.run needs the scripting host: the ModelCraft window, `modelcraft-cli serve`, `control` or `mcp`"),
         other => fail(format!("unknown method {other:?}; methods: {}", METHODS.join(", "))),
+    }
+}
+
+/// A host's extra methods: called first with the document and the request; `None` means it is not
+/// one of the host's, and the engine answers.
+pub type Extension<'a> = &'a mut dyn FnMut(&mut Document, &str, &Value) -> Option<Value>;
+
+/// Answer one request, letting `ext` take it first.
+pub fn handle_with(doc: &mut Document, method: &str, params: &Value, ext: Extension) -> Value {
+    match ext(doc, method, params) {
+        Some(reply) => reply,
+        None => handle(doc, method, params),
     }
 }
 
@@ -245,9 +259,14 @@ pub fn listen(port: Option<u16>, token: Option<String>, wake: impl Fn() + Send +
 
 /// Answer every request waiting on `l` (call it each frame, or in a loop).
 pub fn answer_pending(doc: &mut Document, l: &Listening) -> usize {
+    answer_pending_with(doc, l, &mut |_, _, _| None)
+}
+
+/// [`answer_pending`] with a host extension (see [`Extension`]).
+pub fn answer_pending_with(doc: &mut Document, l: &Listening, ext: Extension) -> usize {
     let mut n = 0;
     while let Ok(req) = l.requests.try_recv() {
-        answer(doc, req);
+        answer_with(doc, req, ext);
         n += 1;
     }
     n
@@ -255,8 +274,13 @@ pub fn answer_pending(doc: &mut Document, l: &Listening) -> usize {
 
 /// Answer one request.
 pub fn answer(doc: &mut Document, req: craft_control::ControlRequest) {
+    answer_with(doc, req, &mut |_, _, _| None);
+}
+
+/// Answer one request, letting `ext` take it first.
+pub fn answer_with(doc: &mut Document, req: craft_control::ControlRequest, ext: Extension) {
     req.started.store(true, std::sync::atomic::Ordering::Relaxed);
-    let reply = handle(doc, &req.method, &req.params);
+    let reply = handle_with(doc, &req.method, &req.params, ext);
     let _ = req.reply.send(reply);
 }
 
