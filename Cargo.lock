@@ -2736,7 +2736,7 @@ dependencies = [
 name = "modelcraft-field"
 version = "0.1.0"
 dependencies = [
- "glam",
+ "glam 0.30.10",
  "proptest",
  "serde",
  "serde_json",

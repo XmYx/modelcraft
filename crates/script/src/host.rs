@@ -199,6 +199,10 @@ impl Shared {
             | Command::SetCloner { .. }
             | Command::AddField { .. }
             | Command::SetField { .. }
+            | Command::AddArray { .. }
+            | Command::AddSymmetry { .. }
+            | Command::SetArray { .. }
+            | Command::SetSymmetry { .. }
             | Command::SetLocked { .. }
             | Command::SetTemplate { .. }
             | Command::AddSelectionSet { .. }

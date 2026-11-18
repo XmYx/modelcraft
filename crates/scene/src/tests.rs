@@ -175,6 +175,7 @@ fn a_mirrored_generator_input_keeps_its_faces_outward() {
     }
 }
 
+#[test]
 fn falloff_fields_limit_where_a_deformer_acts() {
     let mut s = Scene::new();
     let mut ev = Evaluator::new();
