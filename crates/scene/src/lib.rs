@@ -386,9 +386,31 @@ pub enum StepOp {
         #[serde(default)]
         pivot: [f32; 2],
     },
-    /// Weld the UVs on the two sides of the listed edges.
+    /// Weld the UVs on the two sides of the listed edges; with `align`, first move the islands
+    /// on one side onto the other so the edges meet (and with `scale`, resize them to fit).
     StitchUvs {
         edges: Vec<u32>,
+        #[serde(default)]
+        align: bool,
+        #[serde(default)]
+        scale: bool,
+    },
+    /// Relax the UVs of the listed corners (everything when the list is empty) with a few
+    /// iterations of local/global flattening; the other UVs stay where they are.
+    RelaxUvs {
+        #[serde(default)]
+        corners: Vec<u32>,
+        #[serde(default = "default_relax_iterations")]
+        iterations: u32,
+        #[serde(default)]
+        mode: modelcraft_uv::RelaxMode,
+    },
+    /// Lay the selected chains of UV edges on the line between their ends.
+    StraightenUvs {
+        #[serde(default)]
+        corners: Vec<u32>,
+        #[serde(default = "default_strength")]
+        strength: f32,
     },
 }
 
@@ -413,6 +435,14 @@ pub struct UvPin {
 
 fn default_margin() -> f32 {
     0.01
+}
+
+fn default_relax_iterations() -> u32 {
+    10
+}
+
+fn default_strength() -> f32 {
+    1.0
 }
 
 impl StepOp {
@@ -451,7 +481,10 @@ impl StepOp {
             StepOp::ProjectUvs { .. } => "Project UVs",
             StepOp::Seams { .. } => "Seams",
             StepOp::TransformUvs { .. } => "Transform UVs",
+            StepOp::StitchUvs { align: true, .. } => "Stitch UV islands",
             StepOp::StitchUvs { .. } => "Weld UVs",
+            StepOp::RelaxUvs { .. } => "Relax UVs",
+            StepOp::StraightenUvs { .. } => "Straighten UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -467,7 +500,8 @@ impl StepOp {
             StepOp::ProjectUvs { faces, .. } => faces.len() * 4,
             StepOp::Seams { edges } => edges.len() * 8,
             StepOp::TransformUvs { corners, .. } => corners.len() * 4,
-            StepOp::StitchUvs { edges } => edges.len() * 4,
+            StepOp::StitchUvs { edges, .. } => edges.len() * 4,
+            StepOp::RelaxUvs { corners, .. } | StepOp::StraightenUvs { corners, .. } => corners.len() * 4,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }

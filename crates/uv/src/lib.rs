@@ -11,6 +11,8 @@
 //!   system, and an island whose solve does not converge falls back to LSCM ([`AbfReport`]).
 //! - [`measure`]: angle, stretch and area distortion of a UV layout, per triangle and overall.
 //! - [`transform_corners`], [`stitch_edges`]: editing UVs by hand (move, rotate, scale, weld seams).
+//! - [`relax_corners`], [`straighten_corners`], [`stitch_islands`]: relax a layout with the local/global
+//!   flattening of Liu et al. 2008, straighten chains of UV edges, sew islands together by moving them.
 //!
 //! UV space follows glTF: the origin is the top left corner of the image and v grows downwards, so
 //! a triangle that is not mirrored has a negative signed area in (u, v) (see [`measure`]).
@@ -31,6 +33,7 @@ mod layout;
 mod lscm;
 mod seams;
 mod sparse;
+mod tools;
 
 pub use abf::AbfReport;
 pub use charts::{Charts, CutReport, Island, cut_to_disks, face_triangles};
@@ -39,6 +42,7 @@ pub use edit::{UvTransform, bounds, expand_to_uv_vertices, island_corners, stitc
 pub use layout::shelf;
 pub use lscm::{IslandReport, Pin};
 pub use seams::{MAX_SEAMS, SeamSet, shortest_path};
+pub use tools::{MAX_RELAX_ITERATIONS, RelaxMode, RelaxOptions, RelaxReport, StitchOptions, relax_corners, stitch_islands, straighten_corners};
 
 use glam::{DVec2, Vec2};
 use modelcraft_mesh::{MeshError, PolyMesh};
@@ -234,3 +238,5 @@ pub fn unwrap_mesh(mesh: &PolyMesh, seams: &SeamSet, opts: &UnwrapOptions) -> Re
 mod abf_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tools_tests;

@@ -387,9 +387,16 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             };
             modelcraft_uv::transform_corners(m, corners, &t).map_err(|e| OpError::Invalid(e.to_string()))
         }
-        StepOp::StitchUvs { edges } => {
+        StepOp::StitchUvs { edges, align, scale } => {
             edit::check_selection(edges, ne, "edge")?;
-            modelcraft_uv::stitch_edges(m, edges).map_err(|e| OpError::Invalid(e.to_string()))
+            modelcraft_uv::stitch_islands(m, edges, &modelcraft_uv::StitchOptions { align: *align, scale: *scale }).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::RelaxUvs { corners, iterations, mode } => {
+            let opts = modelcraft_uv::RelaxOptions { iterations: *iterations, mode: *mode };
+            modelcraft_uv::relax_corners(m, corners, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::StraightenUvs { corners, strength } => {
+            modelcraft_uv::straighten_corners(m, corners, *strength).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
         StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
         StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),

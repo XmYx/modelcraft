@@ -466,6 +466,27 @@ angle sets: ABF takes 0 Newton iterations and both solvers are exact (angle erro
 below 1e-4). The tests also check that ABF's energy never exceeds LSCM's on the sphere, round cube
 and torus (`abf_is_closer_to_the_surface_angles_than_lscm_on_curved_islands`).
 
+### Relax (`uv-bench --relax N`)
+
+`relax_corners` runs N local/global iterations (Liu et al. 2008) on the whole layout: the global
+system (cotangent Laplacian, two unknowns per vertex) is factored once and solved N times. After
+a LSCM unwrap of a sphere with one seam (`--shape sphere --cut meridian`), 15 iterations, same
+machine and release build as above:
+
+| Sphere | Mode | Time | Fit energy before to after |
+|---|---|---|---|
+| 64×32 (1,986 vertices) | keep lengths | 46 ms | 0.223 to 0.101 |
+| | keep angles | 29 ms | 2.1e-3 to 1.9e-3 |
+| 256×128 (32,514 vertices) | keep lengths | 815 ms | 0.230 to 0.098 |
+| | keep angles | 784 ms | 1.3e-4 to 1.3e-4 |
+
+Keeping lengths spreads the area out (on the 32×16 sphere in the tests the area RMS falls from
+0.92 to 0.36 and the largest area ratio from 5.6 to 3.1) and gives up angles (mean angle error
+6.0° to 15.1°). Keeping angles has little left to improve on a layout that is already conformal.
+The energy is the fit energy of that mode, and a relaxation that would raise it is discarded.
+On a 8×8 grid whose interior vertices were knocked about by up to 0.015 of its width, 60 iterations
+bring the maximum angle error from 17.3° to 4e-5° (`relax_restores_a_jittered_grid_to_an_isometry`).
+
 ## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
 
 Random rectangular islands (fixed seed, sides 0.05 to 1.55, even texel density), packed into the

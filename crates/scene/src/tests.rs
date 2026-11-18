@@ -297,8 +297,8 @@ fn uv_edit_steps_move_weld_and_record_seams() {
     // Weld an edge; JSON defaults for the new steps.
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
         steps.clear();
-        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0] } });
-        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999] } });
+        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0], align: false, scale: false } });
+        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999], align: false, scale: false } });
     }
     let e = ev.evaluate(&s, id);
     assert_eq!(e.errors.len(), 1, "an edge that does not exist is reported, the step skipped");

@@ -56,7 +56,7 @@ Commands:
   bench --groups [--polys N]        patch, visibility, region, shell, trim and occlusion times
   uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
-  uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian]
+  uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian] [--relax N]
                                     unwrap a sphere (or tube, cone, torus, roundcube): time and distortion
   -h, --help | -V, --version
 ";
@@ -293,6 +293,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             &flag(a, "--method").unwrap_or_else(|| "lscm".to_string()),
             &flag(a, "--shape").unwrap_or_else(|| "sphere".to_string()),
             &flag(a, "--cut").unwrap_or_else(|| "auto".to_string()),
+            flag(a, "--relax").and_then(|v| v.parse().ok()).unwrap_or(0),
         ),
         "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
@@ -598,9 +599,9 @@ fn uv_report(d: &mut Document) -> Result<(), String> {
 /// Unwrap a welded shape (no seams unless the shape is developable: the automatic cut gives a
 /// closed one a path) with each solver asked for and report time and distortion. Reproduces the
 /// numbers in `docs/performance.md`.
-fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str) -> Result<(), String> {
+fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str, relax: u32) -> Result<(), String> {
     use modelcraft_engine::ops::{edit, primitives::Primitive};
-    use modelcraft_engine::uv::{SeamSet, UnwrapMethod, UnwrapOptions, measure, unwrap_mesh};
+    use modelcraft_engine::uv::{RelaxMode, RelaxOptions, SeamSet, UnwrapMethod, UnwrapOptions, measure, relax_corners, unwrap_mesh};
     let segments = segments.clamp(4, 512);
     let rings = (segments / 2).max(2);
     let prim = match shape {
@@ -661,6 +662,14 @@ fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str) -> Result<(), S
         }
         let (dist, _) = measure(&out);
         println!("{}", distortion_json(&dist));
+        if relax > 0 {
+            for (label, mode) in [("rigid", RelaxMode::Rigid), ("conformal", RelaxMode::Conformal)] {
+                let t = Instant::now();
+                let (relaxed, rep) = relax_corners(&out, &[], &RelaxOptions { iterations: relax, mode }).map_err(|e| e.to_string())?;
+                println!("relax {label} x{relax}: {:.0} ms, energy {:.4e} -> {:.4e}, {} islands", ms(t), rep.energy_before, rep.energy_after, rep.islands);
+                println!("{}", distortion_json(&measure(&relaxed).0));
+            }
+        }
     }
     Ok(())
 }
