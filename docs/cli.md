@@ -82,7 +82,37 @@ current frame (linear between frames; the first or last frame holds outside the 
 `attach_cache` reads a `.mcpc` file whose point count is the mesh's vertex count, so any tool that
 writes the format (or `modelcraft-cli bake`) can drive a mesh. `set` changes `start_frame`,
 `end_frame`, `fps`, `substeps` (1 to 64), `seed` and `max_cache_mib`; `clear_cache` throws a baked
-cache away. `modelcraft-cli commands` lists them as `sim op=…`.
+cache away.
+
+`add` gives a mesh a simulation (`rigid_active` falls and collides, `rigid_passive` is a collider
+that follows its keyed animation); `set_kind` replaces its settings; `bake` simulates from the start
+frame to the end frame and caches every frame, in one undo step. A rigid body's settings (`kind`
+with `type: "rigid"`): `role`, `shape` (auto, box, sphere, hull, mesh; a mesh shape is for
+colliders), `mass` (kg), `friction`, `bounciness`, `linear_damping`, `angular_damping`,
+`velocity` and `spin` at the start, `can_sleep`, `gravity` and `ground` (a floor at that height),
+and `joints`: `{kind: fixed|hinge|point, other: <mesh object id, or none for the world>, anchor:
+[x,y,z] (world, at the start frame), axis, limit: [min, max] degrees}`. All rigid bodies of a
+scene are one world: baking any of them bakes every one, with the timing, seed, gravity and ground
+of the one you baked. The same scene and seed give the same cache bit for bit. A body's own
+animation is ignored while it is simulated; a collider's keys move it and push the bodies on it.
+Each cache is stored in its mesh's own space under the object's own transform, so the object does
+not move: the mesh does.
+
+`cloth` (`add` with `kind: "cloth"`) simulates the mesh as a cloth with extended position-based
+dynamics. Its settings (`kind` with `type: "cloth"`): `mass` (kg), `stretch`, `shear`, `bend`
+(0 to 1; 1 is inextensible for stretch), `damping`, `thickness` (the radius of a vertex in
+collisions, metres), `friction`, `iterations` per substep, `gravity`, `wind` (`direction`,
+`strength` in metres per second, `turbulence` 0 to 1, `scale` and `speed` of the gusts, seeded by
+the simulation's `seed`), `collide` (with other visible meshes, or only the ids in `collide_with`),
+`self_collision`, and the pins: `pinned` (vertex indices; `sim pin_vertices` adds or releases
+some), `pin_mask` (also hold the vertices whose sculpt mask is above one half) and `pin_follow`
+(a mesh or group id: the pins move as that object does). Colliders are read from the scene at every
+frame, so moving objects, deformed meshes and baked rigid bodies all work; a cloth does not push
+its colliders back. A cloth is baked on its own (`bake` on it), and a cloth baked earlier is a
+collider for the next. Edits to the colliders do not mark a cloth's cache stale.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`
+and `sim-bench cloth` measure a bake.
 
 ### Animation
 

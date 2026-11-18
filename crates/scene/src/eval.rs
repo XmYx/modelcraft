@@ -166,20 +166,24 @@ impl Evaluator {
         let result = match &obj.kind {
             ObjectKind::Mesh { .. } => {
                 let mut e = self.steps_output(scene, id, usize::MAX);
-                let deformers: Vec<(Mat4, crate::Deformer)> = scene
+                let deformers: Vec<(Mat4, crate::Deformer, crate::FieldStack)> = scene
                     .children(id)
                     .into_iter()
                     .filter_map(|c| scene.get(c))
                     .filter(|c| c.visible)
                     .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer)),
+                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer, scene.field_stack(c.id))),
                         _ => None,
                     })
                     .collect();
                 if !deformers.is_empty() {
                     let mut m = (*e.mesh).clone();
-                    for (to_local, d) in deformers {
-                        d.apply(&mut m, to_local);
+                    for (to_local, d, fields) in deformers {
+                        if fields.is_empty() {
+                            d.apply(&mut m, to_local);
+                        } else {
+                            d.apply_weighted(&mut m, to_local, &|p| fields.weight(p));
+                        }
                     }
                     e.mesh = Arc::new(m);
                 }
@@ -256,6 +260,7 @@ impl Evaluator {
             }
             ObjectKind::Group
             | ObjectKind::Deformer { .. }
+            | ObjectKind::Field { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }

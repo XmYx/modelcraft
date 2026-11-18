@@ -2,7 +2,7 @@
 
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Material, ObjectId, StepOp, Transform};
+use modelcraft_scene::{Cloner, Field, Material, ObjectId, StepOp, Transform};
 use modelcraft_sculpt::Stroke;
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +107,12 @@ pub enum Command {
         kind: String,
         target: ObjectId,
     },
+    /// Add a falloff field (`sphere`, `box`, `linear`, `noise`) inside a deformer; the deformer
+    /// then acts only where the field is.
+    AddField {
+        kind: String,
+        target: ObjectId,
+    },
     Delete {
         ids: Vec<ObjectId>,
     },
@@ -144,6 +150,11 @@ pub enum Command {
     SetDeformer {
         id: ObjectId,
         deformer: Deformer,
+    },
+    /// Change a falloff field's shape, remap curve and blend mode.
+    SetField {
+        id: ObjectId,
+        field: Field,
     },
     /// Change a clone generator's layout and seed, and the target object of the surface and
     /// vertices layouts.
@@ -326,6 +337,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round) under target"),
+    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the deformer target"),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -336,6 +348,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_primitive", "Change a primitive's parameters: id, primitive"),
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
+    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
@@ -392,6 +405,7 @@ impl Command {
             Command::AddSmoothCage { .. } => "Add smooth cage".into(),
             Command::AddCloner { kind, .. } => format!("Add {kind} clones"),
             Command::AddDeformer { kind, .. } => format!("Add {kind}"),
+            Command::AddField { kind, .. } => format!("Add {kind} field"),
             Command::Delete { .. } => "Delete".into(),
             Command::Duplicate { .. } => "Duplicate".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -402,6 +416,7 @@ impl Command {
             Command::SetPrimitive { .. } => "Primitive settings".into(),
             Command::SetCageLevels { .. } => "Smooth cage levels".into(),
             Command::SetDeformer { .. } => "Deformer settings".into(),
+            Command::SetField { .. } => "Field settings".into(),
             Command::SetCloner { .. } => "Clone settings".into(),
             Command::AddStep { op, .. } => op.name().into(),
             Command::SetStep { op, .. } => format!("Edit {}", op.name()),

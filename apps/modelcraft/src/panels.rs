@@ -10,7 +10,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, CLONERS, DEFORMERS, PRIMITIVES};
+use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, PRIMITIVES};
 use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::dock::Move;
 use crate::theme;
@@ -104,6 +104,9 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, Action::AddDeformer(d));
                 }
                 ui.separator();
+                for f in FIELDS {
+                    action_button(app, ui, Action::AddField(f));
+                }
                 for c in CLONERS {
                     action_button(app, ui, Action::AddCloner(c));
                 }
@@ -499,6 +502,12 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.2, g));
             p.circle_filled(c, 2.0, g);
         }
+        ObjectKind::Field { .. } => {
+            // A soft disc: strong in the middle, fading out.
+            let t = Color32::from_rgb(110, 210, 200);
+            p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, t.gamma_multiply(0.5)));
+            p.circle_filled(c, 2.5, t);
+        }
         ObjectKind::Cloner { .. } => {
             // Three small squares: one source, many clones.
             let o = Color32::from_rgb(240, 170, 90);
@@ -630,6 +639,9 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 });
                 ui.label(RichText::new(tl!("Shows its first mesh child subdivided. Edit the child; the cage follows.")).color(theme::TEXT_DIM).small());
             });
+        }
+        ObjectKind::Field { field } => {
+            egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
         }
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));

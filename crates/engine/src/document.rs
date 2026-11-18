@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project, uvlayout};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome};
@@ -75,6 +75,8 @@ pub struct Document {
     pub history_note: Option<String>,
     /// Counts the changes made in this session (control clients watch it).
     pub revision: u64,
+    /// A bake that ran elsewhere, waiting for the `bake` command to store it ([`Document::store_bake`]).
+    pub(crate) sim_ready: Option<crate::sim_bake::BakeResult>,
 }
 
 /// Default bound on the history a save stores: 256 MiB of commands.
@@ -104,6 +106,7 @@ impl Document {
             history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
             history_note: None,
             revision: 0,
+            sim_ready: None,
         }
     }
 
@@ -849,6 +852,14 @@ impl Document {
                 let name = self.scene.unique_name(&title(kind));
                 out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
             }
+            Command::AddField { kind, target } => {
+                let field = Field::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown field {kind:?}")))?;
+                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. })) {
+                    return invalid("falloff fields go inside a deformer");
+                }
+                let name = self.scene.unique_name(&format!("{} field", title(kind)));
+                out.created.push(self.scene.add(name, ObjectKind::Field { field }, Some(*target))?);
+            }
             Command::Delete { ids } => {
                 for id in ids {
                     if self.scene.get(*id).is_none() {
@@ -904,6 +915,10 @@ impl Document {
             Command::SetDeformer { id, deformer } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::Deformer { deformer: d } => *d = *deformer,
                 _ => return invalid("not a deformer"),
+            },
+            Command::SetField { id, field } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Field { field: f } => *f = field.sanitized(),
+                _ => return invalid("not a falloff field"),
             },
             Command::SetCloner { id, cloner, target } => {
                 if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
