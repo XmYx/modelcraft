@@ -257,3 +257,179 @@ fn a_smaller_amount_is_a_prefix_of_the_groom_and_hair_gets_a_colour() {
         assert_eq!(some.strand(i), all.strand(i), "what the viewport draws at a lower percentage is the first strands of the full groom");
     }
 }
+
+fn quick_bake(d: &mut Document, hair: ObjectId) {
+    let timing = modelcraft_sim::SimTiming { start_frame: 1.0, end_frame: 20.0, fps: 24.0, substeps: 4 };
+    d.execute(Command::Hair(H::SetDynamics { id: hair, dynamics: None, timing: Some(timing), seed: Some(3) })).unwrap();
+    let out = d.execute(Command::Hair(H::Bake { id: hair })).unwrap();
+    assert!(out.warnings[0].contains("20 frames"), "{:?}", out.warnings);
+}
+
+#[test]
+fn a_bake_is_cached_played_by_frame_undone_and_dropped_when_the_groom_changes() {
+    let mut d = Document::new();
+    let (_, hair) = grown(&mut d);
+    let rest = data(&d, hair);
+    quick_bake(&mut d, hair);
+    let baked = data(&d, hair);
+    let cache = baked.baked.clone().unwrap();
+    assert_eq!((cache.frames(), cache.points()), (20, 1000 * 8));
+    // Frame 1 is the groomed shape; later frames hang.
+    let first = baked.at_frame(1.0);
+    assert_eq!(first.guides.all_points(), rest.guides.all_points());
+    let late = baked.at_frame(20.0);
+    assert_ne!(late.guides.all_points(), rest.guides.all_points());
+    assert_eq!(late.guides.roots(), rest.guides.roots());
+    let mid = baked.at_frame(10.5);
+    assert!(mid.guides.all_points().iter().all(|p| p.is_finite()));
+    // Without a bake the hair is itself.
+    assert!(matches!(rest.at_frame(10.0), std::borrow::Cow::Borrowed(_)));
+    // Undo takes the bake back, redo restores it, the same bake twice gives the same cache.
+    d.execute(Command::Undo).unwrap();
+    assert!(data(&d, hair).baked.is_none());
+    d.execute(Command::Redo).unwrap();
+    assert_eq!(data(&d, hair).baked.as_ref().unwrap().checksum(), cache.checksum());
+    d.execute(Command::Hair(H::Bake { id: hair })).unwrap();
+    assert_eq!(data(&d, hair).baked.as_ref().unwrap().checksum(), cache.checksum(), "baking again gives the same bytes");
+    // Changing the guides or the settings makes the bake stale, so it goes.
+    d.execute(Command::Hair(H::Stroke { id: hair, stroke: stroke_everywhere(BrushKind::Comb, Vec3::new(0.1, 0.0, 0.0)) })).unwrap();
+    assert!(data(&d, hair).baked.is_none());
+    d.execute(Command::Hair(H::Bake { id: hair })).unwrap();
+    d.execute(Command::Hair(H::SetDynamics {
+        id: hair,
+        dynamics: Some(modelcraft_hair::DynamicsSettings { wind: Vec3::new(5.0, 0.0, 0.0), ..Default::default() }),
+        timing: None,
+        seed: None,
+    }))
+    .unwrap();
+    assert!(data(&d, hair).baked.is_none());
+    d.execute(Command::Hair(H::Bake { id: hair })).unwrap();
+    d.execute(Command::Hair(H::ClearBake { id: hair })).unwrap();
+    assert!(d.execute(Command::Hair(H::ClearBake { id: hair })).is_err(), "nothing left to clear");
+}
+
+#[test]
+fn gravity_is_the_worlds_whatever_the_emitters_turn() {
+    // A plane turned on its side grows hair sideways; world gravity still pulls it toward -y.
+    let mut d = Document::new();
+    let plane = d.execute(Command::AddPrimitive { kind: "plane".into(), name: None, parent: None }).unwrap().created[0];
+    let turn = modelcraft_scene::Transform { rotation: glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), ..Default::default() };
+    d.execute(Command::SetTransform { id: plane, transform: turn }).unwrap();
+    let hair = d
+        .execute(Command::Hair(H::Add {
+            mesh: plane,
+            grow: Some(GrowSpec { amount: Amount::Count(30), length: 0.5, ..GrowSpec::default() }),
+            interp: None,
+            name: None,
+        }))
+        .unwrap()
+        .created[0];
+    let still = modelcraft_hair::DynamicsSettings { stiffness: 0.0, collide: false, ..Default::default() };
+    d.execute(Command::Hair(H::SetDynamics {
+        id: hair,
+        dynamics: Some(still),
+        timing: Some(modelcraft_sim::SimTiming { start_frame: 1.0, end_frame: 40.0, fps: 24.0, substeps: 4 }),
+        seed: None,
+    }))
+    .unwrap();
+    d.execute(Command::Hair(H::Bake { id: hair })).unwrap();
+    let h = data(&d, hair);
+    let world = d.scene.world_matrix(plane);
+    let tip_y = |frame: f64| {
+        let at = h.at_frame(frame);
+        (0..at.guides.len()).map(|i| world.transform_point3(*at.guides.strand(i).last().unwrap()).y).sum::<f32>() / at.guides.len() as f32
+    };
+    assert!(tip_y(40.0) < tip_y(1.0) - 0.1, "world -y is down: {} to {}", tip_y(1.0), tip_y(40.0));
+}
+
+#[test]
+fn bad_dynamics_are_errors_and_leave_the_hair_alone() {
+    let mut d = Document::new();
+    let (_, hair) = grown(&mut d);
+    let before = data(&d, hair);
+    for op in [
+        H::SetDynamics { id: hair, dynamics: Some(modelcraft_hair::DynamicsSettings { damping: 3.0, ..Default::default() }), timing: None, seed: None },
+        H::SetDynamics { id: hair, dynamics: Some(modelcraft_hair::DynamicsSettings { gravity: Vec3::NAN, ..Default::default() }), timing: None, seed: None },
+        H::SetDynamics {
+            id: hair,
+            dynamics: None,
+            timing: Some(modelcraft_sim::SimTiming { start_frame: 9.0, end_frame: 2.0, fps: 24.0, substeps: 4 }),
+            seed: None,
+        },
+        H::SetDynamics {
+            id: hair,
+            dynamics: None,
+            timing: Some(modelcraft_sim::SimTiming { start_frame: 1.0, end_frame: 1.0e9, fps: 24.0, substeps: 4 }),
+            seed: None,
+        },
+        H::Bake { id: ObjectId(999) },
+        H::ClearBake { id: hair },
+    ] {
+        assert!(d.execute(Command::Hair(op.clone())).is_err(), "{op:?}");
+    }
+    assert_eq!(*data(&d, hair), *before);
+}
+
+#[test]
+fn hair_exports_as_gltf_lines_and_as_a_point_cache() {
+    let dir = std::env::temp_dir().join(format!("mc-hair-{}-export", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut d = Document::new();
+    let (head, hair) = grown(&mut d);
+    d.execute(Command::SetTransform { id: head, transform: modelcraft_scene::Transform { translation: Vec3::new(10.0, 0.0, 0.0), ..Default::default() } })
+        .unwrap();
+    // glTF of the guides, in the emitter's space and in the world.
+    let (local, world) = (dir.join("local.glb"), dir.join("world.glb"));
+    let msg = d.export_hair(hair, &local, crate::HairExportFormat::Glb, crate::HairExportWhat::Guides, 0, false).unwrap();
+    assert!(msg.contains("1000 guides of 8 points"), "{msg}");
+    d.export_hair(hair, &world, crate::HairExportFormat::Glb, crate::HairExportWhat::Guides, 0, true).unwrap();
+    let min_x = |p: &std::path::Path| {
+        let b = std::fs::read(p).unwrap();
+        let jl = u32::from_le_bytes(b[12..16].try_into().unwrap()) as usize;
+        let j: serde_json::Value = serde_json::from_slice(&b[20..20 + jl]).unwrap();
+        assert_eq!(j["meshes"][0]["primitives"][0]["mode"], 1);
+        j["accessors"][0]["min"][0].as_f64().unwrap()
+    };
+    assert!(min_x(&world) > min_x(&local) + 8.0, "the world copy sits where the emitter does: {} against {}", min_x(&world), min_x(&local));
+    // Render hairs, capped.
+    let strands = dir.join("strands.glb");
+    let msg = d.export_hair(hair, &strands, crate::HairExportFormat::Glb, crate::HairExportWhat::Strands, 500, false).unwrap();
+    assert!(msg.contains("500 strands"), "{msg}");
+    // A point cache: one frame without a bake, every baked frame with one.
+    let still = dir.join("still.mcpc");
+    d.export_hair(hair, &still, crate::HairExportFormat::Mcpc, crate::HairExportWhat::Guides, 0, false).unwrap();
+    let pc = modelcraft_formats::pointcache::PointCache::from_bytes(&std::fs::read(&still).unwrap()).unwrap();
+    assert_eq!((pc.frames(), pc.vertices), (1, 8000));
+    quick_bake(&mut d, hair);
+    let baked = dir.join("baked.mcpc");
+    d.export_hair(hair, &baked, crate::HairExportFormat::Mcpc, crate::HairExportWhat::Guides, 0, true).unwrap();
+    let pc = modelcraft_formats::pointcache::PointCache::from_bytes(&std::fs::read(&baked).unwrap()).unwrap();
+    assert_eq!((pc.frames(), pc.vertices), (20, 8000));
+    assert!(pc.frame(0).unwrap().iter().all(|p| p.x > 5.0), "world space includes the emitter's offset");
+    // The cache plays on a mesh with the simulation framework: the file is the documented format.
+    assert!(pc.to_frame_cache().is_ok());
+    // A bad path is an error, not a crash.
+    assert!(d.export_hair(hair, &dir.join("no/such/dir/x.glb"), crate::HairExportFormat::Glb, crate::HairExportWhat::Guides, 0, false).is_err());
+    assert!(d.export_hair(head, &dir.join("x.glb"), crate::HairExportFormat::Glb, crate::HairExportWhat::Guides, 0, false).is_err(), "only hair exports");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_saved_project_keeps_the_dynamics_settings_and_bakes_again_on_request() {
+    let dir = std::env::temp_dir().join(format!("mc-hair-{}-savebake", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bake.modelcraft");
+    let mut d = Document::new();
+    let (_, hair) = grown(&mut d);
+    quick_bake(&mut d, hair);
+    let checksum = data(&d, hair).baked.as_ref().unwrap().checksum();
+    d.save_as(&path).unwrap();
+    let mut back = Document::open(&path).unwrap();
+    let h = data(&back, hair);
+    assert_eq!((h.timing.end_frame, h.seed), (20.0, 3), "the settings are saved");
+    assert!(h.baked.is_none(), "the cache is derived data and is not in the project");
+    // The same settings and seed bake the same cache.
+    back.execute(Command::Hair(H::Bake { id: hair })).unwrap();
+    assert_eq!(data(&back, hair).baked.as_ref().unwrap().checksum(), checksum);
+    std::fs::remove_dir_all(&dir).ok();
+}

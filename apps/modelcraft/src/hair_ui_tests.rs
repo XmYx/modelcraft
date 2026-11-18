@@ -239,3 +239,79 @@ fn display_options_are_named_controls_with_a_palette_path() {
     palette(&mut h, "Show Hair Guides");
     assert_eq!(crate::hair_ui::guide_lines(h.state()).len(), 1000 * 7, "with strands hidden the guides are what is shown");
 }
+
+#[test]
+fn dynamics_are_typed_baked_scrubbed_and_undone() {
+    use modelcraft_engine::Command;
+    let mut h = with_hair();
+    for name in [
+        "Gravity X",
+        "Gravity Y",
+        "Gravity Z",
+        "Wind X",
+        "Wind Y",
+        "Wind Z",
+        "Hair damping",
+        "Hair stiffness",
+        "Collision clearance",
+        "Bake start frame",
+        "Bake end frame",
+    ] {
+        h.get_by_role_and_label(Role::SpinButton, name);
+    }
+    h.get_by_role_and_label(Role::CheckBox, "Collide with the emitter");
+    for name in ["Bake Hair Dynamics", "Clear Hair Bake", "Export Hair as glTF…", "Export Hair Point Cache…"] {
+        h.get_by_role_and_label(Role::Button, name);
+    }
+    let rest = guides(&h);
+    // No forces by typing: the bake leaves the hair where it is.
+    h.get_by_role_and_label(Role::SpinButton, "Gravity Y").set_value_accesskit(0.0);
+    h.get_by_role_and_label(Role::SpinButton, "Bake end frame").set_value_accesskit(12.0);
+    h.run();
+    palette(&mut h, "Bake Hair Dynamics");
+    assert!(h.state().status.starts_with("Hair baked"), "{}", h.state().status);
+    let hair = crate::hair_ui::target_hair(h.state()).unwrap();
+    let data = |h: &Harness<'static, ModelApp>| match &h.state().doc.scene.get(hair).unwrap().kind {
+        ObjectKind::Hair { hair } => hair.clone(),
+        _ => panic!("not hair"),
+    };
+    let baked = data(&h);
+    assert_eq!(baked.baked.as_ref().map(|c| c.frames()), Some(12));
+    assert_eq!(baked.at_frame(8.0).guides.all_points(), rest.all_points());
+    // With gravity back on, a bake sags: the drawn guides at the last frame differ from the first.
+    h.get_by_role_and_label(Role::SpinButton, "Gravity Y").set_value_accesskit(-9.81);
+    h.run();
+    palette(&mut h, "Bake Hair Dynamics");
+    let lines_at = |h: &mut Harness<'static, ModelApp>, frame: f64| {
+        h.state_mut().doc.scene.anim.frame = frame;
+        crate::hair_ui::guide_lines(h.state())
+    };
+    let (first, last) = (lines_at(&mut h, 1.0), lines_at(&mut h, 12.0));
+    assert_eq!(first.len(), last.len());
+    assert!(first.iter().zip(&last).any(|(a, b)| a.1 != b.1), "the guides on screen follow the cache by frame");
+    // One undo takes the bake away; the hair is its groomed self again.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!(data(&h).baked.is_none());
+    h.state_mut().run(Command::Hair(modelcraft_engine::HairCommand::Bake { id: hair }));
+    palette(&mut h, "Clear Hair Bake");
+    assert!(data(&h).baked.is_none());
+}
+
+#[test]
+fn hair_exports_from_the_app_with_a_status_line() {
+    let mut h = with_hair();
+    let id = crate::hair_ui::target_hair(h.state()).unwrap();
+    let dir = std::env::temp_dir().join(format!("mc-hair-ui-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (glb, cache) = (dir.join("hair.glb"), dir.join("hair.mcpc"));
+    crate::hair_ui::export_to(h.state_mut(), id, &glb, true);
+    assert!(h.state().status.contains("strands of 8 points written"), "{}", h.state().status);
+    crate::hair_ui::export_to(h.state_mut(), id, &cache, false);
+    assert!(h.state().status.contains("1000 guides of 8 points written"), "{}", h.state().status);
+    assert_eq!(&std::fs::read(&glb).unwrap()[0..4], b"glTF");
+    assert_eq!(&std::fs::read(&cache).unwrap()[0..4], b"MCPC");
+    crate::hair_ui::export_to(h.state_mut(), id, &dir.join("no/such/dir/x.glb"), true);
+    assert!(h.state().status.contains("failed"), "{}", h.state().status);
+    std::fs::remove_dir_all(&dir).ok();
+}

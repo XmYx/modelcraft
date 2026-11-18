@@ -446,7 +446,7 @@ Weight: 6
 | Light linking (include / exclude) | C M R | M | M | |
 | Light groups and per-light outputs | R | M | M | |
 | Subsurface scattering (random walk) | C M R | M | L | |
-| Hair and fibre shading | C M R | M | L | |
+| Hair and fibre shading | C M R | D | L | Hair objects render in the CPU path tracer (`modelcraft-cli render`, the Render View): strands are round-cone curves in their own BVH, scattered by the Chiang 2016 fibre model (R, TT, TRT and a residual lobe, longitudinal and azimuthal roughness, cuticle tilt, absorption from the hair colour) with next-event estimation, shadows both ways and bounces among the fibres; a white-furnace test (hair that absorbs nothing is invisible in uniform light), energy and sampling-density checks of the model, and agreement of the three estimators; the object's colour and roughness are the controls; the GPU path tracer declines hair (the CPU is used), no melanin or eccentricity controls, no per-strand colour |
 | Volumes: homogeneous, heterogeneous, sparse grids | C M R | M | L | |
 | Render-time displacement with adaptive subdivision | C M R | M | L | |
 | Motion blur: transform and deformation | C M R | M | L | |
@@ -519,7 +519,7 @@ Weight: 6
 | Smoke and fire | C M | M | XL | |
 | Liquids | C M | M | XL | |
 | Simulation cache and playback | C M | D | M | A fixed-step, seeded, bounded solver loop caches every frame to a `.mcpc`-shaped cache that is saved in the project and plays by scene frame (linear between frames); the Simulation panel bakes on a worker thread with a progress bar, cancels from the button, Escape or the palette, clears the cache, plays it from its first frame, and marks a cache out of date when its settings change; a `.mcpc` from another tool attaches with `sim attach_cache`; tests cover determinism, bounds, cancel, undo, save and recovery; no Alembic, no per-frame playback of a whole scene |
-| Ropes and hair dynamics | C M | M | L | |
+| Ropes and hair dynamics | C M | P | L | Hair guides can be baked: Verlet strands pinned to the emitter with gravity, wind, damping, a shape spring, length constraints and collision with the emitter, deterministic by seed, cached per frame through the simulation framework and played by the timeline, in the viewport, in renders and in exports; a bake of 5,000 guides takes 7 ms a frame; strands do not collide with each other and the emitter is taken to be still while baking; no ropes or other dynamic curve objects, and the cache is not saved in the project (the settings are) |
 | Cloth-like sculpt brushes | Z | M | M | |
 
 ## Hair, fur and grooming
@@ -532,7 +532,7 @@ Weight: 4
 | Render hair interpolated from guides: density, clumping, frizz | C M | D | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k) with density map, clump, frizz, width taper and hard memory caps, editable in Properties; the viewport draws them on the GPU as one call with a display percentage and a 100,000-strand edit limit (1,000,000 strands at 821 fps, 10 % at 3,443 fps on an RTX 4090, 1920x1080, `docs/performance.md`); guides show for selected hair; no strand shading in the viewport, and the path tracer does not see strands yet (see Hair and fibre shading) |
 | Sculpted fibre meshes | Z | M | M | |
 | Hair to cards / geometry | C M | M | M | |
-| Import and export of curve grooms | C M | M | S | |
+| Import and export of curve grooms | C M | P | S | Export only: render hairs or guides as glTF line segments (with a `_WIDTH` attribute and the strand counts in `extras`, checked against the glTF container rules and read back by the project's glTF reader) and guides as a `.mcpc` point cache with every baked frame, from the Hair menu and `modelcraft-cli hair-export`; there is no groom import yet |
 | Instanced fur and feathers | C M | M | M | |
 
 ## Volumes

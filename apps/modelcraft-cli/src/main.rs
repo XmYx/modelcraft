@@ -309,6 +309,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
+        "hair-export" => hair_cmd::export(a, load),
         "sim-bench" => sim_cmd::bench(a),
         "uv-bench" => uv_bench(
             flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64),

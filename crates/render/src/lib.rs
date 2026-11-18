@@ -18,6 +18,7 @@ pub mod buffers;
 pub mod camera;
 pub mod gpu;
 pub mod hair_gpu;
+pub mod hair_trace;
 pub mod trace;
 
 pub use craft_render_core as pathtrace;

@@ -879,6 +879,45 @@ the brush are replaced by its guides until the stroke ends. The app's own frame 
 measured (the window needs a display); the figures above are the hair pass alone, and the egui
 overhead is the same with or without hair. Without a GPU adapter the viewport shows guides only.
 
+### Rendering them (`modelcraft-cli render`, CPU path tracer)
+
+Hair is traced as round-cone segments (`craft-render-bvh::curves`) in a BVH of their own, scattered
+by the fibre model of `craft-render-core::hair` (Chiang et al. 2016 lobes: R, TT, TRT and a residual
+tail). A sphere with 3,000 guides grown with a bend and clumped, 10 points per strand, the strands
+cut off by the default render settings: 640×480, 16 samples per pixel, 12 bounces, studio light and
+ground, `--device cpu` (the GPU path tracer declines hair and the CPU one is used), all 24 cores,
+load average about 25. "Seconds" are `scene_seconds` (building the curve BVH) and `render_seconds`
+from the command's report.
+
+| Strands | Segments | Scene build | Render | Million samples per second |
+|---|---|---|---|---|
+| none (the bare sphere) | 0 | 0.003 s | 0.52 s | 9.55 |
+| 10,000 | 90,000 | 0.09 s | 1.75 s | 2.81 |
+| 150,000 | 1,350,000 | 0.38 s | 4.00 s | 1.23 |
+| 1,000,000 | 9,000,000 | 3.35 s | 7.85 s | 0.63 |
+
+The same 150,000-strand picture at 64 samples per pixel takes 16.5 s. Hair costs about 8 to 15 times
+the bare sphere here, because most camera paths cross many fibres and every fibre hit spends a shadow
+ray and a bounce. A render of hair is capped at 1,000,000 strands per hair object (a prefix of the
+groom, an unbiased thinner copy).
+
+### Baking and exporting (`hair-bench --bake`, `hair-export`)
+
+Dynamics (`modelcraft_hair::StrandSolver` run by `modelcraft_sim::bake`): Verlet with gravity, damping, a
+weak shape spring, 8 length-constraint passes per step and collision with the sphere (a grid of its
+16,128 triangles), 4 substeps per frame, all 24 cores, strands independent of each other. Load average
+about 22.
+
+| Guides × points | Frames | Bake | Per frame | Cache |
+|---|---|---|---|---|
+| 5,000 × 8 | 60 | 431 ms | 7.2 ms | 28.8 MB |
+| 50,000 × 8 | 24 | 1,104 ms | 46 ms | 115.2 MB |
+
+A bake runs on the window's thread, so the app waits for it; scrubbing afterwards plays the cache (and a
+baked hair's strands are made again for each frame shown). Exports: 10,000 strands of 10 points as glTF
+lines is 2.3 MB (100,000 points, 90,000 segments); 3,000 guides of 10 points as one frame of point cache
+is 0.36 MB.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have
