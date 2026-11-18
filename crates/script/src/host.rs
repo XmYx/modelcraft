@@ -197,6 +197,8 @@ impl Shared {
             | Command::Sim(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::AddField { .. }
+            | Command::SetField { .. }
             | Command::SetLocked { .. }
             | Command::SetTemplate { .. }
             | Command::AddSelectionSet { .. }

@@ -16,6 +16,7 @@ modelcraft-anim = { path = "crates/anim" }
 modelcraft-sim = { path = "crates/sim" }
 modelcraft-mesh = { path = "crates/mesh" }
 modelcraft-ops = { path = "crates/ops" }
+modelcraft-field = { path = "crates/field" }
 modelcraft-clone = { path = "crates/clone" }
 modelcraft-scene = { path = "crates/scene" }
 modelcraft-sculpt = { path = "crates/sculpt" }
