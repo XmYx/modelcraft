@@ -52,9 +52,26 @@ impl HairData {
 
     /// The render hairs for the current guides on `mesh`.
     pub fn strands(&self, mesh: &PolyMesh) -> Result<HairCurves, HairError> {
+        self.strands_with_amount(mesh, self.interp.amount)
+    }
+
+    /// The same hairs made with another amount. Strand `i` does not depend on the amount, so the
+    /// result is a prefix of the full groom: this is how the viewport draws a percentage of it.
+    pub fn strands_with_amount(&self, mesh: &PolyMesh, amount: modelcraft_hair::Amount) -> Result<HairCurves, HairError> {
         let surface = Surface::from_mesh(mesh)?;
         let maps = SurfaceMaps { density: self.density.as_deref(), length: None };
-        interpolate(&surface, &self.guides, &self.interp, &maps, &Limits::default())
+        let spec = InterpSpec { amount, ..self.interp.clone() };
+        interpolate(&surface, &self.guides, &spec, &maps, &Limits::default())
+    }
+
+    /// How many render hairs the settings ask for on `mesh`.
+    pub fn strand_count(&self, mesh: &PolyMesh) -> usize {
+        match self.interp.amount {
+            modelcraft_hair::Amount::Count(n) => n,
+            modelcraft_hair::Amount::PerUnitArea(d) => {
+                Surface::from_mesh(mesh).map_or(0, |s| (s.area() * f64::from(d.max(0.0))).round().min(usize::MAX as f64) as usize)
+            }
+        }
     }
 }
 

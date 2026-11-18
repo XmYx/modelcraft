@@ -119,7 +119,7 @@ Weight: 6
 | Single and four-view layouts | C M | D | S | Space |
 | Ground grid and axis triad | C M Z | D | S | |
 | Shaded with wireframe on selection | C M Z | D | S | Auto-smoothed normals (40°) |
-| Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | P | M | Shaded and wireframe only |
+| Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | D | M | Organize ▸ Display Mode for the view, a Display tag per object; each mode drawn and read back on a real GPU adapter in a test |
 | Move, rotate, scale gizmos | C M Z | D | M | Axis and free handles; numeric alternative |
 | Gizmo step snapping (grid, angle, scale) | C M | D | S | Shift+S; Ctrl inverts per drag |
 | Vertex, edge, face and surface snapping | C M Z | M | M | |
@@ -153,15 +153,15 @@ Weight: 5
 | Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
 | Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
 | Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
-| Tags: per-object behaviours (display, render, protection, look-at) | C | M | M | |
-| Display and render layers | C M | M | M | |
-| Instances that share a mesh | C M | M | M | |
+| Tags: per-object behaviours (display, render, protection, look-at) | C | D | M | Display (own draw mode), Render (viewport only), Protection (per channel, refused in the engine), Look At (an aim constraint kept by the tag); `organize` command |
+| Display and render layers | C M | D | M | Layers window: show, render (viewport only) and lock per layer; hidden layers leave the viewport, renders and exports |
+| Instances that share a mesh | C M | D | M | Instance object shares the master's evaluated mesh (one allocation, one GPU upload); own transform and material; Make Unique; deleting a master keeps its instances as real meshes |
 | Selection sets | C M | D | S | Saved in the scene, follow deletes, selected by name |
-| Custom user attributes on objects | C M | M | M | |
+| Custom user attributes on objects | C M | D | M | Number, switch, text, colour, vector per object; numbers and vector parts are `user.<name>` attributes, so they key and script like any number |
 | Scene overrides (takes, render setups) | C M | M | L | |
 | Lock and template objects (visible, not selectable) | C M | D | S | Locked objects refuse edits in the engine; reference-only objects are drawn but never picked |
-| Copy and paste attributes; attribute presets | C M | P | S | Copy and paste transform, material and visibility onto many objects; no presets |
-| Object pivot separate from the origin | C M Z | M | S | |
+| Copy and paste attributes; attribute presets | C M | D | S | Copy and paste onto many objects; named presets saved in the scene (material, tags, user attributes, optionally the placement) |
+| Object pivot separate from the origin | C M Z | D | S | Pivot fields, Pivot to Center, Reset; objects and children stay in place; exports fold the pivot into the transform |
 
 ## Dependency graph, history and node editing
 
@@ -518,7 +518,7 @@ Weight: 6
 | Forces: gravity, wind, turbulence, vortex, attract | C M | P | M | Settings of each system, not objects in the scene: particles take gravity, drag, wind with turbulence, a noise acceleration field and any number of attractors and vortices with a falloff radius; cloth takes gravity and wind with turbulence; rigid bodies take gravity only |
 | Smoke and fire | C M | M | XL | |
 | Liquids | C M | M | XL | |
-| Simulation cache and playback | C M | P | M | The framework is in: a fixed-step solver loop with substeps from a seed (repeatable bit for bit), a cache bounded in frames, points and bytes that bakes per frame, cancels between frames, saves in the project as a `.mcpc` blob and plays back by scene frame (linear between frames); a `.mcpc` file from any tool drives a mesh through `attach_cache`. No solver yet and no panel: nothing in the app bakes one |
+| Simulation cache and playback | C M | D | M | A fixed-step, seeded, bounded solver loop caches every frame to a `.mcpc`-shaped cache that is saved in the project and plays by scene frame (linear between frames); the Simulation panel bakes on a worker thread with a progress bar, cancels from the button, Escape or the palette, clears the cache, plays it from its first frame, and marks a cache out of date when its settings change; a `.mcpc` from another tool attaches with `sim attach_cache`; tests cover determinism, bounds, cancel, undo, save and recovery; no Alembic, no per-frame playback of a whole scene |
 | Ropes and hair dynamics | C M | M | L | |
 | Cloth-like sculpt brushes | Z | M | M | |
 
@@ -529,7 +529,7 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Guide curves on a surface; comb, cut, length brushes | C M Z | D | L | Add Hair grows seeded guides on a mesh (count, length, jitter, density map); comb, cut, length, puff, smooth, clump and frizz brushes by pointer (Shift smooths, Ctrl inverts), by typing (Properties and the palette) and as `hair` commands; symmetry on X, Y, Z, a per-vertex mask, one undo step per stroke, saved with the project; guides drawn as lines in the viewport; no hair cards or per-guide selection yet |
-| Render hair interpolated from guides: density, clumping, frizz | C M | P | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k), with clump, frizz, width taper and hard memory caps, editable in Properties; the viewport shows the guides only, and the renderer does not see strands yet |
+| Render hair interpolated from guides: density, clumping, frizz | C M | D | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k) with density map, clump, frizz, width taper and hard memory caps, editable in Properties; the viewport draws them on the GPU as one call with a display percentage and a 100,000-strand edit limit (1,000,000 strands at 821 fps, 10 % at 3,443 fps on an RTX 4090, 1920x1080, `docs/performance.md`); guides show for selected hair; no strand shading in the viewport, and the path tracer does not see strands yet (see Hair and fibre shading) |
 | Sculpted fibre meshes | Z | M | M | |
 | Hair to cards / geometry | C M | M | M | |
 | Import and export of curve grooms | C M | M | S | |
@@ -631,6 +631,7 @@ Weight: 3
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Simulation panel: `apps/modelcraft/src/sim_ui_tests.rs` (`add_edit_bake_and_play_a_rigid_body_by_keyboard`, `a_long_bake_shows_progress_and_escape_cancels_it`, `a_mesh_without_a_simulation_offers_to_add_one_and_nothing_selected_says_so`).
 - Particles: `crates/sim/src/particles_tests.rs` (`gravity_drag_and_wind_move_a_particle_as_physics_says`, `a_fast_particle_does_not_tunnel_a_single_triangle`, `emitter_shapes_birth_where_they_should_and_leave_the_right_way`, `random_systems_stay_finite_within_their_pool` proptest), `crates/scene/src/sim.rs` (`a_particle_system_evaluates_to_instances_at_the_current_frame`), `crates/render/src/trace.rs` (`particles_and_clones_render_as_instances_of_their_source`), `crates/engine/src/sim_particle_tests.rs`.
 - Cloth: `crates/sim/src/cloth_tests.rs` (`cloth_drapes_over_a_sphere_without_going_into_it`, `a_sheet_dropped_on_a_box_never_goes_into_it`, `self_collision_keeps_a_falling_layer_on_top_of_another`, `random_settings_never_blow_up` proptest), `crates/sim/src/cloth.rs` (`the_hinge_gradient_matches_finite_differences`), `crates/engine/src/sim_cloth_tests.rs`.
 - Rigid bodies: `crates/sim/src/rigid_tests.rs` (`energy_is_never_gained_and_a_bounce_keeps_only_its_share`, `a_stack_of_boxes_does_not_sink_into_itself`, `a_fast_ball_does_not_tunnel_through_a_thin_wall`, `a_hinge_to_the_world_swings_on_a_circle_and_gains_no_energy`, `random_stacks_never_produce_non_finite_points_or_sink_through_the_ground` proptest), `crates/engine/src/sim_rigid_tests.rs` (`a_baked_rigid_body_falls_lands_and_plays_back_on_the_timeline`, `a_bake_is_repeatable_survives_save_and_is_rebuilt_by_crash_recovery`).

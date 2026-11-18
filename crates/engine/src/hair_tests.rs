@@ -241,3 +241,19 @@ fn a_saved_project_brings_the_groom_back_with_its_undo_history() {
     assert!(data(&back, hair).mask.is_none());
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_smaller_amount_is_a_prefix_of_the_groom_and_hair_gets_a_colour() {
+    let mut d = Document::new();
+    let (head, hair) = grown(&mut d);
+    assert_eq!(d.scene.get(hair).unwrap().material.base_color, [0.45, 0.30, 0.18, 1.0]);
+    let mesh = d.eval.evaluate(&d.scene, head).mesh;
+    let h = data(&d, hair);
+    assert_eq!(h.strand_count(&mesh), 20_000);
+    let all = h.strands(&mesh).unwrap();
+    let some = h.strands_with_amount(&mesh, Amount::Count(1234)).unwrap();
+    assert_eq!(some.strand_count(), 1234);
+    for i in [0, 1, 600, 1233] {
+        assert_eq!(some.strand(i), all.strand(i), "what the viewport draws at a lower percentage is the first strands of the full groom");
+    }
+}

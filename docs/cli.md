@@ -24,8 +24,8 @@ modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
-modelcraft-cli hair-bench --strands 1000000   # grow guides and interpolate hairs: time and memory
 modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
+modelcraft-cli hair-bench --strands 1000000 [--gpu]   # grow guides, interpolate hairs, draw them: time, memory, frame times
 modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
 
@@ -286,6 +286,26 @@ weights, blend shapes as morph targets and one animation clip sampled at every f
 playback range (curves, layers, constraints and IK all baked into it). What glTF cannot hold is
 printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
 builds joints, skins, blend shapes and curves from it, under one group named after the file.
+
+### Organising objects
+
+One command, `organize`, with the operation in `op`: `{"cmd":"organize","op":"set_tag","ids":[1],"tag":{"type":"protection","position":true,"rotation":false,"scale":false}}`.
+`modelcraft-cli commands` lists the operations.
+
+| `op` | Fields |
+|---|---|
+| `set_tag`, `remove_tag` | `ids`, `tag` (`display` + `mode`: auto, smooth, flat, wireframe, see_through, bounding_box; `render` + `visible`; `protection` + `position`, `rotation`, `scale`; `look_at` + `target`) or `kind` |
+| `add_layer`, `edit_layer`, `remove_layer`, `assign_layer` | `name`, `ids`, `id`, `color`, `visible`, `render`, `locked`, `layer` |
+| `set_user_attr`, `remove_user_attr` | `ids`, `name`, `value` (`{"type":"number","value":2.5}`; types number, switch, text, colour, vector) |
+| `save_preset`, `apply_preset`, `remove_preset` | `from`, `name`, `parts`, `index`, `ids` |
+| `set_pivot`, `pivot_to_center` | `ids`, `pivot` (object space), `keep_in_place` (default true) |
+| `instance`, `make_unique` | `ids` |
+
+A look-at tag is an aim constraint (+Z at the target) that the tag keeps in step. A protection tag
+makes `set_transform` refuse a change of the channels it names. Hidden layers hide their objects
+in the viewport, in renders and in exports; a layer with Render off shows them only in the
+viewport; a locked layer refuses edits like a locked object. A number or switch user attribute is
+the attribute `user.<name>` (a vector part is `user.<name>.x`), so `anim set_key` keys it.
 
 ## Rendering
 

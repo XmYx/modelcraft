@@ -25,6 +25,7 @@ mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
 mod demo;
+mod display_modes;
 mod dock;
 mod exchange_ui;
 mod field_ui;
@@ -38,6 +39,7 @@ mod keys;
 mod material_ui;
 mod mesh_tools;
 mod object_manager;
+mod organize_ui;
 mod panels;
 mod prefs;
 mod prefs_ui;
@@ -65,6 +67,9 @@ mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;
 mod shelf;
+mod sim_ui;
+#[cfg(test)]
+mod sim_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

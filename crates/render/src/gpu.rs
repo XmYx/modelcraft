@@ -4,6 +4,7 @@ use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::buffers::{LineVertex, MeshData, MeshVertex};
+use crate::hair_gpu::HairDraw;
 
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -117,6 +118,8 @@ pub struct Frame<'a> {
     pub lines: &'a [LineVertex],
     /// Triangle list in world space, alpha blended over the meshes (selected faces).
     pub overlay: &'a [LineVertex],
+    /// Hair strands, drawn as depth-tested lines over the meshes.
+    pub hair: Vec<HairDraw<'a>>,
 }
 
 #[repr(C)]
@@ -138,6 +141,7 @@ pub struct Renderer {
     mesh_pipe: wgpu::RenderPipeline,
     line_pipe: wgpu::RenderPipeline,
     overlay_pipe: wgpu::RenderPipeline,
+    hair_pipe: wgpu::RenderPipeline,
     cam_buf: wgpu::Buffer,
     cam_bg: wgpu::BindGroup,
     draw_layout: wgpu::BindGroupLayout,
@@ -247,6 +251,7 @@ impl Renderer {
         };
         let line_pipe = line_like("line pipeline", wgpu::PrimitiveTopology::LineList, false);
         let overlay_pipe = line_like("overlay pipeline", wgpu::PrimitiveTopology::TriangleList, false);
+        let hair_pipe = crate::hair_gpu::pipeline(device, &shader, &mesh_layout, depth(true), ms, COLOR_FORMAT);
         let cam_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
             size: std::mem::size_of::<CameraU>() as u64,
@@ -265,6 +270,7 @@ impl Renderer {
             mesh_pipe,
             line_pipe,
             overlay_pipe,
+            hair_pipe,
             cam_buf,
             cam_bg,
             draw_layout,
@@ -324,7 +330,7 @@ impl Renderer {
     pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, target: &Target, frame: &Frame<'_>) {
         let cam = CameraU { view_proj: frame.view_proj.to_cols_array_2d(), eye: frame.eye.extend(1.0).to_array() };
         queue.write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&cam));
-        let n = frame.draws.len() as u64;
+        let n = (frame.draws.len() + frame.hair.len()) as u64;
         if n > self.draw_cap {
             self.draw_cap = n.next_power_of_two();
             let (b, g) = Self::draw_buffer(device, &self.draw_layout, self.draw_stride, self.draw_cap);
@@ -333,17 +339,18 @@ impl Renderer {
         }
         if n > 0 {
             let mut bytes = vec![0u8; (self.draw_stride * n) as usize];
-            for (i, d) in frame.draws.iter().enumerate() {
-                let u = DrawU {
-                    model: d.model.to_cols_array_2d(),
-                    color: d.color,
-                    flags: [
-                        f32::from(u8::from(d.selected)),
-                        f32::from(u8::from(d.show_mask)),
-                        if d.uv_checker { 2.0 } else { f32::from(u8::from(d.patch_tint)) },
-                        d.roughness,
-                    ],
-                };
+            let uniforms = frame.draws.iter().map(|d| DrawU {
+                model: d.model.to_cols_array_2d(),
+                color: d.color,
+                flags: [
+                    f32::from(u8::from(d.selected)),
+                    f32::from(u8::from(d.show_mask)),
+                    if d.uv_checker { 2.0 } else { f32::from(u8::from(d.patch_tint)) },
+                    d.roughness,
+                ],
+            });
+            let hair_uniforms = frame.hair.iter().map(|h| DrawU { model: h.model.to_cols_array_2d(), color: h.color, flags: [0.0; 4] });
+            for (i, u) in uniforms.chain(hair_uniforms).enumerate() {
                 let at = i * self.draw_stride as usize;
                 if let Some(slot) = bytes.get_mut(at..at + std::mem::size_of::<DrawU>()) {
                     slot.copy_from_slice(bytemuck::bytes_of(&u));
@@ -383,6 +390,13 @@ impl Renderer {
                 pass.set_vertex_buffer(0, d.mesh.vbuf.slice(..));
                 pass.set_index_buffer(d.mesh.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..d.mesh.index_count, 0, 0..1);
+            }
+            if !frame.hair.is_empty() {
+                pass.set_pipeline(&self.hair_pipe);
+                for (i, h) in frame.hair.iter().enumerate() {
+                    pass.set_bind_group(1, &self.draw_bg, &[((frame.draws.len() + i) as u64 * self.draw_stride) as u32]);
+                    h.hair.draw(&mut pass, h.fraction);
+                }
             }
             if let Some((buf, _)) = &self.overlay_buf
                 && !frame.overlay.is_empty()
@@ -480,6 +494,7 @@ mod tests {
             }],
             lines: &[],
             overlay: &[],
+            hair: Vec::new(),
         };
         r.render(&device, &queue, &target, &frame);
         let px = Renderer::readback(&device, &queue, &target).unwrap();
