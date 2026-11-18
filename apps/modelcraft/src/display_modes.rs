@@ -144,7 +144,15 @@ mod tests {
         } else {
             Vec::new()
         };
-        let frame = Frame { view_proj: cam.view_proj(1.0), eye: cam.eye(), clear: [0.0, 0.0, 0.0, 1.0], draws, lines: &extras.lines, overlay: &extras.overlay };
+        let frame = Frame {
+            view_proj: cam.view_proj(1.0),
+            eye: cam.eye(),
+            clear: [0.0, 0.0, 0.0, 1.0],
+            draws,
+            lines: &extras.lines,
+            overlay: &extras.overlay,
+            hair: Vec::new(),
+        };
         r.render(&device, &queue, &target, &frame);
         Renderer::readback(&device, &queue, &target)
     }
