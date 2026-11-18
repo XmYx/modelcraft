@@ -462,7 +462,7 @@ fn scripts_have_no_file_or_system_access_by_default() {
         assert!(fails(src).contains("Function not found"), "{src}");
     }
     assert!(fails("std::fs::read(\"x\")").contains("Undefined module"));
-    assert!(fails(r#"import "other" as o; o::x()"#).contains("Too many modules"), "modules cannot be loaded at all");
+    assert!(fails(r#"import "other" as o; o::x()"#).contains("scripts folder"), "with no library folder every import fails");
 }
 
 #[test]
