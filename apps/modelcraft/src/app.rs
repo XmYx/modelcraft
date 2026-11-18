@@ -1327,7 +1327,7 @@ impl ModelApp {
             return;
         }
         let redo_y =
-            !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y)));
+            !ctx.text_edit_focused() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y)));
         for a in crate::keys::dispatch(self, ctx) {
             self.act(ctx, a);
         }

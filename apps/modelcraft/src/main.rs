@@ -47,6 +47,8 @@ mod shelf;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
+#[cfg(test)]
+mod ux_ui_tests;
 mod uv_ui;
 #[cfg(test)]
 mod uv_ui_tests;

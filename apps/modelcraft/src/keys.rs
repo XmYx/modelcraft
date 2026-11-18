@@ -58,13 +58,16 @@ pub fn shortcut_text(app: &ModelApp, a: Action) -> String {
 
 /// Run this frame's shortcuts.
 pub fn dispatch(app: &mut ModelApp, ctx: &egui::Context) -> Vec<Action> {
-    // For egui any focused widget "wants the keyboard", a viewport after a click included, and
-    // that used to switch off Undo and the other editing shortcuts right after every stroke.
-    // A focused viewport is not typing.
-    let on_viewport = ctx.memory(|m| m.focused()).is_some_and(|f| (0..4usize).any(|i| f == egui::Id::unique(("viewport", i))));
-    let typing = ctx.egui_wants_keyboard_input() && !on_viewport;
+    // For egui any focused widget "wants the keyboard" (`egui_wants_keyboard_input`): a viewport
+    // after a click, a canvas, a ruler, a button. Treating that as typing switched off Undo,
+    // Select All and the tool keys whenever anything but empty space had focus. Only a focused
+    // text field (a DragValue being edited is one) is typing.
+    let typing = ctx.text_edit_focused();
+    // The workspace contexts hold the single-letter tool and brush keys ("Model: E", "Sculpt: D").
+    // craft-keymap lets a binding in an active context fire even while typing, so while a text
+    // field has focus no context is active: those letters go to the field.
     let contexts = [context(app.workspace)];
-    let active = Active { panel: None, contexts: &contexts, typing };
+    let active = Active { panel: None, contexts: if typing { &[] } else { &contexts }, typing };
     let keymap = &app.keymap;
     let dispatcher = &mut app.dispatcher;
     let hits = ctx.input_mut(|i| dispatcher.dispatch(i, keymap, &active));
