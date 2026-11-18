@@ -51,6 +51,10 @@ Object ids are numbers (`info` prints them).
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
+| `set_locked` | `ids`, `locked` (a locked object refuses edits) |
+| `set_template` | `ids`, `template` (drawn, never picked) |
+| `add_selection_set` | `name`, `ids` |
+| `remove_selection_set` | `index` |
 | `import` | `path` (.glb, .gltf, .obj, .stl, .ply, .fbx, .3mf), `up?` (auto, y, z), `scale?` (metres per file unit) |
 | `end_sculpt` | — |
 | `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge. Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |
@@ -61,6 +65,16 @@ Object ids are numbers (`info` prints them).
 | `set_positions` | `id`, `positions` [[x,y,z]…] (objects that store their own mesh; one per vertex) |
 | `batch` | `commands` [{cmd…}…], `label?` (scene commands as one undo step, all or none) |
 | `undo`, `redo` | — |
+
+### Simulation
+
+One command, `sim`, with the operation in `op`: `{"cmd":"sim","op":"attach_cache","mesh":3,"path":"fall.mcpc"}`.
+A simulation object sits under the mesh it drives and plays the points of its cache for the scene's
+current frame (linear between frames; the first or last frame holds outside the cache).
+`attach_cache` reads a `.mcpc` file whose point count is the mesh's vertex count, so any tool that
+writes the format (or `modelcraft-cli bake`) can drive a mesh. `set` changes `start_frame`,
+`end_frame`, `fps`, `substeps` (1 to 64), `seed` and `max_cache_mib`; `clear_cache` throws a baked
+cache away. `modelcraft-cli commands` lists them as `sim op=…`.
 
 ### Animation
 
@@ -177,7 +191,13 @@ atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smo
 Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
 `@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
 
-A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
+A point cache (`modelcraft-cli bake`) holds a skinned mesh as it is posed frame by frame.
+Exporting to `.glb` keeps the rig instead: when the scene has skins, blend shapes, curves or
+constraints, the file holds the joints, each bound mesh in its rest shape with joints and
+weights, blend shapes as morph targets and one animation clip sampled at every frame of the
+playback range (curves, layers, constraints and IK all baked into it). What glTF cannot hold is
+printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
+builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
 ## Rendering
 

@@ -150,6 +150,10 @@ impl Shared {
                 let full = self.path(path, Access::Read)?;
                 *path = full.to_string_lossy().into_owned();
             }
+            Command::Sim(modelcraft_engine::SimCommand::AttachCache { path, .. }) => {
+                let full = self.path(path, Access::Read)?;
+                *path = full.to_string_lossy().into_owned();
+            }
             Command::Batch { commands, .. } => {
                 for c in commands {
                     self.permit(c)?;
@@ -184,8 +188,13 @@ impl Shared {
             | Command::SetPositions { .. }
             | Command::Anim(_)
             | Command::Rig(_)
+            | Command::Sim(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::SetLocked { .. }
+            | Command::SetTemplate { .. }
+            | Command::AddSelectionSet { .. }
+            | Command::RemoveSelectionSet { .. }
             | Command::Undo
             | Command::Redo => {}
         }

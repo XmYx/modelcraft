@@ -13,6 +13,7 @@ repository = "https://github.com/storytold/modelcraft"
 [workspace.dependencies]
 # internal
 modelcraft-anim = { path = "crates/anim" }
+modelcraft-sim = { path = "crates/sim" }
 modelcraft-mesh = { path = "crates/mesh" }
 modelcraft-ops = { path = "crates/ops" }
 modelcraft-clone = { path = "crates/clone" }
@@ -24,6 +25,7 @@ modelcraft-render = { path = "crates/render" }
 modelcraft-script = { path = "crates/script" }
 craft-render-bvh = { path = "crates/craft-render-bvh" }
 craft-render-core = { path = "crates/craft-render-core" }
+craft-gltf-anim = { path = "crates/craft-gltf-anim" }
 craft-render-gpu = { path = "crates/craft-render-gpu" }
 modelcraft-uv = { path = "crates/uv" }
 modelcraft-uvpack = { path = "crates/uvpack" }
