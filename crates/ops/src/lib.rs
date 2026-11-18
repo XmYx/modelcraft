@@ -10,6 +10,7 @@
 
 pub mod deform;
 pub mod edit;
+pub mod patches;
 pub mod primitives;
 pub mod remesh;
 pub mod select;

@@ -53,6 +53,12 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   matrices (`rig::pose_key`), so moving a joint re-runs the skin and nothing else. The maths
   (weights, linear blend, dual quaternions, heat weights, aiming and mirroring joints) is in
   `modelcraft-anim`, free of the scene.
+- **Deformer stack**: blend shapes, lattices and clusters are one object kind
+  (`ObjectKind::PointDeformer`, `modelcraft_scene::point_deform`), children of the mesh like a
+  skin. `rig::apply_stack` runs them and the skins in child order on the mesh's points, after the
+  parametric deformers; `Scene::move_in_stack` reorders them. Weights and control points are
+  attributes (`target.<i>.weight`, `point.<i>.x`), so they are keyed like everything else. The
+  maths (morph with in-betweens, free-form deformation, clusters) is in `modelcraft-anim::deform`.
 - **Constraints**: `Scene::constraints` holds constraints, IK, driven keys and formulas
   (`modelcraft_scene::constraint`). Each names what it reads and writes (object and channel);
   `Scene::solve_constraints` sorts them topologically (a reader after its writers), skips and
