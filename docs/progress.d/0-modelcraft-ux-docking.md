@@ -1,0 +1,1 @@
+| 2026-11-17 | Docked panels: tab groups, splits and floating windows through craft-ui docking, per-workspace layouts saved in the preferences, keyboard moves from the panel options menu and View ▸ Panels, Reset Panels |

@@ -1118,6 +1118,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "serde",
  "skrifa",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2541,6 +2542,7 @@ dependencies = [
  "craft-image-codecs",
  "craft-keymap",
  "craft-settings",
+ "craft-ui",
  "eframe",
  "egui",
  "egui-wgpu",
@@ -2558,6 +2560,7 @@ dependencies = [
  "modelcraft-sculpt",
  "rfd",
  "serde",
+ "serde_json",
  "wgpu",
 ]
 
@@ -2567,6 +2570,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "proptest",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2707,6 +2711,7 @@ dependencies = [
  "modelcraft-scene",
  "pollster 0.4.0",
  "proptest",
+ "rayon",
  "wgpu",
 ]
 

@@ -97,3 +97,19 @@ fn a_focused_control_keeps_its_own_keys_but_tool_letters_and_command_chords_stil
     h.run();
     assert_ne!(h.state().quad, quad);
 }
+
+#[test]
+fn the_file_menu_offers_3mf_and_usd_export() {
+    let mut h = harness();
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    h.get_by_label("Export").click();
+    h.run();
+    h.run();
+    h.get_by_label_contains("3MF");
+    h.get_by_label_contains("USD");
+    for a in [crate::actions::Action::Export3mf, crate::actions::Action::ExportUsda] {
+        assert!(crate::actions::all().contains(&a), "{a:?} is in the palette and the shortcuts dialog");
+    }
+}

@@ -35,6 +35,8 @@ craft-fonts-build = { workspace = true }
 craft-image-codecs = { workspace = true }
 craft-keymap = { workspace = true, features = ["ui"] }
 craft-settings = { workspace = true }
+craft-ui = { workspace = true, features = ["serde"] }
+serde_json = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }
 

@@ -21,6 +21,8 @@ pub struct Prefs {
     pub brush_presets: Vec<modelcraft_engine::sculpt::preset::BrushPreset>,
     /// Store the undo history in saved files.
     pub keep_history: bool,
+    /// Panel layouts per workspace (`model`, `sculpt`, `paint`), as JSON.
+    pub layouts: std::collections::BTreeMap<String, String>,
     /// Open the agent control channel at start.
     pub allow_agents: bool,
     /// Action ids on the shelf.
@@ -48,6 +50,7 @@ impl Default for Prefs {
             brush_px: 60.0,
             brush_presets: Vec::new(),
             keep_history: true,
+            layouts: Default::default(),
             allow_agents: false,
             shelf: Vec::new(),
             show_grid: true,

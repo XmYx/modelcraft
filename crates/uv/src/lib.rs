@@ -6,8 +6,13 @@
 //!   [`cut_to_disks`], which adds the cuts an island needs to be flattenable.
 //! - [`unwrap`]: least-squares conformal maps (LSCM, Lévy et al. 2002) of every island, with
 //!   optional pinned vertices, then a simple layout in the unit square.
+//! - [`UnwrapMethod::Abf`]: angle-based flattening (ABF, Sheffer et al. 2001, with the reduced
+//!   Newton system of ABF++, 2005) as a second solver; the angles are then fitted by the LSCM
+//!   system, and an island whose solve does not converge falls back to LSCM ([`AbfReport`]).
 //! - [`measure`]: angle, stretch and area distortion of a UV layout, per triangle and overall.
 //! - [`transform_corners`], [`stitch_edges`]: editing UVs by hand (move, rotate, scale, weld seams).
+//! - [`relax_corners`], [`straighten_corners`], [`stitch_islands`]: relax a layout with the local/global
+//!   flattening of Liu et al. 2008, straighten chains of UV edges, sew islands together by moving them.
 //!
 //! UV space follows glTF: the origin is the top left corner of the image and v grows downwards, so
 //! a triangle that is not mirrored has a negative signed area in (u, v) (see [`measure`]).
@@ -19,6 +24,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod abf;
 mod charts;
 mod cholesky;
 mod distortion;
@@ -27,13 +33,16 @@ mod layout;
 mod lscm;
 mod seams;
 mod sparse;
+mod tools;
 
+pub use abf::AbfReport;
 pub use charts::{Charts, CutReport, Island, cut_to_disks, face_triangles};
 pub use distortion::{Distortion, TriangleMetric, measure, per_face};
 pub use edit::{UvTransform, bounds, expand_to_uv_vertices, island_corners, stitch_edges, transform_corners, uv_vertex_corners};
 pub use layout::shelf;
 pub use lscm::{IslandReport, Pin};
 pub use seams::{MAX_SEAMS, SeamSet, shortest_path};
+pub use tools::{MAX_RELAX_ITERATIONS, RelaxMode, RelaxOptions, RelaxReport, StitchOptions, relax_corners, stitch_islands, straighten_corners};
 
 use glam::{DVec2, Vec2};
 use modelcraft_mesh::{MeshError, PolyMesh};
@@ -55,6 +64,19 @@ pub enum UvError {
     Mesh(#[from] MeshError),
 }
 
+/// The solver that flattens each island.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum UnwrapMethod {
+    /// Least-squares conformal maps (Lévy et al. 2002): one linear solve, preserves angles
+    /// wherever the surface allows, tends to blow up area near cone-like points.
+    #[default]
+    Lscm,
+    /// Angle-based flattening (Sheffer et al. 2001, 2005): a nonlinear solve for the angles of the
+    /// flat triangles that stay closest to the surface's. Slower; usually less stretch on
+    /// curved islands. Falls back to LSCM, and says so in the report, if it does not converge.
+    Abf,
+}
+
 /// What [`unwrap`] does besides the seams.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnwrapOptions {
@@ -67,11 +89,13 @@ pub struct UnwrapOptions {
     pub layout: bool,
     /// Margin around and between islands, as a fraction of the unit square.
     pub margin: f32,
+    /// The solver for each island.
+    pub method: UnwrapMethod,
 }
 
 impl Default for UnwrapOptions {
     fn default() -> Self {
-        UnwrapOptions { pins: Vec::new(), auto_cut: true, layout: true, margin: 0.01 }
+        UnwrapOptions { pins: Vec::new(), auto_cut: true, layout: true, margin: 0.01, method: UnwrapMethod::Lscm }
     }
 }
 
@@ -123,7 +147,7 @@ pub fn unwrap(mesh: &PolyMesh, seams: &SeamSet, opts: &UnwrapOptions) -> Result<
         let mine: Vec<(u32, DVec2)> = pins.iter().copied().filter(|(v, _)| island.vertices.binary_search(v).is_ok()).collect();
         // The solver works with v up; ModelCraft's UV space has v down (origin at the top left, as
         // glTF), so pins go in and results come out mirrored in v.
-        let mut solved = lscm::solve_island(mesh, &charts, island, &mine);
+        let mut solved = lscm::solve_island(mesh, &charts, island, &mine, opts.method);
         for u in &mut solved.uv {
             u.y = -u.y;
         }
@@ -211,4 +235,8 @@ pub fn unwrap_mesh(mesh: &PolyMesh, seams: &SeamSet, opts: &UnwrapOptions) -> Re
 }
 
 #[cfg(test)]
+mod abf_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tools_tests;
