@@ -238,6 +238,12 @@ impl Animation {
         self.tracks.retain(|t| !(t.target == id && t.path == path && t.layer == layer));
         self.tracks.len() != n
     }
+    /// Remove an attribute's curves from every layer; `true` when it had any.
+    pub fn remove_path(&mut self, id: ObjectId, path: &str) -> bool {
+        let n = self.tracks.len();
+        self.tracks.retain(|t| !(t.target == id && t.path == path));
+        self.tracks.len() != n
+    }
     /// Remove an object's curves from the active layer; `true` when it had any there.
     pub fn remove_object_tracks(&mut self, id: ObjectId) -> bool {
         let (n, layer) = (self.tracks.len(), self.active_layer);
@@ -304,11 +310,17 @@ impl Animation {
 impl Scene {
     /// The value of a numeric attribute ([`crate::attr`]).
     pub fn attr(&self, id: ObjectId, path: &str) -> Option<f64> {
+        if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
+            return self.constraints.weight_attr(id, path);
+        }
         attr::get(self.get(id)?, path)
     }
 
     /// Set a numeric attribute; the object's revision is bumped only when the value changed.
     pub fn set_attr(&mut self, id: ObjectId, path: &str, value: f64) -> Result<bool, SceneError> {
+        if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
+            return self.constraints.set_weight_attr(id, path, value).ok_or_else(|| SceneError::Invalid(format!("no numeric attribute {path:?}")));
+        }
         let o = self.objects.iter_mut().find(|o| o.id == id).ok_or(SceneError::NoObject(id))?;
         let changed = attr::set(o, path, value)?;
         if changed {
@@ -321,14 +333,19 @@ impl Scene {
     pub fn set_frame(&mut self, frame: f64) {
         self.anim.frame = clamp_frame(frame);
         self.apply_animation();
+        self.solve_constraints();
     }
 
     /// Write the value of every track at the current frame into its attribute. Tracks whose
     /// attribute no longer exists are skipped. Returns how many objects changed.
+    ///
+    /// Curves set the transforms constraints start from, so the constraints' results are taken
+    /// back first; call [`Scene::solve_constraints`] afterwards ([`Scene::set_frame`] does).
     pub fn apply_animation(&mut self) -> usize {
         if self.anim.tracks.is_empty() {
             return 0;
         }
+        self.unsolve_constraints();
         let frame = self.anim.frame;
         // Values per object; rotation is set as one triple.
         let mut per: BTreeMap<ObjectId, Vec<(&str, f64)>> = BTreeMap::new();
@@ -338,6 +355,13 @@ impl Scene {
             }
         }
         let mut changed = 0;
+        for (target, values) in &per {
+            for (path, v) in values {
+                if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
+                    self.constraints.set_weight_attr(*target, path, *v);
+                }
+            }
+        }
         for o in &mut self.objects {
             let Some(values) = per.get(&o.id) else { continue };
             let mut dirty = false;

@@ -2,7 +2,7 @@
 
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Field, Material, ObjectId, StepOp, Transform};
+use modelcraft_scene::{Cloner, Field, Material, ObjectId, StepOp, Transform};
 use modelcraft_sculpt::Stroke;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,18 @@ pub enum MaskOp {
     Patch {
         triangle: u32,
     },
+    /// Soften the mask's edge.
+    Blur,
+    /// Harden the mask's edge.
+    Sharpen,
+    /// Widen the mask by one ring of vertices.
+    Grow,
+    /// Narrow the mask by one ring of vertices.
+    Shrink,
+    /// Mask the hollows of the surface.
+    Hollows,
+    /// Mask the ridges and bumps of the surface.
+    Ridges,
 }
 
 /// Step between detail levels (each level up subdivides once and keeps the sculpted detail).
@@ -81,6 +93,13 @@ pub enum Command {
         #[serde(default = "two")]
         levels: u32,
     },
+    /// Add a clone generator (`linear`, `radial`, `grid`, `scatter`, `surface`, `vertices`). The
+    /// given object becomes the source it clones; without one, a small cube is made.
+    AddCloner {
+        kind: String,
+        #[serde(default)]
+        input: Option<ObjectId>,
+    },
     /// Add a deformer (`bend`, `twist`, `taper`, `ripple`, `round`) under a mesh.
     AddDeformer {
         kind: String,
@@ -135,6 +154,14 @@ pub enum Command {
         id: ObjectId,
         field: Field,
     },
+    /// Change a clone generator's layout and seed, and the target object of the surface and
+    /// vertices layouts.
+    SetCloner {
+        id: ObjectId,
+        cloner: Cloner,
+        #[serde(default)]
+        target: Option<ObjectId>,
+    },
     /// Append a build-history step to a mesh object.
     AddStep {
         id: ObjectId,
@@ -162,6 +189,12 @@ pub enum Command {
     /// Import a glTF/GLB/OBJ/STL/PLY file as new objects.
     Import {
         path: String,
+        /// The file's up axis (`auto`: what the file says, FBX only; else Y).
+        #[serde(default, skip_serializing_if = "is_auto")]
+        up: modelcraft_formats::exchange::Up,
+        /// Metres per file unit (`None`: what the file says, FBX only; else 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f32>,
     },
     /// Start sculpting a mesh object (adds a sculpt layer if its last step is not one).
     BeginSculpt {
@@ -184,6 +217,29 @@ pub enum Command {
         id: ObjectId,
         op: ShapeOp,
     },
+    /// Add a mesh object from raw geometry: `positions` as [x, y, z] and `faces` as lists of
+    /// vertex indices (counter-clockwise). Faces that do not fit the vertices are dropped and
+    /// reported as a warning, like an import.
+    AddMesh {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        parent: Option<ObjectId>,
+        positions: Vec<[f32; 3]>,
+        faces: Vec<Vec<u32>>,
+    },
+    /// Replace the vertex positions of an object that stores its own mesh (an import, an
+    /// `add_mesh`, a collapsed object). One [x, y, z] per vertex.
+    SetPositions {
+        id: ObjectId,
+        positions: Vec<[f32; 3]>,
+    },
+    /// Run several scene commands as one undo step; all of them or none.
+    Batch {
+        #[serde(default)]
+        label: Option<String>,
+        commands: Vec<Command>,
+    },
     Undo,
     Redo,
     /// Keys, curves and time: `{"cmd":"anim","op":"set_key",…}` ([`crate::anim::AnimCommand`]).
@@ -191,6 +247,10 @@ pub enum Command {
     /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
     Rig(crate::rig::RigCommand),
 }
+
+/// Most commands one batch may hold, and how deep batches may nest.
+pub const MAX_BATCH: usize = 100_000;
+pub const MAX_BATCH_DEPTH: usize = 8;
 
 fn two() -> u32 {
     2
@@ -201,6 +261,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_primitive", "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent?"),
     ("add_group", "Add an empty group: name?"),
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
+    ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round) under target"),
     ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the deformer target"),
     ("delete", "Delete objects and their children: ids"),
@@ -214,6 +275,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
     ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
+    ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
         "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op",
@@ -222,19 +284,26 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
     ("remove_step", "Remove a history step: id, index"),
     ("collapse", "Bake an object's history into its mesh: id"),
-    ("import", "Import a glTF, GLB, OBJ, STL or PLY file: path"),
+    ("import", "Import a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file: path, up? (auto, y, z), scale? (metres per file unit)"),
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
     ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs}"),
-    ("sculpt_mask", "Clear, fill or invert the mask, or mask a patch: id, op"),
+    ("sculpt_mask", "Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, {patch: {triangle}})"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
         "sculpt_shape",
         "Edit shape layers: id, op (add {name?}, remove {index}, merge {index}, strength {index, strength}, select {index or null}, rename {index, name})",
     ),
+    ("add_mesh", "Add a mesh from raw geometry: positions [[x,y,z]…], faces [[i,j,k…]…], name?, parent?"),
+    ("set_positions", "Replace the vertex positions of a stored mesh: id, positions [[x,y,z]…]"),
+    ("batch", "Run several scene commands as one undo step, all or none: commands [{cmd…}…], label?"),
     ("undo", "Undo the last change"),
     ("redo", "Redo the last undone change"),
 ];
+
+fn is_auto(u: &modelcraft_formats::exchange::Up) -> bool {
+    *u == modelcraft_formats::exchange::Up::Auto
+}
 
 impl Command {
     /// The English label for menus and the undo history.
@@ -243,6 +312,7 @@ impl Command {
             Command::AddPrimitive { kind, .. } => format!("Add {kind}"),
             Command::AddGroup { .. } => "Add group".into(),
             Command::AddSmoothCage { .. } => "Add smooth cage".into(),
+            Command::AddCloner { kind, .. } => format!("Add {kind} clones"),
             Command::AddDeformer { kind, .. } => format!("Add {kind}"),
             Command::AddField { kind, .. } => format!("Add {kind} field"),
             Command::Delete { .. } => "Delete".into(),
@@ -256,6 +326,7 @@ impl Command {
             Command::SetCageLevels { .. } => "Smooth cage levels".into(),
             Command::SetDeformer { .. } => "Deformer settings".into(),
             Command::SetField { .. } => "Field settings".into(),
+            Command::SetCloner { .. } => "Clone settings".into(),
             Command::AddStep { op, .. } => op.name().into(),
             Command::SetStep { op, .. } => format!("Edit {}", op.name()),
             Command::EnableStep { .. } => "Toggle step".into(),
@@ -277,6 +348,9 @@ impl Command {
                 ShapeOp::Rename { .. } => "Rename shape layer",
             }
             .into(),
+            Command::AddMesh { .. } => "Add mesh".into(),
+            Command::SetPositions { .. } => "Set positions".into(),
+            Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),
             Command::Undo => "Undo".into(),
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),

@@ -8,7 +8,7 @@ use glam::{Mat4, Quat, Vec2 as GVec2, Vec3};
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::PolyMesh;
 use modelcraft_engine::scene::pick::{self, Ray};
-use modelcraft_engine::scene::{ObjectId, ObjectKind, Scene, Step, StepOp};
+use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Scene, Step, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Dab};
 use modelcraft_render::buffers::{self, LineVertex};
 use modelcraft_render::{Camera, ViewPreset};
@@ -89,7 +89,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
         .into_iter()
         .map(|(id, _)| id)
         .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })))
+        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. })))
         .collect()
 }
 
@@ -547,15 +547,20 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
     for id in drawables(&app.doc.scene) {
         let w = app.doc.scene.world_matrix(id);
         let r = ray.transformed(w.inverse());
-        let t = match &app.doc.sculpt {
-            Some(s) if s.id == id => s.mesh.raycast(r.origin, r.dir).map(|h| h.0),
-            _ => pick::pick_face(&app.doc.eval.evaluate(&app.doc.scene, id).mesh, &r).map(|h| h.t),
-        };
-        if let Some(t) = t {
-            let dist = w.transform_vector3(r.dir * t).length();
-            if best.is_none_or(|(b, _)| dist < b) {
-                best = Some((dist, id));
+        let dist = match &app.doc.sculpt {
+            Some(s) if s.id == id => s.mesh.raycast(r.origin, r.dir).map(|h| w.transform_vector3(r.dir * h.0).length()),
+            _ => {
+                let e = app.doc.eval.evaluate(&app.doc.scene, id);
+                match e.instances {
+                    Some(inst) => pick_instances(&inst, &ray, w),
+                    None => pick::pick_face(&e.mesh, &r).map(|h| w.transform_vector3(r.dir * h.t).length()),
+                }
             }
+        };
+        if let Some(dist) = dist
+            && best.is_none_or(|(b, _)| dist < b)
+        {
+            best = Some((dist, id));
         }
     }
     match best {
@@ -572,6 +577,30 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
     }
 }
 
+/// The nearest distance at which a world ray hits any clone of a generator (each clone is tested
+/// against the source's bounding box first, so a thousand clones cost a thousand box tests).
+fn pick_instances(inst: &modelcraft_engine::scene::Instances, ray: &Ray, world: Mat4) -> Option<f32> {
+    let (lo, hi) = inst.source.bounds();
+    let mut best: Option<f32> = None;
+    for c in &inst.clones.instances {
+        let m = world * c.matrix;
+        if m.determinant().abs() < 1e-12 {
+            continue;
+        }
+        let r = ray.transformed(m.inverse());
+        if !pick::ray_aabb(&r, lo, hi) {
+            continue;
+        }
+        if let Some(h) = pick::pick_face(&inst.source, &r) {
+            let d = m.transform_vector3(r.dir * h.t).length();
+            if best.is_none_or(|b| d < b) {
+                best = Some(d);
+            }
+        }
+    }
+    best
+}
+
 fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
     let cam = app.views[i].camera;
     if !add {
@@ -579,8 +608,16 @@ fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
     }
     if app.mode == SelectMode::Object {
         for id in drawables(&app.doc.scene) {
-            let m = app.doc.eval.evaluate(&app.doc.scene, id).mesh;
-            let (lo, hi) = m.bounds();
+            let e = app.doc.eval.evaluate(&app.doc.scene, id);
+            let (lo, hi) = match &e.instances {
+                // A clone generator is as wide as its clones; with none there is nothing to select.
+                Some(inst) if inst.clones.is_empty() => continue,
+                Some(inst) => inst.clones.instances.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), c| {
+                    let p = c.matrix.w_axis.truncate();
+                    (a.min(p), b.max(p))
+                }),
+                None => e.mesh.bounds(),
+            };
             let c = app.doc.scene.world_matrix(id).transform_point3((lo + hi) * 0.5);
             if to_screen(&cam, rect, c).is_some_and(|p| sel.contains(p)) && !app.selection.contains(&id) {
                 app.selection.push(id);
@@ -713,13 +750,18 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let sculpting = app.workspace == Workspace::Sculpt;
     let paint = app.workspace == Workspace::Paint;
     // Evaluate first (the GPU borrow below must not overlap the document's).
-    let mut items: Vec<(ObjectId, Option<Arc<PolyMesh>>, Mat4)> = Vec::new();
+    let mut items: Vec<Item> = Vec::new();
     for id in &ids {
         let w = app.doc.scene.world_matrix(*id);
         if Some(*id) == session {
-            items.push((*id, None, w));
+            items.push((*id, None, w, WHITE));
         } else {
-            items.push((*id, Some(app.doc.eval.evaluate(&app.doc.scene, *id).mesh), w));
+            let e = app.doc.eval.evaluate(&app.doc.scene, *id);
+            match e.instances {
+                // Clones share one mesh (and so one GPU upload); each gets its own matrix and tint.
+                Some(inst) => items.extend(inst.clones.instances.iter().map(|c| (*id, Some(inst.source.clone()), w * c.matrix, c.color))),
+                None => items.push((*id, Some(e.mesh), w, WHITE)),
+            }
         }
     }
     let lines = scene_lines(app, i);
@@ -731,13 +773,14 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
     let mut specs = Vec::new();
-    for (id, m, w) in &items {
+    for (id, m, w, tint) in &items {
         let Some(o) = app.doc.scene.get(*id) else { continue };
         let key = m.as_ref().map(|m| g.mesh(m));
+        let base = material_source(&app.doc.scene, o).material.base_color;
         specs.push(crate::gpu::DrawSpec {
             key,
             model: *w,
-            color: o.material.base_color,
+            color: [base[0] * tint[0], base[1] * tint[1], base[2] * tint[2], base[3] * tint[3]],
             selected: app.selection.contains(id) && !sculpting,
             show_mask: Some(*id) == session,
             patch_tint: app.show_patches || paint,
@@ -749,6 +792,18 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     }
 }
 
+/// One drawn mesh: its object, the mesh (`None`: the sculpt mesh), its world matrix and a colour tint.
+type Item = (ObjectId, Option<Arc<PolyMesh>>, Mat4, [f32; 4]);
+const WHITE: [f32; 4] = [1.0; 4];
+
+/// The object whose material colours `o`: a clone generator is coloured by its source.
+fn material_source<'a>(scene: &'a Scene, o: &'a Object) -> &'a Object {
+    match &o.kind {
+        ObjectKind::Cloner { .. } => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
+        _ => o,
+    }
+}
+
 fn line(a: Vec3, b: Vec3, c: [f32; 4]) -> [LineVertex; 2] {
     [LineVertex { pos: a.to_array(), color: c }, LineVertex { pos: b.to_array(), color: c }]
 }
@@ -756,7 +811,7 @@ fn line(a: Vec3, b: Vec3, c: [f32; 4]) -> [LineVertex; 2] {
 /// Grid, wireframes of selected objects and cages, selected edges.
 fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     let mut out = buffers::grid(20, 0.5, [0.24, 0.25, 0.27, 1.0], [0.34, 0.35, 0.38, 1.0]);
-    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right {
+    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right || !app.show_grid {
         out.clear();
     }
     for (a, b, color) in crate::rig_ui::bone_lines(app) {
@@ -813,6 +868,7 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), sel_wire));
         }
     }
+    out.extend(crate::uv_ui::seam_lines(app));
     out
 }
 
@@ -837,7 +893,7 @@ fn face_overlay(app: &mut ModelApp) -> Vec<LineVertex> {
 }
 
 /// No GPU: a wireframe drawn with the UI painter (bounded), so the app stays usable and testable.
-fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[(ObjectId, Option<Arc<PolyMesh>>, Mat4)], lines: &[LineVertex]) {
+fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[Item], lines: &[LineVertex]) {
     let cam = app.views[i].camera;
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::from_rgb(29, 31, 34));
@@ -851,11 +907,13 @@ fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[(Objec
             painter.line_segment([p, q], Stroke::new(1.0, c));
         }
     }
-    for (id, m, w) in items {
+    let mut budget = 120_000usize;
+    for (id, m, w, _) in items {
         let Some(m) = m else { continue };
         let sel = app.selection.contains(id);
         let c = if sel { theme::SELECT } else { theme::TEXT_DIM };
-        for e in 0..(m.edge_count() as u32).min(30_000) {
+        for e in 0..(m.edge_count() as u32).min(30_000).min(budget as u32) {
+            budget = budget.saturating_sub(1);
             let (a, b) = m.edge_vertices(e);
             if let (Some(p), Some(q)) = (to_screen(&cam, rect, w.transform_point3(m.position(a))), to_screen(&cam, rect, w.transform_point3(m.position(b)))) {
                 painter.line_segment([p, q], Stroke::new(1.0, c));
@@ -891,7 +949,9 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
             egui::StrokeKind::Inside,
         );
     }
-    axis_triad(&painter, &cam, rect);
+    if app.show_axes {
+        axis_triad(&painter, &cam, rect);
+    }
     // Component points.
     if app.workspace == Workspace::Model
         && app.mode == SelectMode::Vertex

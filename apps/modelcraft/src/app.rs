@@ -229,6 +229,19 @@ pub struct ModelApp {
     pub rename: Option<(ObjectId, String)>,
     pub about: bool,
     pub render_view: crate::render_view::RenderView,
+    /// Up axis and unit of files read and written (File ▸ Exchange Settings).
+    pub exchange: modelcraft_engine::formats::exchange::Convert,
+    pub script: crate::script_ui::ScriptState,
+    pub mesh_tools: crate::mesh_tools::State,
+    pub radial: Option<crate::radial::Radial>,
+    pub prefs_window: crate::prefs_ui::PrefsWindow,
+    /// Action ids on the shelf.
+    pub shelf: Vec<String>,
+    pub show_grid: bool,
+    pub show_axes: bool,
+    pub unit: crate::prefs_ui::Unit,
+    /// Interface language code; `None` follows the system.
+    pub language: Option<String>,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -248,6 +261,11 @@ pub struct ModelApp {
     pub recovery_dir: Option<PathBuf>,
     /// The Animation panel: playback, key selection, views.
     pub anim: crate::anim_ui::AnimUi,
+    pub agents: crate::agents::Agents,
+    /// The allow-agents preference.
+    pub allow_agents: bool,
+    /// The UV Editor window: selection, pins, view and display settings.
+    pub uv: crate::uv_ui::UvUi,
 }
 
 /// The engine's note about a restored or dropped undo history, in the interface language.
@@ -277,6 +295,11 @@ impl ModelApp {
         app.prefs = Some(store);
         app.recovery_dir = recovery_dir();
         app.start_autosave();
+        if app.allow_agents {
+            crate::agents::start(&mut app, &cc.egui_ctx);
+        }
+        app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
+        crate::script_ui::startup(&mut app);
         app
     }
 
@@ -326,6 +349,16 @@ impl ModelApp {
             rename: None,
             about: false,
             render_view: Default::default(),
+            exchange: Default::default(),
+            script: Default::default(),
+            mesh_tools: Default::default(),
+            radial: None,
+            prefs_window: Default::default(),
+            shelf: Vec::new(),
+            show_grid: true,
+            show_axes: true,
+            unit: Default::default(),
+            language: None,
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -344,7 +377,14 @@ impl ModelApp {
             autosave_at: None,
             recovery_dir: None,
             anim: Default::default(),
+            agents: Default::default(),
+            allow_agents: false,
+            uv: Default::default(),
         };
+        if let Some(port) = cli.control {
+            app.agents.port = port;
+            crate::agents::start(&mut app, ctx);
+        }
         if let Some(n) = cli.bench_frames {
             let polys = cli.bench_polys.unwrap_or(1_000_000);
             let seg = ((polys as f32 / 6.0).sqrt().ceil() as u32).clamp(4, 1024);
@@ -373,6 +413,15 @@ impl ModelApp {
         }
         if let Some(f) = cli.file.clone() {
             app.open_path(f);
+        }
+        if let Some(heat) = cli.uv_editor {
+            app.uv.open = true;
+            app.uv.heat = heat;
+            if app.selection.is_empty()
+                && let Some(id) = app.doc.scene.objects().iter().find(|o| matches!(o.kind, ObjectKind::Mesh { .. })).map(|o| o.id)
+            {
+                app.select_only(id);
+            }
         }
         if let Some(ws) = cli.workspace {
             let ws = match ws {
@@ -404,6 +453,15 @@ impl ModelApp {
             .map(|b| modelcraft_engine::sculpt::preset::BrushPreset::new(&b.name, &b.brush))
             .collect();
         self.doc.keep_history = p.keep_history;
+        self.allow_agents = p.allow_agents;
+        self.shelf = crate::shelf::cleaned(p.shelf.clone());
+        self.show_grid = p.show_grid;
+        self.show_axes = p.show_axes;
+        self.show_wire = p.show_wire;
+        self.show_patches = p.show_patches;
+        self.unit = p.unit;
+        self.language = p.language.clone().filter(|l| !l.is_empty());
+        crate::i18n::set_language(self.language.as_deref());
         self.keymap = crate::keys::keymap(p.shortcuts);
     }
 
@@ -414,11 +472,25 @@ impl ModelApp {
             NavPreset::MiddleMouse => "middle",
             NavPreset::RightMouse => "right",
         };
-        let (recent, snap, brush_px, keep_history) = (self.recent.clone(), self.snap, self.brush_px, self.doc.keep_history);
         let presets = self.user_presets.clone();
+        let (recent, snap, brush_px, keep_history, allow_agents) = (self.recent.clone(), self.snap, self.brush_px, self.doc.keep_history, self.allow_agents);
+        let (shelf, grid, axes, wire, patches, unit, language) =
+            (self.shelf.clone(), self.show_grid, self.show_axes, self.show_wire, self.show_patches, self.unit, self.language.clone());
+        let (snap_move, snap_rotate_deg, snap_scale) = self.snap_steps;
         if let Some(store) = &mut self.prefs {
             store.update(|p| {
                 p.keep_history = keep_history;
+                p.allow_agents = allow_agents;
+                p.shelf = shelf;
+                p.show_grid = grid;
+                p.show_axes = axes;
+                p.show_wire = wire;
+                p.show_patches = patches;
+                p.unit = unit;
+                p.language = language;
+                p.snap_move = snap_move;
+                p.snap_rotate_deg = snap_rotate_deg;
+                p.snap_scale = snap_scale;
                 p.navigation = nav.into();
                 p.recent = recent;
                 p.snap = snap;
@@ -521,7 +593,7 @@ impl ModelApp {
         let a = self.active()?;
         match &self.doc.scene.get(a)?.kind {
             ObjectKind::Mesh { .. } => Some(a),
-            ObjectKind::SmoothCage { .. } => {
+            ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } => {
                 self.doc.scene.children(a).into_iter().find(|c| matches!(self.doc.scene.get(*c).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })))
             }
             _ => None,
@@ -563,7 +635,7 @@ impl ModelApp {
         }
     }
 
-    fn prune_selection(&mut self) {
+    pub fn prune_selection(&mut self) {
         let scene = &self.doc.scene;
         self.selection.retain(|id| scene.get(*id).is_some());
         let n = self.component_count();
@@ -600,7 +672,7 @@ impl ModelApp {
         }
     }
 
-    fn add_step(&mut self, op: StepOp) {
+    pub fn add_step(&mut self, op: StepOp) {
         let Some(id) = self.edit_target() else {
             self.status = tl!("Select a mesh first");
             return;
@@ -645,6 +717,7 @@ impl ModelApp {
             ExportGlb => self.export_dialog("glb"),
             ExportObj => self.export_dialog("obj"),
             ExportStl => self.export_dialog("stl"),
+            ExportFbx => self.export_dialog("fbx"),
             Undo => {
                 self.drag = None;
                 self.run(Command::Undo);
@@ -657,6 +730,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
@@ -720,6 +794,13 @@ impl ModelApp {
                     }
                     None => self.status = tl!("Select a deformer for the falloff field"),
                 }
+            }
+            AddCloner(kind) => {
+                // The selected mesh (or smooth cage) becomes the source; with none, a small cube is made.
+                let input = self
+                    .active()
+                    .filter(|id| matches!(self.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })));
+                self.run(Command::AddCloner { kind: kind.into(), input });
             }
             AddGroup => {
                 self.run(Command::AddGroup { name: None });
@@ -799,6 +880,7 @@ impl ModelApp {
             MaskClear => self.mask(modelcraft_engine::MaskOp::Clear),
             MaskInvert => self.mask(modelcraft_engine::MaskOp::Invert),
             MaskFill => self.mask(modelcraft_engine::MaskOp::Fill),
+            MaskOp(op) => self.mask(op),
             BrushBigger => self.brush_px = (self.brush_px * 1.15).min(800.0),
             BrushSmaller => self.brush_px = (self.brush_px / 1.15).max(4.0),
             DetailUp => self.sculpt_layer_command(|id| Command::SculptDetail { id, op: modelcraft_engine::DetailOp::Up }),
@@ -824,6 +906,12 @@ impl ModelApp {
             }
             About => self.about = true,
             RenderView => crate::render_view::toggle(self, ctx),
+            ScriptWindow => crate::script_ui::toggle(self),
+            ScriptRun => crate::script_ui::run_editor(self, false),
+            ScriptRunSelection => crate::script_ui::run_editor(self, true),
+            MeshTool(t) => crate::mesh_tools::run(self, t),
+            RadialMenu => crate::radial::open(self, ctx),
+            Preferences => crate::prefs_ui::open(self),
         }
     }
 
@@ -988,28 +1076,30 @@ impl ModelApp {
                 Err(e) => self.status = crate::tlf!("Could not open {file}: {error}", file = path.display(), error = e),
             }
         } else {
-            self.run(Command::Import { path: path.display().to_string() });
+            self.run(Command::Import { path: path.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
             self.frame_selection();
         }
     }
 
     pub fn open_dialog(&mut self) {
-        if let Some(p) =
-            rfd::FileDialog::new().add_filter("ModelCraft", &["modelcraft"]).add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply"]).pick_file()
+        if let Some(p) = rfd::FileDialog::new()
+            .add_filter("ModelCraft", &["modelcraft"])
+            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"])
+            .pick_file()
         {
             self.open_path(p);
         }
     }
 
     fn import_dialog(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply"]).pick_file() {
-            self.run(Command::Import { path: p.display().to_string() });
+        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"]).pick_file() {
+            self.run(Command::Import { path: p.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
         }
     }
 
     fn export_dialog(&mut self, ext: &str) {
         if let Some(p) = rfd::FileDialog::new().add_filter(ext.to_uppercase(), &[ext]).set_file_name(format!("model.{ext}")).save_file() {
-            match self.doc.export(&p) {
+            match self.doc.export_with(&p, modelcraft_engine::formats::exchange::Convert { up: self.exchange.up, scale: self.exchange.scale }) {
                 Ok(()) => self.status = crate::tlf!("Exported {file}", file = p.display()),
                 Err(e) => self.status = crate::tlf!("Export failed: {error}", error = e),
             }
@@ -1177,10 +1267,14 @@ impl ModelApp {
         }
         self.last_frame = Some(now);
         self.frames += 1;
+        crate::agents::tick(self);
         self.shortcuts(&ctx);
+        crate::constraint_ui::tick(self);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
+        crate::script_ui::quick_strip(self, ui);
+        crate::shelf::bar(self, ui);
         crate::panels::status_bar(self, ui);
         crate::anim_ui::bottom_panel(self, ui);
         for side in [Dock::Left, Dock::Right] {
@@ -1213,6 +1307,8 @@ impl ModelApp {
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL_DEEP)).show(ui, |ui| crate::viewport::show(self, ui));
         crate::panels::dialogs(self, &ctx);
+        crate::prefs_ui::show(self, &ctx);
+        crate::radial::show(self, &ctx);
         self.screenshot_tick(&ctx);
         if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {
             ctx.request_repaint();
@@ -1220,7 +1316,10 @@ impl ModelApp {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if crate::render_view::escape(self, ctx) {
+        if crate::render_view::escape(self, ctx) || self.radial.is_some() || crate::script_ui::escape(self, ctx) || crate::script_ui::keys(self, ctx) {
+            return;
+        }
+        if crate::uv_ui::keys(self, ctx) {
             return;
         }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {
@@ -1230,6 +1329,10 @@ impl ModelApp {
                 self.rename = None;
                 self.pending = None;
             }
+            return;
+        }
+        // Preferences answer their own keys (Esc closes them).
+        if self.prefs_window.open {
             return;
         }
         let redo_y =

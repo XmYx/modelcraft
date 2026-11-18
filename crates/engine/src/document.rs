@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use modelcraft_formats::exchange::{self, Item, Kind};
-use modelcraft_formats::{FormatError, journal, project};
+use modelcraft_formats::{FormatError, journal, project, uvlayout};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
-use crate::command::{Command, MaskOp, Outcome};
+use crate::command::{Command, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome};
 use crate::undo::{UndoEntry, UndoStack};
 
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +43,14 @@ pub struct SculptSession {
     pub unsynced: bool,
 }
 
+/// Where an open undo group started.
+struct GroupStart {
+    label: String,
+    /// `undo.len() + undo.dropped` when the group began, so entries dropped for memory do not
+    /// shift the count.
+    mark: usize,
+}
+
 pub struct Document {
     pub scene: Scene,
     pub eval: Evaluator,
@@ -53,6 +61,8 @@ pub struct Document {
     pub sculpt: Option<SculptSession>,
     journal: Option<journal::Journal>,
     replaying: bool,
+    /// Open undo groups ([`Document::begin_group`]), innermost last.
+    groups: Vec<GroupStart>,
     /// Journal entries found next to an opened file, waiting for [`Document::recover`].
     pub pending_recovery: usize,
     /// The frame the journal last recorded (scrubbing is journaled lazily, see `execute`).
@@ -63,6 +73,8 @@ pub struct Document {
     pub history_max_bytes: usize,
     /// What happened to the stored history on open, for the status bar.
     pub history_note: Option<String>,
+    /// Counts the changes made in this session (control clients watch it).
+    pub revision: u64,
 }
 
 /// Default bound on the history a save stores: 256 MiB of commands.
@@ -85,11 +97,13 @@ impl Document {
             sculpt: None,
             journal: None,
             replaying: false,
+            groups: Vec::new(),
             pending_recovery: 0,
             journal_frame: 0.0,
             keep_history: true,
             history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
             history_note: None,
+            revision: 0,
         }
     }
 
@@ -407,6 +421,7 @@ impl Document {
         self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
         self.log(&cmd);
         self.dirty = true;
+        self.revision += 1;
     }
 
     // ---- execution ----
@@ -417,6 +432,9 @@ impl Document {
         if !self.replaying && self.scene.anim.frame != self.journal_frame && !matches!(cmd, Command::Anim(crate::anim::AnimCommand::SetTime { .. })) {
             self.journal_frame = self.scene.anim.frame;
             self.log(&Command::Anim(crate::anim::AnimCommand::SetTime { frame: self.journal_frame }));
+        }
+        if !self.groups.is_empty() && matches!(cmd, Command::Undo | Command::Redo) {
+            return invalid("undo and redo are not available inside an undo group");
         }
         let out = match &cmd {
             Command::Anim(crate::anim::AnimCommand::SetTime { frame }) => {
@@ -484,6 +502,12 @@ impl Document {
                     MaskOp::Fill => s.mesh.mask_all(1.0),
                     MaskOp::Invert => s.mesh.mask_invert(),
                     MaskOp::Patch { triangle } => s.mesh.mask_patch(*triangle),
+                    MaskOp::Blur => s.mesh.mask_blur(),
+                    MaskOp::Sharpen => s.mesh.mask_sharpen(),
+                    MaskOp::Grow => s.mesh.mask_grow(),
+                    MaskOp::Shrink => s.mesh.mask_shrink(),
+                    MaskOp::Hollows => s.mesh.mask_by_bend(false),
+                    MaskOp::Ridges => s.mesh.mask_by_bend(true),
                 };
                 s.unsynced = true;
                 if !change.is_empty() {
@@ -514,6 +538,7 @@ impl Document {
         self.log(&cmd);
         if !matches!(cmd, Command::BeginSculpt { .. } | Command::EndSculpt) {
             self.dirty = true;
+            self.revision += 1;
         }
         Ok(out)
     }
@@ -527,6 +552,8 @@ impl Document {
                 if self.scene.anim.auto_key && !matches!(cmd, Command::Anim(_)) {
                     modelcraft_scene::anim::auto_key(&before, &mut self.scene);
                 }
+                // Constraints follow whatever the command moved.
+                self.scene.solve_constraints();
                 let after = self.scene.clone();
                 let bytes = 512 + self.scene.len() * 300 + self.scene.anim.heap_bytes();
                 self.undo.push(UndoEntry::Scene { label: cmd.label(), cmd: Box::new(cmd.clone()), before: Box::new(before), after: Box::new(after), bytes });
@@ -612,6 +639,32 @@ impl Document {
         }
     }
 
+    fn apply_batch(&mut self, commands: &[Command], depth: usize, out: &mut Outcome) -> Result<(), EngineError> {
+        if depth >= MAX_BATCH_DEPTH {
+            return invalid("batches are nested too deeply");
+        }
+        if commands.len() > MAX_BATCH {
+            return invalid(format!("a batch holds at most {MAX_BATCH} commands"));
+        }
+        for (i, c) in commands.iter().enumerate() {
+            let r = match c {
+                Command::Batch { commands, .. } => {
+                    let mut inner = Outcome::default();
+                    self.apply_batch(commands, depth + 1, &mut inner).map(|()| inner)
+                }
+                _ => self.apply_scene(c),
+            };
+            match r {
+                Ok(o) => {
+                    out.created.extend(o.created);
+                    out.warnings.extend(o.warnings);
+                }
+                Err(e) => return invalid(format!("batch command {} ({}): {e}", i + 1, c.label())),
+            }
+        }
+        Ok(())
+    }
+
     fn apply_scene(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
         let mut out = Outcome::default();
         match cmd {
@@ -634,6 +687,27 @@ impl Document {
                     self.scene.reparent(*i, Some(cage))?;
                 }
                 out.created.push(cage);
+            }
+            Command::AddCloner { kind, input } => {
+                let cloner = Cloner::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone layout {kind:?}")))?;
+                if let Some(i) = input
+                    && !matches!(self.scene.get(*i).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. }))
+                {
+                    return invalid("clones need a mesh or smooth cage as their source");
+                }
+                let parent = input.and_then(|i| self.scene.get(i)).and_then(|o| o.parent);
+                let name = self.scene.unique_name("Clones");
+                let id = self.scene.add(name, ObjectKind::Cloner { cloner, target: None }, parent)?;
+                match input {
+                    Some(i) => self.scene.reparent(*i, Some(id))?,
+                    None => {
+                        let primitive = Primitive::Cube { size: glam::Vec3::splat(0.5), segments: 1 };
+                        let name = self.scene.unique_name("Clone source");
+                        self.scene.add(name, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(id))?;
+                    }
+                }
+                out.warnings.extend(self.eval.evaluate(&self.scene, id).errors.iter().map(|e| e.message.clone()));
+                out.created.push(id);
             }
             Command::AddDeformer { kind, target } => {
                 let deformer = Deformer::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown deformer {kind:?}")))?;
@@ -711,6 +785,21 @@ impl Document {
                 ObjectKind::Field { field: f } => *f = field.sanitized(),
                 _ => return invalid("not a falloff field"),
             },
+            Command::SetCloner { id, cloner, target } => {
+                if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
+                    return invalid("the target must be another object in the scene");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::Cloner { cloner: c, target: t } => {
+                        *c = cloner.sanitized();
+                        *t = *target;
+                    }
+                    _ => return invalid("not a clone generator"),
+                }
+                // A missing source or target, or a cut-off count, reaches the status line (a
+                // live region) so it is announced where the edit was made.
+                out.warnings.extend(self.eval.evaluate(&self.scene, *id).errors.iter().map(|e| e.message.clone()));
+            }
             Command::AddStep { id, op } => {
                 if matches!(op, StepOp::Sculpt { .. }) {
                     return invalid("sculpt layers are added by begin_sculpt");
@@ -739,9 +828,9 @@ impl Document {
                 steps.remove(*index);
             }
             Command::Collapse { id } => self.scene.collapse(*id, &mut self.eval)?,
-            Command::Import { path } => {
+            Command::Import { path, up, scale } => {
                 let p = Path::new(path);
-                let kind = Kind::from_path(p).ok_or_else(|| EngineError::Invalid(format!("{path}: not a glTF, GLB, OBJ, STL or PLY file")))?;
+                let kind = Kind::from_path(p).ok_or_else(|| EngineError::Invalid(format!("{path}: not a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file")))?;
                 let meta = std::fs::metadata(p).map_err(|e| FormatError::io(p, e))?;
                 if meta.len() > MAX_IMPORT_BYTES {
                     return invalid(format!("{path} is too large"));
@@ -757,7 +846,7 @@ impl Document {
                     let q = dir.join(file);
                     (std::fs::metadata(&q).ok()?.len() <= MAX_IMPORT_BYTES).then(|| std::fs::read(q).ok()).flatten()
                 };
-                let (items, warnings) = exchange::import(&bytes, kind, &mut resolve)?;
+                let (items, warnings) = exchange::import_with(&bytes, kind, &mut resolve, exchange::Convert { up: *up, scale: *scale })?;
                 out.warnings = warnings;
                 let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Import").to_string();
                 let root = if items.len() > 1 { Some(self.scene.add(self.scene.unique_name(&stem), ObjectKind::Group, None)?) } else { None };
@@ -778,6 +867,36 @@ impl Document {
                 out.created.extend(ids);
             }
             Command::Anim(a) => crate::anim::apply(&mut self.scene, a, &mut out)?,
+            Command::AddMesh { name, parent, positions, faces } => {
+                if faces.is_empty() {
+                    return invalid("a mesh needs at least one face");
+                }
+                let pos: Vec<glam::Vec3> = positions.iter().map(|p| glam::Vec3::from_array(*p)).collect();
+                let polys: Vec<modelcraft_mesh::Polygon> = faces.iter().map(|f| modelcraft_mesh::Polygon::new(f.clone())).collect();
+                let (mesh, report) = modelcraft_mesh::PolyMesh::build(pos, polys).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                if mesh.face_count() == 0 {
+                    return invalid("none of the faces fit the vertices");
+                }
+                if report.dropped > 0 {
+                    out.warnings.push(format!("{} faces were dropped (an index out of range, fewer than three corners or a repeated vertex)", report.dropped));
+                }
+                if report.fixed_positions > 0 {
+                    out.warnings.push(format!("{} non-finite positions were moved to the origin", report.fixed_positions));
+                }
+                let name = self.scene.unique_name(name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Mesh"));
+                let id = self.scene.add(name, ObjectKind::Mesh { source: Source::Mesh { mesh: Arc::new(mesh) }, steps: vec![] }, *parent)?;
+                out.created.push(id);
+            }
+            Command::SetPositions { id, positions } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => {
+                    let pos: Vec<glam::Vec3> = positions.iter().map(|p| glam::Vec3::from_array(*p)).collect();
+                    let mut m = (**mesh).clone();
+                    m.set_positions(&pos).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                    *mesh = Arc::new(m);
+                }
+                _ => return invalid("only objects that store their own mesh have positions to set (collapse a primitive first)"),
+            },
+            Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
             Command::Undo
             | Command::Redo
@@ -793,6 +912,57 @@ impl Document {
         Ok(out)
     }
 
+    // ---- undo groups ----
+
+    /// Start an undo group: every change until the matching [`Document::end_group`] becomes one
+    /// undo step named `label`. Groups nest; only the outermost one makes a step.
+    pub fn begin_group(&mut self, label: &str) {
+        self.sync_sculpt();
+        let mark = self.undo.len() + self.undo.dropped;
+        self.groups.push(GroupStart { label: label.to_string(), mark });
+    }
+
+    /// Close the innermost group. With `rollback` its changes are undone and forgotten (no redo
+    /// step is left); otherwise the entries it made are merged into one. Sculpt strokes inside a
+    /// group stay separate entries (they store vertex deltas, not scenes). Returns how many
+    /// entries the group made.
+    pub fn end_group(&mut self, rollback: bool) -> usize {
+        let Some(g) = self.groups.pop() else { return 0 };
+        self.sync_sculpt();
+        let made = (self.undo.len() + self.undo.dropped).saturating_sub(g.mark).min(self.undo.len());
+        if rollback {
+            for _ in 0..made {
+                self.undo_once();
+            }
+            self.undo.clear_redo();
+            return made;
+        }
+        if made > 1 && self.groups.is_empty() {
+            let entries = self.undo.take_last(made);
+            if entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. })) {
+                let first = entries.first();
+                let last = entries.last();
+                if let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (first, last) {
+                    let (before, after) = (before.clone(), after.clone());
+                    let bytes = 512 + self.scene.len() * 300;
+                    // The merged step replays as one batch of what the group ran.
+                    let cmd = Command::Batch { label: Some(g.label.clone()), commands: entries.iter().map(|e| e.command().clone()).collect() };
+                    self.undo.push(UndoEntry::Scene { label: g.label, cmd: Box::new(cmd), before, after, bytes });
+                    return made;
+                }
+            }
+            for e in entries {
+                self.undo.push_done(e);
+            }
+        }
+        made
+    }
+
+    /// How many undo groups are open.
+    pub fn group_depth(&self) -> usize {
+        self.groups.len()
+    }
+
     // ---- export ----
 
     /// The scene as export items: evaluated meshes, smooth cages replacing their inputs.
@@ -803,24 +973,51 @@ impl Document {
         let mut items = Vec::new();
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
-            if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. }) || !self.scene.visible(id) {
+            if self.scene.is_cage_input(id)
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                || !self.scene.visible(id)
+            {
                 continue;
             }
-            let mesh = match o.kind {
+            let evaluated = match o.kind {
                 // Joints export as empty nodes; a skinned mesh exports in its current pose.
                 ObjectKind::Group | ObjectKind::Joint { .. } => None,
-                _ => Some(self.eval.evaluate(&self.scene, id).mesh),
+                _ => Some(self.eval.evaluate(&self.scene, id)),
             };
             let parent = o.parent.and_then(|p| index.get(&p).copied());
             index.insert(id, items.len());
+            // A clone generator exports as a group with one node per clone, all sharing the source
+            // mesh (glTF nodes may share a mesh).
+            let instances = evaluated.as_ref().and_then(|e| e.instances.clone());
+            let mesh = if instances.is_some() { None } else { evaluated.map(|e| e.mesh) };
+            let here = items.len();
             items.push(Item { name: o.name.clone(), parent, transform: o.transform, mesh, material: o.material.clone() });
+            if let Some(inst) = instances {
+                let material = inst.source_object.and_then(|s| self.scene.get(s)).map(|s| s.material.clone()).unwrap_or_default();
+                let mut baked_vertices = 0usize;
+                for c in &inst.clones.instances {
+                    let (transform, mesh) = clone_node(c.matrix, &inst.source, &mut baked_vertices);
+                    items.push(Item {
+                        name: format!("{} {}", o.name, c.index + 1),
+                        parent: Some(here),
+                        transform,
+                        mesh: Some(mesh),
+                        material: material.clone(),
+                    });
+                }
+            }
         }
         items
     }
 
     pub fn export(&mut self, path: &Path) -> Result<(), EngineError> {
-        let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj or .stl".into()))?;
-        let bytes = exchange::export(&self.export_items(), kind)?;
+        self.export_with(path, exchange::Convert::default())
+    }
+
+    /// Export into another up axis or unit (`convert.scale`: metres per file unit).
+    pub fn export_with(&mut self, path: &Path, convert: exchange::Convert) -> Result<(), EngineError> {
+        let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl or .fbx".into()))?;
+        let bytes = exchange::export_with(&self.export_items(), kind, convert)?;
         craft_atomic_write(path, &bytes)
     }
 
@@ -867,6 +1064,35 @@ impl Document {
         }
     }
 
+    /// Write the UV layout of a mesh object as `.svg` or `.png`: the given object, or the first
+    /// visible mesh that has UVs. `size` is the picture's side in pixels.
+    pub fn export_uv_layout(&mut self, path: &Path, object: Option<ObjectId>, size: u32) -> Result<(), EngineError> {
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if ext != "svg" && ext != "png" {
+            return Err(EngineError::Invalid("export the UV layout to .svg or .png".into()));
+        }
+        self.sync_sculpt();
+        let id = match object {
+            Some(id) => id,
+            None => {
+                let ids: Vec<ObjectId> = self.scene.tree_order().into_iter().map(|(id, _)| id).collect();
+                ids.into_iter()
+                    .find(|id| {
+                        matches!(self.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }))
+                            && self.scene.visible(*id)
+                            && self.eval.evaluate(&self.scene, *id).mesh.has_uvs()
+                    })
+                    .ok_or_else(|| EngineError::Invalid("no visible mesh has UVs".into()))?
+            }
+        };
+        if self.scene.get(id).is_none() {
+            return Err(EngineError::Invalid(format!("no object {}", id.0)));
+        }
+        let mesh = self.eval.evaluate(&self.scene, id).mesh;
+        let bytes = if ext == "svg" { uvlayout::svg(&mesh, size)?.into_bytes() } else { uvlayout::png(&mesh, size)? };
+        craft_atomic_write(path, &bytes)
+    }
+
     /// Total triangles of everything visible (for the status bar).
     pub fn triangle_count(&mut self) -> usize {
         let ids: Vec<ObjectId> = self.scene.objects().iter().map(|o| o.id).collect();
@@ -874,10 +1100,46 @@ impl Document {
             .filter(|id| !self.scene.is_cage_input(*id))
             .map(|id| match &self.sculpt {
                 Some(s) if s.id == id => s.mesh.triangle_count(),
-                _ => self.eval.evaluate(&self.scene, id).mesh.triangle_count(),
+                _ => {
+                    let e = self.eval.evaluate(&self.scene, id);
+                    e.mesh.triangle_count() + e.instances.map_or(0, |i| i.triangle_count())
+                }
             })
             .sum()
     }
+}
+
+/// Most vertices all the baked clones of one generator may add to an export.
+const MAX_BAKED_VERTICES: usize = 16_000_000;
+
+/// The node for one clone. A glTF node carries translation, rotation and scale only, so a clone
+/// whose matrix has shear (a stretch applied after a rotation) cannot be one node over the shared
+/// mesh: it gets its own copy of the mesh with the matrix applied to the points, and an identity
+/// transform. `baked_vertices` counts those copies; past [`MAX_BAKED_VERTICES`] a sheared clone
+/// falls back to its nearest rotation and scale.
+fn clone_node(
+    matrix: glam::Mat4,
+    source: &std::sync::Arc<modelcraft_scene::PolyMesh>,
+    baked_vertices: &mut usize,
+) -> (modelcraft_scene::Transform, std::sync::Arc<modelcraft_scene::PolyMesh>) {
+    let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
+    let rebuilt = glam::Mat4::from_scale_rotation_translation(scale, rotation, translation);
+    let tolerance = 1e-4 * matrix.to_cols_array().iter().fold(1.0f32, |m, v| m.max(v.abs()));
+    let trs = rebuilt.to_cols_array().iter().zip(matrix.to_cols_array()).all(|(a, b)| (a - b).abs() <= tolerance);
+    if trs || !matrix.is_finite() || *baked_vertices + source.vertex_count() > MAX_BAKED_VERTICES {
+        return (modelcraft_scene::Transform { translation, rotation, scale }.sanitized(), source.clone());
+    }
+    *baked_vertices += source.vertex_count();
+    let mut baked = (**source).clone();
+    baked.map_positions(|_, p| matrix.transform_point3(p));
+    // A matrix that mirrors turns the faces inside out; put them back the right way round.
+    if matrix.determinant() < 0.0 {
+        let all: Vec<u32> = (0..baked.face_count() as u32).collect();
+        if let Ok(flipped) = modelcraft_ops::edit::flip_faces(&baked, &all) {
+            baked = flipped;
+        }
+    }
+    (modelcraft_scene::Transform::default(), std::sync::Arc::new(baked))
 }
 
 fn craft_atomic_write(path: &Path, bytes: &[u8]) -> Result<(), EngineError> {

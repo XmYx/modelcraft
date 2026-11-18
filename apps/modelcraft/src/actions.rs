@@ -15,6 +15,7 @@ pub enum Action {
     ExportGlb,
     ExportObj,
     ExportStl,
+    ExportFbx,
     Undo,
     Redo,
     Delete,
@@ -35,6 +36,7 @@ pub enum Action {
     AddCage,
     AddDeformer(&'static str),
     AddField(&'static str),
+    AddCloner(&'static str),
     AddGroup,
     Extrude,
     Inset,
@@ -52,6 +54,7 @@ pub enum Action {
     MaskClear,
     MaskInvert,
     MaskFill,
+    MaskOp(modelcraft_engine::MaskOp),
     BrushBigger,
     BrushSmaller,
     DetailUp,
@@ -78,14 +81,23 @@ pub enum Action {
     ToggleSnap,
     KeyboardShortcuts,
     RenderView,
+    ScriptWindow,
+    ScriptRun,
+    ScriptRunSelection,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    Uv(crate::uv_ui::UvAction),
+    MeshTool(crate::mesh_tools::Tool),
+    RadialMenu,
+    Preferences,
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
 pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
 /// The falloff field shapes (`modelcraft_field::SHAPES`).
 pub const FIELDS: &[&str] = modelcraft_engine::field::SHAPES;
+/// The clone layouts (`modelcraft_clone::KINDS`).
+pub const CLONERS: &[&str] = modelcraft_engine::clone::KINDS;
 
 pub fn all() -> Vec<Action> {
     use Action::*;
@@ -99,6 +111,7 @@ pub fn all() -> Vec<Action> {
         ExportGlb,
         ExportObj,
         ExportStl,
+        ExportFbx,
         Undo,
         Redo,
         Delete,
@@ -122,7 +135,9 @@ pub fn all() -> Vec<Action> {
     v.extend([AddCage, AddGroup]);
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
     v.extend(FIELDS.iter().map(|f| AddField(f)));
+    v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
+    v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -130,6 +145,12 @@ pub fn all() -> Vec<Action> {
         MaskClear,
         MaskInvert,
         MaskFill,
+        MaskOp(modelcraft_engine::MaskOp::Blur),
+        MaskOp(modelcraft_engine::MaskOp::Sharpen),
+        MaskOp(modelcraft_engine::MaskOp::Grow),
+        MaskOp(modelcraft_engine::MaskOp::Shrink),
+        MaskOp(modelcraft_engine::MaskOp::Hollows),
+        MaskOp(modelcraft_engine::MaskOp::Ridges),
         BrushBigger,
         BrushSmaller,
         DetailUp,
@@ -142,6 +163,11 @@ pub fn all() -> Vec<Action> {
         ViewRight,
         ViewTop,
         RenderView,
+        ScriptWindow,
+        ScriptRun,
+        ScriptRunSelection,
+        RadialMenu,
+        Preferences,
         TransformDialog,
         Palette,
         KeyboardShortcuts,
@@ -150,6 +176,7 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
+    v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
     v
 }
 
@@ -237,6 +264,7 @@ impl Action {
             ExportGlb => tl!("Export glTF Binary (.glb)…"),
             ExportObj => tl!("Export OBJ…"),
             ExportStl => tl!("Export STL…"),
+            ExportFbx => tl!("Export FBX…"),
             Undo => tl!("Undo"),
             Redo => tl!("Redo"),
             Delete => tl!("Delete"),
@@ -259,6 +287,7 @@ impl Action {
             AddCage => tl!("Add Smooth Cage"),
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
             AddField(f) => crate::tlf!("Add {shape} Falloff Field", shape = crate::field_ui::shape_label(f)),
+            AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
             AddGroup => tl!("Add Group"),
             Extrude => tl!("Extrude"),
             Inset => tl!("Inset"),
@@ -276,6 +305,15 @@ impl Action {
             MaskClear => tl!("Clear Mask"),
             MaskInvert => tl!("Invert Mask"),
             MaskFill => tl!("Mask All"),
+            MaskOp(op) => match op {
+                modelcraft_engine::MaskOp::Blur => tl!("Blur Mask"),
+                modelcraft_engine::MaskOp::Sharpen => tl!("Sharpen Mask"),
+                modelcraft_engine::MaskOp::Grow => tl!("Grow Mask"),
+                modelcraft_engine::MaskOp::Shrink => tl!("Shrink Mask"),
+                modelcraft_engine::MaskOp::Hollows => tl!("Mask Hollows"),
+                modelcraft_engine::MaskOp::Ridges => tl!("Mask Ridges"),
+                _ => tl!("Mask"),
+            },
             BrushBigger => tl!("Larger Brush"),
             BrushSmaller => tl!("Smaller Brush"),
             DetailUp => tl!("Detail Level Up"),
@@ -289,6 +327,12 @@ impl Action {
             ViewTop => tl!("Top View"),
             TransformDialog => tl!("Transform by Numbers…"),
             RenderView => tl!("Render View"),
+            ScriptWindow => tl!("Scripts Window"),
+            ScriptRun => tl!("Run Script"),
+            ScriptRunSelection => tl!("Run Selection"),
+            MeshTool(t) => t.label(),
+            RadialMenu => tl!("Radial Menu"),
+            Preferences => tl!("Preferences…"),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
@@ -306,6 +350,7 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
+            Uv(a) => a.label(),
         }
     }
 
@@ -322,6 +367,7 @@ impl Action {
             ExportGlb => "file.export_glb",
             ExportObj => "file.export_obj",
             ExportStl => "file.export_stl",
+            ExportFbx => "file.export_fbx",
             Undo => "edit.undo",
             Redo => "edit.redo",
             Delete => "edit.delete",
@@ -344,6 +390,7 @@ impl Action {
             AddCage => "create.smooth_cage",
             AddDeformer(d) => return format!("create.deformer.{d}"),
             AddField(f) => return format!("create.field.{f}"),
+            AddCloner(c) => return format!("create.clones.{c}"),
             AddGroup => "create.group",
             Extrude => "mesh.extrude",
             Inset => "mesh.inset",
@@ -369,6 +416,15 @@ impl Action {
             MaskClear => "sculpt.mask_clear",
             MaskInvert => "sculpt.mask_invert",
             MaskFill => "sculpt.mask_fill",
+            MaskOp(op) => match op {
+                modelcraft_engine::MaskOp::Blur => "sculpt.mask_blur",
+                modelcraft_engine::MaskOp::Sharpen => "sculpt.mask_sharpen",
+                modelcraft_engine::MaskOp::Grow => "sculpt.mask_grow",
+                modelcraft_engine::MaskOp::Shrink => "sculpt.mask_shrink",
+                modelcraft_engine::MaskOp::Hollows => "sculpt.mask_hollows",
+                modelcraft_engine::MaskOp::Ridges => "sculpt.mask_ridges",
+                _ => "sculpt.mask_other",
+            },
             BrushBigger => "sculpt.brush_bigger",
             BrushSmaller => "sculpt.brush_smaller",
             DetailUp => "sculpt.detail_up",
@@ -382,10 +438,17 @@ impl Action {
             ViewTop => "view.top",
             TransformDialog => "edit.transform_numbers",
             RenderView => "view.render",
+            ScriptWindow => "scripts.window",
+            ScriptRun => "scripts.run",
+            ScriptRunSelection => "scripts.run_selection",
+            MeshTool(t) => t.id(),
+            RadialMenu => "view.radial_menu",
+            Preferences => "edit.preferences",
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
+            Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
         };
@@ -458,6 +521,8 @@ impl Action {
             Symmetry => "Sculpt: X",
             MaskInvert => "Sculpt: Cmd+9",
             MaskClear => "Sculpt: Alt+M",
+            MaskOp(modelcraft_engine::MaskOp::Grow) => "Sculpt: Cmd+]",
+            MaskOp(modelcraft_engine::MaskOp::Shrink) => "Sculpt: Cmd+[",
             BrushBigger => "]",
             BrushSmaller => "[",
             DetailUp => "Sculpt: PageUp",
@@ -470,11 +535,17 @@ impl Action {
             ViewTop => "Alt+4",
             TransformDialog => "Cmd+T",
             RenderView => "F9",
+            ScriptWindow => "Cmd+J",
+            ScriptRun => "Cmd+Enter",
+            ScriptRunSelection => "Cmd+Shift+Enter",
+            RadialMenu => "Shift+Q",
+            Preferences => "Cmd+,",
             Palette => "Cmd+K",
             KeyboardShortcuts => "Cmd+Alt+K",
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
+            Uv(a) => return a.default_binding(),
             _ => return None,
         })
     }
@@ -483,17 +554,19 @@ impl Action {
     pub fn menu(self) -> &'static str {
         use Action::*;
         match self {
-            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl => "File",
-            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddGroup => "Create",
-            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
+            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
+            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences => "Edit",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddGroup => "Create",
+            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
-            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd | LiveDetail
-            | EvenRemesh => "Sculpt",
+            Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
+            | LiveDetail | EvenRemesh => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
+            ScriptWindow | ScriptRun | ScriptRunSelection => "Scripts",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
+            Uv(_) => "UV",
             _ => "View",
         }
     }

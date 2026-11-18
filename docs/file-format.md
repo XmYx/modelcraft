@@ -49,6 +49,28 @@ first; `active_layer` is the layer keys go to. Defaults are left out. The attrib
 sorted and de-duplicated, counts are capped (2²⁰ keys per curve, 200 000 tracks) and tracks on
 missing objects are removed. Builds from before animation ignore the block.
 
+## Deformer stack
+
+An object of `type` `point_deformer` under a mesh holds `deformer`, with `kind` one of
+`blend_shapes` (`targets`: `[{name, weight, frames: [{at, indices, deltas}]}]`, the offsets of the
+listed points when the weight is `at`), `lattice` (`divisions` [x, y, z], `linear?`, `points`: the
+control points in the lattice's unit box, X fastest) and `cluster` (`points`, `weights`, `bind`:
+the inverse of the object's matrix when it was made). Offsets and points are JSON for now. On
+load, counts are capped (512 targets, 16 shapes each, 8 cells per axis), a lattice with the wrong
+number of points is reset and non-finite numbers are replaced.
+
+## Constraints
+
+`scene.constraints` (left out when the scene has none) holds `list`: `{id, name, target, enabled?,
+weight?, type, …}` with `type` one of `point`, `orient`, `scale`, `parent` (`sources`:
+`[{object, weight?, offset?}]`), `aim` (`sources`, `aim`, `up`, `up_object?`, `up_vector`,
+`offset`), `ik` (`goal`, `pole?`, `bones`, `solver`, `iterations`, `tolerance`), `driven` (`path`,
+`driver`, `driver_path`, `curve`) and `expression` (`path`, `expr`); and `authored`: per driven
+object id, the transform it has without its constraints (the objects themselves hold the solved
+pose). On load, weights and solver settings are clamped, duplicate ids and constraints on missing
+objects are dropped, and counts are capped (4096 constraints, 16 sources each). Builds from before
+constraints ignore the block.
+
 ## Point cache (`.mcpc`)
 
 `modelcraft-cli bake` writes the vertices of one object at a run of frames (little-endian):

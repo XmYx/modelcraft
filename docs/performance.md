@@ -56,6 +56,60 @@ this size) and the undo snapshot.
 Level changes build the level topology twice through the validated mesh builder; that, not the
 linear refinement itself, is most of the time, and it is single-threaded.
 
+## The ten newer brushes (same bench, same mesh and radius)
+
+Measured 2026-11-17 while other builds shared the machine (the seven rows above re-measured in
+the same run at 0.26–0.47 ms, so read these as upper bounds).
+
+| Brush | Dab mean | Dab p95 |
+|---|---|---|
+| Pull | 0.58 ms | 0.78 ms |
+| Plateau | 0.48 ms | 0.76 ms |
+| Trim | 0.42 ms | 0.66 ms |
+| Fill | 0.31 ms | 0.53 ms |
+| Polish | 0.38 ms | 0.73 ms |
+| Buildup | 0.44 ms | 0.66 ms |
+| Gouge | 0.30 ms | 0.45 ms |
+| Slide | 0.31 ms | 0.52 ms |
+| Bulge | 0.34 ms | 0.56 ms |
+
+Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
+captured at the first dab, so its row there measures almost nothing.
+
+## 12.6 M triangles (`modelcraft-cli bench --polys 10000000 --dabs 200`)
+
+Measured 2026-11-17 with the machine's load average near 30 on 24 threads (other builds), so
+these are upper bounds and vary by a factor of two between runs. The mesh is the largest quad
+sphere the primitive makes: 6,291,456 quads, 12,582,912 triangles, 6,291,458 vertices. Same
+brush radius as above (0.08 on a unit sphere), which is about 10 k vertices per dab here, X
+symmetry on.
+
+| What | Time |
+|---|---|
+| Generate the mesh | 12–17 s |
+| Start a sculpt session (normals, adjacency, picking tree) | 6–10 s |
+| Dab: Draw, Clay, Smooth, Inflate, Pinch, Flatten, Crease | 3.0–4.9 ms mean, 4.7–7.7 ms p95 |
+| Dab: Grab, Mask | 1.7–2.0 ms mean |
+| Dab: Plateau, Trim, Polish | 5.8–9.6 ms mean, 11–20 ms p95 |
+| Upload of the dirty chunks (~150 k vertices) | 0.9–4.5 ms |
+| 1920×1080 draw + GPU wait | 1.3–20 ms (the GPU was shared; 1.3–1.7 ms in the quiet rows) |
+| End of a stroke (undo record, refit of what moved) | 12–46 ms |
+| Refit of the whole picking tree, for comparison | 110 ms |
+
+So a dab plus its upload stays under 10 ms for the common brushes at 12.6 M triangles in the
+engine. The app window was not measured at this size, 20 M was not measured at all, and a session
+takes several seconds to start: that is why the parity row for 20 M+ polygons stays Missing.
+
+The end of a stroke now refits only the leaves of the picking tree that hold moved triangles
+(and the boxes above them). At 2 M triangles a stroke end takes 2.3–7.3 ms where the full refit
+alone took 9–10 ms.
+
+**Threads, tried and not kept.** Working out a dab's weights and normals on a thread pool was
+measured on this machine while it was busy: with 12 threads Draw went from 6.1 ms to 15.0 ms per
+dab at 12.6 M triangles (p95 8.6 ms to 32 ms), and session start showed no gain outside the
+noise. A dab touches a few thousand vertices, too little to pay for the hand-over when the cores
+are contended. Dabs therefore stay on one thread until this is measured on an idle machine.
+
 ## Live detail and even remesh (`modelcraft-cli bench`, last lines)
 
 Measured 2026-11-17 on the same machine while other builds were running, engine only (no GPU
@@ -102,7 +156,7 @@ modelcraft-cli render dense.modelcraft  -o d.png --width 1280 --height 720  --sa
 | Cornell box, 1024², 256 spp | 36 | 7.5 M paths/s (35.6 s) | 326 M paths/s (0.82 s) | 43× |
 | Material row, 1280×720, 256 spp | 39,686 | 10.3 M paths/s (22.8 s) | 561 M paths/s (0.42 s) | 54× |
 | Dense sphere, 1280×720, 64 spp | 2,007,376 | 11.3 M paths/s (5.2 s) | 406 M paths/s (0.15 s) | 36× |
-| Material showcase (glass, coat, fuzz, thin film, textures, bump), 960×540, 256 spp | 72,196 | 6.2 M paths/s (21.4 s) | not rendered: the GPU path declines layered materials and textures | — |
+| Material showcase (glass, coat, fuzz, thin film, textures, bump), 960×540, 256 spp | 72,196 | 8.5 M paths/s (15.7 s; load average 22) | 299 M paths/s (0.44 s) | 35× |
 
 Scene preparation for the dense sphere (evaluate, triangulate with smoothed normals, build the
 BVH): 2.2 s. The BVH alone, on a 2,000,000-triangle height field: built in 560 ms (2.1 M nodes,
@@ -115,7 +169,9 @@ Correctness is tested, not assumed (see the test names in
 within 2 % of the environment (furnace test) for matte, rough-metal and layered dielectric
 surfaces; a random-material property test bounds every albedo below 1.04 (Monte Carlo slack);
 point, directional, uniform-sky and rectangular-area lighting match their closed forms within
-1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002.
+1–2 %; GPU and CPU images of the same scene agree to a relative MSE below 0.002 (the tests'
+bound; measured with the same 64 samples: showcase 0.00002, cut-outs and maps 0.0001, the Cornell
+box, studio, night street and interior below 0.000001).
 
 ### Benchmark: error against samples and time (`modelcraft-cli render-bench`)
 
@@ -154,19 +210,25 @@ Read honestly:
 - materials, night-street and showcase converge at 1/N from 16 samples on but start from large
   errors (speckle from the small bright light on glossy metal, and caustic paths through glass).
 
-**GPU, RTX 4090 (wgpu, Vulkan).** Three of the six scenes; the kernel declines panorama lighting
-and textures, and those scenes are reported as not rendered rather than run on the CPU.
+**GPU, RTX 4090 (wgpu, Vulkan).** All six scenes: the kernel renders everything the CPU path does
+(layered materials, textures, panorama lighting, the light tree). Load average 20 during the run;
+the GPU itself was idle.
 
 | Scene | relMSE at 1 / 4 / 16 / 64 / 256 spp | Seconds at 256 spp |
 |---|---|---|
-| cornell | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 0.050 |
-| materials | 6.07 / 1.22 / 0.221 / 0.069 / 0.0178 | 0.110 |
-| night-street | 12.6 / 3.41 / 0.848 / 0.236 / 0.0656 | 0.043 |
+| cornell | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 0.053 |
+| materials | 4.94 / 0.805 / 0.128 / 0.049 / 0.0121 | 0.123 |
+| interior | 0.246 / 0.046 / 0.0185 / 0.262 / 0.148 | 0.114 |
+| night-street | 6.79 / 1.01 / 0.262 / 0.072 / 0.0198 | 0.057 |
+| studio | 0.326 / 0.081 / 0.0205 / 0.0052 / 0.0013 | 0.115 |
+| showcase | 2.45 / 0.692 / 0.166 / 0.049 / 0.0135 | 0.168 |
 
-On cornell the GPU reaches the same error per sample as the CPU (it runs the same samples) in
-1/55 of the time. On night-street it needs about 3.3× the samples of the CPU for the same error,
-because the GPU chooses lights by power while the CPU uses the light tree; it is still far ahead
-in time. Porting the tree to the kernel is the next step for that scene.
+Every error equals the CPU's to the digits shown, because the two devices run the same samples
+through the same estimator; the GPU takes 1/20 to 1/50 of the time. Before this kernel the GPU
+rendered three of these scenes and chose lights by power: night-street then stood at
+12.6 / 3.41 / 0.848 / 0.236 / 0.0656 (3.3× the samples of the CPU for the same error) and
+materials at 6.07 / 1.22 / 0.221 / 0.069 / 0.0178. The interior scene's rise at 64 and 256 samples
+is the estimator's (see above), now on both devices.
 
 ### Sample order, feature images and environment sampling (measured by their tests)
 
@@ -226,6 +288,74 @@ The gap between the kernel and the evaluation (≈ 5 ms) is copying the mesh and
 positions for the new pose. These are engine numbers; playback in the app adds a full vertex
 upload and normals for the changed mesh each frame, which has not been measured yet.
 
+## UV unwrap (engine, `modelcraft-cli uv-bench --segments N`)
+
+A welded UV sphere of N×N/2 quads with no seams: the automatic cut adds a path, then LSCM solves
+the single island with a sparse Cholesky factorisation (nested-dissection order, two steps of
+refinement). Distortion is measured on the result (`modelcraft_uv::measure`; area-weighted, angle
+error in degrees, stretch is σ1/σ2 of the per-triangle map, 1 = conformal; area RMS is the RMS of
+the log of each triangle's UV-to-surface area share, 0 = one scale everywhere). Same machine as
+above, release build.
+
+| Sphere | Vertices | Unwrap | Solve residual | Mean / max angle error | Mean / max stretch | Area RMS (log) | Flipped |
+|---|---|---|---|---|---|---|---|
+| 32×16 | 482 | 2 ms | 2e-14 | 0.54° / 1.41° | 1.013 / 1.025 | 0.486 | 0 |
+| 64×32 | 1,986 | 7 ms | 7e-14 | 0.14° / 0.43° | 1.003 / 1.008 | 0.493 | 0 |
+| 128×64 | 8,066 | 32 ms | 3e-13 | 0.035° / 0.11° | 1.001 / 1.002 | 0.496 | 0 |
+| 256×128 | 32,514 | 196 ms | 1e-12 | 0.010° / 0.36° | 1.000 / 1.008 | 0.499 | 0 |
+
+A conformal map keeps angles and cannot keep areas on a sphere: the area RMS near 0.5 is the price
+of the cut. On developable shapes (plane, open tube, cube faces) the unwrap is exact to float
+precision (angle error below 1e-4°, area RMS below 1e-6; see `crates/uv/src/tests.rs`).
+Preconditioned conjugate gradients on the same system stalled (residual 1.7e-5 after 8,000
+iterations at 64×32), which is why the solver is direct; conjugate gradients remain as the
+fallback above 24 M factor entries.
+
+## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
+
+Random rectangular islands (fixed seed, sides 0.05 to 1.55, even texel density), packed into the
+unit square; utilisation is the share of the square the islands cover. Same machine as above
+(a loaded one: other builds were running), release build. The margin is 0.004 up to 1,000 islands
+and 0.0005 above (it is per island on every side, so very many islands need a thinner one to fit
+at all). Up to 500 islands MaxRects packs (four heuristics up to 350, one above); beyond that, or
+when MaxRects has examined 300 million free rectangles, a linear next-fit shelf packer does. `work`
+counts free rectangles examined and is identical on every run, so the bound is tested without a
+clock (`packing_work_is_bounded_at_the_island_cap`).
+
+| Islands | Packer | Time (rotation none / fit) | Utilisation (none / fit) | Work |
+|---|---|---|---|---|
+| 50 | MaxRects | 3 / 4 ms | 87.4 / 88.1 % | 1.2 M |
+| 200 | MaxRects | 68 / 55 ms | 84.0 / 84.8 % | 43 to 50 M |
+| 350 | MaxRects | 327 / 352 ms | 80.9 / 82.0 % | 190 to 200 M |
+| 500 | MaxRects, one heuristic | 234 / 178 ms | 78.6 / 79.2 % | 220 to 250 M |
+| 1,000 | shelves | 0 / 1 ms | 69.8 / 70.6 % | 21 k |
+| 20,000 | shelves | 12 / 10 ms | 84.7 / 84.6 % | 0.42 M |
+| 100,000 (the cap) | shelves | 55 / 63 ms | 70.3 / 70.3 % | 2.1 M |
+
+Rectangles gain little from rotation by definition; the rotation modes matter for slanted islands
+(a diagonal strip packs 1.8 times as densely once straightened, `fit_rotation_straightens_a_diagonal_strip`).
+Before the work bound, 2,000 islands took 20 s with MaxRects alone (reported in review).
+## Hair (`modelcraft-cli hair-bench`)
+
+Guides grown on a 128×64 UV sphere (16,128 triangles, area 12.56), then render hairs blended from
+them by the nearest four guides (`knn`) or the three-guide barycentric rule (`bary`). All 24 cores,
+release build, `modelcraft-cli hair-bench --strands N [--blend bary --clump A --frizz A --points P]`.
+The machine was shared with other builds (load average 50–58 on 24 cores) when these were taken, so
+treat them as pessimistic.
+
+| Strands × points | Guides | Blend, extras | Interpolation | Strands per second | Memory held |
+|---|---|---|---|---|---|
+| 100,000 × 8 | 5,000 | knn | 102 ms | 0.98 M | 12 MB |
+| 1,000,000 × 8 | 5,000 | knn | 467 ms | 2.14 M | 120 MB |
+| 1,000,000 × 8 | 5,000 | bary, clump 0.5, frizz 0.1 | 653 ms | 1.53 M | 120 MB |
+| 1,000,000 × 16 | 5,000 | knn | 614 ms | 1.63 M | 216 MB |
+
+Growing 5,000 guides takes 20–30 ms. Memory is 12 bytes per point plus 24 bytes per strand (root and
+two widths); `modelcraft_hair::estimate_bytes` matches the measured size exactly. Hard caps (checked
+before allocating): 200,000 guides, 5,000,000 strands, 64 points per strand and 40 million points
+per operation by default; no caller can raise them past 1,000,000 guides, 20,000,000 strands, 256
+points per strand and 200 million points.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have
@@ -236,5 +366,5 @@ upload and normals for the changed mesh each frame, which has not been measured 
 
 ## Not yet
 
-Everything above is single-threaded on the CPU. Multithreaded dabs and evaluation are in
-[gaps.md](gaps.md). Session start and subdivision of million-quad meshes take about a second.
+Everything above is single-threaded on the CPU (see "Threads, tried and not kept"). Multithreaded
+evaluation and session start are in [gaps.md](gaps.md). Session start and subdivision of million-quad meshes take about a second.

@@ -10,7 +10,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, DEFORMERS, FIELDS, PRIMITIVES};
+use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, PRIMITIVES};
 use crate::app::{Dock, ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::theme;
 
@@ -50,10 +50,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 ui.menu_button(tl!("Export"), |ui| {
-                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl] {
+                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx] {
                         action_button(app, ui, a);
                     }
                 });
+                ui.menu_button(tl!("Exchange Settings"), |ui| crate::exchange_ui::menu(app, ui));
                 ui.separator();
                 if ui.button(tl!("Quit")).clicked() {
                     app.guard(crate::app::Pending::Quit);
@@ -69,11 +70,17 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::TransformDialog,
                     Action::Palette,
                     Action::KeyboardShortcuts,
+                    Action::Preferences,
                 ] {
                     action_button(app, ui, a);
                 }
                 ui.separator();
                 ui.checkbox(&mut app.doc.keep_history, tl!("Keep Undo History in Saved Files"));
+                let mut on = app.agents.is_on();
+                if ui.checkbox(&mut on, tl!("Allow Agents to Control ModelCraft")).changed() {
+                    app.allow_agents = on;
+                    if on { crate::agents::start(app, ui.ctx()) } else { crate::agents::stop(app) }
+                }
             });
             ui.menu_button(tl!("Select"), |ui| {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
@@ -95,6 +102,9 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for f in FIELDS {
                     action_button(app, ui, Action::AddField(f));
                 }
+                for c in CLONERS {
+                    action_button(app, ui, Action::AddCloner(c));
+                }
             });
             ui.menu_button(tl!("Mesh"), |ui| {
                 for a in [
@@ -115,6 +125,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                ui.menu_button(tl!("Patches and Cleanup"), |ui| {
+                    for t in crate::mesh_tools::ALL {
+                        action_button(app, ui, Action::MeshTool(*t));
+                    }
+                });
             });
             ui.menu_button(tl!("Sculpt"), |ui| {
                 for k in modelcraft_engine::sculpt::brush::KINDS {
@@ -129,6 +144,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
             });
+            ui.menu_button(tl!("Scripts"), |ui| crate::script_ui::menu(app, ui));
             ui.menu_button(tl!("View"), |ui| {
                 for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
                     action_button(app, ui, Action::Workspace(ws));
@@ -143,6 +159,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::RadialMenu,
                     Action::RenderView,
                 ] {
                     action_button(app, ui, a);
@@ -163,6 +180,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     }
                 });
             });
+            crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
@@ -221,6 +239,10 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, Action::AddCage);
                     for d in DEFORMERS {
                         action_button(app, ui, Action::AddDeformer(d));
+                    }
+                    ui.separator();
+                    for c in CLONERS {
+                        action_button(app, ui, Action::AddCloner(c));
                     }
                 });
             }
@@ -464,6 +486,13 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, t.gamma_multiply(0.5)));
             p.circle_filled(c, 2.5, t);
         }
+        ObjectKind::Cloner { .. } => {
+            // Three small squares: one source, many clones.
+            let o = Color32::from_rgb(240, 170, 90);
+            for dx in [-4.0, 0.0, 4.0] {
+                p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
+            }
+        }
         ObjectKind::Deformer { .. } => {
             let m = Color32::from_rgb(200, 140, 230);
             let pts: Vec<egui::Pos2> = (0..=10).map(|k| c + egui::vec2(k as f32 - 5.0, (k as f32 * 1.2).sin() * 3.0)).collect();
@@ -474,6 +503,13 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             let j = Color32::from_rgb(115, 205, 240);
             p.circle_stroke(c + egui::vec2(-3.0, 3.0), 2.5, egui::Stroke::new(1.2, j));
             p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], egui::Stroke::new(1.4, j));
+        }
+        ObjectKind::PointDeformer { .. } => {
+            // A stack deformer: a small grid.
+            let g = Color32::from_rgb(200, 140, 230);
+            p.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), 0.0, egui::Stroke::new(1.2, g), egui::StrokeKind::Inside);
+            p.line_segment([c + egui::vec2(-5.0, 0.0), c + egui::vec2(5.0, 0.0)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(0.0, -5.0), c + egui::vec2(0.0, 5.0)], egui::Stroke::new(1.0, g));
         }
         ObjectKind::Skin { .. } => {
             // A skin: two linked circles.
@@ -670,7 +706,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(tl!("Transform")).default_open(true).show(ui, |ui| {
         let mut t = obj.transform;
         let mut euler = t.euler_degrees();
-        let pos = vec3_row(ui, &tl!("Position"), &mut t.translation, 0.01);
+        let per = app.unit.per_metre();
+        let mut shown = t.translation * per;
+        let pos = vec3_row(ui, &tl!("Position"), &mut shown, 0.01);
+        if pos.iter().any(|r| r.changed()) {
+            t.translation = shown / per;
+        }
         let rot = vec3_row(ui, &tl!("Rotation"), &mut euler, 0.5);
         let scl = vec3_row(ui, &tl!("Scale"), &mut t.scale, 0.01);
         t.set_euler_degrees(euler);
@@ -700,6 +741,9 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         ObjectKind::Field { field } => {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
+        }
+        ObjectKind::Cloner { cloner, target } => {
+            egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
         ObjectKind::Deformer { deformer } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| deformer_fields(app, ui, id, *deformer));
@@ -744,8 +788,11 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
         });
     }
+    crate::deform_ui::properties(app, ui, id);
+    crate::constraint_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
+        crate::mesh_tools::section(app, ui);
     }
     if let Some((verts, tris)) = app.doc.sculpt.as_ref().map(|s| (s.mesh.vertex_count(), s.mesh.triangle_count())) {
         egui::CollapsingHeader::new(tl!("Sculpt")).default_open(true).show(ui, |ui| {
@@ -1026,7 +1073,9 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.label(RichText::new(tl!("Ctrl inverts, Shift smooths. Pen pressure scales strength (and size when enabled).")).color(theme::TEXT_DIM).small());
     if app.doc.sculpt.is_some() && app.brush.kind == BrushKind::Mask {
         ui.horizontal_wrapped(|ui| {
-            for a in [Action::MaskClear, Action::MaskInvert, Action::MaskFill] {
+            use modelcraft_engine::MaskOp as M;
+            let more = [M::Blur, M::Sharpen, M::Grow, M::Shrink, M::Hollows, M::Ridges].map(Action::MaskOp);
+            for a in [Action::MaskClear, Action::MaskInvert, Action::MaskFill].into_iter().chain(more) {
                 if ui.button(a.label()).clicked() {
                     app.act(&ctx, a);
                 }
@@ -1079,6 +1128,8 @@ pub struct Palette {
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
+    crate::script_ui::show(app, ctx);
+    crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
