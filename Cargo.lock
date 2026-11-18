@@ -1042,12 +1042,21 @@ name = "craft-render-core"
 version = "0.1.0"
 dependencies = [
  "craft-render-bvh",
+ "craft-render-denoise",
  "craft-render-guide",
  "craft-texture",
  "glam 0.30.10",
  "proptest",
  "rayon",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-render-denoise"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rayon",
 ]
 
 [[package]]

@@ -65,6 +65,9 @@ pub struct Film {
     pub motion: Vec<[f32; 2]>,
     /// Sum of the squared luminance of the samples (with `sum`, the per-pixel variance).
     pub luminance_sq: Vec<f32>,
+    /// Sum of the samples with an odd index: a second rendering independent of the even samples
+    /// (what `sum` holds less this), which the regression denoiser filters against the first.
+    pub odd: Vec<[f32; 3]>,
 }
 
 /// The transfer function of sRGB displays (IEC 61966-2-1).
@@ -90,6 +93,7 @@ impl Film {
             depth: vec![0.0; n],
             motion: vec![[0.0; 2]; n],
             luminance_sq: vec![0.0; n],
+            odd: vec![[0.0; 3]; n],
         })
     }
 
@@ -115,6 +119,18 @@ impl Film {
             .collect()
     }
 
+    /// The means of the two half renderings (even and odd samples), when each has a sample.
+    pub fn halves(&self) -> Option<(Vec<[f32; 3]>, Vec<[f32; 3]>)> {
+        let (n_odd, n_even) = (self.samples / 2, self.samples - self.samples / 2);
+        if n_odd == 0 || n_even == 0 {
+            return None;
+        }
+        let (ko, ke) = (1.0 / n_odd as f32, 1.0 / n_even as f32);
+        let a = self.sum.iter().zip(&self.odd).map(|(s, o)| [0, 1, 2].map(|k| (s[k] - o[k]) * ke)).collect();
+        let b = self.odd.iter().map(|o| [o[0] * ko, o[1] * ko, o[2] * ko]).collect();
+        Some((a, b))
+    }
+
     /// A feature image divided by the sample count.
     pub fn mean_of(&self, sums: &[[f32; 3]]) -> Vec<[f32; 3]> {
         let k = if self.samples > 0 { 1.0 / self.samples as f32 } else { 0.0 };
@@ -123,12 +139,19 @@ impl Film {
 
     /// The image as 8-bit sRGB with opaque alpha, after scaling by `2^exposure`.
     pub fn to_srgb8(&self, exposure: f32) -> Vec<u8> {
+        let k = if self.samples > 0 { 1.0 / self.samples as f32 } else { 0.0 };
+        let mean: Vec<[f32; 3]> = self.sum.iter().map(|p| [p[0] * k, p[1] * k, p[2] * k]).collect();
+        Film::image_to_srgb8(&mean, exposure)
+    }
+
+    /// An image of mean radiance (a denoised one, say) as 8-bit sRGB with opaque alpha, after
+    /// scaling by `2^exposure`.
+    pub fn image_to_srgb8(image: &[[f32; 3]], exposure: f32) -> Vec<u8> {
         let gain = if exposure.is_finite() { 2f32.powf(exposure.clamp(-32.0, 32.0)) } else { 1.0 };
-        let k = if self.samples > 0 { gain / self.samples as f32 } else { 0.0 };
-        let mut out = Vec::with_capacity(self.sum.len() * 4);
-        for p in &self.sum {
+        let mut out = Vec::with_capacity(image.len() * 4);
+        for p in image {
             for c in p {
-                out.push((linear_to_srgb(c * k) * 255.0 + 0.5) as u8);
+                out.push((linear_to_srgb(c * gain) * 255.0 + 0.5) as u8);
             }
             out.push(255);
         }
@@ -164,12 +187,14 @@ pub(crate) struct PixelSums {
     depth: f32,
     motion: [f32; 2],
     luminance_sq: f32,
+    odd: [f32; 3],
 }
 
-/// Add one sample (its radiance `l`, the features of its first surface, its place `ndc` on the
+/// Add sample number `index` (its radiance `l`, the features of its first surface, its place `ndc` on the
 /// image plane) to a pixel's sums.
 pub(crate) fn add_sample(
     acc: &mut PixelSums,
+    index: u32,
     l: glam::Vec3A,
     f: &crate::integrator::Features,
     ndc: Vec2,
@@ -179,6 +204,9 @@ pub(crate) fn add_sample(
 ) {
     for k in 0..3 {
         acc.radiance[k] += l[k];
+        if index & 1 == 1 {
+            acc.odd[k] += l[k];
+        }
         acc.albedo[k] += f.albedo[k];
         acc.normal[k] += f.normal[k];
     }
@@ -287,7 +315,7 @@ impl Renderer {
                         }
                         None => radiance_and_features(scene, camera.ray(ndc, lens), &mut sampler, &settings.integrator),
                     };
-                    add_sample(&mut acc, l, &f, ndc, previous, w, h);
+                    add_sample(&mut acc, s, l, &f, ndc, previous, w, h);
                 }
                 *px = acc;
             }
@@ -306,6 +334,7 @@ impl Renderer {
                 film.sum[i][k] += add.radiance[k];
                 film.albedo[i][k] += add.albedo[k];
                 film.normal[i][k] += add.normal[k];
+                film.odd[i][k] += add.odd[k];
             }
             film.depth[i] += add.depth;
             film.motion[i][0] += add.motion[0];
