@@ -51,6 +51,8 @@ mod ui_tests;
 mod uv_ui;
 #[cfg(test)]
 mod uv_ui_tests;
+#[cfg(test)]
+mod ux_ui_tests;
 mod viewport;
 
 use args::{Cli, Launch};
