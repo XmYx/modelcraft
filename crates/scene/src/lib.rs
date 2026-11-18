@@ -26,6 +26,7 @@ pub mod pick;
 pub mod point_deform;
 pub mod rig;
 mod rle;
+pub mod sim;
 
 use std::sync::Arc;
 
@@ -34,6 +35,7 @@ pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
+pub use modelcraft_sim::{FrameCache, SimKind, SimObject};
 pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
@@ -515,6 +517,11 @@ pub enum ObjectKind {
         #[serde(default)]
         target: Option<ObjectId>,
     },
+    /// A simulation driving its parent mesh: settings, and the cache the last bake produced
+    /// ([`sim`]).
+    Sim {
+        sim: Arc<SimObject>,
+    },
 }
 
 impl ObjectKind {
@@ -528,6 +535,7 @@ impl ObjectKind {
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::Sim { .. } => "Simulation",
         }
     }
 }
@@ -567,6 +575,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::Sim { sim } => sim.heap_bytes(),
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
@@ -668,6 +677,7 @@ impl Scene {
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        sim::repair(&mut self);
         point_deform::repair(&mut self);
         self.sets.truncate(MAX_SETS);
         for s in &mut self.sets {

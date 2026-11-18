@@ -1,0 +1,1 @@
+| 2026-11-18 | UV Editor layout tools: Pack UV Islands, planar, box, cylindrical and spherical projections and Export UV Layout (SVG, PNG) from the editor, the UV menu and the palette; the parity map splits conformal unwrap (done) from angle-based unwrap (missing) |

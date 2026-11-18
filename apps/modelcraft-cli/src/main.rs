@@ -149,7 +149,14 @@ fn save(d: &mut Document, out: &str) -> Result<(), String> {
 
 fn save_with(d: &mut Document, out: &str, convert: modelcraft_engine::formats::exchange::Convert) -> Result<(), String> {
     let p = Path::new(out);
-    if is_project(p) { d.save_as(p) } else { d.export_with(p, convert) }.map_err(|e| e.to_string())?;
+    if is_project(p) {
+        d.save_as(p).map_err(|e| e.to_string())?;
+    } else {
+        // What the format could not keep (a rigged .glb says so) goes to stderr.
+        for w in d.export_report(p, convert).map_err(|e| e.to_string())? {
+            eprintln!("warning: {w}");
+        }
+    }
     // A CLI save is final: no journal left behind.
     d.detach_journal();
     Ok(())
@@ -166,6 +173,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             for (name, help) in modelcraft_engine::rig::COMMANDS {
                 println!("rig op={name}\t{help}");
+            }
+            for (name, help) in modelcraft_engine::sim::COMMANDS {
+                println!("sim op={name}\t{help}");
             }
             Ok(())
         }

@@ -282,6 +282,8 @@ pub enum Command {
     Anim(crate::anim::AnimCommand),
     /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
     Rig(crate::rig::RigCommand),
+    /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
+    Sim(crate::sim::SimCommand),
 }
 
 /// Most commands one batch may hold, and how deep batches may nest.
@@ -433,6 +435,7 @@ impl Command {
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
+            Command::Sim(c) => c.label(),
         }
     }
 }
