@@ -6,6 +6,7 @@ use craft_render_bvh::Ray;
 use glam::Vec3A;
 
 use crate::bsdf::Bsdf;
+use crate::hair::{CurveSet, FibreHit, HairBsdf, fibre_frame, leave_fibre};
 use crate::light::LightSampling;
 use crate::material::Material;
 use crate::math::Frame;
@@ -115,7 +116,39 @@ pub fn radiance_with(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &I
     let mut passes = 0u32;
     let mut depth = 0u32;
     while depth <= max_depth {
-        let Some(hit) = scene.accel.intersect(&ray) else {
+        let tri = scene.accel.intersect(&ray);
+        if !scene.curves.is_empty()
+            && let Some((set, fh)) = scene.intersect_curves(&ray, tri.map_or(f32::INFINITY, |h| h.t))
+        {
+            let Some(curves) = scene.curves.get(set) else { break };
+            if first {
+                first = false;
+                let albedo = curves.params.sigma_a.to_array().map(|s| (-s).exp());
+                features = Features { albedo: Vec3A::from_array(albedo), normal: fh.frame.normal, depth: fh.t, position: Some(fh.p) };
+            }
+            if depth == max_depth {
+                break;
+            }
+            let step = fibre_step(scene, curves, &fh, &ray, sampler, cfg);
+            add(throughput * step.direct, depth + 1);
+            let Some((next, weight, pdf)) = step.next else { break };
+            throughput *= weight;
+            prev_pdf = pdf;
+            if depth >= cfg.roulette_start {
+                let q = throughput.max_element().min(0.95);
+                if q <= 0.0 || sampler.next1() >= q {
+                    break;
+                }
+                throughput /= q;
+            }
+            if !throughput.is_finite() {
+                break;
+            }
+            ray = next;
+            depth += 1;
+            continue;
+        }
+        let Some(hit) = tri else {
             if first {
                 features.albedo = scene.lights.environment_radiance(ray.dir).min(Vec3A::ONE);
             }
@@ -242,6 +275,43 @@ pub fn radiance_with(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &I
         depth += 1;
     }
     (total, features)
+}
+
+/// What one fibre hit contributes: direct light already weighted, and the continuing ray with the
+/// throughput factor and density of the direction chosen.
+struct FibreStep {
+    direct: Rgb,
+    next: Option<(Ray, Rgb, f32)>,
+}
+
+/// One path vertex on a hair fibre: next-event estimation by the lights, then a sampled direction.
+fn fibre_step(scene: &Scene, curves: &CurveSet, fh: &FibreHit, ray: &Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> FibreStep {
+    let to_viewer = -ray.dir;
+    let (t, n, w) = fibre_frame(&fh.frame, to_viewer);
+    let local = |v: Vec3A| Vec3A::new(v.dot(t), v.dot(n), v.dot(w));
+    let bsdf = HairBsdf::new(&curves.params, local(to_viewer));
+    let mut direct = Vec3A::ZERO;
+    if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
+        let pick = sampler.next1();
+        let u = sampler.next2();
+        if let Some(ls) = scene.lights.sample(&scene.positions, fh.p, pick, u, cfg.light_sampling)
+            && ls.pdf > 0.0
+        {
+            let (f, pdf_bsdf) = bsdf.eval(local(ls.wi));
+            if f.max_element() > 0.0 && !scene.occluded_from_fibre(fh, ls.wi, ls.distance) {
+                let weight = if ls.delta || cfg.strategy == Strategy::LightOnly { 1.0 } else { power_heuristic(ls.pdf, pdf_bsdf) };
+                direct = sanitize(f * ls.radiance * (weight / ls.pdf));
+            }
+        }
+    }
+    let lobe = sampler.next1();
+    let u = sampler.next2();
+    let u_phi = sampler.next1();
+    let next = bsdf.sample(lobe, u, u_phi).map(|s| {
+        let wi = (t * s.wi.x + n * s.wi.y + w * s.wi.z).normalize_or(Vec3A::Y);
+        (leave_fibre(fh, wi, f32::INFINITY), s.weight, s.pdf)
+    });
+    FibreStep { direct, next }
 }
 
 /// Apply the material's normal map, bump map and anisotropy direction to the shading frame.

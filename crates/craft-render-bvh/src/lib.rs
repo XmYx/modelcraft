@@ -8,6 +8,7 @@
 //! - [`Bvh`] is a flat array of 32-byte [`Node`]s in depth-first order: the left child of an
 //!   interior node is the next node, the right child is `a` nodes further on. The layout is plain
 //!   data (`bytemuck::Pod`), so the same bytes go to a GPU buffer.
+//! - [`curves::CurveBvh`] holds hair and fibre segments (round cones) in the same kind of tree.
 //! - [`TriangleBvh`] owns the triangles in leaf order and answers closest-hit and any-hit queries.
 //!
 //! Hostile input: non-finite primitives are left out of the tree, depth is capped (so the fixed
@@ -17,6 +18,8 @@
 
 use glam::{Vec3, Vec3A};
 use rayon::prelude::*;
+
+pub mod curves;
 
 /// Deepest tree the builder makes; the traversal stack holds one entry per level.
 pub const MAX_DEPTH: usize = 60;

@@ -446,7 +446,7 @@ Weight: 6
 | Light linking (include / exclude) | C M R | M | M | |
 | Light groups and per-light outputs | R | M | M | |
 | Subsurface scattering (random walk) | C M R | M | L | |
-| Hair and fibre shading | C M R | M | L | |
+| Hair and fibre shading | C M R | D | L | Hair objects render in the CPU path tracer (`modelcraft-cli render`, the Render View): strands are round-cone curves in their own BVH, scattered by the Chiang 2016 fibre model (R, TT, TRT and a residual lobe, longitudinal and azimuthal roughness, cuticle tilt, absorption from the hair colour) with next-event estimation, shadows both ways and bounces among the fibres; a white-furnace test (hair that absorbs nothing is invisible in uniform light), energy and sampling-density checks of the model, and agreement of the three estimators; the object's colour and roughness are the controls; the GPU path tracer declines hair (the CPU is used), no melanin or eccentricity controls, no per-strand colour |
 | Volumes: homogeneous, heterogeneous, sparse grids | C M R | M | L | |
 | Render-time displacement with adaptive subdivision | C M R | M | L | |
 | Motion blur: transform and deformation | C M R | M | L | |
