@@ -981,6 +981,26 @@ baked hair's strands are made again for each frame shown). Exports: 10,000 stran
 lines is 2.3 MB (100,000 points, 90,000 segments); 3,000 guides of 10 points as one frame of point cache
 is 0.36 MB.
 
+## Script memory (`cargo test -p modelcraft-script --test memory -- --nocapture`)
+
+How far the process's peak resident size (`VmHWM`) grows while a hostile script runs under the
+default limits (10 M operations, 10 s, 256 KiB of strings and 20,000 array and 2,000 map entries per
+container, 4 M geometry items). Linux, test profile, release-like `opt-level` of this workspace, one
+run on a shared 24-core machine; the process starts at its own baseline and the peak only rises, so
+a script that needs less than an earlier one in the list shows +0. There is no allocator cap
+(`docs/scripting.md`, "Memory"), so these are measurements, guarded by a 512 MiB budget per script.
+
+| Script | Peak growth | Time until stopped |
+|---|---|---|
+| map keys with integer values, in a loop | +63 MiB | 1.1 s |
+| map keys with an array of 8 each | +140 MiB | 1.2 s |
+| map keys with a 1 KiB string each | +0 MiB (stopped by the string limit) | 1.0 s |
+| array `push` of an array in a loop | +0 MiB (stopped by the array limit) | 0.02 s |
+| string doubling | +0 MiB | 0.00 s |
+| nested containers, 1000 arrays of 1000 | +0 MiB | 0.01 s |
+| mesh vertices in a loop | +0 MiB (stopped by the geometry budget) | 0.29 s |
+| all seven together | +203 MiB | |
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have
