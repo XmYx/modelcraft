@@ -753,6 +753,7 @@ fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op
                 Some(r)
             }
             StepOp::EvenRemesh { cell } => Some(drag(ui, cell, 0.001, 0.0001..=1000.0, tl!("Cell size"))),
+            StepOp::Decimate { ratio } => Some(drag(ui, ratio, 0.005, 0.001..=1.0, tl!("Share of triangles kept"))),
             StepOp::Subdivide { levels } => {
                 ui.label(tl!("Levels"));
                 let r = ui.add(egui::DragValue::new(levels).range(1..=4));

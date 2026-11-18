@@ -328,6 +328,11 @@ pub enum StepOp {
         normal: Vec3,
         cap: bool,
     },
+    /// Reduce the mesh to about `ratio` of its triangles (0..1), keeping the shape, the UVs and
+    /// the patches. The result is triangles.
+    Decimate {
+        ratio: f32,
+    },
     /// Flatten the surface into UVs: cut along `seams` (and along every edge sharper than
     /// `angle` degrees), solve a least-squares conformal map per island and lay the islands out
     /// in the unit square. Seams are vertex pairs and pins name a face corner, both in the
@@ -444,6 +449,7 @@ impl StepOp {
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::TrimPlane { .. } => "Trim by plane",
+            StepOp::Decimate { .. } => "Decimate",
             StepOp::Unwrap { .. } => "Unwrap UVs",
             StepOp::PackUvs { .. } => "Pack UV islands",
             StepOp::ProjectUvs { .. } => "Project UVs",
