@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use modelcraft_render::pathtrace::{DenoiseMode, Film, PixelOrder, RenderSettings, Renderer, RestirSettings, Scene, relative_mse, scenes};
-use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
+use modelcraft_render::pathtrace_gpu::{GpuContext, GpuOptions, GpuRenderer};
 
 pub const USAGE: &str = "  render-bench [options]            error against time on the benchmark scenes (JSON lines, then a table)
       --scenes a,b,…                default: every benchmark scene
@@ -25,6 +25,7 @@ pub const USAGE: &str = "  render-bench [options]            error against time 
       --splitting                   end or multiply paths by their expected contribution (CPU)
       --restir unbiased|viewport    resampled direct light at the first surface (CPU and GPU)
       --restir-candidates N --restir-neighbors N
+      --hardware-rays               trace through the GPU's ray-query hardware when built and available
       --bvh binary|wide             trace through the binary tree or its 8-wide form
       --denoise [svgf|nfor]         also filter each image and report its error and the filter's time
                                     (the reference is always rendered without either)";
@@ -42,6 +43,7 @@ pub struct BenchArgs {
     pub restir: RestirSettings,
     pub denoise: DenoiseMode,
     pub wide_bvh: bool,
+    pub hardware_rays: bool,
 }
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
@@ -79,14 +81,15 @@ pub fn parse(a: &[String]) -> Result<BenchArgs, String> {
         restir: crate::render_cmd::parse_restir(a)?,
         denoise: crate::render_cmd::parse_denoise(a)?,
         wide_bvh: crate::render_cmd::parse_bvh(a)?,
+        hardware_rays: a.iter().any(|x| x == "--hardware-rays"),
     })
 }
 
 /// Render `spp` samples and return the film with the seconds spent rendering.
-fn run(scene: &Arc<Scene>, gpu: Option<&GpuContext>, settings: RenderSettings, spp: u32) -> Result<(Film, f64), String> {
+fn run(scene: &Arc<Scene>, gpu: Option<&GpuContext>, settings: RenderSettings, spp: u32, hardware_rays: bool) -> Result<(Film, f64), String> {
     match gpu {
         Some(ctx) => {
-            let mut r = GpuRenderer::new(ctx, scene, settings).map_err(|e| e.to_string())?;
+            let mut r = GpuRenderer::with_options(ctx, scene, settings, GpuOptions { hardware_rays }).map_err(|e| e.to_string())?;
             let t = Instant::now();
             r.render(ctx, spp).map_err(|e| e.to_string())?;
             let seconds = t.elapsed().as_secs_f64();
@@ -134,8 +137,8 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
     };
     // The reference: two independent halves, compared and then averaged.
     let half = (args.reference / 2).max(1);
-    let (a, _) = run(&scene, gpu, settings(0x5eed_0001), half)?;
-    let (b, _) = run(&scene, gpu, settings(0x5eed_0002), half)?;
+    let (a, _) = run(&scene, gpu, settings(0x5eed_0001), half, args.hardware_rays)?;
+    let (b, _) = run(&scene, gpu, settings(0x5eed_0002), half, args.hardware_rays)?;
     let (a, b) = (a.mean(), b.mean());
     let reference: Vec<[f32; 3]> = a.iter().zip(&b).map(|(p, q)| [(p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5, (p[2] + q[2]) * 0.5]).collect();
     // The average of two halves has a quarter of the squared difference between them as its own error.
@@ -145,7 +148,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         let (mut errors, mut seconds) = (Vec::new(), Vec::new());
         let (mut filtered_errors, mut filter_seconds) = (Vec::new(), Vec::new());
         for seed in 0..args.seeds {
-            let (film, s) = run(&scene, gpu, tested(seed + 1), *spp)?;
+            let (film, s) = run(&scene, gpu, tested(seed + 1), *spp, args.hardware_rays)?;
             errors.push(relative_mse(&film.mean(), &reference));
             seconds.push(s);
             if args.denoise != DenoiseMode::Off {
@@ -204,7 +207,7 @@ pub fn time_to(rows: &[serde_json::Value], target: f64) -> Option<f64> {
 }
 
 pub fn run_all(args: &BenchArgs) -> Result<(), String> {
-    let gpu = if args.gpu { Some(GpuContext::new().ok_or("no GPU adapter is available")?) } else { None };
+    let gpu = if args.gpu { Some(crate::render_cmd::open_gpu(args.hardware_rays).ok_or("no GPU adapter is available")?) } else { None };
     let mut table = String::from(
         "| Scene | Triangles | spp | Seconds | relMSE mean (min–max) | relMSE median | Efficiency | Seconds to relMSE 0.01 |\n|---|---|---|---|---|---|---|---|\n",
     );

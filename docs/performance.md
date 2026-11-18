@@ -563,6 +563,27 @@ Read honestly:
   point is that every round is one parallel loop and so maps to a GPU build for trees rebuilt each frame;
   that kernel is not written.
 
+### Hardware ray queries (`--hardware-rays`, feature `hw-ray-query`)
+
+An optional backend for the GPU path (see the exception in [architecture.md](architecture.md)): the scene's triangles
+become a bottom-level and a top-level acceleration structure through wgpu 30's experimental ray-query support, and
+`trace_closest` / `trace_any` become `rayQuery` loops (`bvh_rayquery.wgsl`). Off by default at both levels (cargo
+feature and runtime option); scenes with cut-outs or too large for the device, and devices without the feature,
+fall back to the software traversal.
+
+Same height field and settings as the wide-tree table (2,000,000 triangles, 960×540, 16 samples, RTX 4090 on
+Vulkan, load average high from other builds), one run:
+
+| Backend | Setup | M paths/s |
+|---|---|---|
+| software, binary BVH | 189 ms | 120 (158 in the earlier run) |
+| hardware ray queries | 232 ms (building the structure) | 1066 |
+
+About 7 to 9× the software path on this scene. Hardware and software agree on fixed rays: the first-hit depth of
+every pixel differs by more than 0.2 % in none of 3,072 pixels on each of cornell, materials and night-street, and the
+8-sample images differ by a relative MSE below 1e-7. Not measured: other vendors, Metal and DX12 (the feature
+lists Vulkan), scenes near the device's limits, acceleration structure rebuilds for animation.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
