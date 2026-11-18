@@ -296,3 +296,133 @@ fn any_attribute_can_be_keyed_from_the_panel() {
     assert_eq!(h.state().doc.scene.anim.curve(id, "primitive.tube").map(|c| c.len()), Some(1));
     h.get_by_role_and_label(Role::Button, "Torus · primitive.tube key, frame 0, value 0.35");
 }
+
+#[test]
+fn copy_paste_select_all_and_box_select_keys() {
+    let mut h = animated_cube();
+    let id = h.state().selection[0];
+    // Nothing selected: copy and paste say so.
+    palette(&mut h, "Copy Selected Keys");
+    assert_eq!(h.state().status, "No keys selected");
+    palette(&mut h, "Paste Keys at Current Frame");
+    assert_eq!(h.state().status, "No keys copied");
+    // Select All from the palette, copy with the command key on a focused key, go to frame 30,
+    // paste there: the pair lands at 30 and 54 and is selected.
+    palette(&mut h, "Select All Shown Keys");
+    assert_eq!(h.state().anim.selected.len(), 2);
+    h.get_by_role_and_label(Role::Button, "Cube · Position X key, frame 0, value 0").focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    h.run();
+    assert_eq!(h.state().status, "2 keys copied");
+    spin(&mut h, "Frame", 30.0);
+    palette(&mut h, "Paste Keys at Current Frame");
+    let times: Vec<f64> = h.state().doc.scene.anim.curve(id, "translate.x").unwrap().keys.iter().map(|k| k.t).collect();
+    assert_eq!(times, vec![0.0, 24.0, 30.0, 54.0]);
+    assert_eq!(h.state().anim.selected.iter().map(|k| k.frame).collect::<Vec<_>>(), vec![30.0, 54.0]);
+    // Paste with the command key while a key has focus; Undo takes one paste back.
+    spin(&mut h, "Frame", 60.0);
+    h.get_by_role_and_label(Role::Button, "Cube · Position X key, frame 0, value 0").focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    h.run();
+    assert_eq!(h.state().doc.scene.anim.curve(id, "translate.x").unwrap().len(), 6);
+    palette(&mut h, "Undo");
+    assert_eq!(h.state().doc.scene.anim.curve(id, "translate.x").unwrap().len(), 4);
+    // Onto another object: with only that object selected the copied keys go to it.
+    palette(&mut h, "Add Sphere");
+    let ball = h.state().selection[0];
+    spin(&mut h, "Frame", 0.0);
+    palette(&mut h, "Paste Keys at Current Frame");
+    assert_eq!(h.state().doc.scene.anim.curve(ball, "translate.x").map(|c| c.len()), Some(2));
+    // Box selection: drag across the empty strip from before the first key to past the second.
+    h.state_mut().select_only(id);
+    h.state_mut().anim.selected.clear();
+    h.run();
+    let a = h.get_by_role_and_label(Role::Button, "Cube · Position X key, frame 0, value 0").rect();
+    let b = h.get_by_role_and_label(Role::Button, "Cube · Position X key, frame 24, value 6").rect();
+    let from = egui::pos2(a.center().x - 4.0, a.bottom() + 20.0);
+    let to = egui::pos2(b.center().x + 4.0, a.top() - 1.0);
+    h.event(egui::Event::PointerMoved(from));
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run();
+    h.event(egui::Event::PointerMoved(egui::pos2((from.x + to.x) * 0.5, to.y)));
+    h.run();
+    h.event(egui::Event::PointerMoved(to));
+    h.run();
+    h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run();
+    let boxed: Vec<f64> = h.state().anim.selected.iter().map(|k| k.frame).collect();
+    assert_eq!(boxed, vec![0.0, 24.0], "{}", h.state().status);
+    assert_eq!(h.get_by_role_and_label(Role::Button, "Cube · Position X key, frame 24, value 6").accesskit_node().is_selected(), Some(true));
+}
+
+#[test]
+fn layer_solo_lock_keyed_weight_value_zoom_and_ghosts() {
+    let mut h = animated_cube();
+    let id = h.state().selection[0];
+    h.get_by_label("Add Layer").click();
+    h.run();
+    assert!(h.state_mut().run(Command::Anim(AnimCommand::SetKey { id, path: "translate.x".into(), frame: Some(12.0), value: Some(3.0) })));
+    h.get_by_label("Add Layer").click();
+    h.run();
+    assert!(h.state_mut().run(Command::Anim(AnimCommand::SetKey { id, path: "translate.x".into(), frame: Some(12.0), value: Some(10.0) })));
+    spin(&mut h, "Frame", 12.0);
+    assert!((x(&h) - 16.0).abs() < 1e-4);
+    // Solo the top layer by keyboard: the middle one stops playing.
+    h.get_by_role_and_label(Role::CheckBox, "Solo Layer").focus();
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+    assert!((x(&h) - 13.0).abs() < 1e-4, "{}", x(&h));
+    h.key_press(Key::Space);
+    h.run();
+    // Lock: a key cannot be set in it; the status line says why.
+    h.get_by_role_and_label(Role::CheckBox, "Lock Layer").click();
+    h.run();
+    assert!(!h.state_mut().run(Command::Anim(AnimCommand::SetKey { id, path: "translate.x".into(), frame: Some(20.0), value: Some(1.0) })));
+    assert!(h.state().status.contains("locked"), "{}", h.state().status);
+    h.get_by_role_and_label(Role::CheckBox, "Lock Layer").click();
+    h.run();
+    // Key the weight: full at 12, nothing at 0.
+    h.get_by_role_and_label(Role::Button, "Key Layer Weight").click();
+    h.run();
+    spin(&mut h, "Frame", 0.0);
+    spin(&mut h, "Layer weight", 0.0);
+    h.get_by_role_and_label(Role::Button, "Key Layer Weight").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Clear 2 Weight Keys");
+    spin(&mut h, "Frame", 6.0);
+    let top = h.state().doc.scene.anim.active_layer();
+    let w = h.state().doc.scene.anim.layer(top).map(|l| l.weight_at(6.0)).unwrap_or(0.0);
+    assert!(w > 0.2 && w < 0.8, "the weight fades in: {w}");
+    // Move the layer down and up again.
+    let order = |h: &Harness<'static, ModelApp>| h.state().doc.scene.anim.layers().iter().map(|l| l.id).collect::<Vec<_>>();
+    let before = order(&h);
+    h.get_by_role_and_label(Role::Button, "Move Layer Down").click();
+    h.run();
+    assert_eq!(order(&h), before.iter().rev().copied().collect::<Vec<_>>());
+    // The Curve Editor: zoom the value axis by buttons and by number, then fit again.
+    h.state_mut().anim.view = AnimView::Curves;
+    h.run();
+    let fitted = h.state().anim.fitted_values;
+    assert!(h.get_by_role_and_label(Role::Button, "Fit Values").accesskit_node().is_disabled());
+    h.get_by_role_and_label(Role::Button, "Zoom Values In").click();
+    h.run();
+    let zoomed = h.state().anim.value_range.unwrap();
+    assert!(((zoomed.1 - zoomed.0) - (fitted.1 - fitted.0) * 0.5).abs() < 1e-6);
+    spin(&mut h, "Highest value shown", 100.0);
+    assert_eq!(h.state().anim.value_range.map(|r| r.1), Some(100.0));
+    assert_eq!(h.state().anim.fitted_values.1, 100.0, "the plot uses the typed range");
+    h.get_by_role_and_label(Role::Button, "Fit Values").click();
+    h.run();
+    assert!(h.state().anim.value_range.is_none());
+    // Ghosts: three before and three after, a cross of three lines each.
+    h.state_mut().anim.show_paths = false;
+    assert!(crate::anim_ui::path_lines(h.state()).is_empty());
+    palette(&mut h, "Show Ghosts");
+    assert_eq!(h.state().status, "Ghosts shown for selected moving objects");
+    assert_eq!(crate::anim_ui::path_lines(h.state()).len(), 6 * 3);
+    palette(&mut h, "Show Ghosts");
+    assert!(crate::anim_ui::path_lines(h.state()).is_empty());
+}

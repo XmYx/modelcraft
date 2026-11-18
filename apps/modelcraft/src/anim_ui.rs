@@ -65,6 +65,16 @@ pub struct AnimUi {
     pub had_curves: bool,
     /// Draw the path of the selected moving objects in the viewport.
     pub show_paths: bool,
+    /// Copied keys (Copy Keys / Paste Keys).
+    pub clipboard: Vec<modelcraft_engine::PastedKey>,
+    /// The Curve Editor's value range when set by hand (`None`: fitted to the shown curves).
+    pub value_range: Option<(f64, f64)>,
+    /// Draw the selected moving objects at the frames around the current one.
+    pub ghosts: bool,
+    /// Where a box selection in the Key Sheet or Curve Editor started.
+    pub box_from: Option<Pos2>,
+    /// The value range the Curve Editor showed last (what the zoom buttons start from).
+    pub fitted_values: (f64, f64),
 }
 
 impl Default for AnimUi {
@@ -87,6 +97,11 @@ impl Default for AnimUi {
             focus_key: None,
             had_curves: false,
             show_paths: true,
+            clipboard: Vec::new(),
+            value_range: None,
+            ghosts: false,
+            box_from: None,
+            fitted_values: (-1.0, 1.0),
         }
     }
 }
@@ -109,10 +124,14 @@ pub enum AnimAction {
     MotionPaths,
     EulerFilter,
     Turntable,
+    CopyKeys,
+    PasteKeys,
+    SelectAllKeys,
+    Ghosts,
 }
 
 impl AnimAction {
-    pub const ALL: [AnimAction; 14] = [
+    pub const ALL: [AnimAction; 18] = [
         AnimAction::TogglePanel,
         AnimAction::PlayPause,
         AnimAction::KeyTransform,
@@ -127,6 +146,10 @@ impl AnimAction {
         AnimAction::MotionPaths,
         AnimAction::EulerFilter,
         AnimAction::Turntable,
+        AnimAction::CopyKeys,
+        AnimAction::PasteKeys,
+        AnimAction::SelectAllKeys,
+        AnimAction::Ghosts,
     ];
 
     pub fn label(self) -> String {
@@ -145,6 +168,10 @@ impl AnimAction {
             AnimAction::MotionPaths => tl!("Show Motion Paths"),
             AnimAction::EulerFilter => tl!("Smooth Rotation Keys"),
             AnimAction::Turntable => tl!("Turntable"),
+            AnimAction::CopyKeys => tl!("Copy Selected Keys"),
+            AnimAction::PasteKeys => tl!("Paste Keys at Current Frame"),
+            AnimAction::SelectAllKeys => tl!("Select All Shown Keys"),
+            AnimAction::Ghosts => tl!("Show Ghosts"),
         }
     }
 
@@ -164,6 +191,10 @@ impl AnimAction {
             AnimAction::MotionPaths => "anim.motion_paths",
             AnimAction::EulerFilter => "anim.euler_filter",
             AnimAction::Turntable => "anim.turntable",
+            AnimAction::CopyKeys => "anim.copy_keys",
+            AnimAction::PasteKeys => "anim.paste_keys",
+            AnimAction::SelectAllKeys => "anim.select_all_keys",
+            AnimAction::Ghosts => "anim.ghosts",
         }
     }
 
@@ -179,7 +210,14 @@ impl AnimAction {
             AnimAction::PrevKey => "Model: Alt+Comma",
             AnimAction::FirstFrame => "Model: Shift+Comma",
             AnimAction::LastFrame => "Model: Shift+Period",
-            AnimAction::DeleteKeys | AnimAction::MotionPaths | AnimAction::EulerFilter | AnimAction::Turntable => return None,
+            AnimAction::DeleteKeys
+            | AnimAction::MotionPaths
+            | AnimAction::EulerFilter
+            | AnimAction::Turntable
+            | AnimAction::CopyKeys
+            | AnimAction::PasteKeys
+            | AnimAction::SelectAllKeys
+            | AnimAction::Ghosts => return None,
         })
     }
 }
@@ -269,6 +307,16 @@ pub fn act(app: &mut ModelApp, a: AnimAction) {
             app.anim.show_paths = !app.anim.show_paths;
             app.status = if app.anim.show_paths { tl!("Motion paths shown for selected objects") } else { tl!("Motion paths hidden") };
         }
+        AnimAction::CopyKeys => copy_selected(app),
+        AnimAction::PasteKeys => paste(app),
+        AnimAction::SelectAllKeys => {
+            app.anim.selected = rows(app).iter().flat_map(|r| r.curve.keys.iter().map(|k| r.key_ref(k.t)).collect::<Vec<_>>()).collect();
+            app.status = crate::tlf!("{count} keys selected", count = app.anim.selected.len());
+        }
+        AnimAction::Ghosts => {
+            app.anim.ghosts = !app.anim.ghosts;
+            app.status = if app.anim.ghosts { tl!("Ghosts shown for selected moving objects") } else { tl!("Ghosts hidden") };
+        }
         AnimAction::EulerFilter | AnimAction::Turntable => {
             if app.selection.is_empty() {
                 app.status = tl!("Select an object first");
@@ -284,6 +332,52 @@ pub fn act(app: &mut ModelApp, a: AnimAction) {
                 app.status = tl!("Turntable: one turn about Y over the range, repeating");
             }
         }
+    }
+}
+
+/// Copy the selected keys of the active layer, with their interpolation and tangents.
+fn copy_selected(app: &mut ModelApp) {
+    let anim = &app.doc.scene.anim;
+    let layer = anim.active_layer();
+    let keys: Vec<modelcraft_engine::PastedKey> = app
+        .anim
+        .selected
+        .iter()
+        .filter_map(|k| {
+            let curve = &anim.track_in(k.id, &k.path, layer)?.curve;
+            let key = curve.keys.get(curve.key_at(k.frame)?)?;
+            Some(modelcraft_engine::PastedKey { id: k.id, path: k.path.clone(), key: *key })
+        })
+        .collect();
+    if keys.is_empty() {
+        app.status = tl!("No keys selected");
+        return;
+    }
+    app.status = crate::tlf!("{count} keys copied", count = keys.len());
+    app.anim.clipboard = keys;
+}
+
+/// Paste the copied keys so that the earliest lands on the current frame. With one object
+/// selected that is not where the keys came from (and they came from one object), they go onto
+/// the selected object.
+fn paste(app: &mut ModelApp) {
+    let keys = app.anim.clipboard.clone();
+    let Some(first) = keys.iter().map(|k| k.key.t).min_by(f64::total_cmp) else {
+        app.status = tl!("No keys copied");
+        return;
+    };
+    let offset = app.doc.scene.anim.frame - first;
+    let source = keys.first().map(|k| k.id);
+    let one_source = keys.iter().all(|k| Some(k.id) == source);
+    let to = match app.selection.as_slice() {
+        [only] if one_source && Some(*only) != source => Some(*only),
+        _ => None,
+    };
+    let target = |k: &modelcraft_engine::PastedKey| to.unwrap_or(k.id);
+    let pasted: Vec<KeyRef> = keys.iter().map(|k| KeyRef { id: target(k), path: k.path.clone(), frame: k.key.t + offset }).collect();
+    if app.run(Command::Anim(AnimCommand::PasteKeys { keys, offset, to })) {
+        // The pasted keys are selected, ready to be moved.
+        app.anim.selected = pasted;
     }
 }
 
@@ -337,8 +431,49 @@ pub fn tick(app: &mut ModelApp, ctx: &egui::Context) {
 /// World-space line segments (pairs of points with a colour) for the motion paths of the
 /// selected objects that move: the path over the playback range, a tick at every whole frame, a
 /// larger mark at every key and a cross at the current frame. Empty when paths are off.
+/// Ghosts: where the selected moving objects are a few frames before (cool colour) and after
+/// (warm colour) the current frame, fading with distance. A joint is drawn as its bone, any
+/// other object as a small cross along its axes. Positions come from the curves.
+fn ghost_lines(app: &ModelApp, out: &mut Vec<([f32; 3], [f32; 3], [f32; 4])>) {
+    use modelcraft_engine::scene::ObjectKind;
+    let scene = &app.doc.scene;
+    let now = scene.anim.frame;
+    const STEP: f64 = 3.0;
+    for id in app.selection.iter().copied().filter(|id| scene.moves(*id)).take(64) {
+        let Some(o) = scene.get(id) else { continue };
+        let joint_parent =
+            o.parent.filter(|p| matches!(o.kind, ObjectKind::Joint { .. }) && matches!(scene.get(*p).map(|x| &x.kind), Some(ObjectKind::Joint { .. })));
+        for n in 1..=3 {
+            for sign in [-1.0, 1.0] {
+                let frame = now + sign * n as f64 * STEP;
+                let alpha = 0.75 - 0.18 * n as f32;
+                let color = if sign < 0.0 { [0.35, 0.65, 1.0, alpha] } else { [1.0, 0.6, 0.3, alpha] };
+                let world = scene.world_matrix_at(id, frame);
+                let here = world.transform_point3(glam::Vec3::ZERO);
+                match joint_parent {
+                    Some(p) => {
+                        let head = scene.world_matrix_at(p, frame).transform_point3(glam::Vec3::ZERO);
+                        for (a, b) in modelcraft_engine::animation::skeleton::bone_shape(head, here, 0.08) {
+                            out.push((a.to_array(), b.to_array(), color));
+                        }
+                    }
+                    None => {
+                        for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
+                            let d = world.transform_vector3(axis) * 0.25;
+                            out.push(((here - d).to_array(), (here + d).to_array(), color));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn path_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
     let mut out = Vec::new();
+    if app.anim.ghosts {
+        ghost_lines(app, &mut out);
+    }
     if !app.anim.show_paths {
         return out;
     }
@@ -565,11 +700,11 @@ fn layer_controls(app: &mut ModelApp, ui: &mut egui::Ui) {
     let Some(layer) = app.doc.scene.anim.layer(active).cloned() else { return };
     ui.label(tl!("Layer weight"));
     if let Some(w) = number(ui, tl!("Layer weight"), layer.weight, 0.01, Some((0.0, 1.0)), 3) {
-        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: Some(w), mute: None, mode: None }));
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: Some(w), mute: None, mode: None, solo: None, lock: None }));
     }
     let mut mute = layer.mute;
     if ui.checkbox(&mut mute, tl!("Mute Layer")).changed() {
-        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: Some(mute), mode: None }));
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: Some(mute), mode: None, solo: None, lock: None }));
     }
     let mut replace = layer.mode == LayerMode::Override;
     if ui
@@ -578,7 +713,27 @@ fn layer_controls(app: &mut ModelApp, ui: &mut egui::Ui) {
         .changed()
     {
         let mode = if replace { LayerMode::Override } else { LayerMode::Add };
-        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: None, mode: Some(mode) }));
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: None, mode: Some(mode), solo: None, lock: None }));
+    }
+    let mut solo = layer.solo;
+    if ui.checkbox(&mut solo, tl!("Solo Layer")).on_hover_text(tl!("Play only solo layers on top of the base")).changed() {
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: None, mode: None, solo: Some(solo), lock: None }));
+    }
+    let mut lock = layer.lock;
+    if ui.checkbox(&mut lock, tl!("Lock Layer")).on_hover_text(tl!("Keys in a locked layer cannot be set, changed or removed")).changed() {
+        app.run(Command::Anim(AnimCommand::SetLayer { layer: active, name: None, weight: None, mute: None, mode: None, solo: None, lock: Some(lock) }));
+    }
+    let keyed = layer.weight_curve.as_ref().map_or(0, |c| c.len());
+    if ui.button(tl!("Key Layer Weight")).on_hover_text(tl!("Key the layer's weight at the current frame, so it fades over time")).clicked() {
+        app.run(Command::Anim(AnimCommand::KeyLayerWeight { layer: active, frame: None, value: Some(layer.weight), clear: false }));
+    }
+    if keyed > 0 && ui.button(crate::tlf!("Clear {count} Weight Keys", count = keyed)).clicked() {
+        app.run(Command::Anim(AnimCommand::KeyLayerWeight { layer: active, frame: None, value: None, clear: true }));
+    }
+    for (label, delta) in [(tl!("Move Layer Up"), 1), (tl!("Move Layer Down"), -1)] {
+        if ui.button(label).clicked() {
+            app.run(Command::Anim(AnimCommand::MoveLayer { layer: active, delta }));
+        }
     }
     if ui.button(tl!("Remove Layer")).clicked() {
         app.run(Command::Anim(AnimCommand::RemoveLayer { layer: active }));
@@ -942,6 +1097,9 @@ enum KeyMove {
     Delete,
     Undo,
     Redo,
+    Copy,
+    Paste,
+    SelectAll,
 }
 
 /// Undo, redo and (for keys) Delete while a widget of the panel has keyboard focus. The app's
@@ -954,6 +1112,12 @@ fn focused_shortcuts(ui: &egui::Ui, with_delete: bool) -> Option<KeyMove> {
             Some(KeyMove::Undo)
         } else if with_delete && (i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)) {
             Some(KeyMove::Delete)
+        } else if with_delete && i.consume_key(egui::Modifiers::COMMAND, egui::Key::C) {
+            Some(KeyMove::Copy)
+        } else if with_delete && i.consume_key(egui::Modifiers::COMMAND, egui::Key::V) {
+            Some(KeyMove::Paste)
+        } else if with_delete && i.consume_key(egui::Modifiers::COMMAND, egui::Key::A) {
+            Some(KeyMove::SelectAll)
         } else {
             None
         }
@@ -1054,6 +1218,12 @@ fn apply_key_move(app: &mut ModelApp, ctx: &egui::Context, rows: &[Row], row: us
     if undo_redo(app, ctx, &m) {
         return;
     }
+    match m {
+        KeyMove::Copy => return copy_selected(app),
+        KeyMove::Paste => return paste(app),
+        KeyMove::SelectAll => return act(app, AnimAction::SelectAllKeys),
+        _ => {}
+    }
     let Some(here) = rows.get(row) else { return };
     let Some(key) = here.curve.keys.get(index) else { return };
     match m {
@@ -1092,7 +1262,7 @@ fn apply_key_move(app: &mut ModelApp, ctx: &egui::Context, rows: &[Row], row: us
             }
             delete_selected(app);
         }
-        KeyMove::Undo | KeyMove::Redo => {}
+        KeyMove::Undo | KeyMove::Redo | KeyMove::Copy | KeyMove::Paste | KeyMove::SelectAll => {}
     }
 }
 
@@ -1145,6 +1315,12 @@ fn sheet(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
     let frame = app.doc.scene.anim.frame;
     let drag = app.anim.key_drag;
     let mut pending: Option<(usize, usize, KeyMove)> = None;
+    // Dragging on the empty part of the strip selects the keys in a box (keys themselves are
+    // drawn later, so a drag that starts on a key still moves it).
+    let area = ui.available_rect_before_wrap();
+    let strip_area = Rect::from_min_max(Pos2::new(axis.x0, area.top()), Pos2::new(axis.x1, area.bottom()));
+    let band = ui.interact(strip_area, egui::Id::unique("anim-sheet-box"), Sense::drag());
+    let mut spots: Vec<(Pos2, KeyRef)> = Vec::new();
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         for (ri, row) in rows.iter().enumerate() {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::hover());
@@ -1167,6 +1343,7 @@ fn sheet(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
                 let shift = if selected { drag.map_or(0.0, |d| d.0) } else { 0.0 };
                 let c = Pos2::new(axis.x(key.t + shift), rect.center().y);
                 let hit = Rect::from_center_size(Pos2::new(axis.x(key.t), rect.center().y), egui::vec2(14.0, ROW_H - 2.0));
+                spots.push((hit.center(), row.key_ref(key.t)));
                 let (resp, m) = key_widget(app, ui, hit, row, key, AnimView::Sheet, axis, 0.0);
                 if let Some(m) = m {
                     pending = Some((ri, ki, m));
@@ -1175,8 +1352,41 @@ fn sheet(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
             }
         }
     });
+    box_select(app, ui, &band, &spots);
     if let Some((r, k, m)) = pending {
         apply_key_move(app, ui.ctx(), rows, r, k, m, 0.0);
+    }
+}
+
+/// Box selection: while `band` (the empty background) is dragged a rectangle is drawn, and on
+/// release the keys inside it are selected (added with Shift or the command key). Select All
+/// Shown Keys and Shift-click are the ways without dragging.
+fn box_select(app: &mut ModelApp, ui: &egui::Ui, band: &egui::Response, spots: &[(Pos2, KeyRef)]) {
+    if band.drag_started() {
+        app.anim.box_from = band.interact_pointer_pos().map(|p| p - band.drag_delta());
+    }
+    let Some(from) = app.anim.box_from else { return };
+    let to = band.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())).unwrap_or(from);
+    let rect = Rect::from_two_pos(from, to);
+    if band.dragged() {
+        let p = ui.painter();
+        p.rect_filled(rect, 0.0, theme::ACCENT.gamma_multiply(0.12));
+        p.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
+    }
+    if band.drag_stopped() {
+        app.anim.box_from = None;
+        let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+        if !add {
+            app.anim.selected.clear();
+        }
+        for (at, key) in spots {
+            if rect.contains(*at) && !app.anim.selected.contains(key) {
+                app.anim.selected.push(key.clone());
+            }
+        }
+        app.status = crate::tlf!("{count} keys selected", count = app.anim.selected.len());
+    } else if !band.dragged() {
+        app.anim.box_from = None;
     }
 }
 
@@ -1240,6 +1450,7 @@ fn curves(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
     let list = Rect::from_min_max(area.min, Pos2::new(axis.x0 - 6.0, plot.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().id_salt("anim-curve-list").auto_shrink([false, false]).show(ui, |ui| {
+            value_zoom(app, ui);
             for (i, row) in rows.iter().enumerate() {
                 let key = (row.id, row.path.clone());
                 let mut shown = !app.anim.hidden.contains(&key);
@@ -1277,7 +1488,13 @@ fn curves(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
         (lo, hi) = (-1.0, 1.0);
     }
     let pad = ((hi - lo) * 0.12).max(0.5);
-    let (lo, hi) = (lo - pad, hi + pad);
+    let (mut lo, mut hi) = (lo - pad, hi + pad);
+    // A range set by hand wins over the fit; "Fit Values" goes back.
+    match app.anim.value_range {
+        Some((a, b)) if b - a > 1e-9 => (lo, hi) = (a, b),
+        _ => {}
+    }
+    app.anim.fitted_values = (lo, hi);
     let value_px = (plot.height() as f64 / (hi - lo)).max(1e-9);
     let y = |v: f64| plot.bottom() - ((v - lo) * value_px) as f32;
     let p = ui.painter_at(plot);
@@ -1308,6 +1525,8 @@ fn curves(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
         v += step;
     }
     playhead(ui, axis, plot, frame);
+    let band = ui.interact(plot, egui::Id::unique("anim-curve-box"), Sense::drag());
+    let mut spots: Vec<(Pos2, KeyRef)> = Vec::new();
     let mut pending: Option<(usize, usize, KeyMove)> = None;
     for (ri, row, curve) in &visible {
         let color = curve_color(&row.path, *ri);
@@ -1328,6 +1547,7 @@ fn curves(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
                 continue;
             }
             let hit = Rect::from_center_size(Pos2::new(axis.x(key.t), y(key.v)), egui::vec2(14.0, 14.0));
+            spots.push((hit.center(), kref.clone()));
             let (resp, m) = key_widget(app, ui, hit, row, key, AnimView::Curves, axis, value_px);
             if let Some(m) = m {
                 pending = Some((*ri, ki, m));
@@ -1336,9 +1556,38 @@ fn curves(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
         }
     }
     handles(app, ui, axis, &visible, &p, &y, value_px);
+    box_select(app, ui, &band, &spots);
     if let Some((r, k, m)) = pending {
         apply_key_move(app, ui.ctx(), rows, r, k, m, step / 10.0);
     }
+}
+
+/// The Curve Editor's value axis by hand: the two ends as numbers, zoom in and out about the
+/// middle, and back to fitting the shown curves.
+fn value_zoom(app: &mut ModelApp, ui: &mut egui::Ui) {
+    let (lo, hi) = app.anim.value_range.unwrap_or(app.anim.fitted_values);
+    ui.horizontal_wrapped(|ui| {
+        if let Some(v) = number(ui, tl!("Lowest value shown"), lo, 0.1, None, 3)
+            && v < hi
+        {
+            app.anim.value_range = Some((v, hi));
+        }
+        if let Some(v) = number(ui, tl!("Highest value shown"), hi, 0.1, None, 3)
+            && v > lo
+        {
+            app.anim.value_range = Some((lo, v));
+        }
+        let (mid, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
+        if ui.button(tl!("Zoom Values In")).clicked() {
+            app.anim.value_range = Some((mid - half * 0.5, mid + half * 0.5));
+        }
+        if ui.button(tl!("Zoom Values Out")).clicked() {
+            app.anim.value_range = Some((mid - half * 2.0, mid + half * 2.0));
+        }
+        if ui.add_enabled(app.anim.value_range.is_some(), egui::Button::new(tl!("Fit Values"))).clicked() {
+            app.anim.value_range = None;
+        }
+    });
 }
 
 /// The tangent handles of the key the fields edit. Dragging one sets its slope and length; the
