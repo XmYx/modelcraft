@@ -1,0 +1,1 @@
+| 2026-11-18 | Rigid bodies land on an exact ground half-space instead of a 10 km box, so landing stacks no longer sink into the floor and get flung upwards; regression test from the property test's failing cases |

@@ -12,6 +12,24 @@ use crate::error::{R, limit, rt};
 use crate::limits::Limits;
 use crate::perm::{Access, Permissions};
 
+/// What scripts of this session may do beyond the file permissions: the sandbox of a plugin
+/// (see [`crate::plugin`]). Scripts of the user's own scripts folder run with everything allowed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Policy {
+    /// Run commands (every change to the scene is a command).
+    pub edit_scene: bool,
+    /// `register_tool`.
+    pub register_tools: bool,
+    /// `on_*` callbacks.
+    pub listen_events: bool,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Policy { edit_scene: true, register_tools: true, listen_events: true }
+    }
+}
+
 /// What a run reads from the app and hands back to it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RunContext {
@@ -48,6 +66,7 @@ pub(crate) struct Shared {
     pub selection_changed: Cell<bool>,
     pub out: RefCell<Output>,
     pub limits: Limits,
+    pub policy: Cell<Policy>,
     pub perms: RefCell<Permissions>,
     pub deadline: Cell<Option<Instant>>,
     pub native_left: Cell<u64>,
@@ -68,6 +87,7 @@ impl Shared {
             out: RefCell::new(Output::default()),
             native_left: Cell::new(limits.max_native_items),
             limits,
+            policy: Cell::new(Policy::default()),
             perms: RefCell::new(perms),
             deadline: Cell::new(None),
             commands_run: Cell::new(0),
@@ -127,6 +147,9 @@ impl Shared {
     /// document (which journals it and records undo like any other change).
     pub fn exec(&self, mut cmd: Command) -> R<Outcome> {
         self.check_time()?;
+        if !self.policy.get().edit_scene {
+            return Err(rt("this plugin may not change the scene (permission edit_scene was not granted)"));
+        }
         let n = self.commands_run.get() + 1;
         if n > self.limits.max_commands {
             return Err(limit(format!("the script ran more than {} commands and was stopped", self.limits.max_commands)));
@@ -195,12 +218,19 @@ impl Shared {
             | Command::SetPositions { .. }
             | Command::Anim(_)
             | Command::Rig(_)
+            | Command::Organize(_)
             | Command::Hair(_)
             | Command::Sim(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::AddCloneModifier { .. }
+            | Command::SetCloneModifier { .. }
             | Command::AddField { .. }
             | Command::SetField { .. }
+            | Command::AddArray { .. }
+            | Command::AddSymmetry { .. }
+            | Command::SetArray { .. }
+            | Command::SetSymmetry { .. }
             | Command::SetLocked { .. }
             | Command::SetTemplate { .. }
             | Command::AddSelectionSet { .. }

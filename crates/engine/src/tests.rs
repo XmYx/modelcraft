@@ -166,6 +166,10 @@ fn commands_round_trip_as_json() {
         Command::SculptDetail { id: ObjectId(1), op: crate::DetailOp::Up },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Strength { index: 0, strength: 0.25 } },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Select { index: None } },
+        Command::AddArray { kind: "radial".into(), input: Some(ObjectId(1)) },
+        Command::AddSymmetry { input: None, axis: 1 },
+        Command::SetArray { id: ObjectId(2), array: modelcraft_scene::Array::default_of("linear").unwrap() },
+        Command::SetSymmetry { id: ObjectId(3), axis: 2, weld: 0.01 },
         Command::AddField { kind: "noise".into(), target: ObjectId(3) },
         Command::SetField { id: ObjectId(4), field: modelcraft_scene::Field::default_of("box").unwrap() },
         Command::AddCloner { kind: "radial".into(), input: Some(ObjectId(1)) },
@@ -433,6 +437,46 @@ fn strokes_and_presets_keep_their_json_form() {
         d.execute(Command::SculptStroke { id: ball, stroke: st }).unwrap();
         assert!(d.undo.len() >= 3, "{} changed nothing", p.name);
     }
+}
+
+#[test]
+fn array_and_symmetry_commands_chain_undo_and_sanitize() {
+    use modelcraft_scene::Array;
+    let mut d = Document::new();
+    let out = d.execute(Command::AddArray { kind: "linear".into(), input: None }).unwrap();
+    let arr = out.created[0];
+    assert_eq!(d.scene.len(), 2, "a cube is made inside it");
+    assert_eq!(d.eval.evaluate(&d.scene, arr).mesh.face_count(), 24);
+    // A symmetry around the array: the generators nest.
+    let sym = d.execute(Command::AddSymmetry { input: Some(arr), axis: 0 }).unwrap().created[0];
+    assert_eq!(d.scene.get(arr).unwrap().parent, Some(sym));
+    assert_eq!(d.triangle_count(), d.eval.evaluate(&d.scene, sym).mesh.triangle_count());
+    // Settings: sanitized, one undo step each.
+    let before = d.undo.len();
+    d.execute(Command::SetArray {
+        id: arr,
+        array: Array::Linear { count: u32::MAX, offset: glam::Vec3::NAN, rotation: glam::Vec3::ZERO, scale: glam::Vec3::ZERO },
+    })
+    .unwrap();
+    assert_eq!(d.undo.len(), before + 1);
+    if let ObjectKind::Array { array: Array::Linear { count, offset, .. } } = d.scene.get(arr).unwrap().kind {
+        assert_eq!((count, offset), (modelcraft_ops::array::MAX_COPIES, glam::Vec3::ZERO));
+    } else {
+        panic!("not a linear array");
+    }
+    d.execute(Command::SetSymmetry { id: sym, axis: 9, weld: f32::NAN }).unwrap();
+    assert!(matches!(d.scene.get(sym).unwrap().kind, ObjectKind::Symmetry { axis: 2, .. }));
+    d.execute(Command::Undo).unwrap();
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.eval.evaluate(&d.scene, arr).mesh.face_count(), 24);
+    // Wrong kinds fail without a trace.
+    let n = d.undo.len();
+    let group = d.execute(Command::AddGroup { name: None }).unwrap().created[0];
+    assert!(d.execute(Command::AddArray { kind: "linear".into(), input: Some(group) }).is_err());
+    assert!(d.execute(Command::AddArray { kind: "spiral".into(), input: None }).is_err());
+    assert!(d.execute(Command::SetArray { id: sym, array: Array::default_of("radial").unwrap() }).is_err());
+    assert!(d.execute(Command::SetSymmetry { id: arr, axis: 0, weld: 0.0 }).is_err());
+    assert_eq!(d.undo.len(), n + 1, "only the group was added");
 }
 
 fn quad() -> Command {
@@ -872,4 +916,31 @@ fn mirrored_sheared_clones_export_with_outward_faces() {
             assert!(n.dot(at - centre) > 0.0, "clone {k} (det {}) face {f} points inwards", c.matrix.determinant());
         }
     }
+}
+
+#[test]
+fn locked_generators_fields_and_modifiers_refuse_setting_changes() {
+    use modelcraft_scene::{Array, Cloner, Field, Modifier};
+    let mut d = Document::new();
+    let arr = d.execute(Command::AddArray { kind: "linear".into(), input: None }).unwrap().created[0];
+    let sym = d.execute(Command::AddSymmetry { input: None, axis: 0 }).unwrap().created[0];
+    let clones = d.execute(Command::AddCloner { kind: "linear".into(), input: None }).unwrap().created[0];
+    let modifier = d.execute(Command::AddCloneModifier { kind: "plain".into(), cloner: clones }).unwrap().created[0];
+    let field = d.execute(Command::AddField { kind: "sphere".into(), target: modifier }).unwrap().created[0];
+    let edits = |d: &mut Document| {
+        [
+            d.execute(Command::SetArray { id: arr, array: Array::default_of("radial").unwrap() }).is_ok(),
+            d.execute(Command::SetSymmetry { id: sym, axis: 1, weld: 0.0 }).is_ok(),
+            d.execute(Command::SetCloner { id: clones, cloner: Cloner::default_of("grid").unwrap(), target: None }).is_ok(),
+            d.execute(Command::SetCloneModifier { id: modifier, modifier: Modifier::default_of("random").unwrap(), target: None }).is_ok(),
+            d.execute(Command::SetField { id: field, field: Field::default_of("box").unwrap() }).is_ok(),
+        ]
+    };
+    d.execute(Command::SetLocked { ids: vec![arr, sym, clones, modifier, field], locked: true }).unwrap();
+    let n = d.undo.len();
+    assert_eq!(edits(&mut d), [false; 5], "every locked object refuses its settings change");
+    assert_eq!(d.undo.len(), n, "nothing was recorded");
+    assert_eq!(d.scene.get(arr).unwrap().kind, ObjectKind::Array { array: Array::default_of("linear").unwrap() });
+    d.execute(Command::SetLocked { ids: vec![arr, sym, clones, modifier, field], locked: false }).unwrap();
+    assert_eq!(edits(&mut d), [true; 5], "unlocked, the same changes apply");
 }

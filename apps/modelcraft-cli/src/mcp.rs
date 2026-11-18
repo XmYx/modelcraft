@@ -22,7 +22,7 @@ pub fn info() -> Info {
 /// Where tool calls are answered.
 pub enum Backend {
     /// A document of this process.
-    Local(Box<Document>),
+    Local(Box<Document>, Box<modelcraft_script::channel::ScriptChannel>),
     /// The running app's control channel.
     App(Box<craft_control::client::Connection>),
 }
@@ -30,8 +30,8 @@ pub enum Backend {
 impl Backend {
     fn ask(&mut self, method: &str, params: Value) -> Result<Value, String> {
         match self {
-            Backend::Local(d) => {
-                let r = control::handle(d, method, &params);
+            Backend::Local(d, script) => {
+                let r = control::handle_with(d, method, &params, &mut |doc, m, p| script.handle(doc, &mut Vec::new(), m, p));
                 if r["ok"] == true { Ok(r["result"].clone()) } else { Err(r["error"].as_str().unwrap_or("failed").to_string()) }
             }
             Backend::App(c) => c.call(craft_control::client::Request::new(method, params)).map_err(|e| e.message().to_string()),
@@ -44,13 +44,19 @@ pub struct ModelTools {
 }
 
 /// The tool names and the control method each runs.
-const TOOLS: &[(&str, &str)] =
-    &[("info", "document.info"), ("commands", "engine.commands"), ("execute", "engine.execute"), ("save", "document.save"), ("export", "document.export")];
+const TOOLS: &[(&str, &str)] = &[
+    ("info", "document.info"),
+    ("commands", "engine.commands"),
+    ("execute", "engine.execute"),
+    ("save", "document.save"),
+    ("export", "document.export"),
+    ("script", "script.run"),
+];
 
 impl Tools for ModelTools {
     fn instructions(&self) -> String {
         let where_ = match &self.backend {
-            Backend::Local(_) => "a document of this server (call `save` to write it)",
+            Backend::Local(..) => "a document of this server (call `save` to write it)",
             Backend::App(_) => "the scene open in the running ModelCraft window",
         };
         format!(
@@ -79,6 +85,16 @@ impl Tools for ModelTools {
                 Effect::Edits,
             ),
             tool(
+                "script",
+                "Run a script",
+                "Run a Rhai script on the scene (docs/scripting.md): `source` is the script text; `args` an optional object of strings, numbers and booleans read with arg(name, default). Every change is a command and undoable (wrap in undo_group(\"label\", || { ... }) for one step); no file access. Returns ok, value, output lines, command count and, on failure, the error with its line and column.",
+                object(
+                    json!({"source": string("The script text"), "name": string("A name for error messages (optional)"), "args": {"type": "object", "description": "Arguments for arg(name, default) (optional)"}}),
+                    &["source"],
+                ),
+                Effect::Edits,
+            ),
+            tool(
                 "save",
                 "Save",
                 "Save the project (atomically), to `path` when given.",
@@ -94,6 +110,8 @@ impl Tools for ModelTools {
             return text_result(format!("unknown tool {name}"), true);
         };
         match self.backend.ask(method, args.clone()) {
+            // A script that failed is a tool error with the full report, so an agent sees the line.
+            Ok(v) if name == "script" && v["ok"] == false => text_result(serde_json::to_string_pretty(&v).unwrap_or_default(), true),
             Ok(v) => text_result(serde_json::to_string_pretty(&v).unwrap_or_default(), false),
             Err(e) => text_result(format!("{name}: {e}"), true),
         }
@@ -122,7 +140,7 @@ pub fn local(project: Option<&str>) -> Result<Backend, String> {
         Some(p) if Path::new(p).exists() => crate::load(p)?,
         _ => Document::new(),
     };
-    Ok(Backend::Local(Box::new(d)))
+    Ok(Backend::Local(Box::new(d), Box::new(modelcraft_script::channel::ScriptChannel::new())))
 }
 
 #[cfg(test)]
@@ -135,7 +153,7 @@ mod tests {
 
     #[test]
     fn mcp_tools_build_and_list_a_scene() {
-        let mut s = Server::new(info(), ModelTools { backend: Backend::Local(Box::default()) });
+        let mut s = Server::new(info(), ModelTools { backend: Backend::Local(Box::default(), Default::default()) });
         let init = rpc(
             &mut s,
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": craft_mcp_server::PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}),

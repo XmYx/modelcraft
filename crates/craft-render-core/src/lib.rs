@@ -20,7 +20,9 @@
 pub mod bsdf;
 pub mod camera;
 pub mod denoise;
+pub mod flip;
 pub mod guided;
+pub mod hair;
 pub mod integrator;
 pub mod light;
 pub mod material;
@@ -49,6 +51,8 @@ pub use shapes::MeshData;
 
 #[cfg(test)]
 mod denoise_tests;
+#[cfg(test)]
+mod hair_tests;
 #[cfg(test)]
 mod restir_tests;
 #[cfg(test)]

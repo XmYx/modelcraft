@@ -37,6 +37,8 @@ pub const STARTUP: &str = "startup.rhai";
 /// Scripts in this subfolder of the scripts folder become buttons in the Quick Scripts strip.
 pub const QUICK_DIR: &str = "quick";
 pub const EXT: &str = "rhai";
+/// The subfolder of the scripts folder that holds libraries (`import "lib/name" as m;`).
+pub const LIBRARY_DIR: &str = "lib";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConsoleKind {
@@ -119,6 +121,8 @@ pub struct ScriptState {
     /// user's (or an agent's), and callbacks that answer them join the newest one.
     last_mark: usize,
     pub macros: crate::script_macro::MacroState,
+    pub recovery: crate::script_recover::Recovery,
+    pub plugins: crate::plugin_ui::PluginState,
 }
 
 impl Default for ScriptState {
@@ -163,6 +167,8 @@ impl ScriptState {
             was_playing: false,
             last_mark: 0,
             macros: Default::default(),
+            recovery: Default::default(),
+            plugins: Default::default(),
         };
         s.reload();
         s
@@ -170,6 +176,16 @@ impl ScriptState {
 
     pub fn modified(&self) -> bool {
         self.text != self.saved
+    }
+
+    /// What the text is compared with to tell whether it is modified (the recovered text of an
+    /// earlier session is compared with the file it came from).
+    pub(crate) fn set_saved(&mut self, saved: String) {
+        self.saved = saved;
+    }
+
+    pub(crate) fn note_line(&mut self, kind: ConsoleKind, text: String) {
+        self.note(kind, text, None);
     }
 
     /// The name shown for the script and used in error messages.
@@ -200,7 +216,7 @@ fn first_comment(text: &str) -> String {
     text.lines().map(str::trim).find(|l| !l.is_empty()).and_then(|l| l.strip_prefix("//")).map(|l| l.trim().to_string()).unwrap_or_default()
 }
 
-fn read_script(path: &Path) -> Result<String, String> {
+pub(crate) fn read_script(path: &Path) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     if meta.len() > MAX_FILE_BYTES {
         return Err(crate::tlf!("{file} is larger than {size} bytes", file = path.display(), size = MAX_FILE_BYTES));
@@ -244,7 +260,8 @@ pub fn scan(dir: &Path) -> (Vec<Entry>, Vec<Entry>) {
             entries.push(entry_of(p, None));
         } else if p.is_dir() {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            if name.starts_with('.') {
+            // Dot folders are hidden, and `lib` holds libraries for `import`, not scripts to run.
+            if name.starts_with('.') || name == LIBRARY_DIR {
                 continue;
             }
             for q in list(&p).into_iter().filter(|q| is_script(q)) {
@@ -326,11 +343,35 @@ pub fn execute(app: &mut ModelApp, name: &str, source: &str, script: Option<&Pat
     let file = app.doc.path.as_ref().map(|p| p.display().to_string());
     let session = app.script.session.get_or_insert_with(|| Session::new(Limits::default(), Permissions::none()));
     session.set_permissions(perms);
+    session.set_library(app.script.dir.clone());
     session.set_current_file(file);
     let mut ctx = RunContext { selection: app.selection.clone() };
     app.script.note(ConsoleKind::Note, crate::tlf!("Running {script}…", script = name), None);
     let Some(session) = app.script.session.as_mut() else { return false };
     let report = session.run(&mut app.doc, &mut ctx, name, source);
+    finish(app, name, report)
+}
+
+/// Show a run's console lines, the selection it set and its error (no summary line).
+pub(crate) fn show_report(app: &mut ModelApp, report: &modelcraft_script::RunReport) {
+    for l in &report.lines {
+        let kind = match l.kind {
+            LineKind::Print => ConsoleKind::Print,
+            LineKind::Debug => ConsoleKind::Debug,
+            LineKind::Warning => ConsoleKind::Warning,
+        };
+        app.script.note(kind, l.text.clone(), l.line);
+    }
+    if let Some(sel) = &report.selection {
+        app.selection = sel.clone();
+    }
+    if let Some(e) = &report.error {
+        app.script.note(ConsoleKind::Error, e.to_string(), e.line);
+    }
+    app.prune_selection();
+}
+
+pub(crate) fn finish_report(app: &mut ModelApp, name: &str, report: modelcraft_script::RunReport) -> bool {
     finish(app, name, report)
 }
 
@@ -406,10 +447,27 @@ struct Budget {
     left: std::time::Duration,
 }
 
-/// Tell the callbacks of `event`. Returns the time they took.
+/// Tell the callbacks of `event`, the user's scripts and the plugins'. Returns the time they took.
 fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time::Duration {
+    let mut total = std::time::Duration::ZERO;
+    let mut left = budget.map(|b| b.left);
+    for which in std::iter::once(None).chain((0..app.script.plugins.loaded.len()).map(Some)) {
+        let b = budget.zip(left).map(|(b, left)| Budget { each: b.each, left });
+        let t = fire_one(app, which, event, b.as_ref());
+        total += t;
+        left = left.map(|l| l.saturating_sub(t));
+    }
+    total
+}
+
+/// One session's callbacks: the user's (`None`) or a plugin's.
+fn fire_one(app: &mut ModelApp, which: Option<usize>, event: &Event, budget: Option<&Budget>) -> std::time::Duration {
+    let taken = match which {
+        None => app.script.session.take(),
+        Some(i) => app.script.plugins.loaded.get_mut(i).and_then(|p| p.session.take()),
+    };
+    let Some(mut session) = taken else { return std::time::Duration::ZERO };
     let mut ctx = RunContext { selection: app.selection.clone() };
-    let Some(session) = app.script.session.as_mut() else { return std::time::Duration::ZERO };
     let (reports, elapsed) = match budget {
         None => (session.fire(&mut app.doc, &mut ctx, event), std::time::Duration::ZERO),
         Some(b) => {
@@ -417,6 +475,14 @@ fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time
             (f.reports, f.elapsed)
         }
     };
+    match which {
+        None => app.script.session = Some(session),
+        Some(i) => {
+            if let Some(p) = app.script.plugins.loaded.get_mut(i) {
+                p.session = Some(session);
+            }
+        }
+    }
     for r in reports {
         // Callbacks are quiet unless they print or fail: no "finished" line per event.
         for l in &r.lines {
@@ -450,7 +516,7 @@ fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time
 pub fn tick(app: &mut ModelApp) {
     let sig = scene_signature(app);
     let frame = app.doc.scene.anim.frame;
-    let listening = app.script.session.as_ref().is_some_and(|s| s.has_callbacks());
+    let listening = app.script.session.as_ref().is_some_and(|s| s.has_callbacks()) || app.script.plugins.listening();
     if !listening || app.drag.is_some() || app.stroke.is_some() {
         if !listening {
             app.script.last_selection = app.selection.clone();
@@ -587,7 +653,7 @@ pub fn startup(app: &mut ModelApp) {
 
 // ---------------------------------------------------------------- files
 
-fn load(app: &mut ModelApp, path: &Path) {
+pub(crate) fn load(app: &mut ModelApp, path: &Path) {
     match read_script(path) {
         Ok(t) => {
             app.script.saved = t.clone();
@@ -1062,6 +1128,8 @@ pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
             ui.label(RichText::new(tl!("No scripts folder on this system")).color(theme::TEXT_DIM).small());
         }
     }
+    ui.separator();
+    crate::plugin_ui::menu(app, ui);
     let tools = app.script.session.as_ref().map(|s| s.tools()).unwrap_or_default();
     if !tools.is_empty() {
         ui.separator();

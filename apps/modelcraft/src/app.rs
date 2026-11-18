@@ -74,10 +74,11 @@ pub enum PanelId {
     Brushes,
     Paint,
     History,
+    Simulation,
 }
 
 impl PanelId {
-    pub const ALL: [PanelId; 5] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History];
+    pub const ALL: [PanelId; 6] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History, PanelId::Simulation];
     pub fn label(self) -> String {
         match self {
             PanelId::Tree => tl!("Scene"),
@@ -85,6 +86,7 @@ impl PanelId {
             PanelId::Brushes => tl!("Brushes"),
             PanelId::Paint => tl!("Paint"),
             PanelId::History => tl!("Undo History"),
+            PanelId::Simulation => tl!("Simulation"),
         }
     }
 }
@@ -190,6 +192,9 @@ pub struct ModelApp {
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
     pub objects: crate::object_manager::State,
+    /// Snapping to geometry, gizmo orientation and the measure tool.
+    pub snaps: crate::snap_ui::State,
+    pub organize: crate::organize_ui::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -197,6 +202,8 @@ pub struct ModelApp {
     pub stroke: Option<crate::viewport::StrokeInput>,
     pub show_wire: bool,
     pub show_patches: bool,
+    /// How the viewport draws surfaces (an object's Display tag overrides it).
+    pub display_mode: modelcraft_engine::scene::DisplayMode,
     /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub screenshot: Option<PathBuf>,
@@ -213,6 +220,8 @@ pub struct ModelApp {
     pub recovery_dir: Option<PathBuf>,
     /// The Animation panel: playback, key selection, views.
     pub anim: crate::anim_ui::AnimUi,
+    /// The Simulation panel: the bake in progress.
+    pub sim: crate::sim_ui::SimUi,
     /// Hair grooming: brush, symmetry, the stroke in progress.
     pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
@@ -253,6 +262,9 @@ impl ModelApp {
             crate::agents::start(&mut app, &cc.egui_ctx);
         }
         app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
+        let drafts = app.recovery_dir.as_ref().map(|d| d.join("scripts"));
+        crate::script_recover::init(&mut app, drafts);
+        crate::plugin_ui::init(&mut app, crate::plugin_ui::default_dir());
         crate::script_ui::startup(&mut app);
         app
     }
@@ -314,6 +326,8 @@ impl ModelApp {
             unit: Default::default(),
             language: None,
             objects: Default::default(),
+            snaps: Default::default(),
+            organize: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -321,6 +335,7 @@ impl ModelApp {
             stroke: None,
             show_wire: true,
             show_patches: false,
+            display_mode: Default::default(),
             sculpt_groups: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
@@ -334,6 +349,7 @@ impl ModelApp {
             autosave_at: None,
             recovery_dir: None,
             anim: Default::default(),
+            sim: Default::default(),
             groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
@@ -549,6 +565,16 @@ impl ModelApp {
         }
     }
 
+    /// The selected object when it can be a generator's input (a mesh or another generator).
+    fn generator_input_candidate(&self) -> Option<ObjectId> {
+        self.active().filter(|id| {
+            matches!(
+                self.doc.scene.get(*id).map(|o| &o.kind),
+                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+            )
+        })
+    }
+
     pub fn active_mesh(&self) -> Option<ObjectId> {
         self.active().filter(|id| matches!(self.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })))
     }
@@ -558,7 +584,7 @@ impl ModelApp {
         let a = self.active()?;
         match &self.doc.scene.get(a)?.kind {
             ObjectKind::Mesh { .. } => Some(a),
-            ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } => {
+            ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Cloner { .. } => {
                 self.doc.scene.children(a).into_iter().find(|c| matches!(self.doc.scene.get(*c).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })))
             }
             _ => None,
@@ -697,6 +723,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Sim(a) => crate::sim_ui::act(self, a),
             Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
@@ -752,11 +779,19 @@ impl ModelApp {
                 }
                 None => self.status = tl!("Select a mesh to deform"),
             },
+            AddArray(kind) => {
+                let input = self.generator_input_candidate();
+                self.run(Command::AddArray { kind: kind.into(), input });
+            }
+            AddSymmetry => {
+                let input = self.generator_input_candidate();
+                self.run(Command::AddSymmetry { input, axis: 0 });
+            }
             AddField(kind) => {
                 // Into the selected deformer, or the deformer a selected field already sits in.
                 let scene = &self.doc.scene;
                 let target = self.active().and_then(|a| match scene.get(a).map(|o| (&o.kind, o.parent)) {
-                    Some((ObjectKind::Deformer { .. }, _)) => Some(a),
+                    Some((ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. }, _)) => Some(a),
                     Some((ObjectKind::Field { .. }, Some(p))) => Some(p),
                     _ => None,
                 });
@@ -764,7 +799,7 @@ impl ModelApp {
                     Some(target) => {
                         self.run(Command::AddField { kind: kind.into(), target });
                     }
-                    None => self.status = tl!("Select a deformer for the falloff field"),
+                    None => self.status = tl!("Select a deformer or a clone modifier for the falloff field"),
                 }
             }
             AddCloner(kind) => {
@@ -773,6 +808,21 @@ impl ModelApp {
                     .active()
                     .filter(|id| matches!(self.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })));
                 self.run(Command::AddCloner { kind: kind.into(), input });
+            }
+            AddCloneModifier(kind) => {
+                // Into the selected clone generator, or the generator a selected modifier sits in.
+                let scene = &self.doc.scene;
+                let cloner = self.active().and_then(|a| match scene.get(a).map(|o| (&o.kind, o.parent)) {
+                    Some((ObjectKind::Cloner { .. }, _)) => Some(a),
+                    Some((ObjectKind::CloneModifier { .. }, Some(p))) => Some(p),
+                    _ => None,
+                });
+                match cloner {
+                    Some(cloner) => {
+                        self.run(Command::AddCloneModifier { kind: kind.into(), cloner });
+                    }
+                    None => self.status = tl!("Select a clone generator for the modifier"),
+                }
             }
             AddGroup => {
                 self.run(Command::AddGroup { name: None });
@@ -883,10 +933,13 @@ impl ModelApp {
             ScriptRun => crate::script_ui::run_editor(self, false),
             ScriptRunSelection => crate::script_ui::run_editor(self, true),
             ScriptRecord => crate::script_macro::toggle(self),
+            PluginsWindow => crate::plugin_ui::toggle(self),
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
             Objects(op) => crate::object_manager::run(self, op),
+            Snap(op) => crate::snap_ui::run(self, op),
+            Organize(op) => crate::organize_ui::run(self, op),
         }
     }
 
@@ -1220,6 +1273,7 @@ impl eframe::App for ModelApp {
     }
 
     fn on_exit(&mut self) {
+        crate::script_recover::flush(self);
         self.store_prefs();
         if let Some(store) = &mut self.prefs {
             let _ = store.flush();
@@ -1245,9 +1299,12 @@ impl ModelApp {
         self.last_frame = Some(now);
         self.frames += 1;
         crate::agents::tick(self);
+        // Before the shortcuts, so Escape stops a running bake instead of clearing the selection.
+        crate::sim_ui::tick(self, &ctx);
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
         crate::script_ui::tick(self);
+        crate::script_recover::tick(self, &ctx);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
@@ -1258,6 +1315,7 @@ impl ModelApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL)).show(ui, |ui| crate::dock::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         crate::prefs_ui::show(self, &ctx);
+        crate::organize_ui::show(self, &ctx);
         crate::radial::show(self, &ctx);
         self.screenshot_tick(&ctx);
         if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {

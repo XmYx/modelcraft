@@ -8,7 +8,7 @@ use glam::{Mat4, Quat, Vec2 as GVec2, Vec3};
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::PolyMesh;
 use modelcraft_engine::scene::pick::{self, Ray};
-use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Scene, Step, StepOp};
+use modelcraft_engine::scene::{DisplayMode, Object, ObjectId, ObjectKind, Scene, Step, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Dab};
 use modelcraft_render::buffers::{self, LineVertex};
 use modelcraft_render::{Camera, ViewPreset};
@@ -23,7 +23,7 @@ pub enum Handle {
 }
 
 pub enum DragKind {
-    Gizmo { tool: Tool, handle: Handle, pivot: Vec3, scene: Box<Scene> },
+    Gizmo { tool: Tool, handle: Handle, pivot: Vec3, axes: [Vec3; 3], scene: Box<Scene> },
     Box,
 }
 
@@ -92,8 +92,17 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
         .map(|(id, _)| id)
         .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
         .filter(|id| {
-            matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. }))
-                || scene.is_particles(*id)
+            matches!(
+                scene.get(*id).map(|o| &o.kind),
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::Cloner { .. }
+                        | ObjectKind::Instance { .. }
+                )
+            ) || scene.is_particles(*id)
         })
         .collect()
 }
@@ -323,7 +332,9 @@ fn edit_mesh(app: &mut ModelApp) -> Option<(ObjectId, Arc<PolyMesh>, Mat4)> {
 fn pivot(app: &mut ModelApp) -> Option<Vec3> {
     if app.mode == SelectMode::Object {
         let id = app.active()?;
-        return Some(app.doc.scene.world_matrix(id).transform_point3(Vec3::ZERO));
+        // The gizmo sits on the object's pivot.
+        let pivot = app.doc.scene.get(id).map_or(Vec3::ZERO, |o| o.pivot);
+        return Some(app.doc.scene.world_matrix(id).transform_point3(pivot));
     }
     let verts = app.component_vertices();
     let (_, m, w) = edit_mesh(app)?;
@@ -334,25 +345,24 @@ fn pivot(app: &mut ModelApp) -> Option<Vec3> {
     Some(w.transform_point3(c))
 }
 
-const AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
-
 fn gizmo_len(cam: &Camera, rect: Rect, p: Vec3) -> f32 {
     cam.world_per_pixel(p, rect.height()) * 90.0
 }
 
-fn hit_gizmo(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2) -> Option<(Handle, Vec3)> {
+fn hit_gizmo(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2) -> Option<(Handle, Vec3, [Vec3; 3])> {
     if app.tool == Tool::Select {
         return None;
     }
     let p = pivot(app)?;
+    let axes = crate::snap_ui::gizmo_axes(app);
     let cam = app.views[i].camera;
     let ps = to_screen(&cam, rect, p)?;
     let l = gizmo_len(&cam, rect, p);
     if ps.distance(at) < 10.0 && app.tool != Tool::Rotate {
-        return Some((Handle::Free, p));
+        return Some((Handle::Free, p, axes));
     }
     let mut best: Option<(f32, Handle)> = None;
-    for (k, ax) in AXES.iter().enumerate() {
+    for (k, ax) in axes.iter().enumerate() {
         let d = if app.tool == Tool::Rotate {
             ring(&cam, rect, p, *ax, l).windows(2).filter_map(|w| Some(seg_dist(at, *w.first()?, *w.get(1)?))).fold(f32::MAX, f32::min)
         } else {
@@ -365,7 +375,7 @@ fn hit_gizmo(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2) -> Option<(Hand
             best = Some((d, Handle::Axis(k)));
         }
     }
-    best.map(|(_, h)| (h, p))
+    best.map(|(_, h)| (h, p, axes))
 }
 
 fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -396,17 +406,17 @@ pub fn snapped(t: Vec3, r: Quat, s: Vec3, steps: (f32, f32, f32)) -> (Vec3, Quat
     (t, r, s)
 }
 
-fn drag_transform(cam: &Camera, rect: Rect, tool: Tool, handle: Handle, pivot: Vec3, start: Pos2, cur: Pos2) -> (Vec3, Quat, Vec3) {
+fn drag_transform(cam: &Camera, rect: Rect, tool: Tool, handle: Handle, pivot: Vec3, axes: &[Vec3; 3], start: Pos2, cur: Pos2) -> (Vec3, Quat, Vec3) {
     let d = cur - start;
     let l = gizmo_len(cam, rect, pivot);
     let ps = to_screen(cam, rect, pivot).unwrap_or(start);
     let along = |k: usize| -> f32 {
-        let Some(e) = AXES.get(k).and_then(|a| to_screen(cam, rect, pivot + *a * l)) else { return 0.0 };
+        let Some(e) = axes.get(k).and_then(|a| to_screen(cam, rect, pivot + *a * l)) else { return 0.0 };
         let s = e - ps;
         d.dot(s) / s.length_sq().max(1.0)
     };
     match (tool, handle) {
-        (Tool::Move, Handle::Axis(k)) => (AXES.get(k).copied().unwrap_or(Vec3::X) * along(k) * l, Quat::IDENTITY, Vec3::ONE),
+        (Tool::Move, Handle::Axis(k)) => (axes.get(k).copied().unwrap_or(Vec3::X) * along(k) * l, Quat::IDENTITY, Vec3::ONE),
         (Tool::Move, Handle::Free) => {
             let wpp = cam.world_per_pixel(pivot, rect.height());
             let fwd = -cam.back();
@@ -423,7 +433,7 @@ fn drag_transform(cam: &Camera, rect: Rect, tool: Tool, handle: Handle, pivot: V
         (Tool::Rotate, Handle::Axis(k)) => {
             let a0 = (start - ps).angle();
             let a1 = (cur - ps).angle();
-            let axis = AXES.get(k).copied().unwrap_or(Vec3::Y);
+            let axis = axes.get(k).copied().unwrap_or(Vec3::Y);
             let facing = if axis.dot(cam.back()) >= 0.0 { -1.0 } else { 1.0 };
             (Vec3::ZERO, Quat::from_axis_angle(axis, (a1 - a0) * facing), Vec3::ONE)
         }
@@ -481,7 +491,7 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
         let start = at - resp.drag_delta();
         app.component_vertices_cached = app.component_vertices();
         let kind = match hit_gizmo(app, i, rect, start) {
-            Some((handle, pivot)) => DragKind::Gizmo { tool: app.tool, handle, pivot, scene: Box::new(app.doc.scene.clone()) },
+            Some((handle, pivot, axes)) => DragKind::Gizmo { tool: app.tool, handle, pivot, axes, scene: Box::new(app.doc.scene.clone()) },
             None => DragKind::Box,
         };
         app.drag = Some(Drag { view: i, start, kind });
@@ -489,14 +499,17 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
     let dragging = app.drag.as_ref().is_some_and(|d| d.view == i);
     if dragging
         && resp.dragged_by(egui::PointerButton::Primary)
-        && let (Some(cur), Some(Drag { start, kind: DragKind::Gizmo { tool, handle, pivot, scene }, .. })) = (pointer, &app.drag)
+        && let (Some(cur), Some(Drag { start, kind: DragKind::Gizmo { tool, handle, pivot, axes, scene }, .. })) = (pointer, &app.drag)
     {
         {
             let cam = app.views[i].camera;
-            let (t, r, s) = drag_transform(&cam, rect, *tool, *handle, *pivot, *start, cur);
+            let (tool, handle, pivot, axes, start) = (*tool, *handle, *pivot, *axes, *start);
+            let base = (**scene).clone();
+            let (t, r, s) = drag_transform(&cam, rect, tool, handle, pivot, &axes, start, cur);
             let (t, r, s) = if snap_on(app, ui) { snapped(t, r, s, app.snap_steps) } else { (t, r, s) };
-            let mut preview = (**scene).clone();
-            apply_drag(app, &mut preview, t, r, s, *pivot, false);
+            let (t, r, s) = (geometry_snap_move(app, &cam, rect, tool, handle, pivot, &axes, cur, t), r, s);
+            let mut preview = base;
+            apply_drag(app, &mut preview, t, r, s, pivot, false);
             app.doc.scene = preview;
         }
     }
@@ -507,10 +520,12 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
         {
             let cur = pointer.unwrap_or(drag.start);
             match drag.kind {
-                DragKind::Gizmo { tool, handle, pivot, scene } => {
+                DragKind::Gizmo { tool, handle, pivot, axes, scene } => {
                     let cam = app.views[i].camera;
-                    let (t, r, s) = drag_transform(&cam, rect, tool, handle, pivot, drag.start, cur);
+                    let (t, r, s) = drag_transform(&cam, rect, tool, handle, pivot, &axes, drag.start, cur);
                     let (t, r, s) = if snap_on(app, ui) { snapped(t, r, s, app.snap_steps) } else { (t, r, s) };
+                    let t = geometry_snap_move(app, &cam, rect, tool, handle, pivot, &axes, cur, t);
+                    app.snaps.hint = None;
                     app.doc.scene = *scene;
                     let mut base = app.doc.scene.clone();
                     let cmds = apply_drag(app, &mut base, t, r, s, pivot, true);
@@ -525,11 +540,43 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
     if resp.clicked_by(egui::PointerButton::Primary)
         && let Some(at) = resp.interact_pointer_pos()
     {
-        click_select(app, i, rect, at, shift);
+        let cam = app.views[i].camera;
+        if !crate::snap_ui::measure_click(app, &cam, rect, at) {
+            click_select(app, i, rect, at, shift);
+        }
     }
     // Double-click an edge: select its loop.
     if resp.double_clicked() && app.mode == SelectMode::Edge && !app.components.is_empty() {
         app.act(ui.ctx(), crate::actions::Action::SelectLoop);
+    }
+}
+
+/// A move with geometry snapping: the translation that puts the pivot on the vertex, edge point or
+/// surface point under the pointer (along the dragged axis for an axis handle), when one is in
+/// range; the plain translation `t` otherwise. The dragged objects are not snapped to.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn geometry_snap_move(
+    app: &mut ModelApp,
+    cam: &Camera,
+    rect: Rect,
+    tool: Tool,
+    handle: Handle,
+    pivot: Vec3,
+    axes: &[Vec3; 3],
+    cur: Pos2,
+    t: Vec3,
+) -> Vec3 {
+    app.snaps.hint = None;
+    if tool != Tool::Move || !app.snaps.targets.any() {
+        return t;
+    }
+    let skip: Vec<ObjectId> = if app.mode == SelectMode::Object { app.selection.clone() } else { app.edit_target().into_iter().collect() };
+    let Some(hit) = crate::snap_ui::geometry_snap(app, app.snaps.targets, &skip, cam, rect, cur) else { return t };
+    app.snaps.hint = Some(hit);
+    let d = hit.point - pivot;
+    match handle {
+        Handle::Axis(k) => axes.get(k).map_or(t, |a| *a * d.dot(*a)),
+        Handle::Free => d,
     }
 }
 
@@ -784,6 +831,9 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
 fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let cam = app.views[i].camera;
     let aspect = rect.aspect_ratio();
+    if i == app.active_view && aspect.is_finite() && aspect > 0.0 {
+        app.uv.view_aspect = aspect;
+    }
     let ids = drawables(&app.doc.scene);
     let session = app.doc.sculpt.as_ref().map(|s| s.id);
     let sculpting = app.workspace == Workspace::Sculpt;
@@ -803,8 +853,12 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             }
         }
     }
-    let lines = scene_lines(app, i);
-    let overlay = face_overlay(app);
+    let mut lines = scene_lines(app, i);
+    let mut overlay = face_overlay(app);
+    let extras = crate::display_modes::plan(&app.doc.scene, app.display_mode, &|id| app.selection.contains(&id), &items);
+    lines.extend(extras.lines);
+    overlay.extend(extras.overlay);
+    let modes = extras.modes;
     let Some(g) = &mut app.gpu else {
         cpu_view(app, ui, i, rect, &items, &lines);
         return;
@@ -812,9 +866,13 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
     let mut specs = Vec::new();
-    for (id, m, w, tint) in &items {
+    for (n, (id, m, w, tint)) in items.iter().enumerate() {
         let Some(o) = app.doc.scene.get(*id) else { continue };
-        let key = m.as_ref().map(|m| g.mesh(m));
+        let mode = modes.get(n).copied().unwrap_or_default();
+        if !crate::display_modes::is_solid(mode) {
+            continue;
+        }
+        let key = if mode == DisplayMode::Flat { m.as_ref().map(|m| g.mesh_flat(m)) } else { m.as_ref().map(|m| g.mesh(m)) };
         let base = material_source(&app.doc.scene, o).material.base_color;
         specs.push(crate::gpu::DrawSpec {
             key,
@@ -823,10 +881,12 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             selected: app.selection.contains(id) && !sculpting,
             show_mask: Some(*id) == session,
             patch_tint: app.show_patches || paint,
+            uv_checker: app.uv.viewport_checker && m.as_ref().is_some_and(|m| m.has_uvs()),
             roughness: o.material.roughness,
         });
     }
-    if let Some(tex) = g.draw(i, size, cam.view_proj(aspect), cam.eye(), theme::VIEWPORT_BG, &specs, &lines, &overlay) {
+    let hair = crate::hair_ui::hair_specs(&mut app.doc, &app.groom, &app.selection, g);
+    if let Some(tex) = g.draw(i, size, cam.view_proj(aspect), cam.eye(), theme::VIEWPORT_BG, &specs, &lines, &overlay, &hair) {
         ui.painter_at(rect).image(tex, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
@@ -976,6 +1036,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     crate::hair_ui::overlay(app, ui, rect);
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
+    crate::snap_ui::overlay(app, &painter, &cam, rect);
     // View name and focus/active outline.
     let active = app.active_view == i;
     painter.text(
@@ -1062,7 +1123,11 @@ fn gizmo(app: &mut ModelApp, painter: &egui::Painter, i: usize, rect: Rect) {
         _ => None,
     };
     let cols = [theme::AXIS_X, theme::AXIS_Y, theme::AXIS_Z];
-    for (k, ax) in AXES.iter().enumerate() {
+    let axes = match &app.drag {
+        Some(Drag { kind: DragKind::Gizmo { axes, .. }, .. }) => *axes,
+        _ => crate::snap_ui::gizmo_axes(app),
+    };
+    for (k, ax) in axes.iter().enumerate() {
         let c = if active == Some(Handle::Axis(k)) { Color32::from_rgb(255, 220, 90) } else { cols.get(k).copied().unwrap_or(Color32::WHITE) };
         match app.tool {
             Tool::Rotate => {

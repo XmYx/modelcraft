@@ -10,6 +10,9 @@
 //!   and a root-to-tip taper.
 //! - [`apply_stroke`]: grooming brushes (comb, cut, length, puff, smooth, clump, frizz) as plain-data
 //!   [`Stroke`]s of [`Dab`]s, with symmetry and a per-vertex mask, which is what makes them commands.
+//! - [`bake_guides`] and [`StrandSolver`]: guides that hang and swing under gravity and wind, with
+//!   length constraints and emitter collision, baked per frame through `modelcraft-sim`.
+//! - [`to_glb`]: curves as a glTF binary of line segments.
 //! - [`Limits`]: hard caps on guide counts, strand counts, points per strand and total memory, checked
 //!   before anything is allocated.
 //!
@@ -25,6 +28,8 @@
 #![forbid(unsafe_code)]
 
 mod brush;
+mod dynamics;
+mod export;
 mod guides;
 mod interp;
 mod kdtree;
@@ -34,9 +39,13 @@ mod surface;
 #[cfg(test)]
 mod brush_tests;
 #[cfg(test)]
+mod dynamics_tests;
+#[cfg(test)]
 mod tests;
 
 pub use brush::{Brush, BrushKind, Dab, MAX_DABS, Stroke, StrokeReport, Symmetry, apply_dabs, apply_stroke, paint_map};
+pub use dynamics::{DynamicsSettings, MAX_ITERATIONS, StrandSolver, bake_guides, guides_from_points};
+pub use export::{CurveExport, MAX_EXPORT_POINTS, to_glb};
 pub use guides::{Amount, GrowSpec, Guides, grow_guides};
 pub use interp::{Blend, Clump, Frizz, HairCurves, InterpSpec, Width, interpolate};
 pub use kdtree::MAX_K;
@@ -74,6 +83,8 @@ pub enum HairError {
     BadRoot,
     #[error("out of memory for {0} bytes of hair")]
     OutOfMemory(usize),
+    #[error("{0}")]
+    Simulation(String),
 }
 
 /// Hard caps on what one operation may create. [`Limits::default`] suits interactive use; a caller

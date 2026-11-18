@@ -9,7 +9,7 @@ use modelcraft_engine::Document;
 use modelcraft_render::pathtrace::integrator::IntegratorSettings;
 use modelcraft_render::pathtrace::{DenoiseMode, RestirMode, RestirSettings};
 use modelcraft_render::pathtrace::{Film, RenderSettings, Renderer, Scene, scenes};
-use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
+use modelcraft_render::pathtrace_gpu::{GpuContext, GpuOptions, GpuRenderer};
 use modelcraft_render::trace::{ExportOptions, Lighting, export_scene, load_panorama, scene_bounds};
 use modelcraft_render::{Camera, Projection};
 
@@ -34,6 +34,10 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
                                     the two half renderings, for finals) or svgf (the interactive
                                     filter). A .exr then holds the filtered image as R, G, B and the
                                     original as noisy.R/G/B
+      --hardware-rays               trace through the GPU's ray-query hardware (needs a build with the
+                                    hw-ray-query feature and a device that has it; otherwise software)
+      --bvh binary|wide             traversal structure: the binary tree (default) or its compressed 8-wide
+                                    form (faster on the CPU, not on the GPU; see docs/performance.md)
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
@@ -70,6 +74,8 @@ pub struct RenderArgs {
     pub splitting: bool,
     pub restir: RestirSettings,
     pub denoise: DenoiseMode,
+    pub wide_bvh: bool,
+    pub hardware_rays: bool,
 }
 
 impl Default for RenderArgs {
@@ -95,6 +101,8 @@ impl Default for RenderArgs {
             splitting: false,
             restir: RestirSettings::default(),
             denoise: DenoiseMode::Off,
+            wide_bvh: false,
+            hardware_rays: false,
         }
     }
 }
@@ -157,7 +165,18 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         splitting: a.iter().any(|x| x == "--splitting"),
         restir: parse_restir(a)?,
         denoise: parse_denoise(a)?,
+        wide_bvh: parse_bvh(a)?,
+        hardware_rays: a.iter().any(|x| x == "--hardware-rays"),
     })
+}
+
+/// `--bvh binary|wide`: whether to trace through the 8-wide hierarchy.
+pub fn parse_bvh(a: &[String]) -> Result<bool, String> {
+    match value(a, "--bvh") {
+        None | Some("binary") => Ok(false),
+        Some("wide") => Ok(true),
+        Some(other) => Err(format!("--bvh: expected binary or wide, found {other:?}")),
+    }
 }
 
 /// `--denoise` alone means `nfor`; a mode may follow it.
@@ -234,8 +253,25 @@ pub struct Report {
     pub denoised: Option<(Vec<[f32; 3]>, f64)>,
 }
 
+/// The GPU: one with ray-query hardware when asked for (and built for), else the usual one.
+pub fn open_gpu(hardware_rays: bool) -> Option<GpuContext> {
+    if hardware_rays {
+        if let Some(ctx) = GpuContext::new_hardware() {
+            return Some(ctx);
+        }
+        eprintln!(
+            "note: hardware ray queries are not available (built with the hw-ray-query feature: {}); tracing in software",
+            modelcraft_render::pathtrace_gpu::HARDWARE_RAYS_BUILT
+        );
+    }
+    GpuContext::new()
+}
+
 /// Render `scene` with the device the arguments ask for.
-pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
+pub fn render(mut scene: Scene, args: &RenderArgs) -> Result<Report, String> {
+    if args.wide_bvh && !scene.enable_wide_bvh() {
+        eprintln!("note: this scene's tree does not fit the 8-wide form; using the binary tree");
+    }
     let settings = RenderSettings {
         width: args.width,
         height: args.height,
@@ -251,16 +287,17 @@ pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
     };
     let gpu = match args.device {
         Device::Cpu => None,
-        Device::Gpu => Some(GpuContext::new().ok_or("no GPU adapter is available; use --device cpu")?),
-        Device::Auto => GpuContext::new().filter(|c| !c.caps.software),
+        Device::Gpu => Some(open_gpu(args.hardware_rays).ok_or("no GPU adapter is available; use --device cpu")?),
+        Device::Auto => open_gpu(args.hardware_rays).filter(|c| !c.caps.software),
     };
     if let Some(ctx) = gpu {
         let attempt = (|| -> Result<Report, String> {
-            let mut r = GpuRenderer::new(&ctx, &scene, settings).map_err(|e| e.to_string())?;
+            let mut r = GpuRenderer::with_options(&ctx, &scene, settings, GpuOptions { hardware_rays: args.hardware_rays }).map_err(|e| e.to_string())?;
+            let rays = if r.uses_hardware() { ", ray queries" } else { "" };
             let t = Instant::now();
             r.render(&ctx, args.samples).map_err(|e| e.to_string())?;
             let film = r.film(&ctx).map_err(|e| e.to_string())?;
-            Ok(Report { film, device: format!("gpu: {} ({})", ctx.caps.adapter, ctx.caps.backend), seconds: t.elapsed().as_secs_f64(), denoised: None })
+            Ok(Report { film, device: format!("gpu: {} ({}{rays})", ctx.caps.adapter, ctx.caps.backend), seconds: t.elapsed().as_secs_f64(), denoised: None })
         })();
         match attempt {
             Ok(report) => return Ok(report),
@@ -412,6 +449,16 @@ mod tests {
         run("builtin:cornell", png.to_str().unwrap(), &small, |_| Err("no files".into())).unwrap();
         assert!(std::fs::metadata(&png).unwrap().len() > 0);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parses_the_bvh_option_and_renders_the_same_picture_either_way() {
+        assert!(!parse(&args(&[])).unwrap().wide_bvh && parse(&args(&["--bvh", "wide"])).unwrap().wide_bvh);
+        assert!(parse(&args(&["--bvh", "quad"])).is_err());
+        let small = RenderArgs { width: 24, height: 18, samples: 4, device: Device::Cpu, ..RenderArgs::default() };
+        let plain = render(builtin("showcase").unwrap(), &small).unwrap().film;
+        let wide = render(builtin("showcase").unwrap(), &RenderArgs { wide_bvh: true, ..small }).unwrap().film;
+        assert_eq!(plain.sum, wide.sum);
     }
 
     #[test]

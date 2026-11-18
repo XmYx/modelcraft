@@ -98,6 +98,14 @@ on the UI thread and is bounded by the limits below, so a runaway script cannot 
 for more than the time limit; Undo reverts what it did. Unsaved edits are never discarded without
 a prompt (New, Open and choosing a file ask first).
 
+**Unsaved text.** The window keeps what you typed. A moment (1.5 s) after the text last changed,
+and when the app exits, an unsaved script is written to `<state folder>/modelcraft/recovery/scripts/script-draft.json`
+(one file replaced atomically, with the file it belongs to); saving, emptying or discarding the
+text removes it. At the next start the text comes back as unsaved changes, on its file when that
+still exists (the file itself is untouched until you save), and the window opens with a note.
+Texts over 4 MiB are not kept (the status line says so once). The file format and its checks are
+`modelcraft_script::draft`; damaged or foreign files are ignored.
+
 **Files.** The scripts folder is `<user data folder>/modelcraft/scripts`. Its `*.rhai` files and
 one level of subfolders become the Scripts menu (the first comment line is the tooltip); the
 `quick` subfolder becomes the Quick Scripts strip under the tool options; `startup.rhai` runs once
@@ -152,6 +160,67 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
   `args()`; `current_file()` is the open project's file.
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
   [cli.md](cli.md#scripts).
+
+## Plugins
+
+Script packages with a manifest, permissions and a version, installed from the Plugins window and
+run in a sandbox the user approves, are described in [plugins.md](plugins.md).
+
+## Over the control channel
+
+`script.run` runs a script on the open scene from outside: through the window's loopback socket
+(`modelcraft-cli call script.run '{"source": "add_primitive(\"cube\")"}'`), through
+`modelcraft-cli serve` and `control`, and as the `script` tool of the MCP server (`modelcraft-cli
+mcp`, with `--app` for the running window). Parameters: `source` (up to 1 MiB), `name` (what error
+messages call it, default `agent.rhai`), `args` (an object of strings, numbers and booleans, read
+with `arg(name, default)`).
+
+The reply is `{"ok": true, "result": {...}}` where `result` is the report of the run: `ok`,
+`value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line,
+column, message) and `selection` when the script changed it. A script that fails is a successful
+reply with `result.ok == false` (the MCP tool marks it as an error and still returns the report);
+a malformed request is `{"ok": false, "error": ...}`.
+
+An agent's script is as powerful as the agent already is and no more: it runs with the default
+limits, with no file access at all (whatever the user allowed their own scripts), no script
+library, and the selection of the window (which the script may change). Its changes are ordinary
+commands, so each is an undo step (`undo_group` makes one for the whole script) and the window's
+status line says an agent changed the scene. Tools and callbacks it registers are dropped when it
+ends. Clients are asked for approval like for any other change (`script.run` is a *Changes*
+request), and the channel needs its token like every other method.
+
+## Libraries
+
+A script can share code through Rhai modules kept in the scripts folder:
+
+```rhai
+// <scripts folder>/lib/shapes.rhai
+export const SIDES = 6;
+fn row(n, name) { for i in 0..n { move_to(add_primitive("cube", name + i), i * 2, 0, 0); } }
+```
+
+```rhai
+import "lib/shapes" as shapes;
+shapes::row(shapes::SIDES, "c");
+```
+
+- **Where.** The name is a path relative to the scripts folder without the `.rhai` (the suffix may
+  be given). Conventionally libraries live in `lib/`, which the Scripts menu skips. In
+  `modelcraft-cli run-script` the folder is the script's own, or `--library DIR`; `-e` scripts have
+  none unless `--library` is given.
+- **Sandbox.** A name is plain names joined by `/` (letters, digits, `_`, `-`, space, inner dots):
+  no leading `/`, `..`, hidden names, `\` or `:`. The file must be a regular file of at most 4 MiB
+  inside the folder after symbolic links are followed (a link that points out is refused). A
+  library runs in the importing script's engine, so it has the same operation, time, depth and
+  command limits and the same file permissions, and cannot reach more than the script could. At
+  most 8 libraries deep, 64 modules per run; an import cycle is an error naming the chain.
+- **Reloading.** Libraries are read again on every run, so edits show at once.
+- **Tools and callbacks.** They run after the script ended, so the session keeps the modules a
+  script imports at its top level as the namespace of the alias for as long as it lives: a tool
+  that calls `shapes::row` works later. Two scripts that import different libraries under the same
+  alias share the last one loaded, so name aliases after the library. `cmd` and `global` are the
+  engine's and are never replaced.
+- **Errors** inside a library read `... (in library lib/shapes)`; limits stay limits.
 
 ## Recorded macros
 
@@ -217,7 +286,7 @@ undo_group("Macro: Macro 1", || {
 ## The sandbox
 
 A script has no file or network access and no way to start a process: the engine is built from
-Rhai's standard package only, `eval` and modules are switched off, and the functions that touch the
+Rhai's standard package only, `eval` is switched off, modules load only from the scripts folder (see Libraries), and the functions that touch the
 disk (`read_text`, `write_text`, `list_dir`, `file_exists`, `export_scene`, and the `import`
 command) check a `Permissions` first. The default grants nothing. A path is made absolute, `..`
 is resolved and symbolic links are followed before it is compared with the granted folders, so a
@@ -249,7 +318,8 @@ What is measured, and what is not (Linux, test profile of this workspace):
   not measure a map when a key is assigned, only when it is built by a function): at the default
   limits it grew the process by about 67 MB (integer values) to 153 MB (an array per key) in about
   one second before the operation limit stopped it. That is the figure to read as the memory bound
-  of a hostile script; there is no allocator cap, so it is a measurement, not a guarantee.
+  of a hostile script; there is no allocator cap (see below), so it is a measurement, not a
+  guarantee. `crates/script/tests/memory.rs` repeats it.
 - Array growth by `push` is measured per call and rejected at 20,000 entries (Rhai re-measures the
   array on every call, so the cap is kept small; bulk geometry stays in mesh handles).
 - A single native command that is already running is not interrupted. Commands bound their own
@@ -257,6 +327,36 @@ What is measured, and what is not (Linux, test profile of this workspace):
   checked before the next one.
 - Scripts run on the thread that calls `Session::run` (the UI thread in the app). The time limit
   is what keeps the window responsive; a script cannot be stopped from outside while it runs.
+
+## Memory: why there is no allocator cap
+
+A hard cap on what a script may allocate was investigated and is **not built**; the limits above
+stay the bound. The findings:
+
+- *A counting allocator needs `unsafe`.* The only hook Rust gives for seeing allocations is
+  `#[global_allocator]`, and `GlobalAlloc` is an `unsafe trait` whose methods are `unsafe fn`. The
+  workspace is `#![forbid(unsafe_code)]`, so a wrapper cannot be written here, and pulling in a
+  crate that does it (it would carry its own `unsafe`) to cap the whole process would change a
+  house rule for little.
+- *It would not be a per-script cap anyway.* The allocator is process-wide: the window's renderer,
+  decoder and worker threads allocate through it too, and it cannot tell which thread is "the
+  script". Counting bytes around a run is noisy on a busy process and cannot stop a script half
+  way. A refused allocation (`null`) ends in Rust's out-of-memory handler, which aborts the whole
+  app: a hostile script would take the user's unsaved work with it, which is worse than the
+  growth it was meant to prevent.
+- *Rhai has no memory hook of its own.* What it offers is what is already set: string, array and
+  map size limits (nested containers count together), the operation limit, and call and
+  expression depth. ModelCraft adds the per-run budget for geometry built through mesh handles,
+  the command and output limits and the wall-clock deadline.
+- *A real cap would be a process boundary* (run scripts in a child process with an address-space
+  limit). That is a different architecture (documents would have to cross the boundary) and is not
+  planned.
+
+So the memory bound of a hostile script is a measurement, kept honest by a test:
+`crates/script/tests/memory.rs` runs seven hostile scripts under the default limits and fails if the
+process's peak resident size grows by 512 MiB or more for one of them (`docs/performance.md`,
+"Script memory", has the numbers). Revisit this if Rhai gains an allocation hook, or if the
+project allows a vetted `unsafe` allocator crate.
 
 ## Layering
 

@@ -358,6 +358,40 @@ fn settings_are_clamped_and_round_trip_through_json() {
     assert_eq!(serde_json::from_str::<RigidSettings>(&json).unwrap(), s);
 }
 
+/// A stack of spinning boxes dropped on the ground, as the property test below builds it; the
+/// lowest point any box reaches.
+fn spinning_stack_lowest(n: usize, size: f32, drop: f32, e: f32, mu: f32, spin: f32) -> f32 {
+    let bodies: Vec<BodyDesc> = (0..n)
+        .map(|i| {
+            active(
+                i as u64,
+                Vec3::new(0.1 * i as f32, size * 0.5 + drop + 1.3 * size * i as f32, 0.0),
+                Vec3::splat(size * 0.5),
+                RigidSettings { bounciness: e, friction: mu, spin: [spin, 0.0, spin], ..Default::default() },
+            )
+        })
+        .collect();
+    let mut w = world(bodies, Some(0.0));
+    let cache = bake(&mut w, &BakeConfig { timing: timing(48, 4), seed: 1, ..BakeConfig::default() }, &mut Silent).unwrap();
+    assert!(cache.positions().iter().all(|p| p.is_finite()));
+    cache.positions().iter().map(|p| p.y).fold(f32::MAX, f32::min)
+}
+
+#[test]
+fn spinning_stacks_that_used_to_sink_and_fly_off_stay_on_the_ground() {
+    // Cases the property test found against the old box-shaped ground: the bottom box sank about
+    // 0.22 into the floor and the boxes above it were flung upwards at over 15 m/s.
+    for (n, size, drop, e, mu, spin) in [
+        (4, 0.261_325_12, 0.471_679_4, 0.035_465_34, 0.697_428_9, 2.370_561),
+        (5, 0.91, 0.16, 0.77, 0.89, 3.76),
+        (4, 0.26, 0.47, 0.77, 0.89, 3.76),
+        (1, 0.527_940_9, 1.531_206, 0.606_503_3, 1.175_139_3, -3.919_208),
+    ] {
+        let lowest = spinning_stack_lowest(n, size, drop, e, mu, spin);
+        assert!(lowest > -0.1 * size, "n={n} size={size}: lowest point {lowest}");
+    }
+}
+
 proptest::proptest! {
     #![proptest_config(proptest::prelude::ProptestConfig::with_cases(24))]
     #[test]

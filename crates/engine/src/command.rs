@@ -2,7 +2,7 @@
 
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Field, Material, ObjectId, StepOp, Transform};
+use modelcraft_scene::{Array, Cloner, Field, Material, Modifier, ObjectId, StepOp, Transform};
 use modelcraft_sculpt::Stroke;
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +95,12 @@ pub enum Command {
         #[serde(default = "two")]
         levels: u32,
     },
+    /// Add an array generator (`linear`, `radial`): real copies of the input joined into one mesh.
+    AddArray {
+        kind: String,
+        #[serde(default)]
+        input: Option<ObjectId>,
+    },
     /// Add a clone generator (`linear`, `radial`, `grid`, `scatter`, `surface`, `vertices`). The
     /// given object becomes the source it clones; without one, a small cube is made.
     AddCloner {
@@ -102,13 +108,26 @@ pub enum Command {
         #[serde(default)]
         input: Option<ObjectId>,
     },
+    /// Add a symmetry generator: the input mirrored across a plane through its origin.
+    AddSymmetry {
+        #[serde(default)]
+        input: Option<ObjectId>,
+        #[serde(default = "default_axis")]
+        axis: u32,
+    },
     /// Add a deformer (`bend`, `twist`, `taper`, `ripple`, `round`) under a mesh.
     AddDeformer {
         kind: String,
         target: ObjectId,
     },
-    /// Add a falloff field (`sphere`, `box`, `linear`, `noise`) inside a deformer; the deformer
-    /// then acts only where the field is.
+    /// Add a clone modifier (`plain`, `random`, `noise`, `step`, `delay`, `target`) inside a clone
+    /// generator.
+    AddCloneModifier {
+        kind: String,
+        cloner: ObjectId,
+    },
+    /// Add a falloff field (`sphere`, `box`, `linear`, `noise`) inside a deformer or a clone
+    /// modifier; it then acts only where the field is.
     AddField {
         kind: String,
         target: ObjectId,
@@ -151,10 +170,27 @@ pub enum Command {
         id: ObjectId,
         deformer: Deformer,
     },
+    SetArray {
+        id: ObjectId,
+        array: Array,
+    },
+    SetSymmetry {
+        id: ObjectId,
+        axis: u32,
+        #[serde(default)]
+        weld: f32,
+    },
     /// Change a falloff field's shape, remap curve and blend mode.
     SetField {
         id: ObjectId,
         field: Field,
+    },
+    /// Change a clone modifier's mode and channels, and the object its `target` mode points at.
+    SetCloneModifier {
+        id: ObjectId,
+        modifier: Modifier,
+        #[serde(default)]
+        target: Option<ObjectId>,
     },
     /// Change a clone generator's layout and seed, and the target object of the surface and
     /// vertices layouts.
@@ -314,10 +350,17 @@ pub enum Command {
     Anim(crate::anim::AnimCommand),
     /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
     Rig(crate::rig::RigCommand),
+    /// Tags, layers, user attributes, presets, pivots and instances:
+    /// `{"cmd":"organize","op":"set_tag",…}` ([`crate::organize::OrganizeCommand`]).
+    Organize(crate::organize::OrganizeCommand),
     /// Hair and grooming: `{"cmd":"hair","op":"add","mesh":3}` ([`crate::hair::HairCommand`]).
     Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
+}
+
+fn default_axis() -> u32 {
+    0
 }
 
 /// Most commands one batch may hold, and how deep batches may nest.
@@ -337,9 +380,12 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_primitive", "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent?"),
     ("add_group", "Add an empty group: name?"),
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
+    ("add_array", "Add an array generator (linear, radial) around input?: real copies joined into one mesh"),
+    ("add_symmetry", "Add a symmetry generator around input? mirrored across axis (0 X, 1 Y, 2 Z)"),
+    ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear) under target"),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
-    ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round) under target"),
-    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the deformer target"),
+    ("add_clone_modifier", "Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner"),
+    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the target deformer or clone modifier"),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -350,7 +396,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_primitive", "Change a primitive's parameters: id, primitive"),
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
+    ("set_array", "Change an array's layout, copies and steps: id, array"),
+    ("set_symmetry", "Change a symmetry's axis and join distance: id, axis, weld"),
     ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
+    ("set_clone_modifier", "Change a clone modifier (mode, strength, position, rotation, scale, tint) and its target object: id, modifier, target?"),
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
@@ -405,8 +454,11 @@ impl Command {
             Command::AddPrimitive { kind, .. } => format!("Add {kind}"),
             Command::AddGroup { .. } => "Add group".into(),
             Command::AddSmoothCage { .. } => "Add smooth cage".into(),
+            Command::AddArray { kind, .. } => format!("Add {kind} array"),
+            Command::AddSymmetry { .. } => "Add symmetry".into(),
             Command::AddCloner { kind, .. } => format!("Add {kind} clones"),
             Command::AddDeformer { kind, .. } => format!("Add {kind}"),
+            Command::AddCloneModifier { kind, .. } => format!("Add {kind} clone modifier"),
             Command::AddField { kind, .. } => format!("Add {kind} field"),
             Command::Delete { .. } => "Delete".into(),
             Command::Duplicate { .. } => "Duplicate".into(),
@@ -418,7 +470,10 @@ impl Command {
             Command::SetPrimitive { .. } => "Primitive settings".into(),
             Command::SetCageLevels { .. } => "Smooth cage levels".into(),
             Command::SetDeformer { .. } => "Deformer settings".into(),
+            Command::SetArray { .. } => "Array settings".into(),
+            Command::SetSymmetry { .. } => "Symmetry settings".into(),
             Command::SetField { .. } => "Field settings".into(),
+            Command::SetCloneModifier { .. } => "Clone modifier settings".into(),
             Command::SetCloner { .. } => "Clone settings".into(),
             Command::AddStep { op, .. } => op.name().into(),
             Command::SetStep { op, .. } => format!("Edit {}", op.name()),
@@ -481,6 +536,7 @@ impl Command {
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
+            Command::Organize(o) => o.label(),
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
         }

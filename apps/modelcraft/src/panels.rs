@@ -10,7 +10,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, PRIMITIVES};
+use crate::actions::{self, ARRAYS, Action, CLONERS, DEFORMERS, FIELDS, MODIFIERS, PRIMITIVES};
 use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::dock::Move;
 use crate::theme;
@@ -98,6 +98,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
                 ui.separator();
                 action_button(app, ui, Action::AddCage);
+                for a in ARRAYS {
+                    action_button(app, ui, Action::AddArray(a));
+                }
+                action_button(app, ui, Action::AddSymmetry);
                 action_button(app, ui, Action::AddGroup);
                 ui.separator();
                 for d in DEFORMERS {
@@ -109,6 +113,9 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
                 for c in CLONERS {
                     action_button(app, ui, Action::AddCloner(c));
+                }
+                for m in MODIFIERS {
+                    action_button(app, ui, Action::AddCloneModifier(m));
                 }
             });
             ui.menu_button(tl!("Mesh"), |ui| {
@@ -170,6 +177,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                crate::snap_ui::menu(app, ui);
                 ui.checkbox(&mut app.show_wire, tl!("Wireframe on Selection"));
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
                 ui.menu_button(tl!("Navigation"), |ui| {
@@ -195,6 +203,8 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
+            crate::sim_ui::menu(app, ui);
+            crate::organize_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
@@ -475,6 +485,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
         PanelId::Brushes => brushes(app, ui),
         PanelId::Paint => paint(app, ui),
         PanelId::History => undo_history(app, ui),
+        PanelId::Simulation => crate::sim_ui::panel(app, ui),
     }
 }
 
@@ -503,11 +514,50 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.2, g));
             p.circle_filled(c, 2.0, g);
         }
+        ObjectKind::Array { .. } => {
+            let g = Color32::from_rgb(130, 210, 120);
+            for dx in [-4.0, 0.0, 4.0] {
+                p.rect_stroke(
+                    egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.5, 8.0)),
+                    0.0,
+                    egui::Stroke::new(1.0, g),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        ObjectKind::Symmetry { .. } => {
+            let g = Color32::from_rgb(130, 210, 120);
+            p.line_segment([c + egui::vec2(0.0, -6.0), c + egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, g));
+            p.rect_stroke(
+                egui::Rect::from_center_size(c + egui::vec2(-3.5, 0.0), egui::vec2(5.0, 8.0)),
+                0.0,
+                egui::Stroke::new(1.0, g),
+                egui::StrokeKind::Inside,
+            );
+            p.rect_stroke(
+                egui::Rect::from_center_size(c + egui::vec2(3.5, 0.0), egui::vec2(5.0, 8.0)),
+                0.0,
+                egui::Stroke::new(1.0, g),
+                egui::StrokeKind::Inside,
+            );
+        }
         ObjectKind::Field { .. } => {
             // A soft disc: strong in the middle, fading out.
             let t = Color32::from_rgb(110, 210, 200);
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, t.gamma_multiply(0.5)));
             p.circle_filled(c, 2.5, t);
+        }
+        ObjectKind::CloneModifier { .. } => {
+            // Three squares that grow: a change that ramps along the clones.
+            let o = Color32::from_rgb(240, 170, 90);
+            for (dx, s) in [(-4.0, 2.0), (0.0, 3.0), (4.0, 4.0)] {
+                p.rect_stroke(
+                    egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(s, s)),
+                    0.0,
+                    egui::Stroke::new(1.0, o),
+                    egui::StrokeKind::Inside,
+                );
+            }
         }
         ObjectKind::Cloner { .. } => {
             // Three small squares: one source, many clones.
@@ -547,6 +597,11 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             let k = Color32::from_rgb(240, 200, 120);
             p.circle_stroke(c + egui::vec2(-2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
             p.circle_stroke(c + egui::vec2(2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
+        }
+        ObjectKind::Instance { .. } => {
+            // An instance: the mesh diamond drawn dashed, linked to its master.
+            let pts = [c + egui::vec2(0.0, -5.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-5.0, 0.0)];
+            p.add(egui::Shape::dashed_line(&[pts[0], pts[1], pts[2], pts[3], pts[0]], egui::Stroke::new(1.2, blue), 2.0, 2.0));
         }
         ObjectKind::Sim { .. } => {
             // A simulation: a falling dot over a small arc.
@@ -649,8 +704,17 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ui.label(RichText::new(tl!("Shows its first mesh child subdivided. Edit the child; the cage follows.")).color(theme::TEXT_DIM).small());
             });
         }
+        ObjectKind::Array { array } => {
+            egui::CollapsingHeader::new(tl!("Array")).default_open(true).show(ui, |ui| crate::generator_ui::array_fields(app, ui, id, *array));
+        }
+        ObjectKind::Symmetry { axis, weld } => {
+            egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
+        }
         ObjectKind::Field { field } => {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
+        }
+        ObjectKind::CloneModifier { modifier, target } => {
+            egui::CollapsingHeader::new(tl!("Clone Modifier")).default_open(true).show(ui, |ui| crate::modifier_ui::fields(app, ui, id, *modifier, *target));
         }
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
@@ -660,7 +724,10 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         _ => {}
     }
-    if matches!(obj.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. }) {
+    if matches!(
+        obj.kind,
+        ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Instance { .. }
+    ) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
             let mut m = obj.material.clone();
             let mut rgb = [m.base_color[0], m.base_color[1], m.base_color[2]];
@@ -703,6 +770,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     }
     crate::deform_ui::properties(app, ui, id);
     crate::constraint_ui::properties(app, ui, id);
+    crate::organize_ui::properties(app, ui, id);
     crate::hair_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
@@ -726,7 +794,8 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
 fn history(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
     let ctx = ui.ctx().clone();
     let Some(obj) = app.doc.scene.get(id).cloned() else { return };
-    let errors = app.doc.eval.evaluate(&app.doc.scene, id).errors;
+    let evaluated = app.doc.eval.evaluate(&app.doc.scene, id);
+    let errors: Vec<_> = evaluated.errors.into_iter().chain(evaluated.warnings).collect();
     egui::CollapsingHeader::new(tl!("Build History")).default_open(true).show(ui, |ui| {
         let base = match &obj.kind {
             ObjectKind::Mesh { source: Source::Primitive { primitive }, .. } => crate::tlf!("Source: {shape}", shape = primitive.kind().replace('_', " ")),
@@ -887,6 +956,7 @@ fn deformer_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Defor
                 vec![drag(ui, amplitude, 0.005, -10.0..=10.0, tl!("Amplitude")), drag(ui, frequency, 0.01, 0.0..=100.0, tl!("Frequency"))]
             }
             Deformer::Round { amount } => vec![drag(ui, amount, 0.01, 0.0..=1.0, tl!("Amount"))],
+            Deformer::Shear { x, z } => vec![drag(ui, x, 0.01, -1000.0..=1000.0, tl!("Slide X")), drag(ui, z, 0.01, -1000.0..=1000.0, tl!("Slide Z"))],
         })
         .inner;
     if let Some(r) = r.iter().find(|r| r.changed() || r.drag_stopped()) {
@@ -1045,6 +1115,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
     crate::script_ui::show(app, ctx);
+    crate::plugin_ui::show(app, ctx);
     crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);

@@ -51,11 +51,20 @@ pub(crate) fn from_parse(file: &str, e: &ParseError) -> ScriptError {
 pub(crate) fn from_eval(file: &str, e: &EvalAltResult, limit_secs: f64) -> ScriptError {
     let mut calls: Vec<String> = Vec::new();
     let mut cur = e;
-    while let EvalAltResult::ErrorInFunctionCall(name, _, inner, pos) = cur {
-        if let Some(l) = pos.line() {
-            calls.push(format!("in {name}(), called from line {l}"));
+    loop {
+        match cur {
+            EvalAltResult::ErrorInFunctionCall(name, _, inner, pos) => {
+                if let Some(l) = pos.line() {
+                    calls.push(format!("in {name}(), called from line {l}"));
+                }
+                cur = inner;
+            }
+            EvalAltResult::ErrorInModule(name, inner, _) => {
+                calls.push(format!("in library {name}"));
+                cur = inner;
+            }
+            _ => break,
         }
-        cur = inner;
     }
     let (line, column) = place(cur.position());
     let (message, kind) = match cur {

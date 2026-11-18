@@ -1,0 +1,1 @@
+- Hair renders: strands in the path-traced Render View and in `modelcraft-cli render` are lit and shaded as fibres (reflection and light passing through), with the hair object's colour and roughness as the controls. Hair is traced on the processor; choosing the graphics card falls back with a note.

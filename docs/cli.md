@@ -24,8 +24,8 @@ modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
-modelcraft-cli hair-bench --strands 1000000   # grow guides and interpolate hairs: time and memory
 modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
+modelcraft-cli hair-bench --strands 1000000 [--gpu]   # grow guides, interpolate hairs, draw them: time, memory, frame times
 modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
 
@@ -193,6 +193,7 @@ lets them write in `--out-dir`).
 |---|---|
 | `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
 | `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--library DIR` | The folder `import "lib/name" as m;` reads [libraries](scripting.md#libraries) from (default: the script's own folder; none for `-e`) |
 | `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
 | `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
 | `--no-save` | Run and report, write nothing |
@@ -215,6 +216,19 @@ applications and map edits give the same result from the window, a script or the
 | `stroke` | `id`, `stroke`: `brush` {`kind` (comb, cut, length, puff, smooth, clump, frizz), `radius`, `strength`, `falloff`, `invert`, `cut_length`, `frequency`, `seed`}, `symmetry` {`x`, `y`, `z`}, `dabs` [{`center`, `normal`, `delta`, `pressure`}] in the emitter's space |
 | `apply` | `id`, `brush`, `symmetry?`, `center?` [x, y, z], `direction?` [x, y, z]: one dab, over the whole groom when `center` is left out; `direction` is the comb movement |
 | `map` | `id`, `map` (mask, density), `edit`: `fill` + `value` · `invert` · `clear` · `paint` + `center`, `radius`, `value`, `strength`, `falloff` |
+| `set_dynamics` | `id`, `dynamics?` (`gravity`, `wind` in world units per second squared, `damping`, `stiffness`, `iterations`, `collide`, `clearance`), `timing?` (`start_frame`, `end_frame`, `fps`, `substeps`), `seed?`; throws a bake away |
+| `bake` | `id`: simulate the guides over the frames (Verlet, length constraints, emitter collision) and cache them; the timeline, the viewport, renders and exports play the cache |
+| `clear_bake` | `id` |
+
+`modelcraft-cli render` and the Render View include hair: the object's base colour is the hair colour
+and its roughness the fibre roughness (CPU path tracer only; the GPU one declines hair).
+
+A bake is derived data: it is not saved in the project (the settings and seed are, so baking again gives
+the same bytes) and it is dropped when the guides or the settings change. Hair exports from the command
+line: `modelcraft-cli hair-export scene.modelcraft Hair out.glb [--strands N] [--guides] [--emitter]` writes
+glTF lines (one `LINES` primitive; the point width as the `_WIDTH` vertex attribute; `extras.modelcraft` holds
+the strand and point counts) and `hair-export … out.mcpc` the guides as a point cache (every baked frame, or
+one frame without a bake), in world space unless `--emitter` is given.
 
 The mask (1 where brushes act fully, 0 where they never touch a guide) and the density (where
 `regrow` puts guides) are values on the emitter's vertices. Limits (checked before allocating):
@@ -287,6 +301,26 @@ playback range (curves, layers, constraints and IK all baked into it). What glTF
 printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
 builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
+### Organising objects
+
+One command, `organize`, with the operation in `op`: `{"cmd":"organize","op":"set_tag","ids":[1],"tag":{"type":"protection","position":true,"rotation":false,"scale":false}}`.
+`modelcraft-cli commands` lists the operations.
+
+| `op` | Fields |
+|---|---|
+| `set_tag`, `remove_tag` | `ids`, `tag` (`display` + `mode`: auto, smooth, flat, wireframe, see_through, bounding_box; `render` + `visible`; `protection` + `position`, `rotation`, `scale`; `look_at` + `target`) or `kind` |
+| `add_layer`, `edit_layer`, `remove_layer`, `assign_layer` | `name`, `ids`, `id`, `color`, `visible`, `render`, `locked`, `layer` |
+| `set_user_attr`, `remove_user_attr` | `ids`, `name`, `value` (`{"type":"number","value":2.5}`; types number, switch, text, colour, vector) |
+| `save_preset`, `apply_preset`, `remove_preset` | `from`, `name`, `parts`, `index`, `ids` |
+| `set_pivot`, `pivot_to_center` | `ids`, `pivot` (object space), `keep_in_place` (default true) |
+| `instance`, `make_unique` | `ids` |
+
+A look-at tag is an aim constraint (+Z at the target) that the tag keeps in step. A protection tag
+makes `set_transform` refuse a change of the channels it names. Hidden layers hide their objects
+in the viewport, in renders and in exports; a layer with Render off shows them only in the
+viewport; a locked layer refuses edits like a locked object. A number or switch user attribute is
+the attribute `user.<name>` (a vector part is `user.<name>.x`), so `anim set_key` keys it.
+
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
@@ -303,7 +337,10 @@ samples per second.
 | `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
 | `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
 | `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
+| `--flip` (`render-bench`) | Also report the FLIP perceptual difference to the reference (low-dynamic-range form, exposure 0, 67 pixels per degree; not checked against the reference implementation) |
 | `--denoise [svgf\|nfor]` | Filter the noise out: `nfor` (default; regression on the two half renderings, for finals) or `svgf` (the interactive filter). A `.exr` then holds the filtered image as R, G, B and the original as `noisy.R/G/B`. On `render-bench` it also reports the error after the filter and the filter's time ([performance.md](performance.md)) |
+| `--hardware-rays` | Trace through the GPU's ray-query hardware. Needs a build with the cargo feature `hw-ray-query` (off by default, see AGENTS.md) and a device that has it; otherwise software tracing, with a note. Scenes with cut-outs use software too ([performance.md](performance.md)) |
+| `--bvh binary\|wide` | Trace through the binary tree (default) or its compressed 8-wide form: the same images, faster on the CPU for large scenes, slower on the GPU ([performance.md](performance.md)) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
@@ -335,6 +372,7 @@ The same requests reach a document four ways (`crates/engine/src/control.rs`):
 | `document.revision` | — | `{document_id, revision}` |
 | `document.save` | `{path?}` | `{path}` |
 | `document.export` | `{path}` (.glb, .obj, .stl) | `{path}` |
+| `script.run` | `{source, name?, args?}` | the script's report: `{ok, value, output, commands, operations, seconds, error, selection?}` ([scripting.md](scripting.md#over-the-control-channel)) |
 
 Every reply is `{"ok":true,"result":…}` or `{"ok":false,"error":"…"}`.
 

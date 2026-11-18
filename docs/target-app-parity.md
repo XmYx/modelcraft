@@ -119,11 +119,11 @@ Weight: 6
 | Single and four-view layouts | C M | D | S | Space |
 | Ground grid and axis triad | C M Z | D | S | |
 | Shaded with wireframe on selection | C M Z | D | S | Auto-smoothed normals (40°) |
-| Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | P | M | Shaded and wireframe only |
+| Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | D | M | Organize ▸ Display Mode for the view, a Display tag per object; each mode drawn and read back on a real GPU adapter in a test |
 | Move, rotate, scale gizmos | C M Z | D | M | Axis and free handles; numeric alternative |
 | Gizmo step snapping (grid, angle, scale) | C M | D | S | Shift+S; Ctrl inverts per drag |
-| Vertex, edge, face and surface snapping | C M Z | M | M | |
-| Gizmo orientation (world, local, normal, custom) and pivot editing | C M Z | M | M | World axes only |
+| Vertex, edge, face and surface snapping | C M Z | D | M | View ▸ Snapping and Axes: snap a gizmo move onto vertices, edge points and surface points of the other objects (vertex over edge over surface, marker shown, axis handles keep their axis); work is capped by a sampling budget |
+| Gizmo orientation (world, local, normal, custom) and pivot editing | C M Z | P | M | World, local, parent and component-normal axes for move and rotate, and the gizmo sits on the object's pivot (typed or Pivot to Center in Properties); no custom orientation and no dragging of the pivot in the viewport |
 | Isolate selection, hide and unhide | C M Z | P | S | Per-object visibility only |
 | Camera bookmarks and saved views | C M | M | S | |
 | Reference images and image planes | C M Z | M | M | |
@@ -134,7 +134,7 @@ Weight: 6
 | Heads-up statistics (polygons, frame rate) | C M Z | P | S | Frame rate in the status bar; no polygon counts |
 | Headless viewport renders for thumbnails and CI | M | P | S | GPU readback works in `modelcraft-cli bench` and tests; no render command |
 | Large-scene drawing: culling, level of detail, proxies | C M | P | L | 2.0 M triangles at ~290 fps; no culling or proxies |
-| Measure tool and scene units | C M | M | M | |
+| Measure tool and scene units | C M | D | M | Measure (View ▸ Snapping and Axes, palette): two clicks on vertices, edge points or surfaces give the distance and its x, y, z parts in the preference's length unit, drawn in the view and announced in the status bar |
 | Camera objects: create, look through, focal length, clipping | C M | M | M | One editor camera |
 | Safe frames and resolution gate | C M | M | S | |
 | Colour-managed viewport (view transform from a colour config) | C M R | M | M | |
@@ -153,15 +153,15 @@ Weight: 5
 | Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
 | Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
 | Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
-| Tags: per-object behaviours (display, render, protection, look-at) | C | M | M | |
-| Display and render layers | C M | M | M | |
-| Instances that share a mesh | C M | M | M | |
+| Tags: per-object behaviours (display, render, protection, look-at) | C | D | M | Display (own draw mode), Render (viewport only), Protection (per channel, refused in the engine), Look At (an aim constraint kept by the tag); `organize` command |
+| Display and render layers | C M | D | M | Layers window: show, render (viewport only) and lock per layer; hidden layers leave the viewport, renders and exports |
+| Instances that share a mesh | C M | D | M | Instance object shares the master's evaluated mesh (one allocation, one GPU upload); own transform and material; Make Unique; deleting a master keeps its instances as real meshes |
 | Selection sets | C M | D | S | Saved in the scene, follow deletes, selected by name |
-| Custom user attributes on objects | C M | M | M | |
+| Custom user attributes on objects | C M | D | M | Number, switch, text, colour, vector per object; numbers and vector parts are `user.<name>` attributes, so they key and script like any number |
 | Scene overrides (takes, render setups) | C M | M | L | |
 | Lock and template objects (visible, not selectable) | C M | D | S | Locked objects refuse edits in the engine; reference-only objects are drawn but never picked |
-| Copy and paste attributes; attribute presets | C M | P | S | Copy and paste transform, material and visibility onto many objects; no presets |
-| Object pivot separate from the origin | C M Z | M | S | |
+| Copy and paste attributes; attribute presets | C M | D | S | Copy and paste onto many objects; named presets saved in the scene (material, tags, user attributes, optionally the placement) |
+| Object pivot separate from the origin | C M Z | D | S | Pivot fields, Pivot to Center, Reset; objects and children stay in place; exports fold the pivot into the transform |
 
 ## Dependency graph, history and node editing
 
@@ -196,7 +196,7 @@ Weight: 4
 | Extruded 3D text | C M | M | M | |
 | Terrain / landscape generator | C | M | M | |
 | Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
-| Array and symmetry generators (live) | C M | M | M | Mirror exists only as a destructive step |
+| Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |
 | Live polygon reduction generator | C | M | M | |
 | Volume mesher: combine shapes as distance fields, then mesh | C | M | L | |
@@ -302,8 +302,8 @@ Weight: 5
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Cloner: linear, radial, grid, honeycomb, on-object modes | C M | P | L | Clones object: linear, radial, grid, scatter, surface and vertex layouts, seeded; no honeycomb or per-clone selections |
-| Effectors: plain, random, shader, step, delay, time, target, formula | C M | M | L | |
-| Fields drive effectors | C | M | M | |
+| Effectors: plain, random, shader, step, delay, time, target, formula | C M | P | L | Clone modifiers: plain, random, noise (shader), step, delay (time based, follows the timeline) and target, each acting on position, rotation, scale and tint, stacked in order; no formula or mesh-sampled shader |
+| Fields drive effectors | C | D | M | Falloff fields placed inside a clone modifier weigh each clone; several combine as in deformers |
 | Clone selections and weight maps | C | M | M | |
 | Instancing at scale (millions of points, render instances) | C M | P | M | Clones share one GPU mesh and one evaluated mesh; capped at 10,000 per generator, one draw call each |
 | Voronoi fracture | C M | M | L | |
@@ -323,9 +323,9 @@ Weight: 4
 | Angle-based unwrap (ABF) | C M Z | D | M | `modelcraft-uv`: ABF with the reduced Newton system of ABF++ (Sheffer et al. 2001, 2005) as a second solver beside LSCM; chosen with the Unwrap solver box in the UV Editor, `Unwrap UVs (Angle-Based)` in the UV menu and the palette, `method` on the Unwrap step, or `uv-bench --method abf`; an island that does not converge falls back to LSCM and the report says so. Compared with LSCM in `docs/performance.md` |
 | Packing | C M | D | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density (a work bound and a shelf fallback above 500 islands); Pack UV Islands in the UV Editor and menu, history step, CLI |
 | UDIM tiles | C M Z | D | M | `modelcraft-uvpack`: tiles numbered 1001 to 1100 (ten columns, rows going up; stored v is down), packing into N tiles or as many as a texel density needs, with one density across tiles, as the Pack UV Islands step (`tiles`, `texel_density`) and the UDIM tiles box in the UV Editor; the editor draws every tile the UVs reach with its number; layout pictures export one file per tile (`name.1001.png`, `export-uv --udim`); `udim_tiles` lists the tiles a mesh uses. Materials do not sample UDIM sets of images yet |
-| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode); camera projection through the history step and CLI only |
+| Projections: planar, box, cylindrical, spherical, camera | C M Z | D | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode), and Project UVs: From View, which projects as the active 3D view sees the mesh (its camera and the object's transform); all as history steps and through the CLI; the Pack Options popover holds margin, rotation, island sizes, a texel density and the tile count |
 | Relax, straighten, align and stitch tools | C M | D | M | `modelcraft-uv`: Relax UVs (local/global flattening of Liu et al. 2008, keep lengths or keep angles, on the selection with the rest held), Straighten UVs (selected chains of UV edges on the line between their ends, keeping edge-length ratios), Stitch UV Islands (moves one island onto its neighbour along the shared edges with a least-squares similarity, optionally matching scale, then welds), Weld, flip and numeric align; history steps, the UV Editor, menu and palette, `add_step` |
-| Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
+| Checker display, texel density, distortion heat map | C M Z | D | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; `Checker in the 3D view` draws the checker from the UVs on every mesh that has them (the viewport vertex carries a UV per corner; sculpt meshes have none yet) |
 | Automatic UVs from polygon groups | Z | D | M | `Unwrap UVs by Polygon Groups`: the Unwrap step cuts along every border between two patches (polygon groups) so each group is an island, solved with LSCM or ABF, then Pack UV Islands (with tiles) lays them out; step field `from_patches`, UV menu and palette |
 | Transfer UVs between meshes | M Z | D | S | `modelcraft-uv` `transfer_uvs`: each corner takes the UV at the closest point of the other mesh's surface (grid search; per island, so a face never straddles a source seam, and a seam vertex keeps the side its face is on); the `transfer_uvs` command (world space, distance limit, one undo step as a `Set UVs` step) with Transfer UVs in the UV Editor, menu and palette (select the source, then the target) |
 | UV layout export as an image | C M Z | D | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines from the UV Editor, the UV menu and `modelcraft-cli export-uv`. UVs round-trip exactly through GLB and OBJ (tested) |
@@ -415,10 +415,10 @@ Weight: 8
 |---|---|---|---|---|
 | Real-time viewport PBR | C M Z | P | M | Rasterized studio lighting; no shadows or image lighting |
 | Path tracing on the CPU | C M R | D | XL | `craft-render-core`: unidirectional, all cores, deterministic per seed; checked against analytic lights and a furnace test. Which surface, light and output features it carries is counted in their own rows |
-| Path tracing on the GPU | C R | D | XL | `craft-render-gpu`: everything the CPU path renders, as one wgpu compute pipeline (Vulkan, Metal, DX12): the full layered surface model, textures, normal and bump maps, cut-outs, absorbing glass, every light type, panorama lighting with importance sampling, the light tree and the feature images; 30–50× the 24-thread CPU on an RTX 4090 ([performance.md](performance.md)); software BVH traversal, no hardware ray queries; a scene too large for the device's buffers falls back to the CPU |
+| Path tracing on the GPU | C R | D | XL | `craft-render-gpu`: everything the CPU path renders, as one wgpu compute pipeline (Vulkan, Metal, DX12): the full layered surface model, textures, normal and bump maps, cut-outs, absorbing glass, every light type, panorama lighting with importance sampling, the light tree and the feature images; 30–50× the 24-thread CPU on an RTX 4090 ([performance.md](performance.md)); software BVH traversal by default, with optional hardware ray queries (feature `hw-ray-query`, `--hardware-rays`; about 8× on a 2 M triangle scene, Vulkan only); a scene too large for the device's buffers falls back to the CPU |
 | One scene, matching CPU and GPU results | R | D | L | Same samples, same estimator: tests hold the two images to a relative MSE under 0.002 on the Cornell box, the layered-material showcase, a panorama-lit studio, a many-light street, an interior and a scene of cut-outs and maps (measured: 0.0001 or less), and the feature images to matching means |
 | Multiple importance sampling and next-event estimation | R | D | L | Power heuristic over light and BSDF sampling; a test checks that light-only, BSDF-only and combined estimators agree. For many lights the first bounce can be resampled from the light tree's candidates (`--restir`, unbiased for finals and with temporal reuse for the viewport, CPU and GPU agreeing; 3.5× lower error at equal samples, about even at equal time on the benchmark street, [performance.md](performance.md)) |
-| Ray-tracing acceleration structure for the whole scene | R | D | L | `craft-render-bvh`: binned-SAH BVH built in parallel (2.0 M triangles in 0.56 s), one flat layout for CPU and GPU; no instancing or motion yet (their own rows) |
+| Ray-tracing acceleration structure for the whole scene | R | D | L | `craft-render-bvh`: binned-SAH BVH built in parallel (2.0 M triangles in 0.56 s), one flat layout for CPU and GPU, an optional compressed 8-wide form (1.25 to 1.8× the rays per second on the CPU for large scenes, slower on the GPU) and a PLOC builder, both in [performance.md](performance.md); no instancing or motion yet (their own rows) |
 | Adaptive sampling with a noise threshold | R | M | M | |
 | Progressive mode | R | D | M | Passes accumulate on one film; any number of passes equals one render of the same sample count |
 | Bucket mode | R | M | M | |
@@ -446,7 +446,7 @@ Weight: 6
 | Light linking (include / exclude) | C M R | M | M | |
 | Light groups and per-light outputs | R | M | M | |
 | Subsurface scattering (random walk) | C M R | M | L | |
-| Hair and fibre shading | C M R | M | L | |
+| Hair and fibre shading | C M R | D | L | Hair objects render in the CPU path tracer (`modelcraft-cli render`, the Render View): strands are round-cone curves in their own BVH, scattered by the Chiang 2016 fibre model (R, TT, TRT and a residual lobe, longitudinal and azimuthal roughness, cuticle tilt, absorption from the hair colour) with next-event estimation, shadows both ways and bounces among the fibres; a white-furnace test (hair that absorbs nothing is invisible in uniform light), energy and sampling-density checks of the model, and agreement of the three estimators; the object's colour and roughness are the controls; the GPU path tracer declines hair (the CPU is used), no melanin or eccentricity controls, no per-strand colour |
 | Volumes: homogeneous, heterogeneous, sparse grids | C M R | M | L | |
 | Render-time displacement with adaptive subdivision | C M R | M | L | |
 | Motion blur: transform and deformation | C M R | M | L | |
@@ -457,7 +457,7 @@ Weight: 6
 | OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
-| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference; no time limit or per-ray statistics |
+| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference (relative MSE, and with `--flip` the FLIP perceptual difference, written from the paper and not checked against the reference implementation); no time limit or per-ray statistics |
 
 ## Rigging
 
@@ -518,8 +518,8 @@ Weight: 6
 | Forces: gravity, wind, turbulence, vortex, attract | C M | P | M | Settings of each system, not objects in the scene: particles take gravity, drag, wind with turbulence, a noise acceleration field and any number of attractors and vortices with a falloff radius; cloth takes gravity and wind with turbulence; rigid bodies take gravity only |
 | Smoke and fire | C M | M | XL | |
 | Liquids | C M | M | XL | |
-| Simulation cache and playback | C M | P | M | The framework is in: a fixed-step solver loop with substeps from a seed (repeatable bit for bit), a cache bounded in frames, points and bytes that bakes per frame, cancels between frames, saves in the project as a `.mcpc` blob and plays back by scene frame (linear between frames); a `.mcpc` file from any tool drives a mesh through `attach_cache`. No solver yet and no panel: nothing in the app bakes one |
-| Ropes and hair dynamics | C M | M | L | |
+| Simulation cache and playback | C M | D | M | A fixed-step, seeded, bounded solver loop caches every frame to a `.mcpc`-shaped cache that is saved in the project and plays by scene frame (linear between frames); the Simulation panel bakes on a worker thread with a progress bar, cancels from the button, Escape or the palette, clears the cache, plays it from its first frame, and marks a cache out of date when its settings change; a `.mcpc` from another tool attaches with `sim attach_cache`; tests cover determinism, bounds, cancel, undo, save and recovery; no Alembic, no per-frame playback of a whole scene |
+| Ropes and hair dynamics | C M | P | L | Hair guides can be baked: Verlet strands pinned to the emitter with gravity, wind, damping, a shape spring, length constraints and collision with the emitter, deterministic by seed, cached per frame through the simulation framework and played by the timeline, in the viewport, in renders and in exports; a bake of 5,000 guides takes 7 ms a frame; strands do not collide with each other and the emitter is taken to be still while baking; no ropes or other dynamic curve objects, and the cache is not saved in the project (the settings are) |
 | Cloth-like sculpt brushes | Z | M | M | |
 
 ## Hair, fur and grooming
@@ -529,10 +529,10 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Guide curves on a surface; comb, cut, length brushes | C M Z | D | L | Add Hair grows seeded guides on a mesh (count, length, jitter, density map); comb, cut, length, puff, smooth, clump and frizz brushes by pointer (Shift smooths, Ctrl inverts), by typing (Properties and the palette) and as `hair` commands; symmetry on X, Y, Z, a per-vertex mask, one undo step per stroke, saved with the project; guides drawn as lines in the viewport; no hair cards or per-guide selection yet |
-| Render hair interpolated from guides: density, clumping, frizz | C M | P | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k), with clump, frizz, width taper and hard memory caps, editable in Properties; the viewport shows the guides only, and the renderer does not see strands yet |
+| Render hair interpolated from guides: density, clumping, frizz | C M | D | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k) with density map, clump, frizz, width taper and hard memory caps, editable in Properties; the viewport draws them on the GPU as one call with a display percentage and a 100,000-strand edit limit (1,000,000 strands at 821 fps, 10 % at 3,443 fps on an RTX 4090, 1920x1080, `docs/performance.md`); guides show for selected hair; no strand shading in the viewport, and the path tracer does not see strands yet (see Hair and fibre shading) |
 | Sculpted fibre meshes | Z | M | M | |
 | Hair to cards / geometry | C M | M | M | |
-| Import and export of curve grooms | C M | M | S | |
+| Import and export of curve grooms | C M | P | S | Export only: render hairs or guides as glTF line segments (with a `_WIDTH` attribute and the strand counts in `extras`, checked against the glTF container rules and read back by the project's glTF reader) and guides as a `.mcpc` point cache with every baked frame, from the Hair menu and `modelcraft-cli hair-export`; there is no groom import yet |
 | Instanced fur and feathers | C M | M | M | |
 
 ## Volumes
@@ -559,7 +559,7 @@ Weight: 5
 | Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
 | User tools, shelves and recorded macros | C M Z | D | M | Record Macro (Scripts menu, command palette, Scripts window) turns what the user does into a script that replays as one undo step; Save as Tool puts it in the Scripts menu or the Quick Scripts strip; scripts can also register menu commands (`register_tool`); any command can sit on the Quick Bar; `modelcraft-cli macro-script` writes a macro from a command file or journal ([scripting.md](scripting.md#recorded-macros)) |
 | Event callbacks (scene changed, selection changed) | C M | D | M | `on_selection_changed`, `on_scene_changed`, `on_scene_loaded` and `on_frame_changed` in scripts; the app reports them once per frame, never during a drag or stroke ([scripting.md](scripting.md)) |
-| Plugin SDK for native extensions | C M Z | M | L | |
+| Plugin SDK for native extensions | C M Z | P | L | Script-based plugins only, by design (no native or dynamic code): a folder with `plugin.json` (id, version, plugin API, entry, permissions), installed from the Plugins window, a permission prompt before anything runs, a remembered grant (new permissions on update ask again), a per-plugin sandbox (scene editing, menu tools, event callbacks, project file read and write, own library folder) over the scripting limits; no archives, signing, registry or native extensions ([plugins.md](plugins.md)) |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
 
 ## Pipeline formats and referencing
@@ -631,6 +631,7 @@ Weight: 3
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Simulation panel: `apps/modelcraft/src/sim_ui_tests.rs` (`add_edit_bake_and_play_a_rigid_body_by_keyboard`, `a_long_bake_shows_progress_and_escape_cancels_it`, `a_mesh_without_a_simulation_offers_to_add_one_and_nothing_selected_says_so`).
 - Particles: `crates/sim/src/particles_tests.rs` (`gravity_drag_and_wind_move_a_particle_as_physics_says`, `a_fast_particle_does_not_tunnel_a_single_triangle`, `emitter_shapes_birth_where_they_should_and_leave_the_right_way`, `random_systems_stay_finite_within_their_pool` proptest), `crates/scene/src/sim.rs` (`a_particle_system_evaluates_to_instances_at_the_current_frame`), `crates/render/src/trace.rs` (`particles_and_clones_render_as_instances_of_their_source`), `crates/engine/src/sim_particle_tests.rs`.
 - Cloth: `crates/sim/src/cloth_tests.rs` (`cloth_drapes_over_a_sphere_without_going_into_it`, `a_sheet_dropped_on_a_box_never_goes_into_it`, `self_collision_keeps_a_falling_layer_on_top_of_another`, `random_settings_never_blow_up` proptest), `crates/sim/src/cloth.rs` (`the_hinge_gradient_matches_finite_differences`), `crates/engine/src/sim_cloth_tests.rs`.
 - Rigid bodies: `crates/sim/src/rigid_tests.rs` (`energy_is_never_gained_and_a_bounce_keeps_only_its_share`, `a_stack_of_boxes_does_not_sink_into_itself`, `a_fast_ball_does_not_tunnel_through_a_thin_wall`, `a_hinge_to_the_world_swings_on_a_circle_and_gains_no_energy`, `random_stacks_never_produce_non_finite_points_or_sink_through_the_ground` proptest), `crates/engine/src/sim_rigid_tests.rs` (`a_baked_rigid_body_falls_lands_and_plays_back_on_the_timeline`, `a_bake_is_repeatable_survives_save_and_is_rebuilt_by_crash_recovery`).

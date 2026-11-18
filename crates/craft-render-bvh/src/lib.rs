@@ -8,6 +8,7 @@
 //! - [`Bvh`] is a flat array of 32-byte [`Node`]s in depth-first order: the left child of an
 //!   interior node is the next node, the right child is `a` nodes further on. The layout is plain
 //!   data (`bytemuck::Pod`), so the same bytes go to a GPU buffer.
+//! - [`curves::CurveBvh`] holds hair and fibre segments (round cones) in the same kind of tree.
 //! - [`TriangleBvh`] owns the triangles in leaf order and answers closest-hit and any-hit queries.
 //!
 //! Hostile input: non-finite primitives are left out of the tree, depth is capped (so the fixed
@@ -17,6 +18,12 @@
 
 use glam::{Vec3, Vec3A};
 use rayon::prelude::*;
+
+pub mod curves;
+pub mod ploc;
+pub mod wide;
+#[cfg(test)]
+mod wide_tests;
 
 /// Deepest tree the builder makes; the traversal stack holds one entry per level.
 pub const MAX_DEPTH: usize = 60;
@@ -448,12 +455,25 @@ pub struct Hit {
     pub prim: u32,
 }
 
+/// How the binary tree is built.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Builder {
+    /// Top-down, splitting by the surface area heuristic over 16 bins (see [`Bvh::build`]).
+    #[default]
+    BinnedSah,
+    /// Bottom-up parallel locally-ordered clustering (see [`ploc`]).
+    Ploc,
+}
+
 /// A BVH over triangles, with the triangles stored in leaf order.
 #[derive(Clone, Debug, Default)]
 pub struct TriangleBvh {
     pub bvh: Bvh,
     /// Triangles in leaf order (`bvh.prim_order` maps a slot back to the input index).
     pub tris: Vec<TriAccel>,
+    /// The same hierarchy collapsed to 8-wide compressed nodes, when [`TriangleBvh::enable_wide`]
+    /// made it; queries use it in place of `bvh`. Its leaves refer to the same triangle slots.
+    pub wide: Option<wide::WideBvh>,
 }
 
 #[inline]
@@ -481,6 +501,11 @@ fn hit_triangle(tri: &TriAccel, ray: &Ray, tmax: f32) -> Option<(f32, f32, f32)>
 impl TriangleBvh {
     /// Build from triangles given as three corners each.
     pub fn build(triangles: &[[Vec3; 3]]) -> TriangleBvh {
+        TriangleBvh::build_with(triangles, Builder::BinnedSah)
+    }
+
+    /// Build with the chosen tree builder.
+    pub fn build_with(triangles: &[[Vec3; 3]], builder: Builder) -> TriangleBvh {
         let prims: Vec<PrimInfo> = triangles
             .par_iter()
             .map(|t| {
@@ -488,7 +513,10 @@ impl TriangleBvh {
                 PrimInfo { bounds: b, centroid: b.centroid() }
             })
             .collect();
-        let bvh = Bvh::build(&prims);
+        let bvh = match builder {
+            Builder::BinnedSah => Bvh::build(&prims),
+            Builder::Ploc => ploc::build(&prims),
+        };
         let tris = bvh
             .prim_order
             .iter()
@@ -498,7 +526,28 @@ impl TriangleBvh {
                 TriAccel { p0, e1: Vec3A::from(t[1]) - p0, e2: Vec3A::from(t[2]) - p0 }
             })
             .collect();
-        TriangleBvh { bvh, tris }
+        TriangleBvh { bvh, tris, wide: None }
+    }
+
+    /// Collapse the tree to 8-wide compressed nodes and answer queries with them from now on.
+    /// `false` (and nothing changes) when the tree is too deep or has a leaf too large for it.
+    pub fn enable_wide(&mut self) -> bool {
+        match wide::WideBvh::from_binary(&self.bvh) {
+            Some(w) => {
+                self.wide = Some(w);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Visit the leaves a ray reaches (see [`Bvh::traverse`]) through whichever tree is active.
+    #[inline]
+    fn traverse(&self, ray: &Ray, leaf: impl FnMut(u32, u32, &mut f32) -> bool) {
+        match &self.wide {
+            Some(w) => w.traverse(ray, leaf),
+            None => self.bvh.traverse(ray, leaf),
+        }
     }
 
     pub fn triangle_count(&self) -> usize {
@@ -510,7 +559,7 @@ impl TriangleBvh {
     #[inline]
     pub fn intersect_with(&self, ray: &Ray, mut accept: impl FnMut(&Hit) -> bool) -> Option<Hit> {
         let mut best: Option<Hit> = None;
-        self.bvh.traverse(ray, |first, count, tmax| {
+        self.traverse(ray, |first, count, tmax| {
             let (first, count) = (first as usize, count as usize);
             for slot in first..first + count {
                 let Some(tri) = self.tris.get(slot) else { break };
@@ -537,7 +586,7 @@ impl TriangleBvh {
     #[inline]
     pub fn occluded_with(&self, ray: &Ray, mut blocks: impl FnMut(&Hit) -> bool) -> bool {
         let mut found = false;
-        self.bvh.traverse(ray, |first, count, tmax| {
+        self.traverse(ray, |first, count, tmax| {
             let (first, count) = (first as usize, count as usize);
             for slot in first..first + count {
                 let Some(tri) = self.tris.get(slot) else { break };

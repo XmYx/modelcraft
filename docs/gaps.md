@@ -60,7 +60,7 @@ formats, UI/UX.
 | 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 4 | 0.18 | 4.6 |
 | 6 | ~~**M14** Patch grouping tools and mesh cleanup in the UI~~ (done) | Modeling | 3 | 0.13 | 4.3 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 65 | 2.71 | 4.2 |
-| 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 54 | 2.24 | 4.1 |
+| 8 | ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | UI/UX | 54 | 2.24 | 4.1 |
 | 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 11 | 0.44 | 4.0 |
 | 10 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | Scripting and node graph | 54.5 | 2.12 | 3.9 |
 
@@ -81,7 +81,7 @@ users and sit lower only because they are expensive.
 | 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 1 | 4 | 0.18 | 4.6 | — | 19.0 % | 91 |
 | 6 | ~~**M14** Patch grouping tools and mesh cleanup in the UI~~ (done) | Modeling | 2 | 3 | 0.13 | 4.3 | — | 19.1 % | 94 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 6 | 65 | 2.71 | 4.2 | A1 | 21.8 % | 159 |
-| 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
+| 8 | ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
 | 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 2 | 11 | 0.44 | 4.0 | — | 24.5 % | 224 |
 | 10 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | Scripting and node graph | 6 | 54.5 | 2.12 | 3.9 | — | 26.6 % | 278.5 |
 | 11 | **F5** Live link with suite apps, EXR/HDR images, 3MF | Pipeline formats | 3 | 19 | 0.73 | 3.8 | — | 27.3 % | 297.5 |
@@ -96,7 +96,7 @@ users and sit lower only because they are expensive.
 | 20 | **S4** Masks and visibility: cavity/curvature masks, lasso and clip tools, hide by group, shell extract, watertight | Sculpting | 5 | 28.5 | 0.87 | 3.1 | — | 41.2 % | 704 |
 | 21 | **G5** Plugin SDK | Scripting and node graph | 1 | 25 | 0.74 | 3.0 | — | 41.9 % | 729 |
 | 22 | **R4** Materials: OpenPBR-class layered surface, texture inputs, bump/normal/displacement, per-patch assignment, rendered .mcmat links, MaterialX, library | Render engine | 7 | 86 | 2.44 | 2.8 | — | 44.4 % | 815 |
-| 23 | **X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units | UI/UX | 3 | 24 | 0.68 | 2.8 | — | 45.1 % | 839 |
+| 23 | ~~**X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units~~ (mostly done: custom orientation and viewport pivot dragging remain) | UI/UX | 3 | 24 | 0.68 | 2.8 | — | 45.1 % | 839 |
 | 24 | **S1** Detail levels: multiresolution with reconstruction of lower levels | Sculpting | 2 | 33 | 0.93 | 2.8 | — | 46.0 % | 872 |
 | 25 | **S7** Decimation and detail projection | Sculpting | 2 | 33 | 0.93 | 2.8 | — | 46.9 % | 905 |
 | 26 | **U1** UV editor, seams, unwrap, packing, checker and distortion display | UV and paint | 5 | 62.5 | 1.70 | 2.7 | — | 48.6 % | 967.5 |
@@ -270,6 +270,8 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 **U1**: craft-mesh-ops `unwrap_uvs` (craft-libs #1233) is still open and is a projection-chart unwrap on triangle slices, not a conformal solver, so ModelCraft carries its own UI-free `modelcraft-uv` crate (seams, automatic cuts, LSCM with pins, distortion measures) written to move to craft-libs; the editor and packing follow. TextureCraft auto-unwraps meshes without UVs today, and the Paint workspace only shows patches and hands off through GLB, so **U3** vertex colour painting is the cheapest real painting step.
 
+**Note for the render stream (UV checker in the viewport):** `modelcraft_render::buffers::MeshVertex` gained a `uv: [f32; 2]` (32 to 40 bytes, attribute 4, filled per corner by `mesh_data`, zero for shared-vertex sculpt data), `DrawItem`/`DrawSpec` gained `uv_checker`, and `flags.z == 2` in `shader.wgsl` selects the checker (1 is the patch tint). Anything that builds a `MeshVertex` or a `DrawItem` by hand needs the new field.
+
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
 | **U1** UV editor, seams, unwrap, packing, checker and distortion display | 5 | 62.5 | 1.70 | 26 | — |
@@ -292,7 +294,7 @@ Every action is already a serializable command, so **G1** binds a language to an
 
 ## Simulation
 
-The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs a solver on fixed substeps from a seed, caches every frame within bounds and plays it back through the timeline. Particles (D3) are in: point, surface and volume emitters, rate and burst, gravity, wind, noise, drag, attractors and vortices, swept collisions, drawn as instances in the viewport, the export and the render. Cloth (D2) is in: XPBD with stretch, shear and bend, pins by list, sculpt mask or following an object, collisions with anything in the scene, self collision, wind and turbulence (commands only). Rigid bodies (D1) are in on Rapier: active and passive bodies, box, sphere, hull and mesh colliders, friction, bounciness, sleeping and fixed, hinge and point joints, through the `sim` command (no panel yet). Next: the panel (nothing in the app bakes yet), then soft bodies. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
+The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs a solver on fixed substeps from a seed, caches every frame within bounds and plays it back through the timeline. Particles (D3) are in: point, surface and volume emitters, rate and burst, gravity, wind, noise, drag, attractors and vortices, swept collisions, drawn as instances in the viewport, the export and the render. Cloth (D2) is in: XPBD with stretch, shear and bend, pins by list, sculpt mask or following an object, collisions with anything in the scene, self collision, wind and turbulence (commands only). Rigid bodies (D1) are in on Rapier: active and passive bodies, box, sphere, hull and mesh colliders, friction, bounciness, sleeping and fixed, hinge and point joints, through the `sim` command and the panel. The Simulation panel (settings, bake with progress and cancel, clear, play) and menu are in. Next: soft bodies, joints and attractors in the panel, viewport tools. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -316,14 +318,14 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3**: docking with tabs, splits and saved layouts is in (craft-ui `docking`), and so are the radial menu, the Quick Bar and the full Preferences window; shipped translations (catalogs in craft-i18n) remain. **X4**: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes are in; tags, layers, instances, user attributes, attribute presets and pivots remain.
+Undo history now survives save and open (X7, done). **X3**: docking with tabs, splits and saved layouts is in (craft-ui `docking`), and so are the radial menu, the Quick Bar and the full Preferences window; shipped translations (catalogs in craft-i18n) remain. **X4** is done: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing, copy/paste of attributes, tags, display and render layers, instances, user attributes, attribute presets and pivots (the `organize` command). Display modes (flat, smooth, wireframe, see-through, bounding box) came with it.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
-| **X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units | 3 | 24 | 0.68 | 23 | — |
+| ~~**X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units~~ (mostly done: custom orientation and viewport pivot dragging remain) | 3 | 24 | 0.68 | 23 | — |
 | **X2** Viewport aids: reference images, bookmarks, display modes, isolate, matcaps, stats, headless render command, safe frames, camera objects | 9 | 32 | 1.02 | 18 | — |
 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | 5 | 25.5 | 1.19 | 4 | — |
-| **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | 11 | 54 | 2.24 | 8 | — |
+| ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | 11 | 54 | 2.24 | 8 | — |
 | **X5** Scene overrides (takes) | 1 | 25 | 0.60 | 39 | — |
 | **X6** Large-scene drawing: culling, level of detail, proxies | 1 | 12.5 | 0.23 | 57 | — |
 
