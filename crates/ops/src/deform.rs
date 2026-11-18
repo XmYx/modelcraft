@@ -53,6 +53,13 @@ impl Deformer {
 
     /// Deform `m` in place. `to_local` maps mesh space into the deformer's frame.
     pub fn apply(&self, m: &mut PolyMesh, to_local: Mat4) {
+        self.apply_weighted(m, to_local, &|_| 1.0);
+    }
+
+    /// Deform `m` in place, acting at each point with the strength `weight` gives for it (0..1,
+    /// asked in the deformer's frame, before the move): 0 leaves a point alone, 1 deforms it fully
+    /// and values between blend. Falloff fields supply the weight.
+    pub fn apply_weighted(&self, m: &mut PolyMesh, to_local: Mat4, weight: &dyn Fn(Vec3) -> f32) {
         if !to_local.is_finite() || to_local.determinant().abs() < 1e-12 {
             return;
         }
@@ -97,7 +104,21 @@ impl Deformer {
                 }
             }
         };
-        let moved: Vec<Vec3> = local.into_iter().map(|p| back.transform_point3(f(p))).collect();
+        let moved: Vec<Vec3> = local
+            .into_iter()
+            .map(|p| {
+                let w = weight(p);
+                let w = if w.is_finite() { w.clamp(0.0, 1.0) } else { 1.0 };
+                let q = if w >= 1.0 {
+                    f(p)
+                } else if w <= 0.0 {
+                    p
+                } else {
+                    p.lerp(f(p), w)
+                };
+                back.transform_point3(q)
+            })
+            .collect();
         m.map_positions(|i, p| moved.get(i as usize).copied().unwrap_or(p));
     }
 }
@@ -121,6 +142,38 @@ mod tests {
             assert_eq!(m.face_count(), base.face_count());
             assert_ne!(m.positions(), base.positions(), "{k} did nothing");
         }
+    }
+
+    #[test]
+    fn weights_scale_how_far_each_point_moves() {
+        let base = Primitive::Cylinder { radius: 0.5, height: 4.0, sides: 12, rings: 8, caps: true }.build().unwrap();
+        let d = Deformer::Twist { angle: 90.0 };
+        let mut full = base.clone();
+        d.apply(&mut full, Mat4::IDENTITY);
+        let mut none = base.clone();
+        d.apply_weighted(&mut none, Mat4::IDENTITY, &|_| 0.0);
+        assert_eq!(none, base, "weight 0 leaves the mesh alone");
+        let mut one = base.clone();
+        d.apply_weighted(&mut one, Mat4::IDENTITY, &|_| 1.0);
+        assert_eq!(one, full);
+        let mut half = base.clone();
+        d.apply_weighted(&mut half, Mat4::IDENTITY, &|_| 0.5);
+        for i in 0..base.vertex_count() as u32 {
+            let mid = base.position(i).lerp(full.position(i), 0.5);
+            assert!((half.position(i) - mid).length() < 1e-5);
+        }
+        // A weight that depends on position: only the upper half moves; bad weights count as 1.
+        let mut top = base.clone();
+        d.apply_weighted(&mut top, Mat4::IDENTITY, &|p| if p.y > 0.0 { 1.0 } else { 0.0 });
+        for i in 0..base.vertex_count() as u32 {
+            if base.position(i).y <= 0.0 {
+                assert_eq!(top.position(i), base.position(i));
+            }
+        }
+        let mut nan = base.clone();
+        d.apply_weighted(&mut nan, Mat4::IDENTITY, &|_| f32::NAN);
+        assert_eq!(nan, full);
+        nan.validate().unwrap();
     }
 
     #[test]

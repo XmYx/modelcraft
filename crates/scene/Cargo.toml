@@ -13,10 +13,15 @@ workspace = true
 [dependencies]
 modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
+modelcraft-field = { workspace = true }
+modelcraft-uv = { workspace = true }
+modelcraft-uvpack = { workspace = true }
+modelcraft-clone = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 modelcraft-anim = { workspace = true }
+modelcraft-sim = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

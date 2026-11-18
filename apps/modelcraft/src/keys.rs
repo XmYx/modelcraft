@@ -58,13 +58,49 @@ pub fn shortcut_text(app: &ModelApp, a: Action) -> String {
 
 /// Run this frame's shortcuts.
 pub fn dispatch(app: &mut ModelApp, ctx: &egui::Context) -> Vec<Action> {
-    let typing = ctx.egui_wants_keyboard_input();
+    // For egui any focused widget "wants the keyboard" (`egui_wants_keyboard_input`): the
+    // viewport after a click, a canvas, a ruler, a button. Treating that as typing switched off
+    // Undo, Redo and Select All whenever anything but empty space had focus. Only a focused text
+    // field (a DragValue being edited is one) is typing.
+    let typing = ctx.text_edit_focused();
+    let focused = ctx.memory(|m| m.focused());
+    let on_viewport = focused.is_some_and(|f| (0..4usize).any(|i| f == egui::Id::unique(("viewport", i))));
+    // A focused control that is not text (a button, a combo box, a ruler) keeps the keys it uses
+    // itself: Space and Enter press it, the arrows move in it, Escape closes it, Delete clears it.
+    // Chords with a command key, function keys and the letter tool keys still run.
+    let control = focused.is_some() && !typing && !on_viewport;
+    // The workspace contexts hold the single-letter tool and brush keys ("Model: E", "Sculpt: D").
+    // craft-keymap lets a binding in an active context fire even while typing, so while a text
+    // field has focus no context is active: those letters go to the field.
     let contexts = [context(app.workspace)];
-    let active = Active { panel: None, contexts: &contexts, typing };
+    let active = Active { panel: None, contexts: if typing { &[] } else { &contexts }, typing };
     let keymap = &app.keymap;
     let dispatcher = &mut app.dispatcher;
-    let hits = ctx.input_mut(|i| dispatcher.dispatch(i, keymap, &active));
+    let hits = ctx.input_mut(|i| dispatcher.dispatch_filtered(i, keymap, &active, |hit| !(control && widget_key(&hit.trigger.chord))));
     hits.iter().filter_map(|h| action_of(&h.command)).collect()
+}
+
+/// A plain press of a key that controls use themselves.
+fn widget_key(chord: &craft_keymap::Chord) -> bool {
+    use craft_keymap::Key;
+    chord.is_plain()
+        && matches!(
+            chord.key,
+            Key::Space
+                | Key::Enter
+                | Key::Escape
+                | Key::Tab
+                | Key::Delete
+                | Key::Backspace
+                | Key::Up
+                | Key::Down
+                | Key::Left
+                | Key::Right
+                | Key::Home
+                | Key::End
+                | Key::PageUp
+                | Key::PageDown
+        )
 }
 
 /// The suite's Keyboard Shortcuts dialog; saves overrides into the preferences on OK.

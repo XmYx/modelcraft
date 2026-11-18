@@ -13,8 +13,10 @@ pub mod alpha;
 pub mod brush;
 mod bvh;
 pub mod detail;
+pub mod groups;
 pub mod live;
 pub mod preset;
+pub mod project;
 pub mod stroke;
 
 use glam::Vec3;
@@ -23,6 +25,7 @@ use modelcraft_mesh::PolyMesh;
 pub use alpha::Alpha;
 pub use brush::{BrushKind, BrushSettings, Dab, Falloff, Stamp, Stroke, Symmetry};
 pub use bvh::Bvh;
+pub use groups::ScreenRegion;
 pub use stroke::{DabMaker, DabOut, StrokeMode};
 
 /// Vertices per dirty chunk (a GPU upload unit).
@@ -35,6 +38,14 @@ pub struct SculptMesh {
     pub mask: Vec<f32>,
     tris: Vec<[u32; 3]>,
     tri_patch: Vec<u32>,
+    /// The face of the source mesh each triangle came from (not used once live detail has
+    /// changed the triangles), and how many faces there were.
+    tri_face: Vec<u32>,
+    faces: usize,
+    /// Hidden triangles; empty when everything shows.
+    hidden: Vec<bool>,
+    /// Counts every change of patches and visibility.
+    view_rev: u64,
     adj: Adj,
     bvh: Bvh,
     /// Live-detail strokes applied minus undone since the session began.
@@ -163,6 +174,10 @@ impl SculptMesh {
             mask,
             tris,
             tri_patch,
+            tri_face: owner,
+            faces: mesh.face_count(),
+            hidden: Vec::new(),
+            view_rev: 0,
             adj: Adj::Csr { nbr_start, nbr, vtri_start, vtri },
             bvh,
             topo_edits: 0,
@@ -194,7 +209,7 @@ impl SculptMesh {
     }
 
     pub fn heap_bytes(&self) -> usize {
-        self.positions.len() * (12 + 12 + 4 + 4) + self.tris.len() * (12 + 4) + self.adj.heap_bytes() + self.bvh.heap_bytes()
+        self.positions.len() * (12 + 12 + 4 + 4) + self.tris.len() * (12 + 4 + 4) + self.hidden.len() + self.adj.heap_bytes() + self.bvh.heap_bytes()
     }
 
     fn tri_normal(&self, t: u32) -> Vec3 {
@@ -204,20 +219,9 @@ impl SculptMesh {
     }
 
     pub fn recompute_all_normals(&mut self) {
-        let mut n = vec![Vec3::ZERO; self.positions.len()];
-        for t in 0..self.tris.len() as u32 {
-            let fnorm = self.tri_normal(t);
-            if let Some(tri) = self.tris.get(t as usize) {
-                for v in tri {
-                    if let Some(x) = n.get_mut(*v as usize) {
-                        *x += fnorm;
-                    }
-                }
-            }
-        }
-        for x in &mut n {
-            *x = x.normalize_or(Vec3::Y);
-        }
+        // Each normal is the sum of its triangles' normals in triangle order, the same sum
+        // `update_normals` makes, so a full pass and a local update agree to the last bit.
+        let n: Vec<Vec3> = (0..self.positions.len() as u32).map(|v| self.vertex_normal(v)).collect();
         self.normals = n;
     }
 
@@ -245,15 +249,20 @@ impl SculptMesh {
             }
         }
         for w in ring {
-            let mut n = Vec3::ZERO;
-            for t in self.vertex_tris(w) {
-                n += self.tri_normal(*t);
-            }
+            let n = self.vertex_normal(w);
             if let Some(x) = self.normals.get_mut(w as usize) {
-                *x = n.normalize_or(Vec3::Y);
+                *x = n;
             }
             self.mark_dirty(w);
         }
+    }
+
+    fn vertex_normal(&self, v: u32) -> Vec3 {
+        let mut n = Vec3::ZERO;
+        for t in self.vertex_tris(v) {
+            n += self.tri_normal(*t);
+        }
+        n.normalize_or(Vec3::Y)
     }
 
     fn mark_dirty(&mut self, v: u32) {
@@ -305,7 +314,7 @@ impl SculptMesh {
 
     /// Nearest hit of a ray (object space): `(distance, point, triangle)`.
     pub fn raycast(&self, origin: Vec3, dir: Vec3) -> Option<(f32, Vec3, u32)> {
-        self.bvh.raycast(&self.positions, &self.tris, origin, dir, self.drift)
+        self.bvh.raycast(&self.positions, &self.tris, origin, dir, self.drift, &self.hidden)
     }
 
     /// Vertices within `radius` of `center`.
@@ -324,7 +333,11 @@ impl SculptMesh {
         let positions = &self.positions;
         let stamp = &mut self.stamp;
         let tris = &self.tris;
+        let hidden = &self.hidden;
         self.bvh.visit_sphere(center, radius + self.drift, |t| {
+            if hidden.get(t as usize).copied().unwrap_or(false) {
+                return;
+            }
             if let Some(tri) = tris.get(t as usize) {
                 for v in tri {
                     let Some(s) = stamp.get_mut(*v as usize) else { continue };
@@ -346,12 +359,23 @@ impl SculptMesh {
         self.drift = 0.0;
     }
 
+    /// Refit the BVH around the vertices `moved` only (the end of a stroke or an undo).
+    fn refit_around(&mut self, moved: &[u32]) {
+        let adj = &self.adj;
+        self.bvh.refit_moved(&self.positions, &self.tris, moved.iter().flat_map(|v| adj.vertex_tris(*v).iter().copied()));
+        self.drift = 0.0;
+    }
+
     pub fn in_stroke(&self) -> bool {
         self.stroke.is_some()
     }
 
     /// Start a stroke with these brush settings.
-    pub fn begin_stroke(&mut self, brush: BrushSettings) {
+    pub fn begin_stroke(&mut self, mut brush: BrushSettings) {
+        // Live detail would have to split hidden triangles too; it waits until everything shows.
+        if !self.hidden.is_empty() {
+            brush.live_detail = None;
+        }
         self.stroke = Some(StrokeState { brush, original: Default::default(), grabbed: Vec::new(), dabs: Vec::new(), reach: Default::default(), topo: None });
     }
 
@@ -407,11 +431,12 @@ impl SculptMesh {
             self.bvh = Bvh::build(&self.positions, &self.tris);
             self.drift = 0.0;
             u.topo = Some(Box::new(change));
-        } else {
-            self.refit();
         }
         let mut idx: Vec<u32> = st.original.keys().copied().filter(|i| (*i as usize) < old_verts).collect();
         idx.sort_unstable();
+        if u.topo.is_none() {
+            self.refit_around(&idx);
+        }
         for i in idx {
             let (p0, m0) = st.original.get(&i).copied().unwrap_or_default();
             let (p1, m1) = (self.positions.get(i as usize).copied().unwrap_or(p0), self.mask.get(i as usize).copied().unwrap_or(m0));
@@ -453,7 +478,7 @@ impl SculptMesh {
             }
         }
         self.update_normals(&u.indices);
-        self.refit();
+        self.refit_around(&u.indices);
     }
 
     /// Mask helpers: clear, invert, fill, or mask the patch under a triangle.
@@ -478,6 +503,69 @@ impl SculptMesh {
         self.mask_edit(|i, _, m| if inside.get(i as usize).copied().unwrap_or(false) { 1.0 } else { m })
     }
 
+    /// One round of averaging each mask value with its neighbours.
+    pub fn mask_blur(&mut self) -> StrokeUndo {
+        let new = self.mask_from_neighbours(|own, around| {
+            let (sum, n) = around.fold((own, 1.0f32), |(s, n), m| (s + m, n + 1.0));
+            sum / n
+        });
+        self.mask_set(&new)
+    }
+    /// Push mask values away from the middle, hardening a soft edge.
+    pub fn mask_sharpen(&mut self) -> StrokeUndo {
+        self.mask_edit(|_, _, m| (m - 0.5) * 2.0 + 0.5)
+    }
+    /// Grow the mask by one ring of vertices.
+    pub fn mask_grow(&mut self) -> StrokeUndo {
+        let new = self.mask_from_neighbours(|own, around| around.fold(own, f32::max));
+        self.mask_set(&new)
+    }
+    /// Shrink the mask by one ring of vertices.
+    pub fn mask_shrink(&mut self) -> StrokeUndo {
+        let new = self.mask_from_neighbours(|own, around| around.fold(own, f32::min));
+        self.mask_set(&new)
+    }
+    /// Mask by how the surface bends: the hollows (`peaks` false) or the ridges and bumps
+    /// (`peaks` true). The measure is how far a vertex sits below or above the average of its
+    /// neighbours, relative to their distance, so it does not depend on the object's size.
+    pub fn mask_by_bend(&mut self, peaks: bool) -> StrokeUndo {
+        let mut new = Vec::with_capacity(self.positions.len());
+        for (v, p) in self.positions.iter().enumerate() {
+            let ns = self.neighbors(v as u32);
+            let n = self.normals.get(v).copied().unwrap_or(Vec3::Y);
+            let (mut avg, mut len) = (Vec3::ZERO, 0.0f32);
+            for k in ns {
+                let q = self.positions.get(*k as usize).copied().unwrap_or(*p);
+                avg += q;
+                len += q.distance(*p);
+            }
+            let value = if ns.is_empty() || len <= 0.0 {
+                0.0
+            } else {
+                let k = ns.len() as f32;
+                // Positive when the neighbours rise above the vertex: a hollow.
+                let bend = (avg / k - *p).dot(n) / (len / k);
+                (if peaks { -bend } else { bend }) * 6.0
+            };
+            new.push(if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 });
+        }
+        self.mask_set(&new)
+    }
+
+    fn mask_from_neighbours(&self, f: impl Fn(f32, &mut dyn Iterator<Item = f32>) -> f32) -> Vec<f32> {
+        (0..self.positions.len())
+            .map(|v| {
+                let own = self.mask.get(v).copied().unwrap_or(0.0);
+                let mut around = self.neighbors(v as u32).iter().map(|k| self.mask.get(*k as usize).copied().unwrap_or(0.0));
+                f(own, &mut around)
+            })
+            .collect()
+    }
+
+    fn mask_set(&mut self, new: &[f32]) -> StrokeUndo {
+        self.mask_edit(|i, _, m| new.get(i as usize).copied().unwrap_or(m))
+    }
+
     fn mask_edit(&mut self, f: impl Fn(u32, Vec3, f32) -> f32) -> StrokeUndo {
         let mut u = StrokeUndo::default();
         for i in 0..self.positions.len() {
@@ -499,5 +587,7 @@ impl SculptMesh {
     }
 }
 
+#[cfg(test)]
+mod groups_tests;
 #[cfg(test)]
 mod tests;

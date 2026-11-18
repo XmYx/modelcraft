@@ -1,0 +1,1 @@
+- Playback of heavy skinned meshes is faster: skinning and the viewport's mesh preparation use several cores.

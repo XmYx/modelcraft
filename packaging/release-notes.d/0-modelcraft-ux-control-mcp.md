@@ -1,0 +1,1 @@
+- Agents can drive ModelCraft: turn on Edit ▸ Allow Agents to Control ModelCraft (or start with --control), then use `modelcraft-cli call` or register `modelcraft-cli mcp --app` with an MCP client.

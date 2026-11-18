@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use modelcraft_render::pathtrace::{Film, PixelOrder, RenderSettings, Renderer, Scene, relative_mse, scenes};
+use modelcraft_render::pathtrace::{Film, PixelOrder, RenderSettings, Renderer, RestirSettings, Scene, relative_mse, scenes};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
 
 pub const USAGE: &str = "  render-bench [options]            error against time on the benchmark scenes (JSON lines, then a table)
@@ -20,7 +20,12 @@ pub const USAGE: &str = "  render-bench [options]            error against time 
       --seeds N                     independent runs per budget (default 5)
       --reference N                 samples of the reference (default 4096)
       --device cpu|gpu              default cpu
-      --order z|independent         pixel order of the sample sequence (default z)";
+      --order z|independent         pixel order of the sample sequence (default z)
+      --guiding                     learn where light comes from and sample that way (CPU)
+      --splitting                   end or multiply paths by their expected contribution (CPU)
+      --restir unbiased|viewport    resampled direct light at the first surface (CPU and GPU)
+      --restir-candidates N --restir-neighbors N
+                                    (the reference is always rendered without either)";
 
 pub struct BenchArgs {
     pub scenes: Vec<String>,
@@ -30,6 +35,9 @@ pub struct BenchArgs {
     pub reference: u32,
     pub gpu: bool,
     pub order: PixelOrder,
+    pub guiding: bool,
+    pub splitting: bool,
+    pub restir: RestirSettings,
 }
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
@@ -62,6 +70,9 @@ pub fn parse(a: &[String]) -> Result<BenchArgs, String> {
             Some("independent") => PixelOrder::Independent,
             Some(other) => return Err(format!("--order: expected z or independent, found {other:?}")),
         },
+        guiding: a.iter().any(|x| x == "--guiding"),
+        splitting: a.iter().any(|x| x == "--splitting"),
+        restir: crate::render_cmd::parse_restir(a)?,
     })
 }
 
@@ -84,12 +95,33 @@ fn run(scene: &Arc<Scene>, gpu: Option<&GpuContext>, settings: RenderSettings, s
     }
 }
 
+/// The middle value (the mean of the middle two for an even count); rare bright samples move it
+/// far less than they move the mean.
+fn median(values: &[f64]) -> f64 {
+    let mut v = values.to_vec();
+    v.sort_by(f64::total_cmp);
+    match v.len() {
+        0 => 0.0,
+        n if n % 2 == 1 => v[n / 2],
+        n => (v[n / 2 - 1] + v[n / 2]) * 0.5,
+    }
+}
+
 /// One scene's measurements as JSON.
 pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Result<serde_json::Value, String> {
     let t = Instant::now();
     let scene = Arc::new(scenes::by_name(name).ok_or_else(|| format!("unknown scene {name:?}"))?.map_err(|e| e.to_string())?);
     let build_seconds = t.elapsed().as_secs_f64();
     let settings = |seed: u32| RenderSettings { width: args.size, height: args.size, seed, pixel_order: args.order, ..RenderSettings::default() };
+    // The technique under test; the reference is always the plain estimator, so a technique that
+    // changed the expected image would show as an error that does not fall with samples.
+    let tested = |seed: u32| {
+        let mut s = settings(seed);
+        s.integrator.guiding = args.guiding;
+        s.integrator.adaptive_splitting = args.splitting;
+        s.integrator.restir = args.restir;
+        s
+    };
     // The reference: two independent halves, compared and then averaged.
     let half = (args.reference / 2).max(1);
     let (a, _) = run(&scene, gpu, settings(0x5eed_0001), half)?;
@@ -102,7 +134,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
     for spp in &args.budgets {
         let (mut errors, mut seconds) = (Vec::new(), Vec::new());
         for seed in 0..args.seeds {
-            let (film, s) = run(&scene, gpu, settings(seed + 1), *spp)?;
+            let (film, s) = run(&scene, gpu, tested(seed + 1), *spp)?;
             errors.push(relative_mse(&film.mean(), &reference));
             seconds.push(s);
         }
@@ -112,6 +144,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
             "spp": spp,
             "seconds": s,
             "rel_mse": e,
+            "rel_mse_median": median(&errors),
             "rel_mse_min": errors.iter().copied().fold(f64::INFINITY, f64::min),
             "rel_mse_max": errors.iter().copied().fold(0.0, f64::max),
             "efficiency": if e * s > 0.0 { 1.0 / (e * s) } else { 0.0 },
@@ -121,6 +154,9 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         "scene": name,
         "device": gpu.map_or_else(|| format!("cpu: {} threads", std::thread::available_parallelism().map_or(1, usize::from)), |c| format!("gpu: {}", c.caps.adapter)),
         "size": args.size,
+        "guiding": args.guiding,
+        "splitting": args.splitting,
+        "restir": format!("{:?}", args.restir.mode),
         "triangles": scene.triangle_count(),
         "build_seconds": build_seconds,
         "reference_spp": half * 2,
@@ -146,8 +182,9 @@ pub fn time_to(rows: &[serde_json::Value], target: f64) -> Option<f64> {
 
 pub fn run_all(args: &BenchArgs) -> Result<(), String> {
     let gpu = if args.gpu { Some(GpuContext::new().ok_or("no GPU adapter is available")?) } else { None };
-    let mut table =
-        String::from("| Scene | Triangles | spp | Seconds | relMSE (min–max) | Efficiency | Seconds to relMSE 0.01 |\n|---|---|---|---|---|---|---|\n");
+    let mut table = String::from(
+        "| Scene | Triangles | spp | Seconds | relMSE mean (min–max) | relMSE median | Efficiency | Seconds to relMSE 0.01 |\n|---|---|---|---|---|---|---|---|\n",
+    );
     for name in &args.scenes {
         match bench_scene(name, args, gpu.as_ref()) {
             Ok(report) => {
@@ -157,7 +194,7 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
                 for (i, r) in rows.iter().enumerate() {
                     let f = |k: &str| r[k].as_f64().unwrap_or(0.0);
                     table.push_str(&format!(
-                        "| {} | {} | {} | {:.3} | {:.4} ({:.4}–{:.4}) | {:.1} | {} |\n",
+                        "| {} | {} | {} | {:.3} | {:.4} ({:.4}–{:.4}) | {:.4} | {:.1} | {} |\n",
                         if i == 0 { name.as_str() } else { "" },
                         if i == 0 { report["triangles"].to_string() } else { String::new() },
                         r["spp"],
@@ -165,6 +202,7 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
                         f("rel_mse"),
                         f("rel_mse_min"),
                         f("rel_mse_max"),
+                        f("rel_mse_median"),
                         f("efficiency"),
                         if i == 0 { reach.as_str() } else { "" },
                     ));

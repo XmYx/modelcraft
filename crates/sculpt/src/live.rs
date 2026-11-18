@@ -118,6 +118,8 @@ impl SculptMesh {
         self.stamp = vec![0; n];
         self.stamp_gen = 0;
         self.dirty_chunks = vec![true; n.div_ceil(crate::CHUNK)];
+        // Flags per triangle would no longer line up; live detail does not run while any is set.
+        self.hidden.clear();
         self.normals.resize(n, Vec3::Y);
         self.recompute_all_normals();
     }

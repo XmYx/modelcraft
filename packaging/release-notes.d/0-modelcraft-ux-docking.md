@@ -1,0 +1,1 @@
+- Panels dock as tabs and splits around the viewport, float, and keep their places per workspace; View ▸ Panels ▸ Reset Panels restores the defaults.

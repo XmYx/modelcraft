@@ -41,11 +41,28 @@ pub struct IntegratorSettings {
     pub strategy: Strategy,
     /// How lights with a position are chosen for direct lighting.
     pub light_sampling: LightSampling,
+    /// Learn where light comes from while rendering and send part of the paths that way (path
+    /// guiding; see [`crate::guided`]). Off by default; the GPU path does not have it.
+    pub guiding: bool,
+    /// End or multiply paths by what they are expected to add to their pixel, from a radiance
+    /// cache filled while rendering, instead of by throughput alone (see [`crate::guided`]).
+    pub adaptive_splitting: bool,
+    /// Resampled direct lighting at the first surface (see [`crate::restir`]).
+    pub restir: crate::restir::RestirSettings,
 }
 
 impl Default for IntegratorSettings {
     fn default() -> Self {
-        IntegratorSettings { max_depth: 12, roulette_start: 3, clamp_indirect: 0.0, strategy: Strategy::Mis, light_sampling: LightSampling::Tree }
+        IntegratorSettings {
+            max_depth: 12,
+            roulette_start: 3,
+            clamp_indirect: 0.0,
+            strategy: Strategy::Mis,
+            light_sampling: LightSampling::Tree,
+            guiding: false,
+            adaptive_splitting: false,
+            restir: crate::restir::RestirSettings::default(),
+        }
     }
 }
 
@@ -68,7 +85,18 @@ pub fn radiance(scene: &Scene, ray: Ray, sampler: &mut Sampler, cfg: &Integrator
 }
 
 /// [`radiance`] together with the features of the first surface the path met.
-pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> (Rgb, Features) {
+pub fn radiance_and_features(scene: &Scene, ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> (Rgb, Features) {
+    radiance_with(scene, ray, sampler, cfg, None)
+}
+
+/// Direct light at the first surface, supplied by the caller instead of next-event estimation:
+/// it receives the surface, its BSDF and whether the object is transmissive, and returns the
+/// light the surface sends back (multiple importance weight included).
+pub type PrimaryDirect<'a> = &'a mut dyn FnMut(&Surface, &Bsdf, bool) -> Rgb;
+
+/// [`radiance_and_features`] with the direct light at the first surface taken from `primary`
+/// when there is one (indirect bounces always use next-event estimation).
+pub fn radiance_with(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings, mut primary: Option<PrimaryDirect<'_>>) -> (Rgb, Features) {
     let mut features = Features::default();
     let mut first = true;
     let mut total = Vec3A::ZERO;
@@ -90,6 +118,20 @@ pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler,
         let Some(hit) = scene.accel.intersect(&ray) else {
             if first {
                 features.albedo = scene.lights.environment_radiance(ray.dir).min(Vec3A::ONE);
+            }
+            let (sun, sun_pdf) = scene.lights.sun_radiance(ray.dir);
+            if sun_pdf > 0.0 {
+                // The path found a sun's disk by itself; light sampling could have aimed at it too.
+                let w = if prev_pdf.is_infinite() {
+                    1.0
+                } else {
+                    match cfg.strategy {
+                        Strategy::Mis => power_heuristic(prev_pdf, sun_pdf),
+                        Strategy::BsdfOnly => 1.0,
+                        Strategy::LightOnly => 0.0,
+                    }
+                };
+                add(throughput * sun * w, depth);
             }
             if scene.lights.has_environment() {
                 let env = scene.lights.environment_radiance(ray.dir);
@@ -148,7 +190,10 @@ pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler,
         let bsdf = Bsdf::new(&params, sf.frame.to_local(-ray.dir), inside);
 
         // Direct light from one chosen light.
-        if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
+        if let (0, Some(direct)) = (depth, primary.as_mut()) {
+            let c = direct(&sf, &bsdf, transmissive);
+            add(throughput * c, depth + 1);
+        } else if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
             let pick = sampler.next1();
             let u = sampler.next2();
             if let Some(ls) = scene.lights.sample(&scene.positions, sf.p, pick, u, cfg.light_sampling)
@@ -201,7 +246,7 @@ pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler,
 
 /// Apply the material's normal map, bump map and anisotropy direction to the shading frame.
 #[inline]
-fn shading_frame(scene: &Scene, m: &Material, tri: u32, sf: &mut Surface) {
+pub(crate) fn shading_frame(scene: &Scene, m: &Material, tri: u32, sf: &mut Surface) {
     let needs_axes = m.normal_texture.is_some() || m.bump_texture.is_some() || m.specular_roughness_anisotropy > 0.0;
     if !needs_axes {
         return;

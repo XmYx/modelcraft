@@ -9,14 +9,14 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use crate::app::{ModelApp, SelectMode, Workspace};
 use crate::args::Cli;
 
-fn harness() -> Harness<'static, ModelApp> {
+pub(crate) fn harness() -> Harness<'static, ModelApp> {
     let ctx = egui::Context::default();
     let app = ModelApp::with_context(&ctx, Cli::default());
     Harness::builder().with_size(egui::vec2(1500.0, 950.0)).build_ui_state(|ui, app: &mut ModelApp| app.draw(ui), app)
 }
 
 /// Open the command palette with Ctrl+K, type, press Enter.
-fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
+pub(crate) fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);
     h.run();
     h.event(egui::Event::Text(text.to_string()));
@@ -270,6 +270,12 @@ fn detail_levels_and_shape_layers_by_keyboard() {
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes[0].strength, 0.25);
     assert_eq!(h.state().doc.undo.len(), before + 1, "one undo step per edit");
+    // The Brushes pane scrolls inside the dock, and with shape layers listed the radio sits below
+    // its visible part: ask for it to be scrolled into view first, as assistive technology and
+    // Tab focus do, then click it.
+    let base = h.get_by_role_and_label(Role::RadioButton, "Base sculpt");
+    base.scroll_to_me();
+    h.run();
     h.get_by_role_and_label(Role::RadioButton, "Base sculpt").click();
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().active_shape, None);
@@ -390,4 +396,335 @@ fn brush_presets_stroke_modes_and_new_brushes_by_keyboard() {
     h.run();
     assert!(h.state().user_presets.is_empty());
     assert_eq!(h.state().status, "Removed the preset Rock chips");
+}
+
+#[test]
+fn undo_history_reaches_back_into_the_last_session() {
+    let d = std::env::temp_dir().join(format!("mc-ui-history-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    let file = d.join("kept.modelcraft");
+    {
+        let mut h = harness();
+        h.run();
+        palette(&mut h, "Add Cube");
+        palette(&mut h, "Add Sphere");
+        h.state_mut().doc.save_as(&file).unwrap();
+    }
+    let mut h = harness();
+    h.run();
+    h.state_mut().open_path(file.clone());
+    h.run();
+    assert!(h.state().status.contains("Restored 2 undo steps"), "{}", h.state().status);
+    // The history panel lists the earlier session's steps, and the keyboard undoes them.
+    assert!(h.query_by_label("History step 2: Add sphere").is_some());
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 1);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn panels_dock_tab_and_hide_without_dragging() {
+    use crate::app::PanelId;
+    use crate::dock::Pane;
+    let mut h = harness();
+    h.run();
+    let ws = h.state().workspace;
+    // Tab the Undo History in with Properties from the panel's options menu.
+    h.get_by_label("Panel options: Undo History").click();
+    h.run();
+    h.get_by_label("Tab With Properties").click();
+    h.run();
+    let loc = format!("{:?}", h.state().layouts.get(ws).location(&Pane::History));
+    assert!(loc.contains("anchor: Some(Properties), placement: Tab"), "{loc}");
+    assert!(h.state().status.contains("Undo History moved"), "announced: {}", h.state().status);
+    // Hide it from View > Panels, then show it again.
+    h.get_by_label("View").click();
+    h.run();
+    h.get_by_label("Panels").click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Undo History").click();
+    h.run();
+    assert!(!h.state().layouts.shown(ws, PanelId::History));
+    crate::dock::move_panel(h.state_mut(), PanelId::History, crate::dock::Move::Show);
+    h.run();
+    assert!(h.state().layouts.shown(ws, PanelId::History));
+    // F6 moves keyboard focus into the next shown panel.
+    h.key_press(Key::F6);
+    h.run();
+    h.run();
+    // The viewport stays whatever happens, and a saved layout comes back.
+    let saved = h.state().layouts.to_saved();
+    let back = crate::dock::Layouts::from_saved(&saved);
+    assert_eq!(back.get(ws), h.state().layouts.get(ws));
+    assert!(back.get(ws).contains(&Pane::Viewport));
+}
+
+#[test]
+fn agents_drive_the_window_over_the_control_channel() {
+    use std::io::{BufRead, BufReader, Write};
+    let mut h = harness();
+    h.run();
+    let token = "feedfacefeedfacefeedfacefeedfacefeedface";
+    h.state_mut().agents.token = Some(token.into());
+    h.state_mut().agents.port = Some(0);
+    // Off by default; the Edit menu item turns it on.
+    assert!(!h.state().agents.is_on());
+    h.get_by_label("Edit").click();
+    h.run();
+    h.get_by_label("Allow Agents to Control ModelCraft").click();
+    h.run();
+    assert!(h.state().agents.is_on(), "{}", h.state().status);
+    assert!(h.state().status.contains("on port"), "the status bar says where: {}", h.state().status);
+    let port = h.state().agents.listening.as_ref().unwrap().port;
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    writeln!(s, r#"{{"id":1,"method":"engine.execute","params":{{"cmd":"add_primitive","kind":"cylinder"}},"token":"{token}"}}"#).unwrap();
+    // The window answers between frames.
+    let mut reader = BufReader::new(s.try_clone().unwrap());
+    let mut line = String::new();
+    let waiter = std::thread::spawn(move || {
+        reader.read_line(&mut line).unwrap();
+        line
+    });
+    for _ in 0..200 {
+        h.run();
+        if waiter.is_finished() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let reply = waiter.join().unwrap();
+    assert!(reply.contains("\"ok\":true"), "{reply}");
+    assert_eq!(h.state().doc.scene.len(), 1);
+    assert!(h.state().status.contains("An agent changed the scene"), "announced in the status bar: {}", h.state().status);
+    h.get_by_role_and_label(Role::TreeItem, "Cylinder");
+    crate::agents::stop(h.state_mut());
+    assert!(!h.state().agents.is_on());
+}
+
+#[test]
+fn exchange_settings_from_the_file_menu() {
+    let mut h = harness();
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    h.get_by_label("Exchange Settings").click();
+    h.run();
+    h.get_by_role_and_label(Role::RadioButton, "Z up").click();
+    h.run();
+    if h.query_by_role_and_label(Role::RadioButton, "Centimetres").is_none() {
+        // A choice closes the menu; open it again for the unit.
+        h.get_by_label("File").click();
+        h.run();
+        h.get_by_label("Exchange Settings").click();
+        h.run();
+    }
+    h.get_by_role_and_label(Role::RadioButton, "Centimetres").click();
+    h.run();
+    let c = h.state().exchange;
+    assert_eq!(c.up, modelcraft_engine::formats::exchange::Up::Z);
+    assert_eq!(c.scale, Some(0.01));
+    assert!(crate::actions::all().contains(&crate::actions::Action::ExportFbx), "Export FBX is in the palette");
+}
+
+#[test]
+fn patch_grouping_and_mesh_check_by_keyboard() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    let id = h.state().selection[0];
+    // One patch for the whole cube first, then group by angle: six sides, as one history step.
+    palette(&mut h, "Group Patches by Shell");
+    let steps = h.state().doc.scene.get(id).unwrap().steps().len();
+    assert_eq!(steps, 1);
+    palette(&mut h, "Group Patches by Angle");
+    let m = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    assert_eq!(modelcraft_engine::ops::patches::patches_in_use(&m).len(), 6);
+    // Face mode: a new patch from the selection, then select it back by one face.
+    h.key_press(Key::Num4);
+    h.run();
+    h.state_mut().components = [0, 1].into_iter().collect();
+    palette(&mut h, "New Patch from Selection");
+    let m = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    assert_eq!(m.patch(0), m.patch(1));
+    h.state_mut().components = [1].into_iter().collect();
+    palette(&mut h, "Select Patch");
+    assert_eq!(h.state().components.len(), 2);
+    // The mesh check finds no triangles on a cube and says so in the status bar (a live region).
+    palette(&mut h, "Select Triangles");
+    assert!(h.state().components.is_empty());
+    assert!(h.state().status.contains("No triangles"), "{}", h.state().status);
+    // The Properties section is reachable and names its counts.
+    h.get_by_label("Patches and Cleanup").click();
+    h.run();
+    assert!(h.query_by_label_contains("N-gons: 0").is_some());
+    h.get_by_label("Clean Up Mesh").click();
+    h.run();
+    let last = h.state().doc.scene.get(id).unwrap().steps().last().map(|s| s.op.name());
+    assert_eq!(last, Some("Clean up"));
+}
+
+#[test]
+fn radial_menu_by_number_and_by_name() {
+    let mut h = harness();
+    h.run();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.run();
+    assert!(h.state().radial.is_some());
+    assert!(h.query_by_role_and_label(Role::Menu, "Radial menu").is_some());
+    // The first slice has keyboard focus; its number picks it.
+    assert!(h.get_by_role_and_label(Role::MenuItem, "Add Cube").is_focused());
+    h.key_press(Key::Num2);
+    h.run();
+    assert!(h.state().radial.is_none(), "choosing closes it: {} {:?}", h.state().status, h.state().mode);
+    assert_eq!(h.state().doc.scene.len(), 1);
+    // Again, and pick a slice by name; Esc closes without acting.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.get_by_role_and_label(Role::MenuItem, "Add Torus").click();
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 2);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(h.state().radial.is_none());
+    assert_eq!(h.state().status, "Radial menu closed");
+    // In Sculpt the slices are brushes.
+    h.state_mut().set_workspace(Workspace::Sculpt);
+    assert!(crate::radial::items(h.state()).iter().all(|a| matches!(a, crate::actions::Action::Brush(_))));
+}
+
+#[test]
+fn preferences_shelf_units_and_display() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    h.run();
+    h.run();
+    assert!(h.state().prefs_window.open);
+    assert!(h.get_by_role_and_label(Role::ComboBox, "Language").is_focused(), "focus moves into the window");
+    // Display: the grid turns off.
+    h.get_by_label("Display").click();
+    h.run();
+    h.get_by_label("Show the ground grid").click();
+    h.run();
+    assert!(!h.state().show_grid);
+    // Shelf: filter, tick Subdivide; its button appears on the shelf and works.
+    h.get_by_label("Display").click();
+    h.run();
+    h.get_by_label("Quick Bar").click();
+    h.run();
+    h.get_by_label("Filter commands").focus();
+    h.run();
+    h.event(egui::Event::Text("Subdiv".into()));
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Subdivide").click();
+    h.run();
+    assert_eq!(h.state().shelf, vec!["mesh.subdivide".to_string()]);
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.state().prefs_window.open, "Esc closes it");
+    h.get_by_role_and_label(Role::Button, "Subdivide, on the Quick Bar").click();
+    h.run();
+    let id = h.state().selection[0];
+    assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 1);
+    // Units: Position reads in centimetres and typed values convert back to metres.
+    h.state_mut().unit = crate::prefs_ui::Unit::Cm;
+    h.run();
+    h.get_by_label("Position X").set_value_accesskit(150.0);
+    h.run();
+    let x = h.state().doc.scene.get(id).unwrap().transform.translation.x;
+    assert!((x - 1.5).abs() < 1e-5, "{x}");
+}
+
+#[test]
+fn object_manager_search_lock_sets_paste_and_multi_edit() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    palette(&mut h, "Add Sphere");
+    palette(&mut h, "Add Torus");
+    let ids: Vec<_> = h.state().doc.scene.objects().iter().map(|o| o.id).collect();
+    // Search: only matching rows stay in the tree.
+    h.get_by_label("Search objects").focus();
+    h.run();
+    h.event(egui::Event::Text("tor".into()));
+    h.run();
+    assert!(h.query_by_role_and_label(Role::TreeItem, "Cube").is_none());
+    assert!(h.query_by_role_and_label(Role::TreeItem, "Torus").is_some());
+    h.state_mut().objects.filter.clear();
+    h.run();
+    // Lock the cube from its row toggle: edits are refused and the refusal is announced.
+    h.get_by_label("Locked: Cube").click();
+    h.run();
+    assert!(h.state().doc.scene.get(ids[0]).unwrap().locked);
+    h.state_mut().selection = vec![ids[0]];
+    h.key_press(Key::Delete);
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 3, "a locked object is not deleted");
+    assert!(h.state().status.contains("locked"), "{}", h.state().status);
+    palette(&mut h, "Lock or Unlock");
+    assert!(!h.state().doc.scene.get(ids[0]).unwrap().locked, "{} {:?}", h.state().status, h.state().selection);
+    // Template from the palette.
+    h.state_mut().selection = vec![ids[2]];
+    palette(&mut h, "Reference Only On or Off");
+    assert!(h.state().doc.scene.get(ids[2]).unwrap().template);
+    // Multi-edit: both selected, Position Y on the active one moves both, in one undo step.
+    h.state_mut().selection = vec![ids[0], ids[1]];
+    h.run();
+    let n = h.state().doc.undo.len();
+    h.get_by_label("Position Y").set_value_accesskit(2.0);
+    h.run();
+    for id in &ids[..2] {
+        assert!((h.state().doc.scene.get(*id).unwrap().transform.translation.y - 2.0).abs() < 1e-5);
+    }
+    assert_eq!(h.state().doc.undo.len(), n + 1);
+    // Copy the sphere's attributes, paste them onto the torus.
+    h.state_mut().selection = vec![ids[1]];
+    palette(&mut h, "Copy Attributes");
+    h.state_mut().selection = vec![ids[2]];
+    palette(&mut h, "Paste Attributes");
+    assert!((h.state().doc.scene.get(ids[2]).unwrap().transform.translation.y - 2.0).abs() < 1e-5);
+    // A selection set, then select it back by name.
+    h.state_mut().selection = vec![ids[0], ids[2]];
+    palette(&mut h, "Save Selection as Set");
+    assert_eq!(h.state().doc.scene.sets.len(), 1);
+    h.state_mut().selection.clear();
+    h.run();
+    h.get_by_label("Selection Sets").click();
+    h.run();
+    h.get_by_label("Select set Set 1").click();
+    h.run();
+    assert_eq!(h.state().selection, vec![ids[0], ids[2]]);
+}
+
+#[test]
+fn tree_rows_reparent_by_drag_and_drop() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    palette(&mut h, "Add Sphere");
+    let ids: Vec<_> = h.state().doc.scene.objects().iter().map(|o| o.id).collect();
+    let from = h.get_by_role_and_label(Role::TreeItem, "Sphere").rect().center();
+    let to = h.get_by_role_and_label(Role::TreeItem, "Cube").rect().center();
+    h.event(egui::Event::PointerMoved(from));
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run();
+    for k in 1..=6 {
+        h.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+        h.run();
+    }
+    h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run();
+    h.run();
+    assert_eq!(h.state().doc.scene.get(ids[1]).unwrap().parent, Some(ids[0]), "the sphere went under the cube");
 }

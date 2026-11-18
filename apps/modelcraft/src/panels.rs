@@ -10,8 +10,9 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, ARRAYS, Action, DEFORMERS, PRIMITIVES};
-use crate::app::{Dock, ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
+use crate::actions::{self, ARRAYS, Action, CLONERS, DEFORMERS, FIELDS, PRIMITIVES};
+use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
+use crate::dock::Move;
 use crate::theme;
 
 pub(crate) fn set_name(ui: &egui::Ui, resp: &egui::Response, name: impl Into<String>) {
@@ -50,10 +51,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 ui.menu_button(tl!("Export"), |ui| {
-                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl] {
+                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx, Action::Export3mf, Action::ExportUsda] {
                         action_button(app, ui, a);
                     }
                 });
+                ui.menu_button(tl!("Exchange Settings"), |ui| crate::exchange_ui::menu(app, ui));
                 ui.separator();
                 if ui.button(tl!("Quit")).clicked() {
                     app.guard(crate::app::Pending::Quit);
@@ -69,8 +71,20 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::TransformDialog,
                     Action::Palette,
                     Action::KeyboardShortcuts,
+                    Action::Preferences,
                 ] {
                     action_button(app, ui, a);
+                }
+                ui.separator();
+                ui.checkbox(&mut app.doc.keep_history, tl!("Keep Undo History in Saved Files"));
+                let mut on = app.agents.is_on();
+                if ui.checkbox(&mut on, tl!("Allow Agents to Control ModelCraft")).changed() {
+                    app.allow_agents = on;
+                    if on { crate::agents::start(app, ui.ctx()) } else { crate::agents::stop(app) }
+                }
+                ui.separator();
+                for o in crate::object_manager::ALL {
+                    action_button(app, ui, Action::Objects(*o));
                 }
             });
             ui.menu_button(tl!("Select"), |ui| {
@@ -93,6 +107,13 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for d in DEFORMERS {
                     action_button(app, ui, Action::AddDeformer(d));
                 }
+                ui.separator();
+                for f in FIELDS {
+                    action_button(app, ui, Action::AddField(f));
+                }
+                for c in CLONERS {
+                    action_button(app, ui, Action::AddCloner(c));
+                }
             });
             ui.menu_button(tl!("Mesh"), |ui| {
                 for a in [
@@ -113,6 +134,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                ui.menu_button(tl!("Patches and Cleanup"), |ui| {
+                    for t in crate::mesh_tools::ALL {
+                        action_button(app, ui, Action::MeshTool(*t));
+                    }
+                });
             });
             ui.menu_button(tl!("Sculpt"), |ui| {
                 for k in modelcraft_engine::sculpt::brush::KINDS {
@@ -126,7 +152,9 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for a in [Action::DetailUp, Action::DetailDown, Action::ShapeAdd, Action::LiveDetail, Action::EvenRemesh] {
                     action_button(app, ui, a);
                 }
+                crate::sculpt_groups_ui::menu(app, ui);
             });
+            ui.menu_button(tl!("Scripts"), |ui| crate::script_ui::menu(app, ui));
             ui.menu_button(tl!("View"), |ui| {
                 for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
                     action_button(app, ui, Action::Workspace(ws));
@@ -141,6 +169,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::RadialMenu,
                     Action::RenderView,
                 ] {
                     action_button(app, ui, a);
@@ -154,14 +183,22 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 });
                 ui.menu_button(tl!("Panels"), |ui| {
                     for p in PanelId::ALL {
-                        let mut shown = app.layout.dock(app.workspace, p) != Dock::Hidden;
+                        let mut shown = app.layouts.shown(app.workspace, p);
                         if ui.checkbox(&mut shown, p.label()).changed() {
-                            app.layout.set(app.workspace, p, if shown { if p == PanelId::Tree { Dock::Left } else { Dock::Right } } else { Dock::Hidden });
+                            crate::dock::move_panel(app, p, if shown { Move::Show } else { Move::Hide });
                         }
+                    }
+                    ui.separator();
+                    if ui.button(tl!("Reset Panels")).clicked() {
+                        app.layouts.reset(app.workspace);
+                        app.status = tl!("Panels reset");
+                        ui.close();
                     }
                 });
             });
+            crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
+            crate::rig_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
                 action_button(app, ui, Action::KeyboardShortcuts);
@@ -218,6 +255,10 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, Action::AddCage);
                     for d in DEFORMERS {
                         action_button(app, ui, Action::AddDeformer(d));
+                    }
+                    ui.separator();
+                    for c in CLONERS {
+                        action_button(app, ui, Action::AddCloner(c));
                     }
                 });
             }
@@ -394,20 +435,30 @@ pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
     let idx = PanelId::ALL.iter().position(|x| *x == p).unwrap_or(0);
     ui.horizontal(|ui| {
         let header_id = egui::Id::unique(("panel-focus", idx));
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 30.0, 20.0), egui::Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 44.0, 20.0), egui::Sense::hover());
         let resp = ui.interact(rect, header_id, egui::Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, p.label()));
-        ui.painter().text(
-            rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            p.label().to_uppercase(),
-            egui::FontId::proportional(11.0),
-            if resp.has_focus() { theme::ACCENT } else { theme::TEXT_DIM },
-        );
+        // The tab above names the panel; the header shows the name while it has keyboard focus
+        // (F6 lands here), so the focus is visible.
+        if resp.has_focus() {
+            ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, p.label().to_uppercase(), egui::FontId::proportional(11.0), theme::ACCENT);
+        }
         let menu = ui.menu_button("...", |ui| {
-            for (d, l) in [(Dock::Left, tl!("Dock Left")), (Dock::Right, tl!("Dock Right")), (Dock::Float, tl!("Float")), (Dock::Hidden, tl!("Hide"))] {
+            for (m, l) in [
+                (Move::Left, tl!("Dock Left")),
+                (Move::Right, tl!("Dock Right")),
+                (Move::Below, tl!("Dock Below the Viewport")),
+                (Move::Float, tl!("Float")),
+                (Move::Hide, tl!("Hide")),
+            ] {
                 if ui.button(l).clicked() {
-                    app.layout.set(app.workspace, p, d);
+                    crate::dock::move_panel(app, p, m);
+                    ui.close();
+                }
+            }
+            for other in app.layouts.shown_panels(app.workspace).into_iter().filter(|o| *o != p) {
+                if ui.button(crate::tlf!("Tab With {panel}", panel = other.label())).clicked() {
+                    crate::dock::move_panel(app, p, Move::TabWith(other));
                     ui.close();
                 }
             }
@@ -422,7 +473,7 @@ pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
 
 pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
     match p {
-        PanelId::Tree => tree(app, ui),
+        PanelId::Tree => crate::object_manager::tree(app, ui),
         PanelId::Properties => properties(app, ui),
         PanelId::Brushes => brushes(app, ui),
         PanelId::Paint => paint(app, ui),
@@ -433,7 +484,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
 // ---------------------------------------------------------------- scene tree
 
 /// A small drawn badge for an object's kind (fonts may lack symbol glyphs, so nothing here is text).
-fn kind_badge(ui: &mut egui::Ui, o: &Object) {
+pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
@@ -482,139 +533,49 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
                 egui::StrokeKind::Inside,
             );
         }
+        ObjectKind::Field { .. } => {
+            // A soft disc: strong in the middle, fading out.
+            let t = Color32::from_rgb(110, 210, 200);
+            p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, t.gamma_multiply(0.5)));
+            p.circle_filled(c, 2.5, t);
+        }
+        ObjectKind::Cloner { .. } => {
+            // Three small squares: one source, many clones.
+            let o = Color32::from_rgb(240, 170, 90);
+            for dx in [-4.0, 0.0, 4.0] {
+                p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
+            }
+        }
         ObjectKind::Deformer { .. } => {
             let m = Color32::from_rgb(200, 140, 230);
             let pts: Vec<egui::Pos2> = (0..=10).map(|k| c + egui::vec2(k as f32 - 5.0, (k as f32 * 1.2).sin() * 3.0)).collect();
             p.add(egui::Shape::line(pts, egui::Stroke::new(1.4, m)));
         }
-    }
-}
-
-/// A drawn eye toggle (filled dot shown, hollow hidden) with an accessible name.
-fn visibility_toggle(ui: &mut egui::Ui, visible: bool, name: String) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, visible, &name));
-    let col = if resp.hovered() { Color32::WHITE } else { theme::TEXT_DIM };
-    if visible {
-        ui.painter().circle_filled(rect.center(), 3.5, col);
-    } else {
-        ui.painter().circle_stroke(rect.center(), 3.5, egui::Stroke::new(1.0, col));
-    }
-    resp
-}
-
-fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
-    let ctx = ui.ctx().clone();
-    let order = app.doc.scene.tree_order();
-    if order.is_empty() {
-        ui.label(RichText::new(tl!("The scene is empty. Add a shape from the Create menu or the command palette.")).color(theme::TEXT_DIM));
-        return;
-    }
-    let tree_id = ui.make_persistent_id("scene-tree");
-    let mut move_to: Option<(usize, i32)> = None;
-    let mut toggle_vis: Option<(ObjectId, bool)> = None;
-    let mut reparent: Option<(ObjectId, Option<ObjectId>)> = None;
-    for (row, (id, depth)) in order.iter().enumerate() {
-        let Some(o) = app.doc.scene.get(*id).cloned() else { continue };
-        let selected = app.selection.contains(id);
-        let name = o.name.clone();
-        let visible = o.visible;
-        ui.horizontal(|ui| {
-            ui.add_space(*depth as f32 * 14.0);
-            let vis = visibility_toggle(ui, visible, crate::tlf!("Visible: {name}", name = name));
-            if vis.clicked() {
-                toggle_vis = Some((*id, !visible));
-            }
-            kind_badge(ui, &o);
-            let text = if visible { RichText::new(&name) } else { RichText::new(&name).color(theme::TEXT_DIM) };
-            let r = ui.add(egui::Button::selectable(selected, text).frame_when_inactive(false));
-            ui.ctx().accesskit_node_builder(r.id, |n| {
-                n.set_role(egui::accesskit::Role::TreeItem);
-                n.set_label(name.clone());
-                n.set_level(depth + 1);
-                n.set_selected(selected);
-            });
-            if r.clicked() {
-                let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
-                if add {
-                    if let Some(p) = app.selection.iter().position(|s| s == id) {
-                        app.selection.remove(p);
-                    } else {
-                        app.selection.push(*id);
-                    }
-                } else {
-                    app.select_only(*id);
-                }
-            }
-            if r.double_clicked() {
-                app.rename = Some((*id, name.clone()));
-            }
-            if app.tree_focus == Some(*id) {
-                r.request_focus();
-                app.tree_focus = None;
-            }
-            if r.has_focus() {
-                ui.memory_mut(|m| m.data.insert_temp(tree_id, row));
-                // Take the arrows so egui's own focus navigation does not move focus elsewhere.
-                let (up, down) =
-                    ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)));
-                if up {
-                    move_to = Some((row, -1));
-                } else if down {
-                    move_to = Some((row, 1));
-                }
-            }
-            r.context_menu(|ui| {
-                if ui.button(Action::Rename.label()).clicked() {
-                    app.rename = Some((*id, name.clone()));
-                    ui.close();
-                }
-                ui.menu_button(tl!("Move Under"), |ui| {
-                    if ui.button(tl!("Top Level")).clicked() {
-                        reparent = Some((*id, None));
-                        ui.close();
-                    }
-                    for (other, _) in &order {
-                        if other == id {
-                            continue;
-                        }
-                        let n = app.doc.scene.get(*other).map(|o| o.name.clone()).unwrap_or_default();
-                        if ui.button(n).clicked() {
-                            reparent = Some((*id, Some(*other)));
-                            ui.close();
-                        }
-                    }
-                });
-                if ui.button(Action::Duplicate.label()).clicked() {
-                    app.selection = vec![*id];
-                    app.act(&ctx, Action::Duplicate);
-                    ui.close();
-                }
-                if ui.button(Action::Delete.label()).clicked() {
-                    app.selection = vec![*id];
-                    app.act(&ctx, Action::Delete);
-                    ui.close();
-                }
-            });
-            // Remember the row widget ids for keyboard moves.
-            ui.memory_mut(|m| m.data.insert_temp(tree_id.with(row), r.id));
-        });
-    }
-    if let Some((row, dir)) = move_to {
-        let next = (row as i32 + dir).clamp(0, order.len() as i32 - 1) as usize;
-        if let Some((id, _)) = order.get(next) {
-            app.select_only(*id);
-            app.tree_focus = Some(*id);
-            if let Some(wid) = ui.memory(|m| m.data.get_temp::<egui::Id>(tree_id.with(next))) {
-                ui.memory_mut(|m| m.request_focus(wid));
-            }
+        ObjectKind::Joint { .. } => {
+            // A bone: a small circle with a line.
+            let j = Color32::from_rgb(115, 205, 240);
+            p.circle_stroke(c + egui::vec2(-3.0, 3.0), 2.5, egui::Stroke::new(1.2, j));
+            p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], egui::Stroke::new(1.4, j));
         }
-    }
-    if let Some((id, visible)) = toggle_vis {
-        app.run(Command::SetVisible { id, visible });
-    }
-    if let Some((id, parent)) = reparent {
-        app.run(Command::Reparent { id, parent });
+        ObjectKind::PointDeformer { .. } => {
+            // A stack deformer: a small grid.
+            let g = Color32::from_rgb(200, 140, 230);
+            p.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), 0.0, egui::Stroke::new(1.2, g), egui::StrokeKind::Inside);
+            p.line_segment([c + egui::vec2(-5.0, 0.0), c + egui::vec2(5.0, 0.0)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(0.0, -5.0), c + egui::vec2(0.0, 5.0)], egui::Stroke::new(1.0, g));
+        }
+        ObjectKind::Skin { .. } => {
+            // A skin: two linked circles.
+            let k = Color32::from_rgb(240, 200, 120);
+            p.circle_stroke(c + egui::vec2(-2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
+            p.circle_stroke(c + egui::vec2(2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
+        }
+        ObjectKind::Sim { .. } => {
+            // A simulation: a falling dot over a small arc.
+            let t = Color32::from_rgb(120, 220, 200);
+            p.circle_filled(c + egui::vec2(0.0, -3.0), 2.0, t);
+            p.line_segment([c + egui::vec2(-5.0, 5.0), c + egui::vec2(5.0, 5.0)], egui::Stroke::new(1.2, t));
+        }
     }
 }
 
@@ -676,14 +637,20 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(tl!("Transform")).default_open(true).show(ui, |ui| {
         let mut t = obj.transform;
         let mut euler = t.euler_degrees();
-        let pos = vec3_row(ui, &tl!("Position"), &mut t.translation, 0.01);
+        let per = app.unit.per_metre();
+        let mut shown = t.translation * per;
+        let pos = vec3_row(ui, &tl!("Position"), &mut shown, 0.01);
+        if pos.iter().any(|r| r.changed()) {
+            t.translation = shown / per;
+        }
         let rot = vec3_row(ui, &tl!("Rotation"), &mut euler, 0.5);
         let scl = vec3_row(ui, &tl!("Scale"), &mut t.scale, 0.01);
         t.set_euler_degrees(euler);
         let t = t.sanitized();
         for r in pos.iter().chain(&rot).chain(&scl) {
             if r.changed() || r.drag_stopped() {
-                commit_edit(app, r, |o| o.transform = t, || Command::SetTransform { id, transform: t }, id);
+                let batch = crate::object_manager::transform_batch(app, id, obj.transform, t);
+                commit_edit(app, r, |o| o.transform = t, || batch, id);
                 break;
             }
         }
@@ -710,6 +677,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
         }
+        ObjectKind::Field { field } => {
+            egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
+        }
+        ObjectKind::Cloner { cloner, target } => {
+            egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
+        }
         ObjectKind::Deformer { deformer } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| deformer_fields(app, ui, id, *deformer));
         }
@@ -725,19 +698,22 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 set_name(ui, &r, tl!("Base colour"));
                 m.base_color = [rgb[0], rgb[1], rgb[2], m.base_color[3]];
                 let mm = m.clone();
-                commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
+                let batch = crate::object_manager::material_batch(app, id, mm.clone());
+                commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             let mut m2 = obj.material.clone();
             ui.horizontal(|ui| {
                 let r = drag(ui, &mut m2.metallic, 0.01, 0.0..=1.0, tl!("Metallic"));
                 let mm = m2.clone();
-                commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
+                let batch = crate::object_manager::material_batch(app, id, mm.clone());
+                commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             let mut m3 = obj.material.clone();
             ui.horizontal(|ui| {
                 let r = drag(ui, &mut m3.roughness, 0.01, 0.0..=1.0, tl!("Roughness"));
                 let mm = m3.clone();
-                commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
+                let batch = crate::object_manager::material_batch(app, id, mm.clone());
+                commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             crate::material_ui::rows(app, ui, id, &obj);
             ui.horizontal(|ui| {
@@ -753,8 +729,11 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
         });
     }
+    crate::deform_ui::properties(app, ui, id);
+    crate::constraint_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
+        crate::mesh_tools::section(app, ui);
     }
     if let Some((verts, tris)) = app.doc.sculpt.as_ref().map(|s| (s.mesh.vertex_count(), s.mesh.triangle_count())) {
         egui::CollapsingHeader::new(tl!("Sculpt")).default_open(true).show(ui, |ui| {
@@ -833,6 +812,7 @@ fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op
                 Some(r)
             }
             StepOp::EvenRemesh { cell } => Some(drag(ui, cell, 0.001, 0.0001..=1000.0, tl!("Cell size"))),
+            StepOp::Decimate { ratio } => Some(drag(ui, ratio, 0.005, 0.001..=1.0, tl!("Share of triangles kept"))),
             StepOp::Subdivide { levels } => {
                 ui.label(tl!("Levels"));
                 let r = ui.add(egui::DragValue::new(levels).range(1..=4));
@@ -1036,7 +1016,9 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.label(RichText::new(tl!("Ctrl inverts, Shift smooths. Pen pressure scales strength (and size when enabled).")).color(theme::TEXT_DIM).small());
     if app.doc.sculpt.is_some() && app.brush.kind == BrushKind::Mask {
         ui.horizontal_wrapped(|ui| {
-            for a in [Action::MaskClear, Action::MaskInvert, Action::MaskFill] {
+            use modelcraft_engine::MaskOp as M;
+            let more = [M::Blur, M::Sharpen, M::Grow, M::Shrink, M::Hollows, M::Ridges].map(Action::MaskOp);
+            for a in [Action::MaskClear, Action::MaskInvert, Action::MaskFill].into_iter().chain(more) {
                 if ui.button(a.label()).clicked() {
                     app.act(&ctx, a);
                 }
@@ -1044,6 +1026,7 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
         });
     }
     crate::sculpt_ui::layers(app, ui);
+    crate::sculpt_groups_ui::panel(app, ui);
 }
 
 fn falloff_label(f: Falloff) -> String {
@@ -1089,9 +1072,12 @@ pub struct Palette {
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
+    crate::script_ui::show(app, ctx);
+    crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
+    crate::sculpt_groups_ui::dialogs(app, ctx);
     rename(app, ctx);
     if app.about {
         let mut open = true;

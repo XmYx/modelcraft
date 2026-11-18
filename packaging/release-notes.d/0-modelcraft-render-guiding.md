@@ -1,0 +1,1 @@
+- The Render View has a new option, "Learn where light comes from": the renderer notes where light arrives in each part of the scene and sends more of its work there, which cleans up rooms lit mostly by bounced light. It starts a little noisier and pays off from about a hundred samples on; it runs on the processor.

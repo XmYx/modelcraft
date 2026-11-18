@@ -1,0 +1,1 @@
+- Clones: Create > Add Linear, Radial, Grid, Scatter, Surface or Vertices Clones lays out many copies of one object. They are instances, so the mesh is stored and uploaded once; change the layout, counts, offsets and seed in Properties.

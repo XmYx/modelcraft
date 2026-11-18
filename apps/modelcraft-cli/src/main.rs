@@ -4,7 +4,10 @@
 #![forbid(unsafe_code)]
 
 mod bench_cmd;
+mod hair_cmd;
 mod render_cmd;
+mod script_cmd;
+mod sim_cmd;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -14,7 +17,9 @@ use std::time::Instant;
 use glam::Vec3;
 use modelcraft_engine::scene::{ObjectKind, Scene};
 use modelcraft_engine::sculpt::{BrushKind, BrushSettings, Dab, SculptMesh};
-use modelcraft_engine::{COMMANDS, Command, Document};
+use modelcraft_engine::{COMMANDS, Command, Document, control as channel};
+
+mod mcp;
 
 const USAGE: &str = "Usage: modelcraft-cli <command> [args]
 
@@ -27,20 +32,45 @@ Commands:
                                     apply one JSON command per line, then save
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
-  export <project> <out.glb|obj|stl>
-  convert <in> <out>                any readable file to .glb, .obj, .stl or .modelcraft
+  export <project> <out.glb|obj|stl|fbx|3mf|usda> [--up y|z] [--scale M]
+  export-uv <project> <out.svg|png> [--size N] [--object ID]
+                                    the UV layout of a mesh object as a picture
+  convert <in> <out> [--up auto|y|z] [--scale M]
+                                    any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
+                                    .glb, .obj, .stl, .fbx, .3mf, .usda or .modelcraft; --up and --scale
+                                    (metres per file unit) convert axes and units
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
                                     one command per line in, {\"ok\":…} per line out
   bake <project> <object id or name> <out.mcpc> [--start F] [--end F] [--step F] [--world]
                                     bake an object's vertices over the frames into a point cache
   cache-info <file.mcpc>            print a point cache's header and bounds
+  bench-skin [--verts N] [--joints N] [--frames N]
+                                    bind and play a skinned tube: weights, evaluation, playback
+  serve [project] [--port N]        the same channel on a loopback socket, behind a token
+                                    written to a file only you can read
+  call <method> ['<json params>'] [--port N] [--token T]
+                                    one request to a running app or `serve` (engine.execute,
+                                    document.info, document.save, …)
+  mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
+  bench --groups [--polys N]        patch, visibility, region, shell, trim, occlusion, decimate and projection times
+  uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
+  uv <file>                         UV islands and distortion of every mesh object (JSON lines)
+  uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian] [--relax N]
+                                    unwrap a sphere (or tube, cone, torus, roundcube): time and distortion
   -h, --help | -V, --version
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nRendering:\n{}\n{}\n", render_cmd::USAGE, bench_cmd::USAGE)
+    format!(
+        "{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n\nSimulation:\n{}\n",
+        script_cmd::USAGE,
+        render_cmd::USAGE,
+        bench_cmd::USAGE,
+        hair_cmd::USAGE,
+        sim_cmd::USAGE
+    )
 }
 
 fn main() -> ExitCode {
@@ -78,10 +108,13 @@ fn is_project(p: &Path) -> bool {
 }
 
 /// Open a project, or import any other readable file into a new document.
-fn load(path: &str) -> Result<Document, String> {
+pub(crate) fn load(path: &str) -> Result<Document, String> {
     let p = Path::new(path);
     if is_project(p) {
         let mut d = Document::open(p).map_err(|e| e.to_string())?;
+        if let Some(n) = d.history_note.take() {
+            eprintln!("note: {n}");
+        }
         if d.pending_recovery > 0 {
             eprintln!("note: {} unsaved commands wait in the crash journal; `modelcraft-cli recover` replays them", d.pending_recovery);
         }
@@ -89,7 +122,7 @@ fn load(path: &str) -> Result<Document, String> {
         Ok(d)
     } else {
         let mut d = Document::new();
-        let out = d.execute(Command::Import { path: path.to_string() }).map_err(|e| e.to_string())?;
+        let out = d.execute(Command::Import { path: path.to_string(), up: Default::default(), scale: None }).map_err(|e| e.to_string())?;
         for w in out.warnings {
             eprintln!("warning: {w}");
         }
@@ -97,9 +130,36 @@ fn load(path: &str) -> Result<Document, String> {
     }
 }
 
+/// `--up` and `--scale` (metres per file unit).
+fn convert_flags(a: &[String]) -> Result<modelcraft_engine::formats::exchange::Convert, String> {
+    use modelcraft_engine::formats::exchange::{Convert, Up};
+    let up = match flag(a, "--up").as_deref() {
+        None | Some("auto") => Up::Auto,
+        Some("y") | Some("Y") => Up::Y,
+        Some("z") | Some("Z") => Up::Z,
+        Some(other) => return Err(format!("--up takes auto, y or z, not {other:?}")),
+    };
+    let scale = match flag(a, "--scale") {
+        None => None,
+        Some(s) => Some(s.parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).ok_or_else(|| format!("--scale takes a positive number, not {s:?}"))?),
+    };
+    Ok(Convert { up, scale })
+}
+
 fn save(d: &mut Document, out: &str) -> Result<(), String> {
+    save_with(d, out, Default::default())
+}
+
+fn save_with(d: &mut Document, out: &str, convert: modelcraft_engine::formats::exchange::Convert) -> Result<(), String> {
     let p = Path::new(out);
-    if is_project(p) { d.save_as(p) } else { d.export(p) }.map_err(|e| e.to_string())?;
+    if is_project(p) {
+        d.save_as(p).map_err(|e| e.to_string())?;
+    } else {
+        // What the format could not keep (a rigged .glb says so) goes to stderr.
+        for w in d.export_report(p, convert).map_err(|e| e.to_string())? {
+            eprintln!("warning: {w}");
+        }
+    }
     // A CLI save is final: no journal left behind.
     d.detach_journal();
     Ok(())
@@ -113,6 +173,12 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             for (name, help) in modelcraft_engine::anim::COMMANDS {
                 println!("anim op={name}\t{help}");
+            }
+            for (name, help) in modelcraft_engine::rig::COMMANDS {
+                println!("rig op={name}\t{help}");
+            }
+            for (name, help) in modelcraft_engine::sim::COMMANDS {
+                println!("sim op={name}\t{help}");
             }
             Ok(())
         }
@@ -138,8 +204,33 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             save(&mut d, &flag(a, "-o").unwrap_or_else(|| project.to_string()))
         }
-        "export" => save(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?),
-        "convert" => save(&mut load(arg(a, 0, "input")?)?, arg(a, 1, "output")?),
+        "export" => {
+            let c = convert_flags(a)?;
+            save_with(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?, c)
+        }
+        "export-uv" => {
+            let mut d = load(arg(a, 0, "project")?)?;
+            let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
+            let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
+            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+        }
+        "convert" => {
+            let c = convert_flags(a)?;
+            let input = arg(a, 0, "input")?;
+            let mut d = if is_project(Path::new(input)) {
+                load(input)?
+            } else {
+                let mut d = Document::new();
+                let out = d.execute(Command::Import { path: input.to_string(), up: c.up, scale: c.scale }).map_err(|e| e.to_string())?;
+                for w in out.warnings {
+                    eprintln!("warning: {w}");
+                }
+                d
+            };
+            // The conversion applies on the way in; the output is written as the scene is.
+            let out = if is_project(Path::new(input)) { c } else { Default::default() };
+            save_with(&mut d, arg(a, 1, "output")?, out)
+        }
         "recover" => {
             let p = PathBuf::from(arg(a, 0, "project")?);
             let mut d = Document::open(&p).map_err(|e| e.to_string())?;
@@ -160,14 +251,54 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
+        "bench-skin" => {
+            let n = |name: &str, default: usize| flag(a, name).and_then(|v| v.parse().ok()).unwrap_or(default);
+            bench_skin(n("--verts", 100_000), n("--joints", 60), n("--frames", 120))
+        }
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
+        "run-script" => script_cmd::run(a, load, save),
+        "batch-script" => script_cmd::batch(a, load, save),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
             println!("{report}");
             Ok(())
         }
+        "serve" => serve(positional(a), flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?),
+        "call" => {
+            let method = arg(a, 0, "method")?;
+            let params = match a.get(1).filter(|p| !p.starts_with("--")) {
+                Some(p) => serde_json::from_str(p).map_err(|e| format!("params: {e}"))?,
+                None => serde_json::json!({}),
+            };
+            let port = flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?;
+            let mut c = mcp::app_connection(port, flag(a, "--token").as_deref())?;
+            let v = c.call(craft_control::client::Request::new(method, params)).map_err(|e| e.message().to_string())?;
+            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            Ok(())
+        }
+        "mcp" => {
+            let backend = if a.iter().any(|x| x == "--app") {
+                let port = flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?;
+                mcp::Backend::App(Box::new(mcp::app_connection(port, None)?))
+            } else {
+                mcp::local(positional(a))?
+            };
+            mcp::serve(backend)
+        }
+        "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
+        "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
+        "hair-bench" => hair_cmd::bench(a),
+        "sim-bench" => sim_cmd::bench(a),
+        "uv-bench" => uv_bench(
+            flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64),
+            &flag(a, "--method").unwrap_or_else(|| "lscm".to_string()),
+            &flag(a, "--shape").unwrap_or_else(|| "sphere".to_string()),
+            &flag(a, "--cut").unwrap_or_else(|| "auto".to_string()),
+            flag(a, "--relax").and_then(|v| v.parse().ok()).unwrap_or(0),
+        ),
+        "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
@@ -198,6 +329,77 @@ fn bake(a: &[String]) -> Result<(), String> {
     let bytes = cache.to_bytes().map_err(|e| e.to_string())?;
     craft_atomic::atomic_write(Path::new(out), &bytes).map_err(|e| format!("{out}: {e}"))?;
     println!("{} frames of {} vertices written to {out}", cache.frames(), cache.vertices);
+    Ok(())
+}
+
+/// A procedurally generated character stand-in: a tube of about `verts` points along Y with a
+/// chain of `joints` joints up its middle, bound with heat weights, every joint keyed to sway.
+/// Prints the bind time, the per-frame cost of posing and evaluating with both skinning methods,
+/// and the kernels alone.
+fn bench_skin(verts: usize, joints: usize, frames: usize) -> Result<(), String> {
+    use modelcraft_engine::animation::skin;
+    use modelcraft_engine::{BindMethod, RigCommand};
+    let joints = joints.clamp(2, 1000);
+    let frames = frames.clamp(2, 100_000);
+    let mut d = Document::new();
+    let run = |d: &mut Document, c: Command| d.execute(c).map_err(|e| e.to_string());
+    let t = Instant::now();
+    let (mesh, skin_id, _) = modelcraft_engine::rig::bench_character(&mut d, verts, joints, frames, BindMethod::Heat).map_err(|e| e.to_string())?;
+    let count = d.eval.evaluate(&d.scene, mesh).mesh.vertex_count();
+    println!("mesh: {count} vertices, {joints} joints; built and bound with heat weights (4 influences) in {:.0} ms", ms(t));
+    println!("animation: {} curves on {joints} joints, {frames} frames at 24 fps; {} threads", d.scene.anim.tracks().len(), rayon_threads());
+    for dq in [false, true] {
+        run(&mut d, Command::Rig(RigCommand::SetSkin { mesh, dual_quaternion: dq }))?;
+        let (mut pose, mut eval) = (Vec::with_capacity(frames), Vec::with_capacity(frames));
+        let mut checksum = 0.0f64;
+        for f in 0..frames {
+            let t = Instant::now();
+            d.set_frame(f as f64);
+            pose.push(ms(t));
+            let t = Instant::now();
+            let m = d.eval.evaluate(&d.scene, mesh).mesh;
+            eval.push(ms(t));
+            checksum += m.positions().first().map_or(0.0, |p| p.x as f64);
+        }
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+        let total = mean(&pose) + mean(&eval);
+        println!(
+            "{}: pose (curves → joints) {:.3} ms, evaluate (skin {count} points) mean {:.2} ms p95 {:.2} ms → {:.0} evaluated frames per second (checksum {checksum:.3})",
+            if dq { "dual quaternion" } else { "linear blend   " },
+            mean(&pose),
+            mean(&eval),
+            pct(&mut eval, 0.95),
+            1000.0 / total.max(1e-9)
+        );
+    }
+    // The kernels alone, on the same data.
+    let ObjectKind::Skin { skin: bound } = d.scene.get(skin_id).map(|o| o.kind.clone()).ok_or("no skin")? else { return Err("no skin".into()) };
+    let scene = d.scene.clone();
+    let mut hidden = scene.clone();
+    if let Ok(o) = hidden.edit(skin_id) {
+        o.visible = false;
+    }
+    let rest = d.eval.evaluate(&hidden, mesh).mesh.positions().to_vec();
+    let world: Vec<glam::Mat4> = bound.joints.iter().map(|j| scene.world_matrix(*j)).collect();
+    let mats = skin::skin_matrices(&world, &bound.inverse_bind);
+    let mut out = Vec::new();
+    type Kernel = fn(&[Vec3], &skin::SkinWeights, &[glam::Mat4], &mut Vec<Vec3>, bool);
+    for (name, f) in [("linear blend", skin::linear_blend_with as Kernel), ("dual quaternion", skin::dual_quaternion_with)] {
+        let mut per = [0.0; 2];
+        for (slot, parallel) in per.iter_mut().zip([false, true]) {
+            // The best of five batches: the machine is rarely idle.
+            *slot = (0..5)
+                .map(|_| {
+                    let t = Instant::now();
+                    for _ in 0..10 {
+                        f(&rest, &bound.weights, &mats, &mut out, parallel);
+                    }
+                    ms(t) / 10.0
+                })
+                .fold(f64::MAX, f64::min);
+        }
+        println!("kernel {name}: {:.2} ms on one core, {:.2} ms on all, per {count} points", per[0], per[1]);
+    }
     Ok(())
 }
 
@@ -254,8 +456,29 @@ fn validate(d: &mut Document) -> Result<(), String> {
     if bad == 0 { Ok(()) } else { Err("invalid meshes found".into()) }
 }
 
-/// The agent channel: newline-delimited JSON commands on stdin, one reply per line on stdout.
-/// Extra verbs: `{"cmd":"save","path":…}`, `{"cmd":"info"}`, `{"cmd":"export","path":…}`.
+/// The first argument that is not a flag (or a flag's value).
+fn positional(a: &[String]) -> Option<&str> {
+    let mut skip = false;
+    for x in a {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if matches!(x.as_str(), "--port" | "--token") {
+            skip = true;
+            continue;
+        }
+        if !x.starts_with("--") {
+            return Some(x);
+        }
+    }
+    None
+}
+
+/// The agent channel: newline-delimited JSON on stdin, one reply per line on stdout. A line is an
+/// engine command (`{"cmd": …}`), one of the extra verbs `{"cmd":"save","path":…}`,
+/// `{"cmd":"info"}`, `{"cmd":"export","path":…}`, or a control request `{"method": …, "params": …}`
+/// as the socket takes it.
 fn control(project: Option<&str>) -> Result<(), String> {
     let mut d = match project {
         Some(p) if Path::new(p).exists() => load(p)?,
@@ -268,44 +491,201 @@ fn control(project: Option<&str>) -> Result<(), String> {
         if line.trim().is_empty() {
             continue;
         }
-        if line.len() > 64 << 20 {
+        if line.len() > channel::MAX_LINE {
             let _ = writeln!(out, "{{\"ok\":false,\"error\":\"line too long\"}}");
             continue;
         }
         let reply = match serde_json::from_str::<serde_json::Value>(&line) {
             Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-            Ok(v) => match v.get("cmd").and_then(|c| c.as_str()) {
-                Some("save") | Some("export") => {
-                    let path = v.get("path").and_then(|p| p.as_str()).unwrap_or_default().to_string();
-                    match save(&mut d, &path) {
-                        Ok(()) => serde_json::json!({ "ok": true }),
-                        Err(e) => serde_json::json!({ "ok": false, "error": e }),
-                    }
+            Ok(v) => {
+                let (method, params) = match (v.get("method").and_then(|m| m.as_str()), v.get("cmd").and_then(|c| c.as_str())) {
+                    (Some(m), _) => (m.to_string(), v.get("params").cloned().unwrap_or(serde_json::json!({}))),
+                    (None, Some("save")) => ("document.save".into(), v.clone()),
+                    (None, Some("export")) => ("document.export".into(), v.clone()),
+                    (None, Some("info")) => ("document.info".into(), serde_json::json!({})),
+                    _ => ("engine.execute".into(), v.clone()),
+                };
+                let r = channel::handle(&mut d, &method, &params);
+                // A CLI save is final: no journal left behind.
+                if method == "document.save" {
+                    d.detach_journal();
                 }
-                Some("info") => {
-                    let objects: Vec<serde_json::Value> = d
-                        .scene
-                        .tree_order()
-                        .into_iter()
-                        .filter_map(|(id, depth)| {
-                            let o = d.scene.get(id)?.clone();
-                            let m = d.eval.evaluate(&d.scene, id).mesh;
-                            Some(serde_json::json!({"id": id.0, "name": o.name, "type": o.kind.type_name(), "depth": depth, "faces": m.face_count(), "steps": o.steps().len()}))
-                        })
-                        .collect();
-                    serde_json::json!({ "ok": true, "result": { "objects": objects, "undo": d.undo.labels() } })
-                }
-                _ => match serde_json::from_value::<Command>(v) {
-                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-                    Ok(c) => match d.execute(c) {
-                        Ok(o) => serde_json::json!({ "ok": true, "result": o }),
-                        Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-                    },
-                },
-            },
+                r
+            }
         };
         writeln!(out, "{reply}").map_err(|e| e.to_string())?;
         out.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The control channel on a loopback socket, answering until the process is stopped.
+fn serve(project: Option<&str>, port: Option<u16>) -> Result<(), String> {
+    let mut d = match project {
+        Some(p) if Path::new(p).exists() => load(p)?,
+        Some(p) => {
+            let mut d = Document::new();
+            d.path = Some(PathBuf::from(p));
+            d
+        }
+        None => Document::new(),
+    };
+    let l = channel::listen(port, None, || {}).map_err(|e| format!("cannot listen: {e}"))?;
+    match &l.token_file {
+        Some(f) => println!("listening on 127.0.0.1:{} (token in {})", l.port, f.display()),
+        None => println!("listening on 127.0.0.1:{} (token from MODELCRAFT_CONTROL_TOKEN)", l.port),
+    }
+    let _ = std::io::stdout().flush();
+    while let Ok(req) = l.requests.recv() {
+        let save = req.method == "document.save";
+        channel::answer(&mut d, req);
+        if save {
+            d.detach_journal();
+        }
+    }
+    Ok(())
+}
+
+fn distortion_json(d: &modelcraft_engine::uv::Distortion) -> serde_json::Value {
+    serde_json::json!({
+        "triangles": d.triangles, "flipped": d.flipped,
+        "mean_angle_error_deg": d.mean_angle_error_deg, "max_angle_error_deg": d.max_angle_error_deg,
+        "mean_stretch": d.mean_stretch, "max_stretch": d.max_stretch,
+        "area_rms_log": d.area_rms_log, "min_area_ratio": d.min_area_ratio, "max_area_ratio": d.max_area_ratio,
+    })
+}
+
+/// One JSON line per mesh object: its UV islands (cut along the UV discontinuities) and the
+/// distortion of its UVs. Objects without UVs report `"uvs":false`.
+fn uv_report(d: &mut Document) -> Result<(), String> {
+    use modelcraft_engine::uv::{Charts, SeamSet, measure};
+    let ids: Vec<_> = d.scene.objects().iter().filter(|o| matches!(o.kind, ObjectKind::Mesh { .. })).map(|o| o.id).collect();
+    for id in ids {
+        let m = d.eval.evaluate(&d.scene, id).mesh;
+        let name = d.scene.get(id).map(|o| o.name.clone()).unwrap_or_default();
+        if !m.has_uvs() {
+            println!("{}", serde_json::json!({ "id": id.0, "name": name, "uvs": false }));
+            continue;
+        }
+        let charts = Charts::build(&m, &SeamSet::from_uv_discontinuities(&m)).map_err(|e| e.to_string())?;
+        let (dist, _) = measure(&m);
+        println!("{}", serde_json::json!({ "id": id.0, "name": name, "uvs": true, "islands": charts.islands.len(), "distortion": distortion_json(&dist) }));
+    }
+    Ok(())
+}
+
+/// Unwrap a welded shape (no seams unless the shape is developable: the automatic cut gives a
+/// closed one a path) with each solver asked for and report time and distortion. Reproduces the
+/// numbers in `docs/performance.md`.
+fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str, relax: u32) -> Result<(), String> {
+    use modelcraft_engine::ops::{edit, primitives::Primitive};
+    use modelcraft_engine::uv::{RelaxMode, RelaxOptions, SeamSet, UnwrapMethod, UnwrapOptions, measure, relax_corners, unwrap_mesh};
+    let segments = segments.clamp(4, 512);
+    let rings = (segments / 2).max(2);
+    let prim = match shape {
+        "sphere" => Primitive::Sphere { radius: 1.0, segments, rings },
+        "tube" => Primitive::Cylinder { radius: 1.0, height: 2.0, sides: segments, rings, caps: false },
+        "cone" => Primitive::Cone { radius: 1.0, height: 1.5, sides: segments, caps: false },
+        "torus" => Primitive::Torus { radius: 1.0, tube: 0.35, segments, sides: (segments / 2).max(3) },
+        "roundcube" => Primitive::RoundCube { radius: 1.0, segments: (segments / 4).max(2) },
+        other => return Err(format!("unknown shape `{other}` (sphere, tube, cone, torus, roundcube)")),
+    };
+    let methods: Vec<(&str, UnwrapMethod)> = match method {
+        "lscm" => vec![("LSCM", UnwrapMethod::Lscm)],
+        "abf" => vec![("ABF", UnwrapMethod::Abf)],
+        "both" => vec![("LSCM", UnwrapMethod::Lscm), ("ABF", UnwrapMethod::Abf)],
+        other => return Err(format!("unknown method `{other}` (lscm, abf, both)")),
+    };
+    let t = Instant::now();
+    let raw = prim.build().map_err(|e| e.to_string())?;
+    let mesh = edit::weld(&raw, 1e-5).map_err(|e| e.to_string())?;
+    println!("{shape} {segments}: {} faces, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
+    let mut seams = SeamSet::new();
+    match cut {
+        "auto" => {}
+        // One seam from the top to the bottom of the shape (pole to pole on a sphere, a line down
+        // a tube, apex to rim on a cone): a single interior everywhere else.
+        "meridian" => {
+            let key = |v: u32| f64::from(mesh.position(v).y) * 1000.0 - f64::from(mesh.position(v).z);
+            let ids = 0..mesh.vertex_count() as u32;
+            let top = ids.clone().max_by(|a, b| key(*a).total_cmp(&key(*b)));
+            let bottom = ids.min_by(|a, b| key(*a).total_cmp(&key(*b)));
+            if let (Some(top), Some(bottom)) = (top, bottom) {
+                seams.mark_path(&mesh, top, bottom).ok_or("no seam path between the ends of the shape")?;
+            }
+        }
+        other => return Err(format!("unknown cut `{other}` (auto, meridian)")),
+    }
+    for (label, m) in methods {
+        let t = Instant::now();
+        let (out, res) = unwrap_mesh(&mesh, &seams, &UnwrapOptions { method: m, ..UnwrapOptions::default() }).map_err(|e| e.to_string())?;
+        let solve = ms(t);
+        let isl = res.islands.first();
+        match isl.and_then(|i| i.abf) {
+            Some(a) => println!(
+                "unwrap {label} (auto cut of {} edges): {solve:.0} ms, {} Newton iterations, constraint residual {:.1e}, converged {}, fell back {}",
+                res.cut.edges_added,
+                a.iterations,
+                a.residual,
+                a.converged,
+                isl.is_some_and(|i| i.abf_fell_back())
+            ),
+            None => println!(
+                "unwrap {label} (auto cut of {} edges): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
+                res.cut.edges_added,
+                isl.map_or(0, |i| i.iterations),
+                isl.map_or(0.0, |i| i.residual),
+                isl.is_some_and(|i| i.converged)
+            ),
+        }
+        let (dist, _) = measure(&out);
+        println!("{}", distortion_json(&dist));
+        if relax > 0 {
+            for (label, mode) in [("rigid", RelaxMode::Rigid), ("conformal", RelaxMode::Conformal)] {
+                let t = Instant::now();
+                let (relaxed, rep) = relax_corners(&out, &[], &RelaxOptions { iterations: relax, mode }).map_err(|e| e.to_string())?;
+                println!("relax {label} x{relax}: {:.0} ms, energy {:.4e} -> {:.4e}, {} islands", ms(t), rep.energy_before, rep.energy_after, rep.islands);
+                println!("{}", distortion_json(&measure(&relaxed).0));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Pack N random rectangles (fixed seed) with the default options for each rotation mode.
+fn uv_pack_bench(n: usize) -> Result<(), String> {
+    use modelcraft_engine::uvpack::{Density, PackIsland, PackOptions, Rotation, pack};
+    let n = n.clamp(1, 100_000);
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut rnd = move || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 40) as f32 / (1u64 << 24) as f32
+    };
+    let islands: Vec<PackIsland> = (0..n)
+        .map(|_| {
+            let (w, h) = (0.05 + 1.5 * rnd() * rnd(), 0.05 + 1.5 * rnd() * rnd());
+            PackIsland {
+                triangles: vec![
+                    [glam::Vec2::ZERO, glam::Vec2::new(w, 0.0), glam::Vec2::new(w, h)],
+                    [glam::Vec2::ZERO, glam::Vec2::new(w, h), glam::Vec2::new(0.0, h)],
+                ],
+                area_3d: w * h,
+            }
+        })
+        .collect();
+    // The margin is per island on every side, so many islands need a thinner one to fit at all.
+    let margin = if n <= 1000 { 0.004 } else { 0.0005 };
+    for rotation in [Rotation::None, Rotation::Quarter, Rotation::Fit] {
+        let t = Instant::now();
+        let r = pack(&islands, &PackOptions { margin, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;
+        println!(
+            "{n} islands, rotation {rotation:?}: {:.0} ms, utilisation {:.1} %, scale {:.4}, work {}{}",
+            ms(t),
+            r.utilisation * 100.0,
+            r.scale,
+            r.work,
+            if r.shelf_fallback { " (shelf packer)" } else { "" }
+        );
     }
     Ok(())
 }
@@ -315,14 +695,89 @@ fn pct(v: &mut [f64], q: f64) -> f64 {
     v.get(((v.len() as f64 - 1.0) * q).round().max(0.0) as usize).copied().unwrap_or(0.0)
 }
 
+/// How many threads the parallel kernels use.
+fn rayon_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get())
+}
+
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
 /// Sculpt latency on a dense quad sphere: build times, per-dab time for each brush, and, when a
 /// GPU is present, the chunked upload and a full 1920×1080 draw of the mesh.
+/// Time the patch, visibility, region, occlusion, shell and trim operations on a quad sphere.
+fn bench_groups(polys: u32) -> Result<(), String> {
+    use modelcraft_engine::sculpt::groups;
+    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1632);
+    let mesh = modelcraft_engine::ops::primitives::Primitive::RoundCube { radius: 1.0, segments: seg }.build().map_err(|e| e.to_string())?;
+    let mut s = SculptMesh::new(&mesh, None, None);
+    println!("mesh: {} quads, {} triangles, {} vertices", mesh.face_count(), s.triangle_count(), s.vertex_count());
+    let cam = modelcraft_render::Camera { distance: 3.2, ..Default::default() };
+    let region = modelcraft_engine::sculpt::ScreenRegion {
+        view_proj: cam.view_proj(1.0),
+        points: (0..64).map(|k| glam::Vec2::from_angle(k as f32 / 64.0 * std::f32::consts::TAU) * 0.3).collect(),
+        front_only: true,
+        eye: cam.eye(),
+    };
+    if std::env::var("MODELCRAFT_BENCH_ONLY").as_deref() == Ok("decimate") {
+        return bench_decimate(&mesh);
+    }
+    let t = Instant::now();
+    let (by_angle, count) = groups::patches_by_normal(&mesh, 30.0);
+    println!("patches by angle (30 degrees): {count} patches, {:.0} ms", ms(t));
+    let t = Instant::now();
+    let islands = groups::patches_by_uv_island(&mesh).map(|p| p.1);
+    println!("patches by UV island: {islands:?}, {:.0} ms", ms(t));
+    let t = Instant::now();
+    s.set_face_patches(&by_angle);
+    println!("patches into the session: {:.0} ms", ms(t));
+    let t = Instant::now();
+    let inside = groups::faces_in_region(&mesh, &region);
+    println!("faces inside a 64-corner lasso: {} faces, {:.0} ms", inside.iter().filter(|x| **x).count(), ms(t));
+    let t = Instant::now();
+    s.set_face_hidden(&inside);
+    println!("hide them in the session: {:.0} ms", ms(t));
+    s.set_face_hidden(&[]);
+    let t = Instant::now();
+    let masked = s.mask_region(&region, 1.0).indices.len();
+    println!("mask the same lasso: {masked} vertices, {:.0} ms", ms(t));
+    let t = Instant::now();
+    let shell = groups::extract_shell(&mesh, &s.mask, 0.02).map_err(|e| e.to_string())?;
+    println!("shell from that mask: {} faces, {:.0} ms", shell.face_count(), ms(t));
+    let t = Instant::now();
+    let moved = s.clip_plane(Vec3::new(0.0, 0.5, 0.0), Vec3::Y).indices.len();
+    println!("clip to a plane: {moved} vertices, {:.0} ms", ms(t));
+    let t = Instant::now();
+    let trimmed = modelcraft_engine::ops::trim::trim_plane(&mesh, Vec3::new(0.0, 0.3, 0.0), Vec3::new(0.2, 1.0, 0.1), true).map_err(|e| e.to_string())?;
+    println!("trim by a plane with a cap: {} faces left, {:.0} ms", trimmed.face_count(), ms(t));
+    let t = Instant::now();
+    let changed = s.mask_by_occlusion().indices.len();
+    let rays = (groups::OCCLUSION_RAY_BUDGET / s.vertex_count().max(1)).clamp(4, 24);
+    println!("occlusion mask ({rays} rays per vertex): {changed} vertices changed, {:.0} ms", ms(t));
+    bench_decimate(&mesh)
+}
+
+/// Decimate to a tenth, then project a plain ball of the same count onto a bumpy one.
+fn bench_decimate(mesh: &modelcraft_engine::mesh::PolyMesh) -> Result<(), String> {
+    let t = Instant::now();
+    let low = modelcraft_engine::ops::decimate::decimate(mesh, 0.1).map_err(|e| e.to_string())?;
+    let far = low.positions().iter().map(|p| (p.length() - 1.0).abs()).fold(0.0f32, f32::max);
+    let chord = (0..low.face_count() as u32).map(|f| 1.0 - low.face_center(f).length()).fold(0.0f32, f32::max);
+    println!("decimate to 10 %: {} triangles, {:.0} ms; vertices within {far:.1e} of the sphere, faces within {chord:.1e}", low.face_count(), ms(t));
+    let mut bumpy = mesh.clone();
+    bumpy.map_positions(|_, p| p * (1.0 + 0.03 * (p.x * 40.0).sin() * (p.y * 40.0).cos()));
+    let source = SculptMesh::new(&bumpy, None, None);
+    let mut target = SculptMesh::new(mesh, None, None);
+    let t = Instant::now();
+    let moved = target.project_onto(&source, 0.2).indices.len();
+    let worst = target.positions.iter().map(|p| source.closest_point(*p, 0.05).map(|q| q.distance(*p)).unwrap_or(0.05)).fold(0.0f32, f32::max);
+    println!("project onto a detailed mesh of the same size: {moved} vertices, {:.0} ms; worst distance left {worst:.1e}", ms(t));
+    Ok(())
+}
+
 fn bench(polys: u32, dabs: usize) -> Result<(), String> {
-    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1024);
+    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1632);
     let t = Instant::now();
     let mesh = modelcraft_engine::ops::primitives::Primitive::RoundCube { radius: 1.0, segments: seg }.build().map_err(|e| e.to_string())?;
     let build_ms = ms(t);
@@ -392,7 +847,9 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                 }
             }
         }
+        let t = Instant::now();
         let undo = s.end_stroke().map(|(u, _)| u.indices.len()).unwrap_or(0);
+        let end_ms = ms(t);
         if kind == BrushKind::Mask {
             // Leave the surface free for the brushes that follow.
             s.mask_all(0.0);
@@ -400,19 +857,24 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
         }
         let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
         println!(
-            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts",
+            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts, stroke end {:.1} ms",
             kind.label(),
             mean(&dab_t),
             pct(&mut dab_t, 0.95),
             mean(&up_t),
             touched / dabs.max(1),
             mean(&draw_t),
-            undo
+            undo,
+            end_ms
         );
     }
     let t = Instant::now();
     s.refit();
-    println!("bvh refit {:.1} ms", ms(t));
+    println!("full bvh refit {:.1} ms (a stroke end refits only what moved)", ms(t));
+    if polys > 2_000_000 {
+        println!("(history, detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
+        return Ok(());
+    }
     // A full scene-evaluation round trip on the same density through the engine.
     let mut d = Document::new();
     let id = d
@@ -429,6 +891,10 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
     let faces = d.eval.evaluate(&d.scene, id).mesh.face_count();
     println!("history: {}-quad base + 1 subdivision level = {} quads in {:.0} ms", 6 * (seg / 2) * (seg / 2), faces, ms(t));
     let _ = (Scene::new(), ObjectKind::Group);
+    if polys > 2_000_000 {
+        println!("(detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
+        return Ok(());
+    }
     detail_bench(&mut d, id)
 }
 

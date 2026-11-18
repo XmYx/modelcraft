@@ -1,0 +1,1 @@
+- Export the UV layout of a mesh as an SVG or PNG picture (`modelcraft-cli export-uv`), and UVs are checked to survive GLB and OBJ export and import unchanged.

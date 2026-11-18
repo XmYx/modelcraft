@@ -1,0 +1,1 @@
+- Scripting reference and seven example scripts (scatter, batch export, rename by pattern, mesh stats, staircase, distribute, dependency report) in the `examples/scripts` folder.

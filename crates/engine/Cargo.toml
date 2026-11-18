@@ -12,17 +12,25 @@ workspace = true
 
 [dependencies]
 modelcraft-anim = { workspace = true }
+modelcraft-sim = { workspace = true }
 modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
+modelcraft-field = { workspace = true }
+modelcraft-clone = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-sculpt = { workspace = true }
+modelcraft-uv = { workspace = true }
+modelcraft-uvpack = { workspace = true }
 modelcraft-formats = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 craft-atomic = { workspace = true }
+craft-control = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
+craft-gltf-anim = { workspace = true }
 serde_json = { workspace = true }
 proptest = { workspace = true }

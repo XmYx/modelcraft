@@ -1,0 +1,1 @@
+| 2026-11-17 | Undo history kept across sessions: saves store the history as a base scene and its commands, opening replays them and checks the result against the saved scene; Edit ▸ Keep Undo History in Saved Files |

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use glam::Mat4;
 use modelcraft_ops::{OpError, edit, subdivide};
 
-use crate::{ObjectId, ObjectKind, PolyMesh, Scene, Source, Step, StepOp};
+use crate::{CloneSet, ObjectId, ObjectKind, PolyMesh, Scene, Source, Step, StepOp};
 
 /// A step that could not run (its selection no longer fits the mesh, a size limit…). The
 /// evaluator skips it and goes on, so a stale step never breaks the object.
@@ -22,6 +22,28 @@ pub struct StepError {
 pub struct Evaluated {
     pub mesh: Arc<PolyMesh>,
     pub errors: Vec<StepError>,
+    /// For a clone generator: the clones. The mesh is then empty; draw `instances.source` once per
+    /// clone instead.
+    pub instances: Option<Arc<Instances>>,
+}
+
+/// The clones of one generator: one source mesh, drawn many times.
+#[derive(Clone, Debug, Default)]
+pub struct Instances {
+    /// The evaluated mesh every clone shares (in the source object's own space).
+    pub source: Arc<PolyMesh>,
+    /// The source object (its material colours the clones).
+    pub source_object: Option<ObjectId>,
+    /// Each clone's matrix in the generator's space; it already includes the source object's own
+    /// transform, so a clone's world matrix is `world(generator) * matrix`.
+    pub clones: CloneSet,
+}
+
+impl Instances {
+    /// Triangles drawn in all (source triangles times clones).
+    pub fn triangle_count(&self) -> usize {
+        self.source.triangle_count().saturating_mul(self.clones.len())
+    }
 }
 
 #[derive(Default)]
@@ -102,7 +124,10 @@ impl Evaluator {
             let i = cache.outputs.len();
             let prev = cache.outputs.last().cloned().unwrap_or_else(|| src.clone());
             let Some(step) = steps.get(i) else { break };
-            let out = if step.enabled {
+            let out = if step.enabled && step.op.is_marker() {
+                // Nothing to compute: share the previous output instead of copying it.
+                prev
+            } else if step.enabled {
                 self.runs += 1;
                 match run_step(&prev, &step.op) {
                     Ok(m) => Arc::new(m),
@@ -117,7 +142,7 @@ impl Evaluator {
             cache.outputs.push(out);
         }
         let mesh = if want == 0 { src } else { cache.outputs.get(want - 1).cloned().unwrap_or(src) };
-        Evaluated { mesh, errors: cache.errors.iter().filter(|e| e.step < want || e.step == usize::MAX).cloned().collect() }
+        Evaluated { mesh, errors: cache.errors.iter().filter(|e| e.step < want || e.step == usize::MAX).cloned().collect(), instances: None }
     }
 
     /// The final mesh of an object in its own space: steps, then deformer children; for a smooth
@@ -131,7 +156,8 @@ impl Evaluator {
         if depth > crate::MAX_DEPTH {
             return Evaluated::default();
         }
-        let key = scene.deep_rev(id);
+        // A skinned mesh also depends on where its joints are.
+        let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id) ^ crate::sim::sim_key(scene, id);
         if let Some((k, e)) = self.finals.get(&id)
             && *k == key
         {
@@ -140,23 +166,37 @@ impl Evaluator {
         let result = match &obj.kind {
             ObjectKind::Mesh { .. } => {
                 let mut e = self.steps_output(scene, id, usize::MAX);
-                let deformers: Vec<(Mat4, crate::Deformer)> = scene
+                let deformers: Vec<(Mat4, crate::Deformer, crate::FieldStack)> = scene
                     .children(id)
                     .into_iter()
                     .filter_map(|c| scene.get(c))
                     .filter(|c| c.visible)
                     .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer)),
+                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer, scene.field_stack(c.id))),
                         _ => None,
                     })
                     .collect();
                 if !deformers.is_empty() {
                     let mut m = (*e.mesh).clone();
-                    for (to_local, d) in deformers {
-                        d.apply(&mut m, to_local);
+                    for (to_local, d, fields) in deformers {
+                        if fields.is_empty() {
+                            d.apply(&mut m, to_local);
+                        } else {
+                            d.apply_weighted(&mut m, to_local, &|p| fields.weight(p));
+                        }
                     }
                     e.mesh = Arc::new(m);
                 }
+                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
+                if let Some(m) = skinned {
+                    e.mesh = Arc::new(m);
+                }
+                e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
+                let (simulated, problems) = crate::sim::apply_sims(scene, id, &e.mesh);
+                if let Some(m) = simulated {
+                    e.mesh = Arc::new(m);
+                }
+                e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
                 e
             }
             ObjectKind::SmoothCage { levels } => {
@@ -170,11 +210,11 @@ impl Evaluator {
                         m.map_positions(|_, p| local.transform_point3(p));
                         self.runs += 1;
                         match subdivide::catmull_clark(&m, *levels) {
-                            Ok(s) => Evaluated { mesh: Arc::new(s), errors: inner.errors },
+                            Ok(s) => Evaluated { mesh: Arc::new(s), errors: inner.errors, instances: None },
                             Err(e) => {
                                 let mut errors = inner.errors;
                                 errors.push(StepError { step: usize::MAX, message: e.to_string() });
-                                Evaluated { mesh: Arc::new(m), errors }
+                                Evaluated { mesh: Arc::new(m), errors, instances: None }
                             }
                         }
                     }
@@ -182,7 +222,51 @@ impl Evaluator {
             }
             ObjectKind::Array { array } => self.generate(scene, id, depth, |m| array.build(m)),
             ObjectKind::Symmetry { axis, weld } => self.generate(scene, id, depth, |m| edit::mirror(m, *axis as usize, *weld)),
-            ObjectKind::Group | ObjectKind::Deformer { .. } => Evaluated::default(),
+            ObjectKind::Cloner { cloner, target } => {
+                let mut errors = Vec::new();
+                let mut out = Evaluated::default();
+                match scene.generator_input(id) {
+                    None => errors.push(StepError { step: usize::MAX, message: "the clone generator needs a source object inside it".into() }),
+                    Some(c) => {
+                        let inner = self.evaluate_depth(scene, c, depth + 1);
+                        errors.extend(inner.errors);
+                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        // The surface and vertices layouts sit on the target, seen from this generator.
+                        let target_mesh = match target.filter(|t| *t != id && cloner.layout.needs_target()) {
+                            Some(t) if scene.get(t).is_some() => {
+                                let m = self.evaluate_depth(scene, t, depth + 1).mesh;
+                                Some((m, target_frame(scene, id, t)))
+                            }
+                            _ => None,
+                        };
+                        self.runs += 1;
+                        match cloner.generate_in(target_mesh.as_ref().map(|(m, _)| m.as_ref()), target_mesh.as_ref().map_or(Mat4::IDENTITY, |(_, f)| *f)) {
+                            Ok(mut set) => {
+                                for i in &mut set.instances {
+                                    i.matrix *= local;
+                                }
+                                if set.truncated {
+                                    errors.push(StepError {
+                                        step: usize::MAX,
+                                        message: format!("more than {} clones asked for; the rest are left out", crate::MAX_CLONES),
+                                    });
+                                }
+                                out.instances = Some(Arc::new(Instances { source: inner.mesh, source_object: Some(c), clones: set }));
+                            }
+                            Err(e) => errors.push(StepError { step: usize::MAX, message: e.to_string() }),
+                        }
+                    }
+                }
+                out.errors = errors;
+                out
+            }
+            ObjectKind::Group
+            | ObjectKind::Deformer { .. }
+            | ObjectKind::Field { .. }
+            | ObjectKind::Joint { .. }
+            | ObjectKind::Skin { .. }
+            | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Sim { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result
@@ -219,6 +303,28 @@ impl Evaluator {
     }
 }
 
+/// The matrix that takes a target object's space into the generator's space.
+fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
+    let to_gen = scene.world_matrix(generator).inverse() * scene.world_matrix(target);
+    if to_gen.is_finite() { to_gen } else { Mat4::IDENTITY }
+}
+
+/// The cache key of a final mesh. A clone generator also depends on its target and on where the
+/// target sits relative to it, which the subtree revision does not cover.
+fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
+    let mut key = scene.deep_rev(id);
+    if let Some(ObjectKind::Cloner { target: Some(t), .. }) = scene.get(id).map(|o| &o.kind)
+        && scene.get(*t).is_some()
+    {
+        let mut h = key ^ scene.deep_rev(*t).rotate_left(21);
+        for f in target_frame(scene, id, *t).to_cols_array() {
+            h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);
+        }
+        key = h;
+    }
+    key
+}
+
 fn same_source(a: &Source, b: &Source) -> bool {
     match (a, b) {
         (Source::Mesh { mesh: x }, Source::Mesh { mesh: y }) => Arc::ptr_eq(x, y),
@@ -237,6 +343,7 @@ fn same_step(a: &Step, b: &Step) -> bool {
                 && x.topology.as_ref().map(Arc::as_ptr) == y.topology.as_ref().map(Arc::as_ptr)
                 && Arc::ptr_eq(&x.positions, &y.positions)
                 && Arc::ptr_eq(&x.mask, &y.mask)
+                && Arc::ptr_eq(&x.patches, &y.patches)
         }
         _ => a == b,
     }
@@ -296,6 +403,52 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
+        StepOp::Unwrap { seams, angle, pins, auto_cut, margin, method } => {
+            use modelcraft_uv::{Pin, SeamSet, UnwrapOptions};
+            let mut set = SeamSet::from_vertex_pairs(seams);
+            set.retain_existing(m);
+            if let Some(a) = angle {
+                set.mark_by_angle(m, *a);
+            }
+            let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
+            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
+            modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::Seams { .. } => Ok(m.clone()),
+        StepOp::TransformUvs { corners, translate, rotate_deg, scale, pivot } => {
+            let t = modelcraft_uv::UvTransform {
+                translate: glam::Vec2::from(*translate),
+                rotate_deg: *rotate_deg,
+                scale: glam::Vec2::from(*scale),
+                pivot: glam::Vec2::from(*pivot),
+            };
+            modelcraft_uv::transform_corners(m, corners, &t).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::StitchUvs { edges, align, scale } => {
+            edit::check_selection(edges, ne, "edge")?;
+            modelcraft_uv::stitch_islands(m, edges, &modelcraft_uv::StitchOptions { align: *align, scale: *scale }).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::RelaxUvs { corners, iterations, mode } => {
+            let opts = modelcraft_uv::RelaxOptions { iterations: *iterations, mode: *mode };
+            modelcraft_uv::relax_corners(m, corners, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::StraightenUvs { corners, strength } => {
+            modelcraft_uv::straighten_corners(m, corners, *strength).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
+        StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
+        StepOp::PackUvs { margin, rotation, density } => {
+            let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
+            let (uvs, _) = modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            let mut out = m.clone();
+            out.set_uvs(&uvs)?;
+            Ok(out)
+        }
+        StepOp::ProjectUvs { projection, fit, faces } => {
+            edit::check_selection(faces, nf, "face")?;
+            let opts = modelcraft_uvpack::ProjectOptions { projection: *projection, fit: *fit, faces: faces.clone() };
+            modelcraft_uvpack::project_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))
+        }
         StepOp::Sculpt { layer } => {
             let base = layer.topology.as_deref().unwrap_or(m);
             let mut out = if layer.level == 0 { base.clone() } else { subdivide::catmull_clark(base, u32::from(layer.level))? };
@@ -304,8 +457,13 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
                 return Err(OpError::Invalid(format!("the sculpt layer has {} points but the mesh now has {nv}", layer.positions.len())));
             }
             out.set_positions(&layer.positions)?;
+            if layer.patches.len() == out.face_count() {
+                out.set_patches(&layer.patches)?;
+            }
             Ok(out)
         }
         StepOp::EvenRemesh { cell } => modelcraft_ops::remesh::even_remesh(m, *cell),
+        StepOp::TrimPlane { point, normal, cap } => modelcraft_ops::trim::trim_plane(m, *point, *normal, *cap),
+        StepOp::Decimate { ratio } => modelcraft_ops::decimate::decimate(m, *ratio),
     }
 }

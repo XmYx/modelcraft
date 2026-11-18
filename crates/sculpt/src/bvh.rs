@@ -144,6 +144,46 @@ impl Bvh {
         }
     }
 
+    /// Refit only the leaves holding the triangles `moved`, and the boxes above them. The cost
+    /// is one cheap pass over the nodes plus the real work for the moved part, instead of a
+    /// box computation for every triangle of the mesh.
+    pub fn refit_moved(&mut self, p: &[Vec3], tris: &[[u32; 3]], moved: impl Iterator<Item = u32>) {
+        let mut dirty = vec![false; self.nodes.len()];
+        for t in moved {
+            if let Some(d) = self.tri_leaf.get(t as usize).and_then(|leaf| dirty.get_mut(*leaf as usize)) {
+                *d = true;
+            }
+        }
+        for i in (0..self.nodes.len()).rev() {
+            let Some(node) = self.nodes.get(i).copied() else { continue };
+            let (lo, hi) = if node.count > 0 {
+                if !dirty.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                self.leaf_tris(i, &node)
+                    .filter_map(|t| tris.get(t as usize))
+                    .map(|t| tri_bounds(p, t))
+                    .fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
+            } else {
+                let (li, ri) = (node.first as usize, node.first as usize + 1);
+                if !(dirty.get(li).copied().unwrap_or(false) || dirty.get(ri).copied().unwrap_or(false)) {
+                    continue;
+                }
+                if let Some(d) = dirty.get_mut(i) {
+                    *d = true;
+                }
+                match (self.nodes.get(li).copied(), self.nodes.get(ri).copied()) {
+                    (Some(l), Some(r)) => (l.lo.min(r.lo), l.hi.max(r.hi)),
+                    _ => (node.lo, node.hi),
+                }
+            };
+            if let Some(nd) = self.nodes.get_mut(i) {
+                nd.lo = lo;
+                nd.hi = hi;
+            }
+        }
+    }
+
     /// Calls `f` for every triangle in leaves whose box (grown by `pad`) meets the sphere.
     pub fn visit_sphere(&self, c: Vec3, r: f32, mut f: impl FnMut(u32)) {
         let mut stack = vec![0usize];
@@ -164,7 +204,42 @@ impl Bvh {
         }
     }
 
-    pub fn raycast(&self, p: &[Vec3], tris: &[[u32; 3]], o: Vec3, d: Vec3, pad: f32) -> Option<(f32, Vec3, u32)> {
+    /// Does a ray hit anything at all? (`skip`: triangles to ignore, or empty.)
+    pub fn any_hit(&self, p: &[Vec3], tris: &[[u32; 3]], o: Vec3, d: Vec3, pad: f32, skip: &[bool]) -> bool {
+        if !(o.is_finite() && d.is_finite()) || d.length_squared() == 0.0 {
+            return false;
+        }
+        let inv = d.recip();
+        let mut stack = vec![0usize];
+        while let Some(i) = stack.pop() {
+            let Some(n) = self.nodes.get(i) else { continue };
+            let (lo, hi) = (n.lo - Vec3::splat(pad), n.hi + Vec3::splat(pad));
+            let t1 = (lo - o) * inv;
+            let t2 = (hi - o) * inv;
+            if t1.min(t2).max_element().max(0.0) > t1.max(t2).min_element() {
+                continue;
+            }
+            if n.count > 0 {
+                for t in self.leaf_tris(i, n) {
+                    let Some(tri) = tris.get(t as usize) else { continue };
+                    if skip.get(t as usize).copied().unwrap_or(false) {
+                        continue;
+                    }
+                    let g = |i: u32| p.get(i as usize).copied().unwrap_or_default();
+                    if ray_tri(o, d, g(tri[0]), g(tri[1]), g(tri[2])).is_some() {
+                        return true;
+                    }
+                }
+            } else {
+                stack.push(n.first as usize);
+                stack.push(n.first as usize + 1);
+            }
+        }
+        false
+    }
+
+    /// Nearest hit of a ray (`skip`: triangles to ignore, or empty).
+    pub fn raycast(&self, p: &[Vec3], tris: &[[u32; 3]], o: Vec3, d: Vec3, pad: f32, skip: &[bool]) -> Option<(f32, Vec3, u32)> {
         if !(o.is_finite() && d.is_finite()) || d.length_squared() == 0.0 {
             return None;
         }
@@ -184,6 +259,9 @@ impl Bvh {
             if n.count > 0 {
                 for t in self.leaf_tris(i, n) {
                     let Some(tri) = tris.get(t as usize) else { continue };
+                    if skip.get(t as usize).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let g = |i: u32| p.get(i as usize).copied().unwrap_or_default();
                     if let Some(h) = ray_tri(o, d, g(tri[0]), g(tri[1]), g(tri[2]))
                         && best.is_none_or(|(b, _)| h < b)

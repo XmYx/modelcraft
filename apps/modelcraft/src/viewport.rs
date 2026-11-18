@@ -8,7 +8,7 @@ use glam::{Mat4, Quat, Vec2 as GVec2, Vec3};
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::PolyMesh;
 use modelcraft_engine::scene::pick::{self, Ray};
-use modelcraft_engine::scene::{ObjectId, ObjectKind, Scene, Step, StepOp};
+use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Scene, Step, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Dab};
 use modelcraft_render::buffers::{self, LineVertex};
 use modelcraft_render::{Camera, ViewPreset};
@@ -50,12 +50,14 @@ pub struct Bench {
     pub sculpt_ms: Vec<f32>,
     pub dab_ms: Vec<f32>,
     pub upload_ms: Vec<f32>,
-    last: Option<std::time::Instant>,
+    /// Playing the skinned benchmark character instead of sculpting ([`crate::rig_tools`]).
+    pub skin: Option<crate::rig_tools::SkinBench>,
+    pub(crate) last: Option<std::time::Instant>,
 }
 
 impl Bench {
     pub fn new(total: u32) -> Self {
-        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), last: None }
+        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), skin: None, last: None }
     }
 }
 
@@ -68,16 +70,16 @@ pub fn save_png(path: &std::path::Path, img: &egui::ColorImage) -> Result<(), St
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-fn to_screen(cam: &Camera, rect: Rect, p: Vec3) -> Option<Pos2> {
+pub(crate) fn to_screen(cam: &Camera, rect: Rect, p: Vec3) -> Option<Pos2> {
     let n = cam.project(p, rect.aspect_ratio())?;
     Some(pos2(rect.left() + (n.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - n.y * 0.5) * rect.height()))
 }
 
-fn ndc(rect: Rect, p: Pos2) -> GVec2 {
+pub(crate) fn ndc(rect: Rect, p: Pos2) -> GVec2 {
     GVec2::new((p.x - rect.left()) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.top()) / rect.height() * 2.0)
 }
 
-fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
+pub(crate) fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
     let (origin, dir) = cam.ray(ndc(rect, p), rect.aspect_ratio());
     Ray { origin, dir }
 }
@@ -92,7 +94,13 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
         .filter(|id| {
             matches!(
                 scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::Cloner { .. }
+                )
             )
         })
         .collect()
@@ -122,6 +130,9 @@ pub fn show(app: &mut ModelApp, ui: &mut egui::Ui) {
 }
 
 fn bench_tick(app: &mut ModelApp) {
+    if app.bench.as_ref().is_some_and(|b| b.skin.is_some()) {
+        return crate::rig_tools::bench_tick(app);
+    }
     let Some(b) = &mut app.bench else { return };
     let now = std::time::Instant::now();
     let dt = b.last.map(|t| now.duration_since(t).as_secs_f32() * 1000.0);
@@ -215,7 +226,12 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
     match app.workspace {
-        Workspace::Sculpt => sculpt_input(app, ui, &resp, i, rect),
+        Workspace::Sculpt => {
+            // The rectangle and lasso tools take the drag instead of the brush.
+            if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
+                sculpt_input(app, ui, &resp, i, rect);
+            }
+        }
         _ => model_input(app, ui, &resp, i, rect),
     }
     render(app, ui, i, rect);
@@ -295,7 +311,7 @@ fn navigate(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     }
 }
 
-fn is_nav(app: &ModelApp, ui: &egui::Ui) -> bool {
+pub(crate) fn is_nav(app: &ModelApp, ui: &egui::Ui) -> bool {
     ui.input(|i| match app.nav {
         NavPreset::AltMouse => i.modifiers.alt,
         _ => false,
@@ -458,6 +474,10 @@ fn apply_drag(app: &ModelApp, scene: &mut Scene, t: Vec3, r: Quat, s: Vec3, pivo
 }
 
 fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
+    // A rig tool (placing joints, painting weights) takes the pointer while it is on.
+    if !is_nav(app, ui) && crate::rig_tools::input(app, ui, resp, i, rect) {
+        return;
+    }
     let pointer = resp.interact_pointer_pos().or_else(|| resp.hover_pos());
     let shift = ui.input(|inp| inp.modifiers.shift);
     if resp.drag_started_by(egui::PointerButton::Primary)
@@ -548,19 +568,41 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
         }
         return;
     }
+    // Joints are picked first, by their bones on screen: they sit inside the meshes they move.
+    if let Some(joint) = crate::rig_tools::pick_joint(app, i, rect, at) {
+        if add {
+            match app.selection.iter().position(|s| *s == joint) {
+                Some(p) => {
+                    app.selection.remove(p);
+                }
+                None => app.selection.push(joint),
+            }
+        } else {
+            app.select_only(joint);
+        }
+        return;
+    }
     let mut best: Option<(f32, ObjectId)> = None;
     for id in drawables(&app.doc.scene) {
+        if app.doc.scene.get(id).is_some_and(|o| o.template) {
+            continue;
+        }
         let w = app.doc.scene.world_matrix(id);
         let r = ray.transformed(w.inverse());
-        let t = match &app.doc.sculpt {
-            Some(s) if s.id == id => s.mesh.raycast(r.origin, r.dir).map(|h| h.0),
-            _ => pick::pick_face(&app.doc.eval.evaluate(&app.doc.scene, id).mesh, &r).map(|h| h.t),
-        };
-        if let Some(t) = t {
-            let dist = w.transform_vector3(r.dir * t).length();
-            if best.is_none_or(|(b, _)| dist < b) {
-                best = Some((dist, id));
+        let dist = match &app.doc.sculpt {
+            Some(s) if s.id == id => s.mesh.raycast(r.origin, r.dir).map(|h| w.transform_vector3(r.dir * h.0).length()),
+            _ => {
+                let e = app.doc.eval.evaluate(&app.doc.scene, id);
+                match e.instances {
+                    Some(inst) => pick_instances(&inst, &ray, w),
+                    None => pick::pick_face(&e.mesh, &r).map(|h| w.transform_vector3(r.dir * h.t).length()),
+                }
             }
+        };
+        if let Some(dist) = dist
+            && best.is_none_or(|(b, _)| dist < b)
+        {
+            best = Some((dist, id));
         }
     }
     match best {
@@ -577,6 +619,30 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
     }
 }
 
+/// The nearest distance at which a world ray hits any clone of a generator (each clone is tested
+/// against the source's bounding box first, so a thousand clones cost a thousand box tests).
+fn pick_instances(inst: &modelcraft_engine::scene::Instances, ray: &Ray, world: Mat4) -> Option<f32> {
+    let (lo, hi) = inst.source.bounds();
+    let mut best: Option<f32> = None;
+    for c in &inst.clones.instances {
+        let m = world * c.matrix;
+        if m.determinant().abs() < 1e-12 {
+            continue;
+        }
+        let r = ray.transformed(m.inverse());
+        if !pick::ray_aabb(&r, lo, hi) {
+            continue;
+        }
+        if let Some(h) = pick::pick_face(&inst.source, &r) {
+            let d = m.transform_vector3(r.dir * h.t).length();
+            if best.is_none_or(|b| d < b) {
+                best = Some(d);
+            }
+        }
+    }
+    best
+}
+
 fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
     let cam = app.views[i].camera;
     if !add {
@@ -584,8 +650,19 @@ fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
     }
     if app.mode == SelectMode::Object {
         for id in drawables(&app.doc.scene) {
-            let m = app.doc.eval.evaluate(&app.doc.scene, id).mesh;
-            let (lo, hi) = m.bounds();
+            if app.doc.scene.get(id).is_some_and(|o| o.template) {
+                continue;
+            }
+            let e = app.doc.eval.evaluate(&app.doc.scene, id);
+            let (lo, hi) = match &e.instances {
+                // A clone generator is as wide as its clones; with none there is nothing to select.
+                Some(inst) if inst.clones.is_empty() => continue,
+                Some(inst) => inst.clones.instances.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), c| {
+                    let p = c.matrix.w_axis.truncate();
+                    (a.min(p), b.max(p))
+                }),
+                None => e.mesh.bounds(),
+            };
             let c = app.doc.scene.world_matrix(id).transform_point3((lo + hi) * 0.5);
             if to_screen(&cam, rect, c).is_some_and(|p| sel.contains(p)) && !app.selection.contains(&id) {
                 app.selection.push(id);
@@ -718,13 +795,18 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let sculpting = app.workspace == Workspace::Sculpt;
     let paint = app.workspace == Workspace::Paint;
     // Evaluate first (the GPU borrow below must not overlap the document's).
-    let mut items: Vec<(ObjectId, Option<Arc<PolyMesh>>, Mat4)> = Vec::new();
+    let mut items: Vec<Item> = Vec::new();
     for id in &ids {
         let w = app.doc.scene.world_matrix(*id);
         if Some(*id) == session {
-            items.push((*id, None, w));
+            items.push((*id, None, w, WHITE));
         } else {
-            items.push((*id, Some(app.doc.eval.evaluate(&app.doc.scene, *id).mesh), w));
+            let e = app.doc.eval.evaluate(&app.doc.scene, *id);
+            match e.instances {
+                // Clones share one mesh (and so one GPU upload); each gets its own matrix and tint.
+                Some(inst) => items.extend(inst.clones.instances.iter().map(|c| (*id, Some(inst.source.clone()), w * c.matrix, c.color))),
+                None => items.push((*id, Some(e.mesh), w, WHITE)),
+            }
         }
     }
     let lines = scene_lines(app, i);
@@ -736,13 +818,14 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
     let mut specs = Vec::new();
-    for (id, m, w) in &items {
+    for (id, m, w, tint) in &items {
         let Some(o) = app.doc.scene.get(*id) else { continue };
         let key = m.as_ref().map(|m| g.mesh(m));
+        let base = material_source(&app.doc.scene, o).material.base_color;
         specs.push(crate::gpu::DrawSpec {
             key,
             model: *w,
-            color: o.material.base_color,
+            color: [base[0] * tint[0], base[1] * tint[1], base[2] * tint[2], base[3] * tint[3]],
             selected: app.selection.contains(id) && !sculpting,
             show_mask: Some(*id) == session,
             patch_tint: app.show_patches || paint,
@@ -754,6 +837,18 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     }
 }
 
+/// One drawn mesh: its object, the mesh (`None`: the sculpt mesh), its world matrix and a colour tint.
+type Item = (ObjectId, Option<Arc<PolyMesh>>, Mat4, [f32; 4]);
+const WHITE: [f32; 4] = [1.0; 4];
+
+/// The object whose material colours `o`: a clone generator is coloured by its source.
+fn material_source<'a>(scene: &'a Scene, o: &'a Object) -> &'a Object {
+    match &o.kind {
+        ObjectKind::Cloner { .. } => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
+        _ => o,
+    }
+}
+
 fn line(a: Vec3, b: Vec3, c: [f32; 4]) -> [LineVertex; 2] {
     [LineVertex { pos: a.to_array(), color: c }, LineVertex { pos: b.to_array(), color: c }]
 }
@@ -761,8 +856,11 @@ fn line(a: Vec3, b: Vec3, c: [f32; 4]) -> [LineVertex; 2] {
 /// Grid, wireframes of selected objects and cages, selected edges.
 fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     let mut out = buffers::grid(20, 0.5, [0.24, 0.25, 0.27, 1.0], [0.34, 0.35, 0.38, 1.0]);
-    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right {
+    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right || !app.show_grid {
         out.clear();
+    }
+    for (a, b, color) in crate::rig_ui::bone_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
     }
     for (a, b, color) in crate::anim_ui::path_lines(app) {
         out.extend(line(a.into(), b.into(), color));
@@ -792,6 +890,21 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), color));
         }
     }
+    // Outline of the selected falloff fields (and of every field of a selected deformer).
+    let sel_fields: Vec<ObjectId> = app
+        .doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| matches!(o.kind, ObjectKind::Field { .. }) && app.doc.scene.visible(o.id))
+        .filter(|o| app.selection.contains(&o.id) || o.parent.is_some_and(|p| app.selection.contains(&p)))
+        .map(|o| o.id)
+        .collect();
+    for f in sel_fields {
+        for (a, b) in crate::field_ui::outline(&app.doc.scene, f) {
+            out.extend(line(a, b, [0.45, 0.85, 0.8, 0.9]));
+        }
+    }
     if app.mode == SelectMode::Edge
         && let Some((_, m, w)) = edit_mesh(app)
     {
@@ -800,6 +913,7 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), sel_wire));
         }
     }
+    out.extend(crate::uv_ui::seam_lines(app));
     out
 }
 
@@ -824,7 +938,7 @@ fn face_overlay(app: &mut ModelApp) -> Vec<LineVertex> {
 }
 
 /// No GPU: a wireframe drawn with the UI painter (bounded), so the app stays usable and testable.
-fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[(ObjectId, Option<Arc<PolyMesh>>, Mat4)], lines: &[LineVertex]) {
+fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[Item], lines: &[LineVertex]) {
     let cam = app.views[i].camera;
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::from_rgb(29, 31, 34));
@@ -838,11 +952,13 @@ fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[(Objec
             painter.line_segment([p, q], Stroke::new(1.0, c));
         }
     }
-    for (id, m, w) in items {
+    let mut budget = 120_000usize;
+    for (id, m, w, _) in items {
         let Some(m) = m else { continue };
         let sel = app.selection.contains(id);
         let c = if sel { theme::SELECT } else { theme::TEXT_DIM };
-        for e in 0..(m.edge_count() as u32).min(30_000) {
+        for e in 0..(m.edge_count() as u32).min(30_000).min(budget as u32) {
+            budget = budget.saturating_sub(1);
             let (a, b) = m.edge_vertices(e);
             if let (Some(p), Some(q)) = (to_screen(&cam, rect, w.transform_point3(m.position(a))), to_screen(&cam, rect, w.transform_point3(m.position(b)))) {
                 painter.line_segment([p, q], Stroke::new(1.0, c));
@@ -878,7 +994,9 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
             egui::StrokeKind::Inside,
         );
     }
-    axis_triad(&painter, &cam, rect);
+    if app.show_axes {
+        axis_triad(&painter, &cam, rect);
+    }
     // Component points.
     if app.workspace == Workspace::Model
         && app.mode == SelectMode::Vertex
@@ -903,7 +1021,9 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     if app.workspace == Workspace::Model {
         gizmo(app, &painter, i, rect);
     }
+    crate::sculpt_groups_ui::overlay(app, &painter, i);
     if app.workspace == Workspace::Sculpt
+        && app.sculpt_groups.tool == crate::sculpt_groups_ui::RegionTool::Brush
         && let Some(at) = resp.hover_pos()
     {
         let col = if app.brush.kind == BrushKind::Mask { Color32::from_rgb(110, 160, 255) } else { theme::ACCENT };

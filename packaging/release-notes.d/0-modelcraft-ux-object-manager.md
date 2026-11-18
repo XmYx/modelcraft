@@ -1,0 +1,1 @@
+- The Scene panel searches, reparents by drag-and-drop, locks objects or makes them reference-only, and keeps selection sets; Properties edits every selected object at once; Edit ▸ Copy/Paste Attributes.

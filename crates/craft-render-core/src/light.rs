@@ -28,6 +28,9 @@ pub enum Light {
     /// on a surface facing it.
     Directional { direction: Vec3, irradiance: Vec3 },
     /// A directional light with a disk of `angular_radius` radians, which softens its shadows.
+    /// With a radius above zero the disk is a light with a size in the sky: paths that leave the
+    /// scene towards it find it too, and the two ways of finding it are weighted against each
+    /// other (so a mirror shows the sun without the noise of aiming at it).
     Sun { direction: Vec3, irradiance: Vec3, angular_radius: f32 },
 }
 
@@ -68,7 +71,7 @@ pub enum LightSampling {
     /// By the light tree: nearby and bright lights are preferred at every shading point.
     #[default]
     Tree,
-    /// By power alone, the same everywhere (what the GPU path does).
+    /// By power alone, the same everywhere.
     Power,
 }
 
@@ -138,6 +141,12 @@ impl EnvMap {
         }
         let turn = if rotation.is_finite() { (rotation / (2.0 * PI)).rem_euclid(1.0) } else { 0.0 };
         Some(EnvMap { image, turn, conditional, marginal, mean_luminance: (total / weight) as f32 })
+    }
+
+    /// The sampling tables, for an implementation that samples the image elsewhere (a GPU):
+    /// the running sum over rows, then one running sum of `width` entries per row.
+    pub fn sampling_tables(&self) -> (&[f32], &[f32]) {
+        (&self.marginal, &self.conditional)
     }
 
     #[inline]
@@ -357,6 +366,18 @@ pub struct Lights {
     /// How many entries of `cdf` have a position (and so are in the tree).
     positional: usize,
     tree: LightTree,
+    /// Suns with a disk: axis, tangent of the angular radius, irradiance, selection probability.
+    suns: Vec<(Vec3A, f32, Vec3A, f32)>,
+}
+
+/// Smallest tangent of a sun's angular radius that counts as a disk rather than a point.
+const SUN_DISK_MIN: f32 = 1e-6;
+
+/// Density over solid angle of a point of a sun's disk, `cos` away from its axis: the disk is
+/// sampled evenly on the plane one unit along the axis.
+#[inline]
+fn sun_density(tan_radius: f32, cos: f32) -> f32 {
+    1.0 / (PI * tan_radius * tan_radius * cos * cos * cos)
 }
 
 const NO_SLOT: u32 = u32::MAX;
@@ -410,16 +431,41 @@ impl Lights {
             // Lights that carry no measurable power are chosen uniformly.
             let n = power.len();
             self.cdf.extend((1..=n).map(|i| i as f32 / n as f32));
-            return;
+        } else {
+            let mut acc = 0.0f64;
+            for p in &power {
+                acc += f64::from(p.max(0.0));
+                self.cdf.push((acc / total) as f32);
+            }
+            if let Some(last) = self.cdf.last_mut() {
+                *last = 1.0;
+            }
         }
-        let mut acc = 0.0f64;
-        for p in &power {
-            acc += f64::from(p.max(0.0));
-            self.cdf.push((acc / total) as f32);
+        self.suns.clear();
+        for (j, l) in self.analytic.iter().enumerate() {
+            if let Light::Sun { direction, irradiance, angular_radius } = *l {
+                let (axis, tan) = (Vec3A::from(direction).normalize_or_zero(), angular_radius.clamp(0.0, 0.5).tan());
+                if axis != Vec3A::ZERO && tan > SUN_DISK_MIN {
+                    self.suns.push((axis, tan, irradiance.into(), self.pmf(self.emissive.len() + j)));
+                }
+            }
         }
-        if let Some(last) = self.cdf.last_mut() {
-            *last = 1.0;
+    }
+
+    /// Radiance of the sun disks around `dir` (a direction that leaves the scene), and the
+    /// density over solid angle with which [`Lights::sample`] picks `dir` on them.
+    #[inline]
+    pub fn sun_radiance(&self, dir: Vec3A) -> (Rgb, f32) {
+        let (mut radiance, mut pdf) = (Vec3A::ZERO, 0.0);
+        for (axis, tan, irradiance, pmf) in &self.suns {
+            let cos = dir.dot(*axis);
+            if cos > 0.0 && (1.0 - cos * cos).max(0.0) <= tan * tan * cos * cos {
+                let density = sun_density(*tan, cos);
+                radiance += *irradiance * density;
+                pdf += pmf * density;
+            }
         }
+        (radiance, pdf)
     }
 
     /// The running sum of selection probabilities by power, in the order emissive triangles,
@@ -441,9 +487,28 @@ impl Lights {
         hi - lo
     }
 
+    /// How many entries of [`Lights::selection_cdf`] have a position (and so are in the tree);
+    /// they come first.
+    pub fn positional_count(&self) -> usize {
+        self.positional
+    }
+
+    /// The light tree as plain words, eight per node, for an implementation that descends it
+    /// elsewhere (a GPU): the bits of the centre (3 floats), the squared radius and the power,
+    /// then the left and right child (a leaf has `u32::MAX` on the right and its light on the
+    /// left), then zero. The second list holds, per light, the left/right turns from the root to
+    /// its leaf (bit `i` set = right at depth `i`).
+    pub fn tree_words(&self) -> (Vec<u32>, &[u64]) {
+        let mut words = Vec::with_capacity(self.tree.nodes.len() * 8);
+        for n in &self.tree.nodes {
+            words.extend([n.centre.x.to_bits(), n.centre.y.to_bits(), n.centre.z.to_bits(), n.radius2.to_bits(), n.power.to_bits(), n.left, n.right, 0]);
+        }
+        (words, &self.tree.paths)
+    }
+
     /// Probability that a light with a position is chosen at all.
     #[inline]
-    fn positional_mass(&self) -> f32 {
+    pub fn positional_mass(&self) -> f32 {
         if self.positional == 0 { 0.0 } else { self.cdf.get(self.positional - 1).copied().unwrap_or(0.0) }
     }
 
@@ -492,23 +557,44 @@ impl Lights {
         (front || e.two_sided).then(|| e.radiance.into())
     }
 
-    /// Choose a light with `pick` and a point on it with `u`, as seen from `p`.
+    /// Choose a light for the shading point `p` with `pick`: its entry in
+    /// [`Lights::selection_cdf`] and the probability with which it was chosen.
     #[inline]
-    pub fn sample(&self, positions: &[[Vec3; 3]], p: Vec3A, pick: f32, u: Vec2, mode: LightSampling) -> Option<LightSample> {
+    pub fn pick(&self, p: Vec3A, pick: f32, mode: LightSampling) -> Option<(u32, f32)> {
         if self.cdf.is_empty() {
             return None;
         }
         let mass = self.positional_mass();
         let (entry, pmf) = if mode == LightSampling::Tree && pick < mass {
             let (light, pdf) = self.tree.sample(p, pick / mass)?;
-            (light as usize, pdf * mass)
+            (light, pdf * mass)
         } else {
             let entry = self.cdf.partition_point(|c| *c <= pick).min(self.cdf.len() - 1);
-            (entry, self.pmf(entry))
+            (entry as u32, self.pmf(entry))
         };
-        if pmf <= 0.0 {
-            return None;
-        }
+        (pmf > 0.0).then_some((entry, pmf))
+    }
+
+    /// Probability with which [`Lights::pick`] chooses `entry` when shading `p`.
+    #[inline]
+    pub fn selection_pdf(&self, entry: u32, p: Vec3A, mode: LightSampling) -> f32 {
+        let entry = entry as usize;
+        if entry < self.positional { self.select_pdf(entry, p, mode) } else { self.pmf(entry) }
+    }
+
+    /// Choose a light with `pick` and a point on it with `u`, as seen from `p`.
+    #[inline]
+    pub fn sample(&self, positions: &[[Vec3; 3]], p: Vec3A, pick: f32, u: Vec2, mode: LightSampling) -> Option<LightSample> {
+        let (entry, pmf) = self.pick(p, pick, mode)?;
+        let lp = self.point(positions, entry, p, u)?;
+        Some(LightSample { wi: lp.wi, distance: lp.distance, radiance: lp.contrib * lp.to_solid, pdf: pmf * lp.density * lp.to_solid, delta: lp.delta })
+    }
+
+    /// The point `u` of light `entry` as seen from `p`, whatever chose the light. `None` when
+    /// the point sends nothing towards `p` (it faces away, or the light has no area).
+    #[inline]
+    pub fn point(&self, positions: &[[Vec3; 3]], entry: u32, p: Vec3A, u: Vec2) -> Option<LightPoint> {
+        let entry = entry as usize;
         if let Some(e) = self.emissive.get(entry) {
             let t = positions.get(e.tri as usize)?;
             let (p0, p1, p2) = (Vec3A::from(t[0]), Vec3A::from(t[1]), Vec3A::from(t[2]));
@@ -526,20 +612,23 @@ impl Lights {
             if cos == 0.0 || (cos < 0.0 && !e.two_sided) || e.area <= 0.0 {
                 return None;
             }
-            return Some(LightSample { wi, distance, radiance: e.radiance.into(), pdf: pmf * dist2 / (e.area * cos.abs()), delta: false });
+            let cos = cos.abs();
+            return Some(LightPoint {
+                wi,
+                distance,
+                contrib: Vec3A::from(e.radiance) * (cos / dist2),
+                density: 1.0 / e.area,
+                to_solid: dist2 / cos,
+                delta: false,
+            });
         }
         if let Some(l) = self.analytic.get(entry - self.emissive.len()) {
+            let delta = |wi: Vec3A, distance: f32, contrib: Rgb| Some(LightPoint { wi, distance, contrib, density: 1.0, to_solid: 1.0, delta: true });
             return match *l {
                 Light::Point { position, intensity } => {
                     let d = Vec3A::from(position) - p;
                     let dist2 = d.length_squared();
-                    (dist2 > 0.0).then(|| LightSample {
-                        wi: d / dist2.sqrt(),
-                        distance: dist2.sqrt(),
-                        radiance: Vec3A::from(intensity) / dist2,
-                        pdf: pmf,
-                        delta: true,
-                    })
+                    if dist2 > 0.0 { delta(d / dist2.sqrt(), dist2.sqrt(), Vec3A::from(intensity) / dist2) } else { None }
                 }
                 Light::Spot { position, direction, intensity, cone_angle, blend } => {
                     let d = Vec3A::from(position) - p;
@@ -549,17 +638,11 @@ impl Lights {
                     }
                     let wi = d / dist2.sqrt();
                     let falloff = spot_falloff(-wi.dot(Vec3A::from(direction).normalize_or_zero()), cone_angle, blend);
-                    (falloff > 0.0).then(|| LightSample {
-                        wi,
-                        distance: dist2.sqrt(),
-                        radiance: Vec3A::from(intensity) * (falloff / dist2),
-                        pdf: pmf,
-                        delta: true,
-                    })
+                    if falloff > 0.0 { delta(wi, dist2.sqrt(), Vec3A::from(intensity) * (falloff / dist2)) } else { None }
                 }
                 Light::Directional { direction, irradiance } => {
                     let wi = Vec3A::from(direction).normalize_or_zero();
-                    (wi != Vec3A::ZERO).then(|| LightSample { wi, distance: f32::INFINITY, radiance: irradiance.into(), pdf: pmf, delta: true })
+                    if wi != Vec3A::ZERO { delta(wi, f32::INFINITY, irradiance.into()) } else { None }
                 }
                 Light::Sun { direction, irradiance, angular_radius } => {
                     let axis = Vec3A::from(direction).normalize_or_zero();
@@ -567,22 +650,54 @@ impl Lights {
                         return None;
                     }
                     // A point on the sun's disk; the irradiance is spread evenly over it.
-                    let d = concentric_disk(u) * angular_radius.clamp(0.0, 0.5).tan();
-                    let wi = Frame::new(axis).to_world(Vec3A::new(d.x, d.y, 1.0).normalize());
-                    Some(LightSample { wi, distance: f32::INFINITY, radiance: irradiance.into(), pdf: pmf, delta: true })
+                    let tan = angular_radius.clamp(0.0, 0.5).tan();
+                    let d = concentric_disk(u) * tan;
+                    let local = Vec3A::new(d.x, d.y, 1.0).normalize();
+                    let wi = Frame::new(axis).to_world(local);
+                    if tan > SUN_DISK_MIN {
+                        // A disk in the sky: radiance and a density over solid angle, whose ratio
+                        // is the irradiance, so BSDF sampling can be weighted against it.
+                        let density = sun_density(tan, local.z);
+                        Some(LightPoint { wi, distance: f32::INFINITY, contrib: Vec3A::from(irradiance) * density, density, to_solid: 1.0, delta: false })
+                    } else {
+                        delta(wi, f32::INFINITY, irradiance.into())
+                    }
                 }
             };
         }
         match &self.env_map {
             Some(map) => {
                 let (wi, pdf) = map.sample(u);
-                (pdf > 0.0).then(|| LightSample { wi, distance: f32::INFINITY, radiance: map.radiance(wi), pdf: pmf * pdf, delta: false })
+                (pdf > 0.0).then(|| LightPoint { wi, distance: f32::INFINITY, contrib: map.radiance(wi), density: pdf, to_solid: 1.0, delta: false })
             }
-            None => {
-                Some(LightSample { wi: uniform_sphere(u), distance: f32::INFINITY, radiance: self.environment.into(), pdf: pmf / (4.0 * PI), delta: false })
-            }
+            None => Some(LightPoint {
+                wi: uniform_sphere(u),
+                distance: f32::INFINITY,
+                contrib: self.environment.into(),
+                density: 1.0 / (4.0 * PI),
+                to_solid: 1.0,
+                delta: false,
+            }),
         }
     }
+}
+
+/// A point on a light as seen from one shading point, in the measure the light is sampled in
+/// (area for emissive triangles, solid angle for suns and the environment, a count for point
+/// and spot lights). A receiver gets `bsdf × contrib` from it per unit of that measure.
+#[derive(Clone, Copy, Debug)]
+pub struct LightPoint {
+    /// Unit direction from the shaded point towards the light.
+    pub wi: Vec3A,
+    pub distance: f32,
+    /// Radiance times the geometry term (`cos / distance²` for an emissive triangle).
+    pub contrib: Rgb,
+    /// Density of the point on its light in its measure, the choice of the light excluded.
+    pub density: f32,
+    /// Multiply `density` by this to get a density over solid angle (`distance² / cos` for an
+    /// emissive triangle, 1 otherwise).
+    pub to_solid: f32,
+    pub delta: bool,
 }
 
 /// How much of a spot light reaches a direction whose cosine to the axis is `cos`.

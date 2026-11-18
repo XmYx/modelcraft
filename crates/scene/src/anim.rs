@@ -72,6 +72,23 @@ pub struct Layer {
     pub weight: f64,
     #[serde(default, skip_serializing_if = "is_false")]
     pub mute: bool,
+    /// Play only this layer (and other solo layers) on top of the base.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub solo: bool,
+    /// Keys in this layer cannot be set, changed or removed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub lock: bool,
+    /// The weight over time: when it has keys it replaces `weight`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight_curve: Option<Arc<Curve>>,
+}
+
+impl Layer {
+    /// The layer's weight at `frame`: its weight curve when keyed, else its plain weight.
+    pub fn weight_at(&self, frame: f64) -> f64 {
+        let w = self.weight_curve.as_ref().and_then(|c| c.eval(frame)).unwrap_or(self.weight);
+        if w.is_finite() { w.clamp(0.0, 1.0) } else { 1.0 }
+    }
 }
 
 fn is_false(b: &bool) -> bool {
@@ -151,7 +168,16 @@ impl Animation {
         }
         let id = self.layers.iter().map(|l| l.id).max().unwrap_or(BASE_LAYER) + 1;
         let name: String = name.trim().chars().take(128).collect();
-        self.layers.push(Layer { id, name: if name.is_empty() { format!("Layer {id}") } else { name }, mode, weight: 1.0, mute: false });
+        self.layers.push(Layer {
+            id,
+            name: if name.is_empty() { format!("Layer {id}") } else { name },
+            mode,
+            weight: 1.0,
+            mute: false,
+            solo: false,
+            lock: false,
+            weight_curve: None,
+        });
         Ok(id)
     }
     /// Remove a layer and its curves; the base layer becomes active if it was the active one.
@@ -170,12 +196,14 @@ impl Animation {
 
     /// The value of an attribute at `frame` with every layer applied, bottom to top: the base
     /// curve, then each layer that is not muted adds its curve (times its weight) or blends
-    /// towards it (by its weight). `None` when no layer has a curve with keys for it.
+    /// towards it (by its weight, which may itself be keyed). With a solo layer, only solo layers
+    /// play on top of the base. `None` when no layer has a curve with keys for it.
     pub fn value_at(&self, id: ObjectId, path: &str, frame: f64) -> Option<f64> {
         let mut v = self.track_in(id, path, BASE_LAYER).and_then(|t| t.curve.eval(frame));
-        for l in self.layers.iter().filter(|l| !l.mute) {
+        let solo = self.layers.iter().any(|l| l.solo);
+        for l in self.layers.iter().filter(|l| !l.mute && (!solo || l.solo)) {
             let Some(x) = self.track_in(id, path, l.id).and_then(|t| t.curve.eval(frame)) else { continue };
-            let w = if l.weight.is_finite() { l.weight.clamp(0.0, 1.0) } else { 1.0 };
+            let w = l.weight_at(frame);
             v = Some(match (l.mode, v) {
                 (LayerMode::Add, below) => below.unwrap_or(0.0) + x * w,
                 (LayerMode::Override, Some(below)) => below + (x - below) * w,
@@ -202,7 +230,27 @@ impl Animation {
 
     /// The curve of an attribute in the active layer, created empty when missing.
     pub fn curve_mut(&mut self, id: ObjectId, path: &str) -> Result<&mut Curve, SceneError> {
+        if self.active_locked() {
+            return Err(SceneError::Invalid("the active animation layer is locked".into()));
+        }
         self.curve_mut_in(id, path, self.active_layer)
+    }
+
+    /// Whether the active layer is locked against key edits.
+    pub fn active_locked(&self) -> bool {
+        self.layer(self.active_layer).is_some_and(|l| l.lock)
+    }
+
+    /// Move a layer `delta` places up the stack (negative: down); `true` when it moved.
+    pub fn move_layer(&mut self, id: u32, delta: i32) -> bool {
+        let Some(at) = self.layers.iter().position(|l| l.id == id) else { return false };
+        let to = (at as i64 + delta as i64).clamp(0, self.layers.len() as i64 - 1) as usize;
+        if to == at {
+            return false;
+        }
+        let l = self.layers.remove(at);
+        self.layers.insert(to, l);
+        true
     }
 
     /// The curve of an attribute in a layer, created empty when missing.
@@ -234,12 +282,24 @@ impl Animation {
 
     /// Remove an attribute's curve from the active layer; `true` when it existed.
     pub fn remove_track(&mut self, id: ObjectId, path: &str) -> bool {
+        if self.active_locked() {
+            return false;
+        }
         let (n, layer) = (self.tracks.len(), self.active_layer);
         self.tracks.retain(|t| !(t.target == id && t.path == path && t.layer == layer));
         self.tracks.len() != n
     }
+    /// Remove an attribute's curves from every layer; `true` when it had any.
+    pub fn remove_path(&mut self, id: ObjectId, path: &str) -> bool {
+        let n = self.tracks.len();
+        self.tracks.retain(|t| !(t.target == id && t.path == path));
+        self.tracks.len() != n
+    }
     /// Remove an object's curves from the active layer; `true` when it had any there.
     pub fn remove_object_tracks(&mut self, id: ObjectId) -> bool {
+        if self.active_locked() {
+            return false;
+        }
         let (n, layer) = (self.tracks.len(), self.active_layer);
         self.tracks.retain(|t| !(t.target == id && t.layer == layer));
         self.tracks.len() != n
@@ -281,6 +341,9 @@ impl Animation {
         for l in &mut self.layers {
             l.weight = if l.weight.is_finite() { l.weight.clamp(0.0, 1.0) } else { 1.0 };
             l.name = l.name.chars().take(128).collect();
+            if let Some(c) = &mut l.weight_curve {
+                Arc::make_mut(c).sanitize();
+            }
         }
         if !ids.contains(&self.active_layer) {
             self.active_layer = BASE_LAYER;
@@ -304,12 +367,18 @@ impl Animation {
 impl Scene {
     /// The value of a numeric attribute ([`crate::attr`]).
     pub fn attr(&self, id: ObjectId, path: &str) -> Option<f64> {
+        if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
+            return self.constraints.weight_attr(id, path);
+        }
         attr::get(self.get(id)?, path)
     }
 
     /// Set a numeric attribute; the object's revision is bumped only when the value changed.
     pub fn set_attr(&mut self, id: ObjectId, path: &str, value: f64) -> Result<bool, SceneError> {
-        let o = self.objects.iter_mut().find(|o| o.id == id).ok_or(SceneError::NoObject(id))?;
+        if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
+            return self.constraints.set_weight_attr(id, path, value).ok_or_else(|| SceneError::Invalid(format!("no numeric attribute {path:?}")));
+        }
+        let o = self.object_mut(id).ok_or(SceneError::NoObject(id))?;
         let changed = attr::set(o, path, value)?;
         if changed {
             o.rev = crate::next_rev();
@@ -321,14 +390,19 @@ impl Scene {
     pub fn set_frame(&mut self, frame: f64) {
         self.anim.frame = clamp_frame(frame);
         self.apply_animation();
+        self.solve_constraints();
     }
 
     /// Write the value of every track at the current frame into its attribute. Tracks whose
     /// attribute no longer exists are skipped. Returns how many objects changed.
+    ///
+    /// Curves set the transforms constraints start from, so the constraints' results are taken
+    /// back first; call [`Scene::solve_constraints`] afterwards ([`Scene::set_frame`] does).
     pub fn apply_animation(&mut self) -> usize {
         if self.anim.tracks.is_empty() {
             return 0;
         }
+        self.unsolve_constraints();
         let frame = self.anim.frame;
         // Values per object; rotation is set as one triple.
         let mut per: BTreeMap<ObjectId, Vec<(&str, f64)>> = BTreeMap::new();
@@ -338,6 +412,13 @@ impl Scene {
             }
         }
         let mut changed = 0;
+        for (target, values) in &per {
+            for (path, v) in values {
+                if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
+                    self.constraints.set_weight_attr(*target, path, *v);
+                }
+            }
+        }
         for o in &mut self.objects {
             let Some(values) = per.get(&o.id) else { continue };
             let mut dirty = false;
@@ -401,7 +482,7 @@ impl Scene {
     fn layer_value(&self, id: ObjectId, path: &str, frame: f64, result: f64) -> f64 {
         let layer = self.anim.active_layer;
         let Some(l) = self.anim.layer(layer) else { return result };
-        let (mode, w) = (l.mode, if l.weight.is_finite() { l.weight.clamp(0.0, 1.0) } else { 1.0 });
+        let (mode, w) = (l.mode, l.weight_at(frame));
         // What the layers give without this layer's curve. Layers above it are ignored: the key
         // makes the result right as seen from this layer.
         let mut below = self.anim.clone();

@@ -8,14 +8,24 @@ modelcraft-cli run scene.modelcraft script.jsonl -o out.modelcraft
 modelcraft-cli info scene.modelcraft          # object tree with counts
 modelcraft-cli validate model.glb             # evaluate and check every mesh
 modelcraft-cli export scene.modelcraft out.glb
+modelcraft-cli export-uv scene.modelcraft layout.png --size 2048   # UV layout as SVG or PNG
 modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
 modelcraft-cli bake scene.modelcraft Cube out.mcpc --start 0 --end 48 --step 1 --world
                                               # an object's vertices per frame (point cache)
 modelcraft-cli cache-info out.mcpc            # a point cache's header and bounds
+modelcraft-cli run-script scene.modelcraft tool.rhai -o out.modelcraft   # a script over a project
+
+modelcraft-cli bench-skin --verts 100000 --joints 60 --frames 120
+                                              # bind, pose and skin a procedural tube
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
+modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell, trim and occlusion timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
+modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
+modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
+modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
+modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
 
 ## Commands
@@ -39,17 +49,70 @@ Object ids are numbers (`info` prints them).
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …} |
-| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) |
+| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin, method (lscm, abf)} · {op: stitch_uvs, edges, align?, scale?} · {op: relax_uvs, corners, iterations, mode (rigid, conformal)} · {op: straighten_uvs, corners, strength} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform)} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) · {op: decimate, ratio} (keeps about `ratio` of the triangles, 0..1, with UVs and patches; the result is triangles) |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
-| `import` | `path` (.glb, .gltf, .obj, .stl, .ply) |
+| `set_locked` | `ids`, `locked` (a locked object refuses edits) |
+| `set_template` | `ids`, `template` (drawn, never picked) |
+| `add_selection_set` | `name`, `ids` |
+| `remove_selection_set` | `index` |
+| `import` | `path` (.glb, .gltf, .obj, .stl, .ply, .fbx, .3mf, .usda), `up?` (auto, y, z), `scale?` (metres per file unit) |
 | `end_sculpt` | — |
 | `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge. Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |
-| `sculpt_mask` | `id`, `op`: clear, fill, invert, {patch: {triangle}} |
+| `sculpt_mask` | `id`, `op`: clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}} |
+| `sculpt_groups` | `id`, `op`: {by_normal: {angle}} (degrees) · by_uv_island · by_part · from_mask. Makes patches on the mesh being sculpted |
+| `sculpt_visibility` | `id`, `op`: show_all · invert · hide_masked · hide_unmasked · {hide_patch: {triangle}} · {show_patch: {triangle}} · {isolate: {triangle}}. Hidden faces stay in the mesh; picking and brushes skip them |
+| `sculpt_region` | `id`, `region` {view_proj (16 numbers, column-major, object space to clip space), points [[x, y]…] (3 to 4096 corners, each −1..1, y up), front_only?, eye? (object space)}, `action`: mask, unmask, hide, isolate |
+| `sculpt_clip` | `id`, `point`, `normal` (object space): what lies on the normal's side moves onto the plane, as far as the mask allows |
+| `sculpt_extract` | `id`, `thickness`: a new object from the fully masked faces, as a closed shell |
+| `sculpt_project` | `id`, `source` (another object), `reach?` (how far a vertex may move, in the sculpted object's units; a tenth of its size when left out): the mesh being sculpted moves onto the source's surface, as far as the mask allows |
 | `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
 | `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
+| `add_mesh` | `positions` [[x,y,z]…], `faces` [[i,j,k…]…], `name?`, `parent?` (a mesh from raw geometry; faces that do not fit are dropped with a warning) |
+| `set_positions` | `id`, `positions` [[x,y,z]…] (objects that store their own mesh; one per vertex) |
+| `batch` | `commands` [{cmd…}…], `label?` (scene commands as one undo step, all or none) |
 | `undo`, `redo` | — |
+
+### Simulation
+
+One command, `sim`, with the operation in `op`: `{"cmd":"sim","op":"attach_cache","mesh":3,"path":"fall.mcpc"}`.
+A simulation object sits under the mesh it drives and plays the points of its cache for the scene's
+current frame (linear between frames; the first or last frame holds outside the cache).
+`attach_cache` reads a `.mcpc` file whose point count is the mesh's vertex count, so any tool that
+writes the format (or `modelcraft-cli bake`) can drive a mesh. `set` changes `start_frame`,
+`end_frame`, `fps`, `substeps` (1 to 64), `seed` and `max_cache_mib`; `clear_cache` throws a baked
+cache away.
+
+`add` gives a mesh a simulation (`rigid_active` falls and collides, `rigid_passive` is a collider
+that follows its keyed animation); `set_kind` replaces its settings; `bake` simulates from the start
+frame to the end frame and caches every frame, in one undo step. A rigid body's settings (`kind`
+with `type: "rigid"`): `role`, `shape` (auto, box, sphere, hull, mesh; a mesh shape is for
+colliders), `mass` (kg), `friction`, `bounciness`, `linear_damping`, `angular_damping`,
+`velocity` and `spin` at the start, `can_sleep`, `gravity` and `ground` (a floor at that height),
+and `joints`: `{kind: fixed|hinge|point, other: <mesh object id, or none for the world>, anchor:
+[x,y,z] (world, at the start frame), axis, limit: [min, max] degrees}`. All rigid bodies of a
+scene are one world: baking any of them bakes every one, with the timing, seed, gravity and ground
+of the one you baked. The same scene and seed give the same cache bit for bit. A body's own
+animation is ignored while it is simulated; a collider's keys move it and push the bodies on it.
+Each cache is stored in its mesh's own space under the object's own transform, so the object does
+not move: the mesh does.
+
+`cloth` (`add` with `kind: "cloth"`) simulates the mesh as a cloth with extended position-based
+dynamics. Its settings (`kind` with `type: "cloth"`): `mass` (kg), `stretch`, `shear`, `bend`
+(0 to 1; 1 is inextensible for stretch), `damping`, `thickness` (the radius of a vertex in
+collisions, metres), `friction`, `iterations` per substep, `gravity`, `wind` (`direction`,
+`strength` in metres per second, `turbulence` 0 to 1, `scale` and `speed` of the gusts, seeded by
+the simulation's `seed`), `collide` (with other visible meshes, or only the ids in `collide_with`),
+`self_collision`, and the pins: `pinned` (vertex indices; `sim pin_vertices` adds or releases
+some), `pin_mask` (also hold the vertices whose sculpt mask is above one half) and `pin_follow`
+(a mesh or group id: the pins move as that object does). Colliders are read from the scene at every
+frame, so moving objects, deformed meshes and baked rigid bodies all work; a cloth does not push
+its colliders back. A cloth is baked on its own (`bake` on it), and a cloth baked earlier is a
+collider for the next. Edits to the colliders do not mark a cloth's cache stale.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`
+and `sim-bench cloth` measure a bake.
 
 ### Animation
 
@@ -78,7 +141,11 @@ names (`levels`, `deformer.angle`, …). Whole-number attributes round; switches
 | `turntable` | `ids`, `axis` (x, y, z; default y), `turns` (default 1), `start?`, `end?`; replaces the rotation curves |
 | `add_layer` | `name?`, `mode?` (add, override); the new layer becomes active |
 | `remove_layer`, `set_active_layer` | `layer` (0 is the base layer) |
-| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?` |
+| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?`, `solo?` (only solo layers play over the base), `lock?` (its keys cannot be changed) |
+| `key_layer_weight` | `layer`, `frame?`, `value?` (its weight there without it), `clear?` (remove its weight keys): the layer's weight over time |
+| `move_layer` | `layer`, `delta` (1 up, −1 down) |
+| `paste_keys` | `keys`: `[{id, path, key: {t, v, interp?, tangent?, …}}]`, `offset?` (frames), `to?` (another object; attributes it lacks are skipped) |
+| `set_attr` | `id`, `path`, `value`: set any numeric attribute without keying it |
 | `flatten_layers` | `step` (default 1): bake every layer into the base curves |
 | `set_time` | `frame` (poses the scene; not an undo step) |
 | `set_time_range` | `start?`, `end?`, `fps?` |
@@ -90,6 +157,89 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
     '{"cmd":"anim","op":"set_key","id":1,"path":"translate.x","frame":24,"value":6}' \
     '{"cmd":"anim","op":"set_time","frame":12}' | modelcraft-cli control
 ```
+
+## Scripts
+
+```
+modelcraft-cli run-script <project|new> <script.rhai> [-o <out>] [options]
+modelcraft-cli run-script <project|new> -e '<script text>' [options]
+modelcraft-cli batch-script <script.rhai> <file>... --out-dir DIR [--format modelcraft|glb|obj|stl] [options]
+```
+
+`run-script` runs a [Rhai script](scripting.md) over a project (or an empty scene) and saves like
+`run` does. `batch-script` runs one script over many files (projects or any importable model),
+saves each result in `--out-dir` (named after the input; a second input with the same file name gets `_2`, `_3`, ... instead of overwriting the first), prints one line per file and exits with status 1 if any file
+failed (`--stop-on-error` stops at the first). Scripts have no file access unless it is granted:
+they may read the script's folder and the project's folder, and write nowhere (`batch-script`
+lets them write in `--out-dir`).
+
+| Option | Meaning |
+|---|---|
+| `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
+| `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
+| `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
+| `--no-save` | Run and report, write nothing |
+
+Errors print as `file:line:column: message` and give a non-zero exit status. Commands the script
+ran before an error stay applied in memory but nothing is saved.
+
+### Rigging
+
+One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","parent":3}`.
+
+| `op` | Fields |
+|---|---|
+| `add_joint` | `parent?`, `position?` [x, y, z] in world space (one unit up the parent's Y without it), `name?` |
+| `orient_joints` | `ids`, `aim` (x, y, z; default y), `up` (default z), `children?`: aim each joint at its first child joint, children stay in place |
+| `mirror_joints` | `id`, `axis` (default x), `find?`, `replace?` (for example `_L` → `_R`) |
+| `bind_skin` | `mesh`, `joints`, `method` (heat, distance; default heat), `influences` (1–8, default 4), `dual_quaternion?` |
+| `unbind_skin` | `mesh` |
+| `set_skin` | `mesh`, `dual_quaternion` |
+| `edit_weights` | `mesh`, `weights`: `normalize` · `prune` + `threshold` · `limit` + `max` · `mirror` + `axis`, `find`, `replace`, `tolerance` · `set` + `points`, `joint`, `weight` · `paint` + `joint`, `center` [x, y, z] in the mesh's space, `radius`, `strength` (−1..1) |
+
+| `add_constraint` | `kind` (point, orient, scale, parent, aim), `target`, `sources`, `weights?` (one per source), `maintain_offset` (default true), `aim` (default y), `up` (default z), `up_object?`, `name?` |
+| `add_ik` | `end` (the chain's end joint), `goal?` (an object; a group is created at the end joint without it), `pole?`, `bones` (default 2), `solver` (auto, two_bone, fabrik, ccd), `name?` |
+| `set_driven_key` | `driver`, `driver_path`, `target`, `path`, `driver_value?`, `value?` (the attributes' current values without them): one key of the curve that maps the driver's value to the driven attribute |
+| `set_expression` | `target`, `path`, `expr` (empty removes it) |
+| `set_constraint` | `id`, `weight?` (0–1; the IK/FK blend of an IK constraint), `enabled?`, `name?`, `source_weights?`, `solver?`, `iterations?`, `pole?` (an object id, 0 for none) |
+| `remove_constraint` | `id` |
+| `match_ik` | `id`, `to`: `fk` (the joints keep the solved pose, blend 0) or `ik` (the goal and pole move onto the chain, blend 1) |
+| `bake_constraints` | `objects`, `start?`, `end?` (the playback range without them), `step` (default 1), `keep?`: key the solved transforms, then switch the constraints off |
+
+| `add_shape` | `mesh`, `from` (a mesh with the same points, in the shape wanted), `name?`; with `target` (a shape's index) and `at` (0–1) the shape becomes an in-between of that target |
+| `set_shape` | `mesh`, `target`, `weight?`, `name?` |
+| `remove_shape` | `mesh`, `target`, `frame?` (one in-between; the whole shape without it) |
+| `add_lattice` | `mesh`, `divisions` [x, y, z] (1–8 cells, default 2), `linear?` (cell by cell instead of one Bézier volume) |
+| `edit_lattice` | `id`, `points` (control point indices, X fastest, then Y, then Z), `translate?` or `to?` [x, y, z] in the lattice's space (the box is one unit wide), `reset?`, `linear?` |
+| `add_cluster` | `mesh`, `points?`, `weights?`, `radius?` (every point within it of the centre, with a smooth falloff), `center?` [x, y, z] in the mesh's space, `name?` |
+| `set_cluster_weights` | `id`, `points`, `weight` (0 takes them out) |
+| `move_in_stack` | `id`, `delta` (negative: earlier) |
+
+Blend shapes, lattices, clusters and skins are children of the mesh they deform and run in child
+order after the parametric deformers: the deformer stack. A blend shape's weight is the attribute
+`target.<index>.weight` of the blend-shape object and a lattice's control points are
+`point.<index>.x|y|z` of the lattice, so `anim set_key` keys them. A cluster follows its own
+transform.
+
+Constraints run after every command and frame change, in dependency order: a constraint that reads
+what another writes runs after it, and constraints that depend on themselves are skipped and named
+in the command's `warnings`. A constraint's weight is the attribute `constraint.<id>.weight` of its
+target, so `anim set_key` keys it (an IK/FK switch over time).
+
+An expression is one formula giving one number: `+ - * / % ^`, comparisons, `&&`, `||`, `!`,
+`cond ? a : b`, brackets, the constants `pi`, `tau`, `e`, and the functions `sin cos tan asin acos
+atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smoothstep deg rad`.
+Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
+`@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
+
+A point cache (`modelcraft-cli bake`) holds a skinned mesh as it is posed frame by frame.
+Exporting to `.glb` keeps the rig instead: when the scene has skins, blend shapes, curves or
+constraints, the file holds the joints, each bound mesh in its rest shape with joints and
+weights, blend shapes as morph targets and one animation clip sampled at every frame of the
+playback range (curves, layers, constraints and IK all baked into it). What glTF cannot hold is
+printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
+builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
 ## Rendering
 
@@ -104,6 +254,9 @@ samples per second.
 | `--samples N` | Samples per pixel, default 64 |
 | `--depth N` | Bounces, default 12 |
 | `--device auto\|cpu\|gpu` | `auto` uses a hardware GPU when there is one and falls back to the CPU; `gpu` fails if it cannot |
+| `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
+| `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
+| `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
@@ -119,22 +272,53 @@ or compositor reads: `albedo.R/G/B`, `N.X/Y/Z` (world-space normal), `Z` (distan
 camera), `motion.X/Y` and `variance`, all 32-bit float. The feature images come from the CPU path.
 
 `modelcraft-cli render-bench [--scenes a,b] [--size N] [--spp 1,4,16] [--seeds N] [--reference N]
-[--device cpu|gpu] [--order z|independent]` measures error against samples and time on the
+[--device cpu|gpu] [--order z|independent] [--guiding] [--splitting]` measures error against samples and time on the
 benchmark scenes, each against its own converged reference, and prints one JSON line per scene and
 a table ([performance.md](performance.md) explains the protocol).
 
 ## Control channel
 
-`modelcraft-cli control` reads one command per line and answers one line each:
-`{"ok":true,"result":{"created":[…],"warnings":[…]}}` or `{"ok":false,"error":"…"}`. Extra verbs:
-`{"cmd":"info"}` (object list and undo labels), `{"cmd":"save","path":…}`, `{"cmd":"export","path":…}`.
-It runs locally over stdio only, so it needs no authentication; a socket listener will use
-`craft-control`'s token files, as TextureCraft and MaterialCraft do.
+The same requests reach a document four ways (`crates/engine/src/control.rs`):
 
-Example session:
+| Method | Params | Result |
+|---|---|---|
+| `engine.execute` | a command (`{"cmd": …}`), or `{"command": {…}}` | `{created, warnings}` |
+| `engine.commands` | — | `[{name, help}]` |
+| `document.info` | — | `{path, dirty, revision, objects: [{id, name, type, depth, parent, visible, faces, steps}], undo, redo}` |
+| `document.revision` | — | `{document_id, revision}` |
+| `document.save` | `{path?}` | `{path}` |
+| `document.export` | `{path}` (.glb, .obj, .stl) | `{path}` |
+
+Every reply is `{"ok":true,"result":…}` or `{"ok":false,"error":"…"}`.
+
+- **stdin/stdout**: `modelcraft-cli control [project]` reads one line each: an engine command,
+  `{"method": …, "params": …}`, or the short verbs `{"cmd":"info"}`, `{"cmd":"save","path":…}`,
+  `{"cmd":"export","path":…}`. Local, so no token.
+- **Loopback socket in the window**: `modelcraft --control` (or `--control-port N`), or
+  **Edit ▸ Allow Agents to Control ModelCraft** (a preference, off by default). The channel is
+  craft-control's: loopback only, a fresh 32-byte token per launch written to
+  `<data folder>/modelcraft/control/<port>.token` (readable only by you; `MODELCRAFT_CONTROL_DIR`
+  moves the folder, `MODELCRAFT_CONTROL_TOKEN` sets the token), the port in `current.port`, default
+  port 28730 then the next 15. The first request of a connection carries `"token"`; requests are
+  `{"id", "method", "params"}` lines. The window answers between frames, never during a drag or
+  stroke; the status bar says when an agent changed the scene.
+- **Loopback socket without a window**: `modelcraft-cli serve [project] [--port N]`, the same
+  channel on a document of its own.
+- **One request from a shell**: `modelcraft-cli call <method> ['<json params>'] [--port N]
+  [--token T]` finds the port and token the way any craft-control client does.
+- **MCP**: `modelcraft-cli mcp [project]` is an MCP server on stdio (craft-mcp-server) with the
+  tools `info`, `commands`, `execute`, `save` and `export` on its own document;
+  `modelcraft-cli mcp --app [--port N]` sends every tool call to the running window instead, so an
+  agent and a person work on the same scene. Register it with an MCP client as the command
+  `modelcraft-cli mcp --app`.
+
+Example sessions:
 
 ```
 $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' '{"cmd":"add_step","id":1,"op":{"op":"subdivide","levels":2}}' '{"cmd":"info"}' | modelcraft-cli control
+$ modelcraft --control &
+$ modelcraft-cli call engine.execute '{"cmd":"add_primitive","kind":"torus"}'
+$ modelcraft-cli call document.info
 ```
 
 ## Interop with the suite

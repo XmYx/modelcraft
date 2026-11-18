@@ -2,7 +2,7 @@
 
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Array, Material, ObjectId, StepOp, Transform};
+use modelcraft_scene::{Array, Cloner, Field, Material, ObjectId, StepOp, Transform};
 use modelcraft_sculpt::Stroke;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,20 @@ pub enum MaskOp {
     Patch {
         triangle: u32,
     },
+    /// Soften the mask's edge.
+    Blur,
+    /// Harden the mask's edge.
+    Sharpen,
+    /// Widen the mask by one ring of vertices.
+    Grow,
+    /// Narrow the mask by one ring of vertices.
+    Shrink,
+    /// Mask the hollows of the surface.
+    Hollows,
+    /// Mask the ridges and bumps of the surface.
+    Ridges,
+    /// Mask what the sky cannot reach: folds, holes and where parts meet.
+    Occlusion,
 }
 
 /// Step between detail levels (each level up subdivides once and keeps the sculpted detail).
@@ -87,6 +101,13 @@ pub enum Command {
         #[serde(default)]
         input: Option<ObjectId>,
     },
+    /// Add a clone generator (`linear`, `radial`, `grid`, `scatter`, `surface`, `vertices`). The
+    /// given object becomes the source it clones; without one, a small cube is made.
+    AddCloner {
+        kind: String,
+        #[serde(default)]
+        input: Option<ObjectId>,
+    },
     /// Add a symmetry generator: the input mirrored across a plane through its origin.
     AddSymmetry {
         #[serde(default)]
@@ -96,6 +117,12 @@ pub enum Command {
     },
     /// Add a deformer (`bend`, `twist`, `taper`, `ripple`, `round`) under a mesh.
     AddDeformer {
+        kind: String,
+        target: ObjectId,
+    },
+    /// Add a falloff field (`sphere`, `box`, `linear`, `noise`) inside a deformer; the deformer
+    /// then acts only where the field is.
+    AddField {
         kind: String,
         target: ObjectId,
     },
@@ -147,6 +174,19 @@ pub enum Command {
         #[serde(default)]
         weld: f32,
     },
+    /// Change a falloff field's shape, remap curve and blend mode.
+    SetField {
+        id: ObjectId,
+        field: Field,
+    },
+    /// Change a clone generator's layout and seed, and the target object of the surface and
+    /// vertices layouts.
+    SetCloner {
+        id: ObjectId,
+        cloner: Cloner,
+        #[serde(default)]
+        target: Option<ObjectId>,
+    },
     /// Append a build-history step to a mesh object.
     AddStep {
         id: ObjectId,
@@ -171,9 +211,33 @@ pub enum Command {
     Collapse {
         id: ObjectId,
     },
+    /// Protect objects from edits (or allow them again).
+    SetLocked {
+        ids: Vec<ObjectId>,
+        locked: bool,
+    },
+    /// Show objects for reference only: drawn, not picked in the viewport.
+    SetTemplate {
+        ids: Vec<ObjectId>,
+        template: bool,
+    },
+    /// Remember a selection under a name.
+    AddSelectionSet {
+        name: String,
+        ids: Vec<ObjectId>,
+    },
+    RemoveSelectionSet {
+        index: usize,
+    },
     /// Import a glTF/GLB/OBJ/STL/PLY file as new objects.
     Import {
         path: String,
+        /// The file's up axis (`auto`: what the file says, FBX only; else Y).
+        #[serde(default, skip_serializing_if = "is_auto")]
+        up: modelcraft_formats::exchange::Up,
+        /// Metres per file unit (`None`: what the file says, FBX only; else 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f32>,
     },
     /// Start sculpting a mesh object (adds a sculpt layer if its last step is not one).
     BeginSculpt {
@@ -196,15 +260,81 @@ pub enum Command {
         id: ObjectId,
         op: ShapeOp,
     },
+    /// Make patches on the mesh being sculpted.
+    SculptGroups {
+        id: ObjectId,
+        op: crate::groups::GroupOp,
+    },
+    /// Hide and show faces of the mesh being sculpted.
+    SculptVisibility {
+        id: ObjectId,
+        op: crate::groups::VisibilityOp,
+    },
+    /// Mask or hide what lies inside a rectangle or lasso drawn on the screen.
+    SculptRegion {
+        id: ObjectId,
+        region: modelcraft_sculpt::ScreenRegion,
+        action: crate::groups::RegionAction,
+    },
+    /// Move everything on the normal's side of a plane onto the plane (object space).
+    SculptClip {
+        id: ObjectId,
+        point: glam::Vec3,
+        normal: glam::Vec3,
+    },
+    /// Make a new object from the masked faces, thickened into a closed shell.
+    SculptExtract {
+        id: ObjectId,
+        thickness: f32,
+    },
+    /// Move the vertices of the mesh being sculpted onto the surface of another object, no
+    /// further than `reach` (in the sculpted object's units; a tenth of its size when left out).
+    SculptProject {
+        id: ObjectId,
+        source: ObjectId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reach: Option<f32>,
+    },
+    /// Add a mesh object from raw geometry: `positions` as [x, y, z] and `faces` as lists of
+    /// vertex indices (counter-clockwise). Faces that do not fit the vertices are dropped and
+    /// reported as a warning, like an import.
+    AddMesh {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        parent: Option<ObjectId>,
+        positions: Vec<[f32; 3]>,
+        faces: Vec<Vec<u32>>,
+    },
+    /// Replace the vertex positions of an object that stores its own mesh (an import, an
+    /// `add_mesh`, a collapsed object). One [x, y, z] per vertex.
+    SetPositions {
+        id: ObjectId,
+        positions: Vec<[f32; 3]>,
+    },
+    /// Run several scene commands as one undo step; all of them or none.
+    Batch {
+        #[serde(default)]
+        label: Option<String>,
+        commands: Vec<Command>,
+    },
     Undo,
     Redo,
     /// Keys, curves and time: `{"cmd":"anim","op":"set_key",…}` ([`crate::anim::AnimCommand`]).
     Anim(crate::anim::AnimCommand),
+    /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
+    Rig(crate::rig::RigCommand),
+    /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
+    Sim(crate::sim::SimCommand),
 }
 
 fn default_axis() -> u32 {
     0
 }
+
+/// Most commands one batch may hold, and how deep batches may nest.
+pub const MAX_BATCH: usize = 100_000;
+pub const MAX_BATCH_DEPTH: usize = 8;
 
 fn two() -> u32 {
     2
@@ -218,6 +348,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_array", "Add an array generator (linear, radial) around input?: real copies joined into one mesh"),
     ("add_symmetry", "Add a symmetry generator around input? mirrored across axis (0 X, 1 Y, 2 Z)"),
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear) under target"),
+    ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
+    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the deformer target"),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -230,27 +362,52 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
     ("set_array", "Change an array's layout, copies and steps: id, array"),
     ("set_symmetry", "Change a symmetry's axis and join distance: id, axis, weld"),
+    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
+    ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
-        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op",
+        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op",
     ),
     ("set_step", "Change a history step: id, index, op"),
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
     ("remove_step", "Remove a history step: id, index"),
     ("collapse", "Bake an object's history into its mesh: id"),
-    ("import", "Import a glTF, GLB, OBJ, STL or PLY file: path"),
+    ("set_locked", "Protect objects from edits or allow them again: ids, locked"),
+    ("set_template", "Show objects for reference only (not picked in the viewport): ids, template"),
+    ("add_selection_set", "Remember a selection: name, ids"),
+    ("remove_selection_set", "Forget a selection set: index"),
+    ("import", "Import a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file: path, up? (auto, y, z), scale? (metres per file unit)"),
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
     ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs}"),
-    ("sculpt_mask", "Clear, fill or invert the mask, or mask a patch: id, op"),
+    ("sculpt_mask", "Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}})"),
+    ("sculpt_groups", "Make patches while sculpting: id, op ({by_normal: {angle}}, by_uv_island, by_part, from_mask)"),
+    (
+        "sculpt_visibility",
+        "Hide and show faces while sculpting: id, op (show_all, invert, hide_masked, hide_unmasked, {hide_patch: {triangle}}, {show_patch: {triangle}}, {isolate: {triangle}})",
+    ),
+    (
+        "sculpt_region",
+        "Mask or hide inside a screen outline: id, region {view_proj (16 numbers, object to clip space), points [[x, y]…] in −1..1, front_only?, eye?}, action (mask, unmask, hide, isolate)",
+    ),
+    ("sculpt_clip", "Move what lies on the normal's side of a plane onto it: id, point, normal"),
+    ("sculpt_extract", "New object from the masked faces as a closed shell: id, thickness"),
+    ("sculpt_project", "Move the sculpted mesh onto the surface of another object, as far as the mask allows: id, source, reach?"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
         "sculpt_shape",
         "Edit shape layers: id, op (add {name?}, remove {index}, merge {index}, strength {index, strength}, select {index or null}, rename {index, name})",
     ),
+    ("add_mesh", "Add a mesh from raw geometry: positions [[x,y,z]…], faces [[i,j,k…]…], name?, parent?"),
+    ("set_positions", "Replace the vertex positions of a stored mesh: id, positions [[x,y,z]…]"),
+    ("batch", "Run several scene commands as one undo step, all or none: commands [{cmd…}…], label?"),
     ("undo", "Undo the last change"),
     ("redo", "Redo the last undone change"),
 ];
+
+fn is_auto(u: &modelcraft_formats::exchange::Up) -> bool {
+    *u == modelcraft_formats::exchange::Up::Auto
+}
 
 impl Command {
     /// The English label for menus and the undo history.
@@ -261,7 +418,9 @@ impl Command {
             Command::AddSmoothCage { .. } => "Add smooth cage".into(),
             Command::AddArray { kind, .. } => format!("Add {kind} array"),
             Command::AddSymmetry { .. } => "Add symmetry".into(),
+            Command::AddCloner { kind, .. } => format!("Add {kind} clones"),
             Command::AddDeformer { kind, .. } => format!("Add {kind}"),
+            Command::AddField { kind, .. } => format!("Add {kind} field"),
             Command::Delete { .. } => "Delete".into(),
             Command::Duplicate { .. } => "Duplicate".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -274,11 +433,18 @@ impl Command {
             Command::SetDeformer { .. } => "Deformer settings".into(),
             Command::SetArray { .. } => "Array settings".into(),
             Command::SetSymmetry { .. } => "Symmetry settings".into(),
+            Command::SetField { .. } => "Field settings".into(),
+            Command::SetCloner { .. } => "Clone settings".into(),
             Command::AddStep { op, .. } => op.name().into(),
             Command::SetStep { op, .. } => format!("Edit {}", op.name()),
             Command::EnableStep { .. } => "Toggle step".into(),
             Command::RemoveStep { .. } => "Remove step".into(),
             Command::Collapse { .. } => "Collapse history".into(),
+            Command::SetLocked { locked: true, .. } => "Lock".into(),
+            Command::SetLocked { .. } => "Unlock".into(),
+            Command::SetTemplate { .. } => "Reference only".into(),
+            Command::AddSelectionSet { .. } => "Add selection set".into(),
+            Command::RemoveSelectionSet { .. } => "Remove selection set".into(),
             Command::Import { .. } => "Import".into(),
             Command::BeginSculpt { .. } => "Start sculpting".into(),
             Command::EndSculpt => "Stop sculpting".into(),
@@ -295,9 +461,41 @@ impl Command {
                 ShapeOp::Rename { .. } => "Rename shape layer",
             }
             .into(),
+            Command::SculptGroups { op, .. } => match op {
+                crate::groups::GroupOp::ByNormal { .. } => "Patches by angle",
+                crate::groups::GroupOp::ByUvIsland => "Patches by UV island",
+                crate::groups::GroupOp::ByPart => "Patches by part",
+                crate::groups::GroupOp::FromMask => "Patch from mask",
+            }
+            .into(),
+            Command::SculptVisibility { op, .. } => match op {
+                crate::groups::VisibilityOp::ShowAll => "Show all",
+                crate::groups::VisibilityOp::Invert => "Invert visibility",
+                crate::groups::VisibilityOp::HidePatch { .. } => "Hide patch",
+                crate::groups::VisibilityOp::ShowPatch { .. } => "Show patch",
+                crate::groups::VisibilityOp::Isolate { .. } => "Isolate patch",
+                crate::groups::VisibilityOp::HideMasked => "Hide masked",
+                crate::groups::VisibilityOp::HideUnmasked => "Hide unmasked",
+            }
+            .into(),
+            Command::SculptRegion { action, .. } => match action {
+                crate::groups::RegionAction::Mask => "Mask region",
+                crate::groups::RegionAction::Unmask => "Unmask region",
+                crate::groups::RegionAction::Hide => "Hide region",
+                crate::groups::RegionAction::Isolate => "Isolate region",
+            }
+            .into(),
+            Command::SculptClip { .. } => "Clip to plane".into(),
+            Command::SculptExtract { .. } => "Extract shell".into(),
+            Command::SculptProject { .. } => "Project detail".into(),
+            Command::AddMesh { .. } => "Add mesh".into(),
+            Command::SetPositions { .. } => "Set positions".into(),
+            Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),
             Command::Undo => "Undo".into(),
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),
+            Command::Rig(r) => r.label(),
+            Command::Sim(c) => c.label(),
         }
     }
 }

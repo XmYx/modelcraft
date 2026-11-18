@@ -35,36 +35,70 @@ pub const SMOOTH_ANGLE_DEG: f32 = 40.0;
 /// Above this many corners, use shared vertex normals (meshes that dense look smooth anyway).
 pub const CORNER_LIMIT: usize = 2_000_000;
 
+/// Meshes with at least this many faces are turned into drawing data on several cores.
+pub const PARALLEL_FACES: usize = 16_384;
+/// Most runs of faces built at once.
+const MAX_RUNS: usize = 8;
+
 /// Drawing data with auto-smoothed normals: each face corner gets the average normal of the faces
 /// around its vertex that bend less than [`SMOOTH_ANGLE_DEG`] from its own face.
 pub fn mesh_data(m: &PolyMesh) -> MeshData {
+    mesh_data_in(m, MAX_RUNS)
+}
+
+/// [`mesh_data`] built in at most `max_runs` runs of faces at once (1: on the calling thread).
+pub fn mesh_data_in(m: &PolyMesh, max_runs: usize) -> MeshData {
     let corners: usize = (0..m.face_count() as u32).map(|f| m.face_len(f)).sum();
     if corners > CORNER_LIMIT {
         return shared_data(m.positions(), &m.vertex_normals(), None, &m.triangulate().0);
     }
-    let fnorm: Vec<Vec3> = (0..m.face_count() as u32).map(|f| m.face_normal(f)).collect();
+    use rayon::prelude::*;
+    let faces = m.face_count() as u32;
+    // Large meshes (a skinned character re-uploaded every frame of playback) are built in a few
+    // runs of faces at once; each run fills its own piece and the pieces are joined in order,
+    // so the result is the same as building it in one go.
+    let runs = if (faces as usize) < PARALLEL_FACES { 1 } else { max_runs.min(faces as usize / (PARALLEL_FACES / 4)).max(1) as u32 };
+    let fnorm: Vec<Vec3> = if runs == 1 {
+        (0..faces).map(|f| m.face_normal(f)).collect()
+    } else {
+        (0..faces).into_par_iter().with_min_len(4096).map(|f| m.face_normal(f)).collect()
+    };
     let cos = SMOOTH_ANGLE_DEG.to_radians().cos();
-    let mut out = MeshData { vertices: Vec::with_capacity(corners), indices: Vec::with_capacity(corners * 2) };
-    for f in 0..m.face_count() as u32 {
-        let nf = fnorm.get(f as usize).copied().unwrap_or(Vec3::Y);
-        let first = out.vertices.len() as u32;
-        let mut n = 0u32;
-        for h in m.face_half_edges(f) {
-            let v = m.origin(h);
-            let mut sum = Vec3::ZERO;
-            for g in m.vertex_faces(v) {
-                let ng = fnorm.get(g as usize).copied().unwrap_or(Vec3::ZERO);
-                if ng.dot(nf) >= cos {
-                    sum += ng;
+    let build = |from: u32, to: u32| -> MeshData {
+        let mut out = MeshData { vertices: Vec::new(), indices: Vec::new() };
+        for f in from..to {
+            let nf = fnorm.get(f as usize).copied().unwrap_or(Vec3::Y);
+            let first = out.vertices.len() as u32;
+            let mut n = 0u32;
+            for h in m.face_half_edges(f) {
+                let v = m.origin(h);
+                let mut sum = Vec3::ZERO;
+                for g in m.vertex_faces(v) {
+                    let ng = fnorm.get(g as usize).copied().unwrap_or(Vec3::ZERO);
+                    if ng.dot(nf) >= cos {
+                        sum += ng;
+                    }
                 }
+                let normal = sum.normalize_or(nf);
+                out.vertices.push(MeshVertex { pos: m.position(v).to_array(), normal: normal.to_array(), mask: 0.0, patch: m.patch(f) as f32 });
+                n += 1;
             }
-            let normal = sum.normalize_or(nf);
-            out.vertices.push(MeshVertex { pos: m.position(v).to_array(), normal: normal.to_array(), mask: 0.0, patch: m.patch(f) as f32 });
-            n += 1;
+            for i in 1..n.saturating_sub(1) {
+                out.indices.extend_from_slice(&[first, first + i, first + i + 1]);
+            }
         }
-        for i in 1..n.saturating_sub(1) {
-            out.indices.extend_from_slice(&[first, first + i, first + i + 1]);
-        }
+        out
+    };
+    if runs == 1 {
+        return build(0, faces);
+    }
+    let per = faces.div_ceil(runs);
+    let pieces: Vec<MeshData> = (0..runs).into_par_iter().map(|r| build(r * per, ((r + 1) * per).min(faces))).collect();
+    let mut out = MeshData { vertices: Vec::with_capacity(corners), indices: Vec::with_capacity(corners * 2) };
+    for piece in pieces {
+        let base = out.vertices.len() as u32;
+        out.vertices.extend_from_slice(&piece.vertices);
+        out.indices.extend(piece.indices.iter().map(|i| i + base));
     }
     out
 }
@@ -128,6 +162,18 @@ pub fn grid(lines: i32, step: f32, minor: [f32; 4], major: [f32; 4]) -> Vec<Line
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_meshes_built_on_several_cores_equal_the_one_core_result() {
+        use modelcraft_scene::Primitive;
+        let m = Primitive::Cylinder { radius: 1.0, height: 8.0, sides: 128, rings: 200, caps: true }.build().unwrap();
+        assert!(m.face_count() >= PARALLEL_FACES);
+        let (one, many) = (mesh_data_in(&m, 1), mesh_data_in(&m, MAX_RUNS));
+        assert_eq!(one.indices, many.indices);
+        assert!(one.vertices == many.vertices, "the same vertices, bit for bit");
+        assert_eq!(mesh_data(&m).vertices.len(), one.vertices.len());
+        assert!(one.indices.iter().all(|i| (*i as usize) < one.vertices.len()));
+    }
     use modelcraft_mesh::Polygon;
 
     fn cube() -> PolyMesh {

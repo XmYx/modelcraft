@@ -484,6 +484,17 @@ impl Bsdf {
         (pdf > 0.0 && f.is_finite()).then(|| BsdfSample { wi, weight: f / pdf, pdf })
     }
 
+    /// Probability that [`Bsdf::sample`] draws from a wide lobe (diffuse or fuzz), where a
+    /// learned distribution of incoming light can help.
+    pub fn wide_probability(&self) -> f32 {
+        self.p[DIFFUSE] + self.p[FUZZ]
+    }
+
+    /// The largest share of light the wide lobes send back (their albedo, at most 1).
+    pub fn wide_albedo(&self) -> f32 {
+        (self.diffuse + self.fuzz).max_element().clamp(0.0, 1.0)
+    }
+
     /// The outgoing direction this was resolved for.
     pub fn wo(&self) -> Vec3A {
         self.wo
