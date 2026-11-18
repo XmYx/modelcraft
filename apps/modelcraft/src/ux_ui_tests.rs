@@ -76,3 +76,24 @@ fn a_single_letter_shortcut_does_nothing_while_a_text_field_has_focus() {
     h.run();
     assert_eq!(h.state().tool, crate::app::Tool::Rotate, "E switches to Rotate with nothing focused");
 }
+
+#[test]
+fn a_focused_control_keeps_its_own_keys_but_tool_letters_and_command_chords_still_run() {
+    let mut h = harness();
+    h.run();
+    focus(&h, egui::Id::unique(("panel-focus", 0)));
+    h.run();
+    let quad = h.state().quad;
+    h.key_press(Key::Space);
+    h.run();
+    assert_eq!(h.state().quad, quad, "Space belongs to the focused control, it does not toggle four views");
+    h.key_press(Key::E);
+    h.run();
+    assert_eq!(h.state().tool, crate::app::Tool::Rotate, "a tool letter still runs");
+    // With the viewport focused Space is the viewport's.
+    focus(&h, egui::Id::unique(("viewport", 0)));
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+    assert_ne!(h.state().quad, quad);
+}
