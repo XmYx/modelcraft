@@ -161,6 +161,39 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
   [cli.md](cli.md#scripts).
 
+## Libraries
+
+A script can share code through Rhai modules kept in the scripts folder:
+
+```rhai
+// <scripts folder>/lib/shapes.rhai
+export const SIDES = 6;
+fn row(n, name) { for i in 0..n { move_to(add_primitive("cube", name + i), i * 2, 0, 0); } }
+```
+
+```rhai
+import "lib/shapes" as shapes;
+shapes::row(shapes::SIDES, "c");
+```
+
+- **Where.** The name is a path relative to the scripts folder without the `.rhai` (the suffix may
+  be given). Conventionally libraries live in `lib/`, which the Scripts menu skips. In
+  `modelcraft-cli run-script` the folder is the script's own, or `--library DIR`; `-e` scripts have
+  none unless `--library` is given.
+- **Sandbox.** A name is plain names joined by `/` (letters, digits, `_`, `-`, space, inner dots):
+  no leading `/`, `..`, hidden names, `\` or `:`. The file must be a regular file of at most 4 MiB
+  inside the folder after symbolic links are followed (a link that points out is refused). A
+  library runs in the importing script's engine, so it has the same operation, time, depth and
+  command limits and the same file permissions, and cannot reach more than the script could. At
+  most 8 libraries deep, 64 modules per run; an import cycle is an error naming the chain.
+- **Reloading.** Libraries are read again on every run, so edits show at once.
+- **Tools and callbacks.** They run after the script ended, so the session keeps the modules a
+  script imports at its top level as the namespace of the alias for as long as it lives: a tool
+  that calls `shapes::row` works later. Two scripts that import different libraries under the same
+  alias share the last one loaded, so name aliases after the library. `cmd` and `global` are the
+  engine's and are never replaced.
+- **Errors** inside a library read `... (in library lib/shapes)`; limits stay limits.
+
 ## Recorded macros
 
 Scripts menu, "Record Macro" (also in the command palette, and the first button of the Scripts
@@ -225,7 +258,7 @@ undo_group("Macro: Macro 1", || {
 ## The sandbox
 
 A script has no file or network access and no way to start a process: the engine is built from
-Rhai's standard package only, `eval` and modules are switched off, and the functions that touch the
+Rhai's standard package only, `eval` is switched off, modules load only from the scripts folder (see Libraries), and the functions that touch the
 disk (`read_text`, `write_text`, `list_dir`, `file_exists`, `export_scene`, and the `import`
 command) check a `Permissions` first. The default grants nothing. A path is made absolute, `..`
 is resolved and symbolic links are followed before it is compared with the granted folders, so a

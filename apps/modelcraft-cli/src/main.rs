@@ -8,6 +8,8 @@ mod hair_cmd;
 mod macro_cmd;
 mod render_cmd;
 mod script_cmd;
+#[cfg(test)]
+mod script_library_tests;
 mod sim_cmd;
 
 use std::io::{BufRead, Write};
