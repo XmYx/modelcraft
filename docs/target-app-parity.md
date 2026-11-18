@@ -103,7 +103,7 @@ full 3D suite stays in the denominator, however large.
 | Professional modeler | No | Missing knife, booleans, vertex snapping, UV tools, normals editing, splines |
 | Motion designer | No | No cloners, effectors, fields or animation |
 | Animator keying objects and parameters | Preview | Keys on any number, curves, timeline, auto-key, Key Sheet and Curve Editor; no layers, clips or motion paths |
-| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending, constraints and blend shapes work; no weight brush or control shapes yet |
+| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending, constraints, blend shapes and a weight brush work; no control shapes, rig templates or retargeting yet |
 | Simulation | No | Not started |
 | Look development and final rendering | No | Viewport shading only; no offline renderer |
 
@@ -465,8 +465,8 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Joints: create, mirror, orient | C M | P | M | Joints are objects in the tree (keyable, parented), drawn as bones; add (chains by one key), aim at the child with children kept in place, mirror across a plane with renaming; no click-to-place tool, no separate orientation channel, joints are not picked in the viewport |
-| Skinning with linear blend and weight painting | C M | P | L | A skin under a mesh binds it to joints and evaluates through the graph (only the skin re-runs when a joint moves); weights are painted by a command dab with falloff, not yet by a viewport brush; weights are saved as JSON |
+| Joints: create, mirror, orient | C M | D | M | Joints are objects in the tree (keyable, parented), drawn as bones; add by key (chains by one key) or by clicking in the viewport (Place Joints by Clicking), pick by clicking a joint or its bone, aim at the child with children kept in place, mirror across a plane with renaming; no separate orientation channel |
+| Skinning with linear blend and weight painting | C M | D | L | A skin under a mesh binds it to joints and evaluates through the graph (only the skin re-runs when a joint moves); a viewport brush paints a joint's weight on the posed mesh with radius, strength and subtract, shows the weight as marks, previews live and commits one undo step per stroke; the same dab as a command; weights are saved as JSON |
 | Dual-quaternion skinning | C M | D | S | Per skin switch (keyable); a half twist keeps the radius where linear blending collapses (tests) |
 | Weight tools: normalize, mirror, copy, prune, automatic binding | C M | P | M | Automatic binding by heat equilibrium over the surface (from the 2007 paper, without its visibility test) or by distance; normalize, prune, limit, mirror with joint renaming, set by number; no copying between meshes |
 | IK solvers: two-bone, multi-chain, spline IK | C M | P | L | Closed-form two-bone with a pole, FABRIK and CCD for longer chains (a pole turns the solved chain), solved in dependency order after the goal's own constraints; bone lengths kept (property tests); no spline IK, no joint limits, no stretch |
@@ -489,11 +489,11 @@ Weight: 8
 |---|---|---|---|---|
 | Keyframe any attribute; auto key | C M | D | M | Every number an object stores has a path (transform, visibility, material, primitive, history-step and deformer parameters); stepped, linear and Bézier keys; auto-key keys changed transform channels and already-animated attributes in the same undo step |
 | Timeline: scrub, play, range | C M | D | M | Scene frame rate and range, whole-frame playback (once, loop, back and forth), next/previous key; the ruler is a keyboard slider |
-| Graph editor: curves, tangents, Bézier handles | C M | P | L | Curve Editor: automatic clamped, flat, free and split tangents, weighted handles, five extrapolation modes, numeric fields for every drag; no box selection, no manual value zoom or normalised view, no copy/paste |
-| Dope sheet | C M | P | M | Key Sheet: select, move, scale and delete keys by pointer, keyboard or number; no box selection, copy/paste or summary rows |
+| Graph editor: curves, tangents, Bézier handles | C M | D | L | Curve Editor: automatic clamped, flat, free and split tangents, weighted handles, five extrapolation modes, numeric fields for every drag, box selection, copy and paste with tangents, a value axis fitted or set by hand (numbers, zoom in / out); no normalised view |
+| Dope sheet | C M | D | M | Key Sheet: select (click, box, all), move, scale, delete, copy and paste keys (at the current frame, onto another object) by pointer, keyboard or number; no summary rows |
 | Non-linear clips: blend, loop, offset | C M | M | L | |
-| Animation layers | C M | P | M | Adding and replacing layers with weight and mute; keys go to the active layer and keying a pose solves for the layer's value; flatten to the base; no solo or lock, weights are not keyable, layers cannot be reordered |
-| Motion paths and ghosting | C M | P | M | Paths of selected moving objects in the viewport with a tick per frame and a mark per key, following animated parents; no ghosts, paths are not editable |
+| Animation layers | C M | D | M | Adding and replacing layers with weight, mute, solo and lock; the weight can be keyed and fades the layer over time; layers move up and down the stack; keys go to the active layer and keying a pose solves for the layer's value; flatten to the base |
+| Motion paths and ghosting | C M | P | M | Paths of selected moving objects in the viewport with a tick per frame and a mark per key, following animated parents; ghosts three steps before and after the current frame (joints as bones, other objects as axis crosses, from the curves); no mesh ghosts, paths are not editable |
 | Viewport preview capture (playblast) | C M | M | S | |
 | Bake constraints and simulations to keys | C M | P | S | Bake Constraints to Keys samples the solved transforms over a range into curves (angles kept continuous) and switches the constraints off, in one undo step; there are no simulations to bake |
 | Curve cleanup: Euler filter, simplify | C M | D | S | Smooth Rotation Keys removes whole-turn and flip jumps (property test: every rotation kept); simplify within a tolerance; bake to linear keys |
@@ -635,6 +635,7 @@ Weight: 3
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Deformer stack: `crates/anim/src/deform.rs` (`ffd_is_a_convex_combination`, `frame_shares_are_continuous_and_exact_at_the_frames` proptests), `crates/engine/src/deformer_tests.rs` (`blend_shapes_with_in_betweens_and_keyed_weights`, `lattices_clusters_and_the_order_of_the_stack`, `shapes_run_before_the_skin_and_everything_survives_a_save`), `apps/modelcraft/src/deform_ui_tests.rs`.
 - Rigged glTF: `crates/craft-gltf-anim/src/tests.rs` (`a_rigged_animated_document_round_trips_exactly`, `hostile_files_are_refused_or_trimmed_never_trusted`, `corrupted_files_never_panic` proptest), `crates/engine/src/gltf_tests.rs` (`skins_shapes_and_clips_round_trip_through_glb`, `constraints_are_baked_into_the_clip_and_limits_are_said`).
+- Finishing pass: `crates/engine/src/anim_tests.rs` (`layers_solo_lock_keyed_weights_and_order`, `keys_are_pasted_with_their_shape_at_an_offset_or_onto_another_object`), `apps/modelcraft/src/anim_ui_tests.rs` (`copy_paste_select_all_and_box_select_keys`, `layer_solo_lock_keyed_weight_value_zoom_and_ghosts`), `apps/modelcraft/src/rig_tools_tests.rs`.
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
@@ -661,6 +662,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | Finishing pass: joints, skinning with weight painting, Curve Editor, Key Sheet, and animation layers done; ghosts added to motion paths (partial) |
 | 2026-11-18 | minor | Deformation: blend shapes with in-betweens done; lattice partial |
 | 2026-11-18 | minor | IK and constraints: constraints and FK/IK blending done; IK solvers, baking constraints, expressions and driven keys partial |
 | 2026-11-17 | minor | Rigging: dual-quaternion skinning done; joints, linear-blend skinning and weight tools partial |

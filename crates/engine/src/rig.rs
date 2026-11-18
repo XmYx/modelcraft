@@ -672,18 +672,7 @@ pub fn apply(doc: &mut Document, cmd: &RigCommand, out: &mut Outcome) -> Result<
                         return invalid("a dab needs a finite centre, a positive radius and a finite strength");
                     }
                     let points = rest(doc);
-                    let mut touched = 0;
-                    for (v, p) in points.iter().enumerate().take(s.weights.points()) {
-                        let d = p.distance(c) / radius;
-                        if d >= 1.0 {
-                            continue;
-                        }
-                        // Smooth falloff: full at the centre, none at the rim.
-                        let f = 1.0 - d * d * (3.0 - 2.0 * d);
-                        let now = s.weights.weight(v, j);
-                        s.weights.set_weight(v, j, (now + strength.clamp(-1.0, 1.0) * f).clamp(0.0, 1.0));
-                        touched += 1;
-                    }
+                    let touched = paint_weights(&mut s.weights, j, &points, c, *radius, *strength);
                     out.warnings.push(format!("{touched} points painted"));
                 }
             }
@@ -693,6 +682,29 @@ pub fn apply(doc: &mut Document, cmd: &RigCommand, out: &mut Outcome) -> Result<
         }
     }
     Ok(())
+}
+
+/// One dab of the weight brush on `weights`: points of `rest` (the mesh as it was bound) within
+/// `radius` of `center` move their weight for joint `j` towards 1 (`strength` > 0) or 0, most
+/// at the centre. Returns how many points it touched. The `edit_weights` paint operation and
+/// the viewport brush's preview both run this.
+pub fn paint_weights(weights: &mut SkinWeights, j: u16, rest: &[Vec3], center: Vec3, radius: f32, strength: f32) -> usize {
+    if !center.is_finite() || !radius.is_finite() || radius <= 0.0 || !strength.is_finite() {
+        return 0;
+    }
+    let mut touched = 0;
+    for (v, p) in rest.iter().enumerate().take(weights.points()) {
+        let d = p.distance(center) / radius;
+        if d >= 1.0 {
+            continue;
+        }
+        // Smooth falloff: full at the centre, none at the rim.
+        let f = 1.0 - d * d * (3.0 - 2.0 * d);
+        let now = weights.weight(v, j);
+        weights.set_weight(v, j, (now + strength.clamp(-1.0, 1.0) * f).clamp(0.0, 1.0));
+        touched += 1;
+    }
+    touched
 }
 
 /// World rotation of an object (for tools that aim things).
