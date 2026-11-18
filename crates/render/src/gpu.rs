@@ -534,6 +534,7 @@ mod tests {
                 }],
                 lines: &[],
                 overlay: &[],
+                hair: Vec::new(),
             };
             r.render(&device, &queue, &target, &frame);
             Renderer::readback(&device, &queue, &target).unwrap()
