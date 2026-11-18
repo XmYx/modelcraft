@@ -186,6 +186,8 @@ impl Shared {
             | Command::Rig(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::AddField { .. }
+            | Command::SetField { .. }
             | Command::Undo
             | Command::Redo => {}
         }
