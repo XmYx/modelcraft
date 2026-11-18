@@ -82,7 +82,24 @@ current frame (linear between frames; the first or last frame holds outside the 
 `attach_cache` reads a `.mcpc` file whose point count is the mesh's vertex count, so any tool that
 writes the format (or `modelcraft-cli bake`) can drive a mesh. `set` changes `start_frame`,
 `end_frame`, `fps`, `substeps` (1 to 64), `seed` and `max_cache_mib`; `clear_cache` throws a baked
-cache away. `modelcraft-cli commands` lists them as `sim op=…`.
+cache away.
+
+`add` gives a mesh a simulation (`rigid_active` falls and collides, `rigid_passive` is a collider
+that follows its keyed animation); `set_kind` replaces its settings; `bake` simulates from the start
+frame to the end frame and caches every frame, in one undo step. A rigid body's settings (`kind`
+with `type: "rigid"`): `role`, `shape` (auto, box, sphere, hull, mesh; a mesh shape is for
+colliders), `mass` (kg), `friction`, `bounciness`, `linear_damping`, `angular_damping`,
+`velocity` and `spin` at the start, `can_sleep`, `gravity` and `ground` (a floor at that height),
+and `joints`: `{kind: fixed|hinge|point, other: <mesh object id, or none for the world>, anchor:
+[x,y,z] (world, at the start frame), axis, limit: [min, max] degrees}`. All rigid bodies of a
+scene are one world: baking any of them bakes every one, with the timing, seed, gravity and ground
+of the one you baked. The same scene and seed give the same cache bit for bit. A body's own
+animation is ignored while it is simulated; a collider's keys move it and push the bodies on it.
+Each cache is stored in its mesh's own space under the object's own transform, so the object does
+not move: the mesh does.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and
+`modelcraft-cli sim-bench rigid --bodies 1000 --frames 120` measures a bake.
 
 ### Animation
 

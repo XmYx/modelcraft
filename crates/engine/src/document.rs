@@ -75,6 +75,8 @@ pub struct Document {
     pub history_note: Option<String>,
     /// Counts the changes made in this session (control clients watch it).
     pub revision: u64,
+    /// A bake that ran elsewhere, waiting for the `bake` command to store it ([`Document::store_bake`]).
+    pub(crate) sim_ready: Option<crate::sim_bake::BakeResult>,
 }
 
 /// Default bound on the history a save stores: 256 MiB of commands.
@@ -104,6 +106,7 @@ impl Document {
             history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
             history_note: None,
             revision: 0,
+            sim_ready: None,
         }
     }
 
