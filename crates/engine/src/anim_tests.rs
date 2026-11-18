@@ -180,14 +180,23 @@ fn layers_adjust_the_animation_below_without_changing_it() {
     key(&mut d, id, "translate.x", 0.0, 2.0);
     d.set_frame(5.0);
     assert_eq!(x(&d, id), 7.0);
-    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: Some(0.5), mute: None, mode: None })).unwrap();
+    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: Some(0.5), mute: None, mode: None, solo: None, lock: None })).unwrap();
     assert_eq!(x(&d, id), 6.0);
-    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: None, mute: Some(true), mode: None })).unwrap();
+    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: None, mute: Some(true), mode: None, solo: None, lock: None })).unwrap();
     assert_eq!(x(&d, id), 5.0);
-    d.execute(Command::Anim(A::SetLayer { layer, name: Some("Lift".into()), weight: Some(9.0), mute: Some(false), mode: Some(LayerMode::Override) })).unwrap();
+    d.execute(Command::Anim(A::SetLayer {
+        layer,
+        name: Some("Lift".into()),
+        weight: Some(9.0),
+        mute: Some(false),
+        mode: Some(LayerMode::Override),
+        solo: None,
+        lock: None,
+    }))
+    .unwrap();
     assert_eq!(x(&d, id), 2.0, "an overriding layer at full weight replaces the base");
     // Keying the current pose in a layer makes the result equal it: move to 8 at frame 5.
-    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: Some(0.5), mute: None, mode: Some(LayerMode::Add) })).unwrap();
+    d.execute(Command::Anim(A::SetLayer { layer, name: None, weight: Some(0.5), mute: None, mode: Some(LayerMode::Add), solo: None, lock: None })).unwrap();
     d.execute(Command::Anim(A::SetAutoKey { on: true })).unwrap();
     d.execute(Command::SetTransform { id, transform: Transform { translation: Vec3::new(8.0, 0.0, 0.0), ..Default::default() } }).unwrap();
     assert_eq!(d.scene.anim.curve(id, "translate.x").unwrap().eval(5.0), Some(6.0), "(8 − 5) / 0.5");
@@ -213,8 +222,8 @@ fn layers_adjust_the_animation_below_without_changing_it() {
     for bad in [
         A::RemoveLayer { layer: 42 },
         A::SetActiveLayer { layer: 42 },
-        A::SetLayer { layer: 42, name: None, weight: None, mute: None, mode: None },
-        A::SetLayer { layer, name: None, weight: Some(f64::NAN), mute: None, mode: None },
+        A::SetLayer { layer: 42, name: None, weight: None, mute: None, mode: None, solo: None, lock: None },
+        A::SetLayer { layer, name: None, weight: Some(f64::NAN), mute: None, mode: None, solo: None, lock: None },
         A::FlattenLayers { step: 0.0 },
     ] {
         assert!(d.execute(Command::Anim(bad)).is_err());
@@ -286,7 +295,7 @@ fn commands_are_json_and_round_trip() {
     assert!(e.contains("missing field `path`"), "{e}");
     let e = serde_json::from_str::<Command>(r#"{"cmd":"anim","op":"wobble"}"#).unwrap_err().to_string();
     assert!(e.contains("unknown variant `wobble`"), "{e}");
-    assert_eq!(crate::anim::COMMANDS.len(), 21);
+    assert_eq!(crate::anim::COMMANDS.len(), 25);
     // Every listed name parses as a command tag.
     for (name, _) in crate::anim::COMMANDS {
         let e = serde_json::from_str::<A>(&format!(r#"{{"op":"{name}"}}"#)).err().map(|e| e.to_string()).unwrap_or_default();
@@ -322,4 +331,139 @@ fn animation_survives_save_and_crash_recovery() {
     let again = Document::open(&p).unwrap();
     assert_eq!(again.scene.anim, want);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn layers_solo_lock_keyed_weights_and_order() {
+    let mut d = Document::new();
+    let id = cube(&mut d);
+    key(&mut d, id, "translate.x", 0.0, 1.0);
+    let add = |d: &mut Document, mode| {
+        d.execute(Command::Anim(A::AddLayer { name: None, mode })).unwrap();
+        d.scene.anim.active_layer()
+    };
+    let a = add(&mut d, modelcraft_scene::LayerMode::Add);
+    key(&mut d, id, "translate.x", 0.0, 10.0);
+    let b = add(&mut d, modelcraft_scene::LayerMode::Add);
+    key(&mut d, id, "translate.x", 0.0, 100.0);
+    let x = |d: &mut Document, frame: f64| {
+        d.set_frame(frame);
+        d.scene.attr(id, "translate.x").unwrap()
+    };
+    assert_eq!(x(&mut d, 0.0), 111.0);
+    let set = |d: &mut Document, json: &str| d.execute(serde_json::from_str(json).unwrap());
+    // Solo: only that layer plays over the base.
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"set_layer","layer":{a},"solo":true}}"#)).unwrap();
+    assert_eq!(x(&mut d, 0.0), 11.0);
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"set_layer","layer":{a},"solo":false}}"#)).unwrap();
+    // A keyed weight fades the layer over time; clearing the keys gives the plain weight back.
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"key_layer_weight","layer":{b},"frame":0,"value":0}}"#)).unwrap();
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"key_layer_weight","layer":{b},"frame":10,"value":1}}"#)).unwrap();
+    assert_eq!(x(&mut d, 0.0), 11.0);
+    assert_eq!(x(&mut d, 10.0), 111.0);
+    let half = x(&mut d, 5.0);
+    assert!(half > 40.0 && half < 80.0, "{half}");
+    // Keying a pose in a faded layer solves for the weight at that frame.
+    d.set_frame(5.0);
+    d.execute(Command::Anim(A::SetKey { id, path: "translate.x".into(), frame: None, value: None })).unwrap();
+    assert!((x(&mut d, 5.0) - half).abs() < 1e-6);
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"key_layer_weight","layer":{b},"clear":true}}"#)).unwrap();
+    assert!(d.scene.anim.layer(b).unwrap().weight_curve.is_none());
+    // Lock: keys in the layer cannot be set, moved or removed, by command or by auto-key.
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"set_layer","layer":{b},"lock":true}}"#)).unwrap();
+    let before = d.scene.anim.clone();
+    for bad in [
+        format!(r#"{{"cmd":"anim","op":"set_key","id":{},"path":"translate.x","frame":3,"value":5}}"#, id.0),
+        format!(r#"{{"cmd":"anim","op":"remove_track","id":{},"path":"translate.x"}}"#, id.0),
+        format!(r#"{{"cmd":"anim","op":"key_transform","ids":[{}]}}"#, id.0),
+    ] {
+        let r = set(&mut d, &bad);
+        assert!(r.is_err() || d.scene.anim == before, "{bad}");
+        assert!(d.scene.anim == before, "{bad}");
+    }
+    d.execute(Command::Anim(A::SetAutoKey { on: true })).unwrap();
+    d.execute(Command::SetTransform { id, transform: Transform { translation: Vec3::new(7.0, 0.0, 0.0), ..Default::default() } }).unwrap();
+    assert_eq!(d.scene.anim.tracks(), before.tracks(), "auto-key does not write into a locked layer");
+    d.execute(Command::Anim(A::SetAutoKey { on: false })).unwrap();
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"set_layer","layer":{b},"lock":false}}"#)).unwrap();
+    // Order: with a replacing layer the order decides the result.
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"set_layer","layer":{a},"mode":"override"}}"#)).unwrap();
+    d.scene.anim.clone_from(&{
+        let mut an = d.scene.anim.clone();
+        an.layer_mut(b).unwrap().weight = 1.0;
+        an
+    });
+    let top_adds = x(&mut d, 0.0);
+    assert_eq!(top_adds, 110.0, "a replaces the base with 10, then b adds 100");
+    let out = set(&mut d, &format!(r#"{{"cmd":"anim","op":"move_layer","layer":{a},"delta":1}}"#)).unwrap();
+    assert!(out.warnings.is_empty());
+    assert_eq!(x(&mut d, 0.0), 10.0, "b adds first, then a replaces everything below");
+    assert!(!set(&mut d, &format!(r#"{{"cmd":"anim","op":"move_layer","layer":{a},"delta":1}}"#)).unwrap().warnings.is_empty());
+    assert!(set(&mut d, r#"{"cmd":"anim","op":"move_layer","layer":99,"delta":1}"#).is_err());
+    assert!(set(&mut d, r#"{"cmd":"anim","op":"key_layer_weight","layer":99}"#).is_err());
+    // Saved and read back.
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"set_layer","layer":{a},"solo":true,"lock":true}}"#)).unwrap();
+    set(&mut d, &format!(r#"{{"cmd":"anim","op":"key_layer_weight","layer":{a},"frame":2,"value":0.5}}"#)).unwrap();
+    let json = serde_json::to_string(&d.scene).unwrap();
+    let back = serde_json::from_str::<modelcraft_scene::Scene>(&json).unwrap().repaired().unwrap();
+    assert_eq!(back.anim, d.scene.anim);
+}
+
+#[test]
+fn keys_are_pasted_with_their_shape_at_an_offset_or_onto_another_object() {
+    use crate::anim::PastedKey;
+    use modelcraft_anim::{Interp, Key};
+    let mut d = Document::new();
+    let a = cube(&mut d);
+    let b = cube(&mut d);
+    key(&mut d, a, "translate.x", 0.0, 1.0);
+    key(&mut d, a, "translate.x", 10.0, 5.0);
+    key(&mut d, a, "rotate.y", 10.0, 90.0);
+    let copied: Vec<PastedKey> = ["translate.x", "rotate.y"]
+        .iter()
+        .flat_map(|p| d.scene.anim.curve(a, p).unwrap().keys.iter().map(|k| PastedKey { id: a, path: p.to_string(), key: *k }).collect::<Vec<_>>())
+        .collect();
+    assert_eq!(copied.len(), 3);
+    // Twenty frames later on the same object.
+    let out = d.execute(Command::Anim(A::PasteKeys { keys: copied.clone(), offset: 20.0, to: None })).unwrap();
+    assert_eq!(out.warnings, vec!["3 keys pasted".to_string()]);
+    let c = d.scene.anim.curve(a, "translate.x").unwrap();
+    assert_eq!(c.keys.iter().map(|k| (k.t, k.v)).collect::<Vec<_>>(), vec![(0.0, 1.0), (10.0, 5.0), (20.0, 1.0), (30.0, 5.0)]);
+    // A stepped key keeps its interpolation through the paste.
+    let stepped = PastedKey { id: a, path: "translate.x".into(), key: Key::new(40.0, 9.0).with_interp(Interp::Stepped) };
+    d.execute(Command::Anim(A::PasteKeys { keys: vec![stepped], offset: 0.0, to: None })).unwrap();
+    assert_eq!(d.scene.anim.curve(a, "translate.x").unwrap().keys.last().map(|k| k.interp), Some(Interp::Stepped));
+    // Onto another object: one undo step; pasting one angle keys all three there.
+    d.execute(Command::Anim(A::PasteKeys { keys: copied.clone(), offset: 0.0, to: Some(b) })).unwrap();
+    assert_eq!(d.scene.anim.curve(b, "translate.x").map(|c| c.len()), Some(2));
+    assert!(d.scene.anim.curve(b, "rotate.x").is_some() && d.scene.anim.curve(b, "rotate.z").is_some());
+    d.set_frame(10.0);
+    assert!((d.scene.attr(b, "rotate.y").unwrap() - 90.0).abs() < 1e-3);
+    d.execute(Command::Undo).unwrap();
+    assert!(!d.scene.anim.is_animated(b));
+    // Attributes the target does not have are skipped and counted; nothing fitting is an error.
+    let odd = PastedKey { id: a, path: "primitive.nonsense".into(), key: Key::new(0.0, 1.0) };
+    let mut mixed = copied.clone();
+    mixed.push(odd.clone());
+    assert_eq!(
+        d.execute(Command::Anim(A::PasteKeys { keys: mixed, offset: 0.0, to: Some(b) })).unwrap().warnings,
+        vec!["3 keys pasted, 1 skipped".to_string()]
+    );
+    assert!(d.execute(Command::Anim(A::PasteKeys { keys: vec![odd], offset: 0.0, to: Some(b) })).is_err());
+    assert!(d.execute(Command::Anim(A::PasteKeys { keys: vec![], offset: 0.0, to: None })).is_err());
+    assert!(d.execute(Command::Anim(A::PasteKeys { keys: copied, offset: f64::NAN, to: None })).is_err());
+}
+
+#[test]
+fn any_attribute_is_set_by_path_without_a_key() {
+    let mut d = Document::new();
+    let id = cube(&mut d);
+    d.execute(Command::Anim(A::SetAttr { id, path: "material.roughness".into(), value: 0.25 })).unwrap();
+    assert_eq!(d.scene.attr(id, "material.roughness"), Some(0.25));
+    assert!(d.scene.anim.is_empty(), "nothing was keyed");
+    d.execute(Command::Undo).unwrap();
+    assert_ne!(d.scene.attr(id, "material.roughness"), Some(0.25));
+    assert!(d.execute(Command::Anim(A::SetAttr { id, path: "no.such".into(), value: 1.0 })).is_err());
+    assert!(d.execute(Command::Anim(A::SetAttr { id: modelcraft_scene::ObjectId(999), path: "visible".into(), value: 1.0 })).is_err());
+    assert!(d.execute(Command::Anim(A::SetAttr { id, path: "translate.x".into(), value: f64::NAN })).is_err());
 }
