@@ -324,7 +324,15 @@ fn unwrap_step_writes_uvs_that_later_steps_keep() {
         steps.push(Step {
             id: 1,
             enabled: true,
-            op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01, method: Default::default() },
+            op: StepOp::Unwrap {
+                seams: vec![],
+                angle: Some(30.0),
+                pins: vec![],
+                auto_cut: true,
+                margin: 0.01,
+                method: Default::default(),
+                from_patches: false,
+            },
         });
         steps.push(Step { id: 2, enabled: true, op: StepOp::Subdivide { levels: 1 } });
     }
@@ -356,6 +364,7 @@ fn unwrap_step_with_stale_input_is_skipped() {
                 auto_cut: true,
                 margin: 5.0,
                 method: Default::default(),
+                from_patches: false,
             },
         });
     }
@@ -409,7 +418,11 @@ fn pack_and_project_steps_write_uvs() {
     let id = s.add("Cube", cube_kind(), None).unwrap();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
         steps.push(Step { id: 1, enabled: true, op: StepOp::ProjectUvs { projection: Projection::Box, fit: Fit::Uniform, faces: vec![] } });
-        steps.push(Step { id: 2, enabled: true, op: StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform } });
+        steps.push(Step {
+            id: 2,
+            enabled: true,
+            op: StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform, tiles: 1, texel_density: None },
+        });
     }
     let e = ev.evaluate(&s, id);
     assert!(e.errors.is_empty(), "{:?}", e.errors);

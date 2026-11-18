@@ -199,6 +199,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
+            crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
                 action_button(app, ui, Action::KeyboardShortcuts);
@@ -557,6 +558,14 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c + egui::vec2(-3.0, 3.0), 2.5, egui::Stroke::new(1.2, j));
             p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], egui::Stroke::new(1.4, j));
         }
+        ObjectKind::Hair { .. } => {
+            // Hair: three curved strands.
+            let k = Color32::from_rgb(215, 170, 110);
+            for dx in [-4.0f32, 0.0, 4.0] {
+                let pts: Vec<egui::Pos2> = (0..=6).map(|j| c + egui::vec2(dx + (j as f32 * 0.6).sin() * 1.5, 5.0 - j as f32 * 1.6)).collect();
+                p.add(egui::Shape::line(pts, egui::Stroke::new(1.2, k)));
+            }
+        }
         ObjectKind::PointDeformer { .. } => {
             // A stack deformer: a small grid.
             let g = Color32::from_rgb(200, 140, 230);
@@ -731,6 +740,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     }
     crate::deform_ui::properties(app, ui, id);
     crate::constraint_ui::properties(app, ui, id);
+    crate::hair_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
         crate::mesh_tools::section(app, ui);

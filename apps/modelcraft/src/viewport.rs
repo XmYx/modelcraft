@@ -84,7 +84,7 @@ pub(crate) fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
     Ray { origin, dir }
 }
 
-/// Objects drawn as surfaces: meshes and cages, not cage inputs, groups or deformers.
+/// Objects drawn as surfaces: meshes, cages, clone generators and particle systems, not cage inputs, groups or deformers.
 fn drawables(scene: &Scene) -> Vec<ObjectId> {
     scene
         .tree_order()
@@ -101,7 +101,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
                         | ObjectKind::Symmetry { .. }
                         | ObjectKind::Cloner { .. }
                 )
-            )
+            ) || scene.is_particles(*id)
         })
         .collect()
 }
@@ -225,14 +225,16 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
     }
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
-    match app.workspace {
-        Workspace::Sculpt => {
-            // The rectangle and lasso tools take the drag instead of the brush.
-            if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
-                sculpt_input(app, ui, &resp, i, rect);
+    if !crate::hair_ui::input(app, ui, &resp, i, rect) {
+        match app.workspace {
+            Workspace::Sculpt => {
+                // The rectangle and lasso tools take the drag instead of the brush.
+                if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
+                    sculpt_input(app, ui, &resp, i, rect);
+                }
             }
+            _ => model_input(app, ui, &resp, i, rect),
         }
-        _ => model_input(app, ui, &resp, i, rect),
     }
     render(app, ui, i, rect);
     overlays(app, ui, &resp, i, rect);
@@ -761,7 +763,7 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
                     let delta = w.inverse().transform_vector3(now - last);
                     st.grab = Some((origin, n, now));
                     let mut center = st.last.unwrap_or(Vec3::ZERO);
-                    if kind == Some(BrushKind::Pull) {
+                    if kind.is_some_and(BrushKind::travels) {
                         // A pull travels with what it moves, picking up new surface on the way.
                         center += delta;
                         st.last = Some(center);
@@ -841,10 +843,11 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
 type Item = (ObjectId, Option<Arc<PolyMesh>>, Mat4, [f32; 4]);
 const WHITE: [f32; 4] = [1.0; 4];
 
-/// The object whose material colours `o`: a clone generator is coloured by its source.
+/// The object whose material colours `o`: a clone generator or particle system is coloured by its source.
 fn material_source<'a>(scene: &'a Scene, o: &'a Object) -> &'a Object {
     match &o.kind {
         ObjectKind::Cloner { .. } => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
+        ObjectKind::Sim { .. } if scene.is_particles(o.id) => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
         _ => o,
     }
 }
@@ -863,6 +866,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
         out.extend(line(a.into(), b.into(), color));
     }
     for (a, b, color) in crate::anim_ui::path_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
+    for (a, b, color) in crate::hair_ui::guide_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
     if app.workspace == Workspace::Sculpt {
@@ -975,6 +981,7 @@ fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[Item],
 }
 
 fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
+    crate::hair_ui::overlay(app, ui, rect);
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
     // View name and focus/active outline.
