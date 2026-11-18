@@ -547,6 +547,9 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
     }
     let mut best: Option<(f32, ObjectId)> = None;
     for id in drawables(&app.doc.scene) {
+        if app.doc.scene.get(id).is_some_and(|o| o.template) {
+            continue;
+        }
         let w = app.doc.scene.world_matrix(id);
         let r = ray.transformed(w.inverse());
         let dist = match &app.doc.sculpt {
@@ -610,6 +613,9 @@ fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
     }
     if app.mode == SelectMode::Object {
         for id in drawables(&app.doc.scene) {
+            if app.doc.scene.get(id).is_some_and(|o| o.template) {
+                continue;
+            }
             let e = app.doc.eval.evaluate(&app.doc.scene, id);
             let (lo, hi) = match &e.instances {
                 // A clone generator is as wide as its clones; with none there is nothing to select.

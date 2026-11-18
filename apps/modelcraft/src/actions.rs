@@ -80,6 +80,9 @@ pub enum Action {
     ToggleSnap,
     KeyboardShortcuts,
     RenderView,
+    ScriptWindow,
+    ScriptRun,
+    ScriptRunSelection,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
     Hair(crate::hair_ui::HairAction),
@@ -87,6 +90,7 @@ pub enum Action {
     MeshTool(crate::mesh_tools::Tool),
     RadialMenu,
     Preferences,
+    Objects(crate::object_manager::Op),
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -132,6 +136,7 @@ pub fn all() -> Vec<Action> {
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
+    v.extend(crate::object_manager::ALL.iter().map(|o| Objects(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -157,6 +162,9 @@ pub fn all() -> Vec<Action> {
         ViewRight,
         ViewTop,
         RenderView,
+        ScriptWindow,
+        ScriptRun,
+        ScriptRunSelection,
         RadialMenu,
         Preferences,
         TransformDialog,
@@ -318,9 +326,13 @@ impl Action {
             ViewTop => tl!("Top View"),
             TransformDialog => tl!("Transform by Numbers…"),
             RenderView => tl!("Render View"),
+            ScriptWindow => tl!("Scripts Window"),
+            ScriptRun => tl!("Run Script"),
+            ScriptRunSelection => tl!("Run Selection"),
             MeshTool(t) => t.label(),
             RadialMenu => tl!("Radial Menu"),
             Preferences => tl!("Preferences…"),
+            Objects(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
@@ -426,9 +438,13 @@ impl Action {
             ViewTop => "view.top",
             TransformDialog => "edit.transform_numbers",
             RenderView => "view.render",
+            ScriptWindow => "scripts.window",
+            ScriptRun => "scripts.run",
+            ScriptRunSelection => "scripts.run_selection",
             MeshTool(t) => t.id(),
             RadialMenu => "view.radial_menu",
             Preferences => "edit.preferences",
+            Objects(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
@@ -521,6 +537,9 @@ impl Action {
             ViewTop => "Alt+4",
             TransformDialog => "Cmd+T",
             RenderView => "F9",
+            ScriptWindow => "Cmd+J",
+            ScriptRun => "Cmd+Enter",
+            ScriptRunSelection => "Cmd+Shift+Enter",
             RadialMenu => "Shift+Q",
             Preferences => "Cmd+,",
             Palette => "Cmd+K",
@@ -539,7 +558,7 @@ impl Action {
         use Action::*;
         match self {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
-            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences => "Edit",
+            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             AddPrimitive(_) | AddCage | AddDeformer(_) | AddCloner(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
@@ -547,6 +566,7 @@ impl Action {
             | LiveDetail | EvenRemesh => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
+            ScriptWindow | ScriptRun | ScriptRunSelection => "Scripts",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
             Hair(_) => "Hair",

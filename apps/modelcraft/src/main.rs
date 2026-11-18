@@ -33,6 +33,7 @@ mod hair_ui_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
+mod object_manager;
 mod panels;
 mod prefs;
 mod prefs_ui;
@@ -41,6 +42,7 @@ mod render_view;
 mod rig_ui;
 #[cfg(test)]
 mod rig_ui_tests;
+mod script_ui;
 mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;

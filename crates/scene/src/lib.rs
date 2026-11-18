@@ -34,6 +34,7 @@ pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
+pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
@@ -323,6 +324,25 @@ pub enum StepOp {
         #[serde(default = "default_margin")]
         margin: f32,
     },
+    /// Pack the islands the UVs already form into the unit square: `margin` between them as a
+    /// fraction of the square, optional rotation, and an even texel density.
+    PackUvs {
+        #[serde(default = "default_margin")]
+        margin: f32,
+        #[serde(default = "default_rotation")]
+        rotation: Rotation,
+        #[serde(default = "default_density")]
+        density: Density,
+    },
+    /// Give the corners of `faces` (all faces when empty) UVs from a planar, box, cylindrical,
+    /// spherical or camera projection of their positions.
+    ProjectUvs {
+        projection: Projection,
+        #[serde(default)]
+        fit: Fit,
+        #[serde(default)]
+        faces: Vec<u32>,
+    },
     /// Records seams (pairs of vertices of the step's input mesh) and changes nothing; the UV
     /// editor reads the latest one, and an unwrap step takes them.
     Seams {
@@ -346,6 +366,14 @@ pub enum StepOp {
     StitchUvs {
         edges: Vec<u32>,
     },
+}
+
+fn default_rotation() -> Rotation {
+    Rotation::Fit
+}
+
+fn default_density() -> Density {
+    Density::Uniform
 }
 
 fn unit_scale() -> [f32; 2] {
@@ -394,6 +422,8 @@ impl StepOp {
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::Unwrap { .. } => "Unwrap UVs",
+            StepOp::PackUvs { .. } => "Pack UV islands",
+            StepOp::ProjectUvs { .. } => "Project UVs",
             StepOp::Seams { .. } => "Seams",
             StepOp::TransformUvs { .. } => "Transform UVs",
             StepOp::StitchUvs { .. } => "Weld UVs",
@@ -409,6 +439,7 @@ impl StepOp {
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
             StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
+            StepOp::ProjectUvs { faces, .. } => faces.len() * 4,
             StepOp::Seams { edges } => edges.len() * 8,
             StepOp::TransformUvs { corners, .. } => corners.len() * 4,
             StepOp::StitchUvs { edges } => edges.len() * 4,
@@ -501,6 +532,12 @@ pub struct Object {
     #[serde(default)]
     pub material: Material,
     pub kind: ObjectKind,
+    /// Protected: edits to it are refused until it is unlocked.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+    /// Shown for reference: drawn, never picked in the viewport.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub template: bool,
     /// Bumped on every change; the evaluator's cache key. Not saved.
     #[serde(skip)]
     pub rev: u64,
@@ -546,11 +583,28 @@ pub struct Scene {
     /// Boxed: a scene is moved around by value (history entries, snapshots).
     #[serde(default, skip_serializing_if = "no_constraints")]
     pub constraints: Box<constraint::Constraints>,
+    /// Named selections.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sets: Vec<SelectionSet>,
 }
 
 #[allow(clippy::borrowed_box)]
 fn no_constraints(c: &Box<constraint::Constraints>) -> bool {
     c.is_empty()
+}
+
+/// A named list of objects, to select them together again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SelectionSet {
+    pub name: String,
+    pub ids: Vec<ObjectId>,
+}
+
+/// Most selection sets in a scene.
+pub const MAX_SETS: usize = 1000;
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -604,6 +658,11 @@ impl Scene {
         rig::repair(&mut self);
         hair::repair(&mut self);
         point_deform::repair(&mut self);
+        self.sets.truncate(MAX_SETS);
+        for s in &mut self.sets {
+            s.ids.retain(|i| ids.contains(i));
+            s.name = s.name.chars().take(256).collect();
+        }
         Ok(self)
     }
 
@@ -655,6 +714,8 @@ impl Scene {
             visible: true,
             material: Material::default(),
             kind,
+            locked: false,
+            template: false,
             rev: next_rev(),
         });
         Ok(id)
@@ -690,6 +751,9 @@ impl Scene {
         for (_, o) in &out {
             self.anim.remove_object(o.id);
             self.constraints.remove_object(o.id);
+        }
+        for s in &mut self.sets {
+            s.ids.retain(|i| !doomed.contains(i));
         }
         out
     }

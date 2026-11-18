@@ -187,6 +187,10 @@ impl Shared {
             | Command::Hair(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::SetLocked { .. }
+            | Command::SetTemplate { .. }
+            | Command::AddSelectionSet { .. }
+            | Command::RemoveSelectionSet { .. }
             | Command::Undo
             | Command::Redo => {}
         }
