@@ -1,0 +1,1 @@
+- Simulation panel: add rigid bodies, colliders, cloth or particles to an object, set them up, bake them in the background (Escape cancels), and play the result on the timeline.
