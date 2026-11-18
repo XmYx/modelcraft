@@ -44,7 +44,8 @@ fn what_the_user_does_is_recorded_and_replays_to_the_same_scene() {
     d.start_recording();
     let a = add(&mut d, "cube", "Base");
     let b = add(&mut d, "sphere", "Ball");
-    d.execute(cmd(json!({"cmd":"set_transform","id":a.0,"transform":{"translation":[1.0,2.0,3.0],"rotation":[0.0,0.0,0.0,1.0],"scale":[2.0,2.0,2.0]}}))).unwrap();
+    d.execute(cmd(json!({"cmd":"set_transform","id":a.0,"transform":{"translation":[1.0,2.0,3.0],"rotation":[0.0,0.0,0.0,1.0],"scale":[2.0,2.0,2.0]}})))
+        .unwrap();
     d.execute(Command::Reparent { id: b, parent: Some(a) }).unwrap();
     d.execute(Command::Rename { id: b, name: "Ball 2".into() }).unwrap();
     d.execute(cmd(json!({"cmd":"add_step","id":a.0,"op":{"op":"subdivide","levels":1}}))).unwrap();
@@ -155,7 +156,12 @@ fn an_undo_group_is_one_recorded_step_and_a_rolled_back_one_is_none() {
     let mut s = Session::new(Limits::default(), Permissions::none());
     let mut e = Document::new();
     e.start_recording();
-    let rep = s.run(&mut e, &mut RunContext::default(), "x.rhai", "undo_group(\"Row\", || { for i in 0..3 { move_to(add_primitive(\"cube\", \"c\" + i), i, 0, 0); } });");
+    let rep = s.run(
+        &mut e,
+        &mut RunContext::default(),
+        "x.rhai",
+        "undo_group(\"Row\", || { for i in 0..3 { move_to(add_primitive(\"cube\", \"c\" + i), i, 0, 0); } });",
+    );
     assert!(rep.ok(), "{:?}", rep.error);
     let r = steps(&mut e);
     assert_eq!(r.len(), 1);
@@ -231,7 +237,10 @@ fn awkward_text_and_numbers_survive_the_script() {
     let mut d = Document::new();
     d.start_recording();
     let a = add(&mut d, "cube", "He said \"hi\"\\ \n tab\t and ünï © 日本");
-    d.execute(cmd(json!({"cmd":"set_transform","id":a.0,"transform":{"translation":[1e-7,-0.0,123456789.5],"rotation":[0.0,0.0,0.0,1.0],"scale":[1e-12,1.0,3.0]}}))).unwrap();
+    d.execute(cmd(
+        json!({"cmd":"set_transform","id":a.0,"transform":{"translation":[1e-7,-0.0,123456789.5],"rotation":[0.0,0.0,0.0,1.0],"scale":[1e-12,1.0,3.0]}}),
+    ))
+    .unwrap();
     let r = steps(&mut d);
     let text = macro_script("odd \"name\"\nwith newline", &r, &[]).unwrap();
     assert!(text.lines().count() > 3);

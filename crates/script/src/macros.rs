@@ -21,7 +21,8 @@ use crate::api::script_name;
 
 /// Fields of a command that hold object ids (a number, a list of numbers or null). Only these are
 /// rewritten, at the top level of a command.
-const ID_KEYS: &[&str] = &["id", "ids", "parent", "input", "target", "mesh", "joint", "joints", "sources", "driver", "end", "goal", "pole", "up_object", "objects", "from"];
+const ID_KEYS: &[&str] =
+    &["id", "ids", "parent", "input", "target", "mesh", "joint", "joints", "sources", "driver", "end", "goal", "pole", "up_object", "objects", "from"];
 
 /// Longest macro script written, in bytes (a long sculpt stroke can be large).
 pub const MAX_MACRO_BYTES: usize = 8 << 20;
@@ -117,11 +118,18 @@ pub fn macro_script(name: &str, steps: &[Recorded], selection: &[ObjectId]) -> R
     }
     if !unmapped.is_empty() {
         let list: Vec<String> = unmapped.iter().map(u64::to_string).collect();
-        let _ = writeln!(out, "// Objects {} were not selected when recording started; their numbers are kept and only match a scene that has them.", list.join(", "));
+        let _ = writeln!(
+            out,
+            "// Objects {} were not selected when recording started; their numbers are kept and only match a scene that has them.",
+            list.join(", ")
+        );
     }
     let _ = writeln!(out, "let sel = selection();");
     if sel_needed > 0 {
-        let _ = writeln!(out, "if sel.len() < {sel_needed} {{ throw \"select {sel_needed} object(s) first: this macro works on the objects that were selected when it was recorded\"; }}");
+        let _ = writeln!(
+            out,
+            "if sel.len() < {sel_needed} {{ throw \"select {sel_needed} object(s) first: this macro works on the objects that were selected when it was recorded\"; }}"
+        );
     }
     let _ = writeln!(out, "undo_group({}, || {{", string(&format!("Macro: {clean}")));
     out.push_str(&body);
@@ -194,7 +202,37 @@ fn key(k: &str) -> String {
 fn is_keyword(k: &str) -> bool {
     matches!(
         k,
-        "true" | "false" | "let" | "const" | "if" | "else" | "switch" | "do" | "while" | "until" | "loop" | "for" | "in" | "continue" | "break" | "return" | "throw" | "try" | "catch" | "fn" | "private" | "import" | "export" | "as" | "global" | "this" | "is" | "type_of" | "print" | "debug" | "eval"
+        "true"
+            | "false"
+            | "let"
+            | "const"
+            | "if"
+            | "else"
+            | "switch"
+            | "do"
+            | "while"
+            | "until"
+            | "loop"
+            | "for"
+            | "in"
+            | "continue"
+            | "break"
+            | "return"
+            | "throw"
+            | "try"
+            | "catch"
+            | "fn"
+            | "private"
+            | "import"
+            | "export"
+            | "as"
+            | "global"
+            | "this"
+            | "is"
+            | "type_of"
+            | "print"
+            | "debug"
+            | "eval"
     )
 }
 

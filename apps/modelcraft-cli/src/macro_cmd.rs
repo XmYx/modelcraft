@@ -36,9 +36,8 @@ pub fn read_commands(text: &str) -> Result<Vec<Command>, String> {
 
 pub fn run(a: &[String]) -> Result<(), String> {
     let input = crate::arg(a, 0, "a commands file")?;
-    let name = crate::flag(a, "--name").unwrap_or_else(|| {
-        Path::new(input).file_stem().map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.is_empty()).unwrap_or_else(|| "macro".into())
-    });
+    let name = crate::flag(a, "--name")
+        .unwrap_or_else(|| Path::new(input).file_stem().map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.is_empty()).unwrap_or_else(|| "macro".into()));
     let meta = std::fs::metadata(input).map_err(|e| format!("{input}: {e}"))?;
     if meta.len() > 64 << 20 {
         return Err(format!("{input} is larger than 64 MiB"));

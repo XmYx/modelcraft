@@ -498,7 +498,8 @@ impl Document {
         let made = self.undo_mark() > before;
         let now = self.scene.anim.frame;
         let Some(rec) = self.recorder.as_mut() else { return };
-        let single = |command: Command, created: Vec<ObjectId>, undoable: bool| Recorded { label: None, commands: vec![RecordedCommand { command, created }], undoable };
+        let single =
+            |command: Command, created: Vec<ObjectId>, undoable: bool| Recorded { label: None, commands: vec![RecordedCommand { command, created }], undoable };
         match &cmd {
             Command::Undo => rec.undo(),
             Command::Redo => rec.redo(),
