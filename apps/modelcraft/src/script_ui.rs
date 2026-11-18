@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Color32, Key, KeyboardShortcut, Modifiers, RichText};
 use modelcraft_script::highlight::{TokenKind, tokenize};
-use modelcraft_script::{ErrorKind, Event, Limits, LineKind, Permissions, RunContext, Session};
+use modelcraft_script::{ErrorKind, Event, EventPacer, Limits, LineKind, Permissions, PlaybackPolicy, RunContext, Session};
 
 use crate::actions::Action;
 use crate::app::ModelApp;
@@ -81,7 +81,7 @@ pub struct ScriptState {
     pub path: Option<PathBuf>,
     saved: String,
     pub console: Vec<ConsoleLine>,
-    session: Option<Session>,
+    pub(crate) session: Option<Session>,
     /// The scripts folder (`None` in tests unless one is set).
     pub dir: Option<PathBuf>,
     pub allow_writes: bool,
@@ -107,6 +107,15 @@ pub struct ScriptState {
     last_selection: Vec<modelcraft_engine::scene::ObjectId>,
     last_sig: u64,
     last_frame: f64,
+    /// Holds back and merges frame and scene events while the timeline plays.
+    pub pacer: EventPacer,
+    /// The pacer's clock.
+    clock: std::time::Instant,
+    /// Playback was running in the last frame (to deliver what was held back when it stops).
+    was_playing: bool,
+    /// The undo history's mark at the end of the last frame: steps made after it are the
+    /// user's (or an agent's), and callbacks that answer them join the newest one.
+    last_mark: usize,
 }
 
 impl Default for ScriptState {
@@ -146,6 +155,10 @@ impl ScriptState {
             last_selection: Vec::new(),
             last_sig: 0,
             last_frame: 0.0,
+            pacer: EventPacer::new(PlaybackPolicy::default()),
+            clock: std::time::Instant::now(),
+            was_playing: false,
+            last_mark: 0,
         };
         s.reload();
         s
@@ -382,10 +395,24 @@ pub fn scene_loaded(app: &mut ModelApp) {
     app.script.loaded = true;
 }
 
-fn fire(app: &mut ModelApp, event: &Event) {
+/// How long callbacks may run for one event: the usual limit, or a budget shared with the other
+/// events of a batch (while the timeline plays).
+struct Budget {
+    each: std::time::Duration,
+    left: std::time::Duration,
+}
+
+/// Tell the callbacks of `event`. Returns the time they took.
+fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time::Duration {
     let mut ctx = RunContext { selection: app.selection.clone() };
-    let Some(session) = app.script.session.as_mut() else { return };
-    let reports = session.fire(&mut app.doc, &mut ctx, event);
+    let Some(session) = app.script.session.as_mut() else { return std::time::Duration::ZERO };
+    let (reports, elapsed) = match budget {
+        None => (session.fire(&mut app.doc, &mut ctx, event), std::time::Duration::ZERO),
+        Some(b) => {
+            let f = session.fire_within(&mut app.doc, &mut ctx, event, b.each, b.left);
+            (f.reports, f.elapsed)
+        }
+    };
     for r in reports {
         // Callbacks are quiet unless they print or fail: no "finished" line per event.
         for l in &r.lines {
@@ -405,11 +432,17 @@ fn fire(app: &mut ModelApp, event: &Event) {
         }
     }
     app.prune_selection();
+    elapsed
 }
 
 /// Once per frame: tell the callbacks what changed (selection, scene, frame, a loaded project).
 /// Nothing runs while a drag or a stroke is going on; the change is reported when it ends. What a
 /// callback itself changes does not count as a change, so callbacks cannot trigger themselves.
+///
+/// While the timeline plays, the frame and scene events (which change every drawn frame) go
+/// through the pacer instead: they are merged into one batch per interval carrying the newest
+/// frame, the callbacks of a batch share a small time budget, and what was held back is delivered
+/// once when playback stops.
 pub fn tick(app: &mut ModelApp) {
     let sig = scene_signature(app);
     let frame = app.doc.scene.anim.frame;
@@ -420,28 +453,80 @@ pub fn tick(app: &mut ModelApp) {
             app.script.last_sig = sig;
             app.script.last_frame = frame;
             app.script.loaded = false;
+            app.script.was_playing = false;
+            app.script.pacer.flush();
+            app.script.last_mark = app.doc.undo_mark();
         }
         return;
     }
-    let mut events = Vec::new();
+    let playing = app.anim.playback.playing;
+    let scene_changed = sig != app.script.last_sig;
+    let frame_changed = frame != app.script.last_frame;
+    let mut immediate = Vec::new();
     if std::mem::take(&mut app.script.loaded) {
-        events.push(Event::SceneLoaded);
+        immediate.push(Event::SceneLoaded);
     }
     if app.selection != app.script.last_selection {
-        events.push(Event::SelectionChanged);
+        immediate.push(Event::SelectionChanged);
     }
-    if sig != app.script.last_sig {
-        events.push(Event::SceneChanged);
+    let now = app.script.clock.elapsed();
+    let mut paced = Vec::new();
+    if playing {
+        app.script.was_playing = true;
+        paced = app.script.pacer.offer(now, frame_changed.then_some(frame), scene_changed);
+    } else if std::mem::take(&mut app.script.was_playing) || app.script.pacer.pending() {
+        // Playback stopped: the current change joins what was held back, and all of it is delivered.
+        paced = app.script.pacer.offer(now, frame_changed.then_some(frame), scene_changed);
+        paced.extend(app.script.pacer.flush());
+    } else {
+        if scene_changed {
+            immediate.push(Event::SceneChanged);
+        }
+        if frame_changed {
+            immediate.push(Event::FrameChanged { frame, skipped: 0 });
+        }
     }
-    if frame != app.script.last_frame {
-        events.push(Event::FrameChanged { frame });
-    }
-    if events.is_empty() {
+    app.script.last_selection = app.selection.clone();
+    app.script.last_sig = sig;
+    app.script.last_frame = frame;
+    if immediate.is_empty() && paced.is_empty() {
+        app.script.last_mark = app.doc.undo_mark();
         return;
     }
-    for e in &events {
-        fire(app, e);
+    // What the callbacks change joins one undo step (see `Document::fold_undo_since`): the user's
+    // step that they answer when there is one, otherwise a single "Script callbacks" step. The
+    // redo history is held aside, so reacting to an Undo does not make it impossible to Redo.
+    let user_step = app.doc.undo_mark() > app.script.last_mark && !app.doc.undo.can_redo();
+    let mark = app.doc.undo_mark();
+    let redo = app.doc.undo.take_redo();
+    for e in &immediate {
+        fire(app, e, None);
     }
+    if !paced.is_empty() {
+        let policy = app.script.pacer.policy().clone();
+        // A batch delivered while playing shares one budget; the flush at the end has none.
+        let mut left = policy.frame_budget;
+        let mut spent = std::time::Duration::ZERO;
+        for e in &paced {
+            let t = if playing {
+                let b = Budget { each: policy.event_time, left };
+                let t = fire(app, e, Some(&b));
+                left = left.saturating_sub(t);
+                t
+            } else {
+                let started = std::time::Instant::now();
+                fire(app, e, None);
+                started.elapsed()
+            };
+            spent += t;
+        }
+        if playing {
+            app.script.pacer.record_cost(now, spent);
+        }
+    }
+    app.doc.fold_undo_since(mark, &tl!("Script callbacks"), user_step);
+    app.doc.undo.restore_redo(redo);
+    app.script.last_mark = app.doc.undo_mark();
     app.script.last_selection = app.selection.clone();
     app.script.last_sig = scene_signature(app);
     app.script.last_frame = app.doc.scene.anim.frame;

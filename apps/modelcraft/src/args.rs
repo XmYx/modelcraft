@@ -17,6 +17,9 @@ Options:
   --bench-viewport <FRAMES>  orbit around a 1M-polygon sculpt for FRAMES frames, print frame
                              times and quit
   --bench-polys <N>          polygon count for --bench-viewport (default 1000000)
+  --bench-skin <FRAMES>      play a skinned character (100,000 vertices, 60 joints) for FRAMES
+                             frames and print frame, pose, evaluation and upload times as JSON
+  --bench-skin-dq            with --bench-skin: dual-quaternion skinning
   --control                  let agents control this window over the loopback channel
   --control-port <PORT>      the same, on exactly this port
   -h, --help                 print this help
@@ -49,6 +52,10 @@ pub struct Cli {
     pub uv_editor: Option<crate::uv_ui::Heat>,
     pub bench_frames: Option<u32>,
     pub bench_polys: Option<u32>,
+    /// Play the skinned benchmark character for this many frames and print timings.
+    pub bench_skin: Option<u32>,
+    /// Skin the benchmark character with dual quaternions.
+    pub bench_skin_dq: bool,
     pub file: Option<PathBuf>,
     /// Open the agent channel (`Some(None)`: the default port).
     pub control: Option<Option<u16>>,
@@ -110,6 +117,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Launch, String> {
             "--control-port" => cli.control = Some(Some(value("--control-port")?.parse().map_err(|_| "--control-port takes a port number")?)),
             "--screenshot" => cli.screenshot = Some(PathBuf::from(value("--screenshot")?)),
             "--bench-viewport" => cli.bench_frames = Some(value("--bench-viewport")?.parse().map_err(|_| "--bench-viewport takes a frame count")?),
+            "--bench-skin" => cli.bench_skin = Some(value("--bench-skin")?.parse().map_err(|_| "--bench-skin takes a frame count")?),
+            "--bench-skin-dq" => cli.bench_skin_dq = true,
             "--bench-polys" => cli.bench_polys = Some(value("--bench-polys")?.parse().map_err(|_| "--bench-polys takes a number")?),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             _ => {

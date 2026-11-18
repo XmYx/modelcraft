@@ -215,7 +215,9 @@ pub fn even_remesh(app: &mut ModelApp) {
 pub fn layers(app: &mut ModelApp, ui: &mut egui::Ui) {
     let Some(id) = app.doc.sculpt.as_ref().map(|s| s.id) else { return };
     let ctx = ui.ctx().clone();
-    app.doc.sync_sculpt();
+    // No sync here: the panel reads the layer's level and shape layers, which strokes do not
+    // change. Syncing every frame copied the whole mesh into the scene during a stroke and made
+    // everything that evaluates the object rebuild it (64 ms a frame at 2 M triangles).
     ui.add_space(8.0);
     ui.label(RichText::new(crate::tl!("Surface detail")).strong());
     let mut on = app.brush.live_detail.is_some();

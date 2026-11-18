@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use egui::{Key, RichText};
-use modelcraft_render::pathtrace::{RenderSettings, Renderer, SceneBuilder};
+use modelcraft_render::pathtrace::{RenderSettings, Renderer, RestirMode, SceneBuilder};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
 use modelcraft_render::trace::{ExportOptions, Lighting, export_builder};
 
@@ -95,6 +95,8 @@ pub struct RenderView {
     pub live: bool,
     /// Learn where light comes from while rendering (path guiding with adaptive splitting; CPU).
     pub learn_light: bool,
+    /// Resample direct light between neighbouring pixels and passes (ReSTIR; CPU and GPU).
+    pub resample_light: bool,
     pub light: Light,
     /// Sun height above the horizon and compass direction, in degrees (Daylight).
     pub sun_elevation: f32,
@@ -122,6 +124,7 @@ impl Default for RenderView {
             device: Device::Auto,
             live: true,
             learn_light: false,
+            resample_light: false,
             light: Light::Studio,
             sun_elevation: 40.0,
             sun_azimuth: 30.0,
@@ -263,7 +266,17 @@ fn scene_key(app: &ModelApp) -> u64 {
     }
     h = mix(h, c.projection as u64);
     let v = &app.render_view;
-    for n in [v.width, v.height, v.samples, v.device as u32, v.light as u32, v.sun_elevation.to_bits(), v.sun_azimuth.to_bits(), u32::from(v.learn_light)] {
+    for n in [
+        v.width,
+        v.height,
+        v.samples,
+        v.device as u32,
+        v.light as u32,
+        v.sun_elevation.to_bits(),
+        v.sun_azimuth.to_bits(),
+        u32::from(v.learn_light),
+        u32::from(v.resample_light),
+    ] {
         h = mix(h, u64::from(n));
     }
     for b in v.panorama.iter().flat_map(|(path, _)| path.bytes()) {
@@ -295,6 +308,8 @@ pub fn start(app: &mut ModelApp, ctx: &egui::Context) {
     let v = &mut app.render_view;
     let mut settings = RenderSettings { width: v.width.clamp(16, 8192), height: v.height.clamp(16, 8192), ..RenderSettings::default() };
     (settings.integrator.guiding, settings.integrator.adaptive_splitting) = (v.learn_light, v.learn_light);
+    // The view accumulates passes on a still picture, which is what temporal reuse needs.
+    settings.integrator.restir.mode = if v.resample_light { RestirMode::Viewport } else { RestirMode::Off };
     let target = v.samples.clamp(1, 1 << 20);
     let cancel = Arc::new(AtomicBool::new(false));
     let shared = Arc::new(Mutex::new(Shared::default()));
@@ -458,6 +473,8 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
             ui.checkbox(&mut v.live, tl!("Update while editing"));
             ui.checkbox(&mut v.learn_light, tl!("Learn where light comes from"))
                 .on_hover_text(tl!("Cleaner pictures of rooms lit indirectly, after a noisier start. Renders on the processor."));
+            ui.checkbox(&mut v.resample_light, tl!("Resample direct light"))
+                .on_hover_text(tl!("Cleaner pictures with many lights, a little darker (a few percent) near shadows. Takes longer per pass."));
         });
         let (done, target) = app.render_view.progress();
         ui.horizontal(|ui| {
@@ -588,6 +605,27 @@ mod tests {
         let learned = h.state().render_view.image().unwrap().0;
         assert_eq!(learned.len(), plain.len());
         assert!(learned.chunks(4).any(|p| p[0] > 120), "the picture is lit");
+    }
+
+    #[test]
+    fn resampling_direct_light_is_a_keyboard_option_that_restarts_the_render() {
+        let mut h = harness();
+        h.run();
+        h.key_press(Key::F9);
+        wait_until_done(&mut h);
+        assert!(!h.state().render_view.resample_light);
+        let checkbox = h.get_by_role_and_label(Role::CheckBox, "Resample direct light");
+        checkbox.focus();
+        h.step();
+        h.key_press(Key::Space);
+        h.step();
+        assert!(h.state().render_view.resample_light);
+        h.step();
+        wait_until_done(&mut h);
+        let state = h.state().render_view.state.clone();
+        assert!(state.starts_with("Render finished: 4 samples"), "{state}");
+        let (pixels, _) = h.state().render_view.image().unwrap();
+        assert!(pixels.chunks(4).any(|p| p[0] > 120), "the picture is lit");
     }
 
     #[test]

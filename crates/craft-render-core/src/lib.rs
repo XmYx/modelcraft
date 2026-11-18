@@ -25,6 +25,7 @@ pub mod light;
 pub mod material;
 pub mod math;
 pub mod render;
+pub mod restir;
 pub mod sampler;
 pub mod scene;
 pub mod scenes;
@@ -39,8 +40,11 @@ pub use integrator::{IntegratorSettings, Strategy};
 pub use light::{Light, LightSampling};
 pub use material::Material;
 pub use render::{Film, PixelOrder, RenderSettings, Renderer, mean_rgb, mse, relative_mse, render_image};
+pub use restir::{RestirMode, RestirSettings};
 pub use scene::{Scene, SceneBuilder, SceneError};
 pub use shapes::MeshData;
 
+#[cfg(test)]
+mod restir_tests;
 #[cfg(test)]
 mod tests;
