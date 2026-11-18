@@ -204,7 +204,42 @@ impl Bvh {
         }
     }
 
-    pub fn raycast(&self, p: &[Vec3], tris: &[[u32; 3]], o: Vec3, d: Vec3, pad: f32) -> Option<(f32, Vec3, u32)> {
+    /// Does a ray hit anything at all? (`skip`: triangles to ignore, or empty.)
+    pub fn any_hit(&self, p: &[Vec3], tris: &[[u32; 3]], o: Vec3, d: Vec3, pad: f32, skip: &[bool]) -> bool {
+        if !(o.is_finite() && d.is_finite()) || d.length_squared() == 0.0 {
+            return false;
+        }
+        let inv = d.recip();
+        let mut stack = vec![0usize];
+        while let Some(i) = stack.pop() {
+            let Some(n) = self.nodes.get(i) else { continue };
+            let (lo, hi) = (n.lo - Vec3::splat(pad), n.hi + Vec3::splat(pad));
+            let t1 = (lo - o) * inv;
+            let t2 = (hi - o) * inv;
+            if t1.min(t2).max_element().max(0.0) > t1.max(t2).min_element() {
+                continue;
+            }
+            if n.count > 0 {
+                for t in self.leaf_tris(i, n) {
+                    let Some(tri) = tris.get(t as usize) else { continue };
+                    if skip.get(t as usize).copied().unwrap_or(false) {
+                        continue;
+                    }
+                    let g = |i: u32| p.get(i as usize).copied().unwrap_or_default();
+                    if ray_tri(o, d, g(tri[0]), g(tri[1]), g(tri[2])).is_some() {
+                        return true;
+                    }
+                }
+            } else {
+                stack.push(n.first as usize);
+                stack.push(n.first as usize + 1);
+            }
+        }
+        false
+    }
+
+    /// Nearest hit of a ray (`skip`: triangles to ignore, or empty).
+    pub fn raycast(&self, p: &[Vec3], tris: &[[u32; 3]], o: Vec3, d: Vec3, pad: f32, skip: &[bool]) -> Option<(f32, Vec3, u32)> {
         if !(o.is_finite() && d.is_finite()) || d.length_squared() == 0.0 {
             return None;
         }
@@ -224,6 +259,9 @@ impl Bvh {
             if n.count > 0 {
                 for t in self.leaf_tris(i, n) {
                     let Some(tri) = tris.get(t as usize) else { continue };
+                    if skip.get(t as usize).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let g = |i: u32| p.get(i as usize).copied().unwrap_or_default();
                     if let Some(h) = ray_tri(o, d, g(tri[0]), g(tri[1]), g(tri[2]))
                         && best.is_none_or(|(b, _)| h < b)

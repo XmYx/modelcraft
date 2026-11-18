@@ -15,6 +15,7 @@ pub mod primitives;
 pub mod remesh;
 pub mod select;
 pub mod subdivide;
+pub mod trim;
 
 pub use modelcraft_mesh::{MeshError, PolyMesh, Polygon};
 
