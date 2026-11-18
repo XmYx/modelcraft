@@ -176,7 +176,11 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 38);
+    // Every command is listed once. (A fixed count here made every pull request that adds a
+    // command conflict with every other one.)
+    let names: std::collections::HashSet<&str> = crate::COMMANDS.iter().map(|c| c.0).collect();
+    assert_eq!(names.len(), crate::COMMANDS.len());
+    assert!(names.contains("add_primitive") && names.contains("sculpt_region"));
 }
 
 fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {
@@ -669,6 +673,48 @@ fn a_merged_undo_group_is_saved_with_the_history_and_replays_as_one_step() {
     assert_eq!(r.scene.len(), 1);
     r.execute(Command::Redo).unwrap();
     assert_eq!(r.scene.len(), 3);
+}
+
+#[test]
+fn locks_templates_sets_and_batches() {
+    let mut d = Document::new();
+    let a = add(&mut d, "cube");
+    let b = add(&mut d, "sphere");
+    d.execute(Command::SetLocked { ids: vec![a], locked: true }).unwrap();
+    let t = Transform { translation: Vec3::X, ..Default::default() };
+    assert!(d.execute(Command::SetTransform { id: a, transform: t }).is_err(), "a locked object refuses edits");
+    assert!(d.execute(Command::Delete { ids: vec![a] }).is_err());
+    assert!(d.execute(Command::BeginSculpt { id: a }).is_err());
+    d.execute(Command::SetVisible { id: a, visible: false }).unwrap();
+    d.execute(Command::SetLocked { ids: vec![a], locked: false }).unwrap();
+    d.execute(Command::SetTemplate { ids: vec![b], template: true }).unwrap();
+    assert!(d.scene.get(b).unwrap().template);
+    // A batch is one undo step, and all-or-nothing.
+    let n = d.undo.len();
+    let moves = vec![Command::SetTransform { id: a, transform: t }, Command::SetTransform { id: b, transform: t }];
+    d.execute(Command::Batch { label: Some("Move 2 objects".into()), commands: moves }).unwrap();
+    assert_eq!(d.undo.len(), n + 1);
+    assert_eq!(d.undo.labels().last().map(String::as_str), Some("Move 2 objects"));
+    let bad = vec![Command::SetTransform { id: a, transform: Transform::default() }, Command::Delete { ids: vec![ObjectId(99)] }];
+    assert!(d.execute(Command::Batch { label: None, commands: bad }).is_err());
+    assert_eq!(d.scene.get(a).unwrap().transform.translation, Vec3::X, "the failed batch left nothing behind");
+    assert!(d.execute(Command::Batch { label: None, commands: vec![Command::Undo] }).is_err());
+    // Selection sets follow deletes and survive a save.
+    d.execute(Command::AddSelectionSet { name: " Pair ".into(), ids: vec![a, b, ObjectId(77)] }).unwrap();
+    assert_eq!(d.scene.sets[0].name, "Pair");
+    assert_eq!(d.scene.sets[0].ids, vec![a, b]);
+    assert!(d.execute(Command::AddSelectionSet { name: " ".into(), ids: vec![a] }).is_err());
+    d.execute(Command::Delete { ids: vec![b] }).unwrap();
+    assert_eq!(d.scene.sets[0].ids, vec![a]);
+    let dir = tmp("sets");
+    let p = dir.join("s.modelcraft");
+    d.execute(Command::SetLocked { ids: vec![a], locked: true }).unwrap();
+    d.save_as(&p).unwrap();
+    let r = Document::open(&p).unwrap();
+    assert_eq!(r.scene.sets.len(), 1);
+    assert!(r.scene.get(a).unwrap().locked);
+    d.execute(Command::RemoveSelectionSet { index: 0 }).unwrap();
+    assert!(d.execute(Command::RemoveSelectionSet { index: 0 }).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
 

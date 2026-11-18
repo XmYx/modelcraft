@@ -545,6 +545,12 @@ pub struct Object {
     #[serde(default)]
     pub material: Material,
     pub kind: ObjectKind,
+    /// Protected: edits to it are refused until it is unlocked.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+    /// Shown for reference: drawn, never picked in the viewport.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub template: bool,
     /// Bumped on every change; the evaluator's cache key. Not saved.
     #[serde(skip)]
     pub rev: u64,
@@ -589,11 +595,28 @@ pub struct Scene {
     /// Boxed: a scene is moved around by value (history entries, snapshots).
     #[serde(default, skip_serializing_if = "no_constraints")]
     pub constraints: Box<constraint::Constraints>,
+    /// Named selections.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sets: Vec<SelectionSet>,
 }
 
 #[allow(clippy::borrowed_box)]
 fn no_constraints(c: &Box<constraint::Constraints>) -> bool {
     c.is_empty()
+}
+
+/// A named list of objects, to select them together again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SelectionSet {
+    pub name: String,
+    pub ids: Vec<ObjectId>,
+}
+
+/// Most selection sets in a scene.
+pub const MAX_SETS: usize = 1000;
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -646,6 +669,11 @@ impl Scene {
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
         point_deform::repair(&mut self);
+        self.sets.truncate(MAX_SETS);
+        for s in &mut self.sets {
+            s.ids.retain(|i| ids.contains(i));
+            s.name = s.name.chars().take(256).collect();
+        }
         Ok(self)
     }
 
@@ -697,6 +725,8 @@ impl Scene {
             visible: true,
             material: Material::default(),
             kind,
+            locked: false,
+            template: false,
             rev: next_rev(),
         });
         Ok(id)
@@ -732,6 +762,9 @@ impl Scene {
         for (_, o) in &out {
             self.anim.remove_object(o.id);
             self.constraints.remove_object(o.id);
+        }
+        for s in &mut self.sets {
+            s.ids.retain(|i| !doomed.contains(i));
         }
         out
     }

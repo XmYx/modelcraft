@@ -472,6 +472,9 @@ impl Document {
                 if !matches!(self.scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
                     return invalid("only mesh objects can be sculpted");
                 }
+                if let Some(o) = self.scene.get(id).filter(|o| o.locked) {
+                    return invalid(format!("{} is locked; unlock it first", o.name));
+                }
                 if needs_layer {
                     let input = self.eval.steps_output(&self.scene, id, usize::MAX).mesh;
                     let layer = SculptLayer::new(input.positions().to_vec());
@@ -728,6 +731,38 @@ impl Document {
     }
 
     fn apply_scene(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
+        self.check_unlocked(cmd)?;
+        self.apply_scene_unchecked(cmd)
+    }
+
+    /// Refuse an edit of a locked object.
+    fn check_unlocked(&self, cmd: &Command) -> Result<(), EngineError> {
+        let ids: Vec<ObjectId> = match cmd {
+            Command::Delete { ids } => ids.clone(),
+            Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
+            Command::Rename { id, .. }
+            | Command::Reparent { id, .. }
+            | Command::SetTransform { id, .. }
+            | Command::SetMaterial { id, .. }
+            | Command::SetPrimitive { id, .. }
+            | Command::SetCageLevels { id, .. }
+            | Command::SetDeformer { id, .. }
+            | Command::AddStep { id, .. }
+            | Command::SetStep { id, .. }
+            | Command::EnableStep { id, .. }
+            | Command::RemoveStep { id, .. }
+            | Command::Collapse { id } => vec![*id],
+            _ => return Ok(()),
+        };
+        for id in ids {
+            if let Some(o) = self.scene.get(id).filter(|o| o.locked) {
+                return invalid(format!("{} is locked; unlock it first", o.name));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_scene_unchecked(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
         let mut out = Outcome::default();
         match cmd {
             Command::AddPrimitive { kind, name, parent } => {
@@ -948,6 +983,37 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::SetLocked { ids, locked } => {
+                for id in ids {
+                    self.scene.edit(*id)?.locked = *locked;
+                }
+            }
+            Command::SetTemplate { ids, template } => {
+                for id in ids {
+                    self.scene.edit(*id)?.template = *template;
+                }
+            }
+            Command::AddSelectionSet { name, ids } => {
+                let name: String = name.trim().chars().take(256).collect();
+                if name.is_empty() {
+                    return invalid("a selection set needs a name");
+                }
+                if self.scene.sets.len() >= modelcraft_scene::MAX_SETS {
+                    return invalid("too many selection sets");
+                }
+                let mut ids: Vec<ObjectId> = ids.iter().copied().filter(|i| self.scene.get(*i).is_some()).collect();
+                ids.dedup();
+                if ids.is_empty() {
+                    return invalid("select objects first");
+                }
+                self.scene.sets.push(modelcraft_scene::SelectionSet { name, ids });
+            }
+            Command::RemoveSelectionSet { index } => {
+                if *index >= self.scene.sets.len() {
+                    return invalid(format!("no selection set {index}"));
+                }
+                self.scene.sets.remove(*index);
+            }
             Command::Undo
             | Command::Redo
             | Command::BeginSculpt { .. }

@@ -81,6 +81,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     app.allow_agents = on;
                     if on { crate::agents::start(app, ui.ctx()) } else { crate::agents::stop(app) }
                 }
+                ui.separator();
+                for o in crate::object_manager::ALL {
+                    action_button(app, ui, Action::Objects(*o));
+                }
             });
             ui.menu_button(tl!("Select"), |ui| {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
@@ -445,7 +449,7 @@ pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
 
 pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
     match p {
-        PanelId::Tree => tree(app, ui),
+        PanelId::Tree => crate::object_manager::tree(app, ui),
         PanelId::Properties => properties(app, ui),
         PanelId::Brushes => brushes(app, ui),
         PanelId::Paint => paint(app, ui),
@@ -456,7 +460,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
 // ---------------------------------------------------------------- scene tree
 
 /// A small drawn badge for an object's kind (fonts may lack symbol glyphs, so nothing here is text).
-fn kind_badge(ui: &mut egui::Ui, o: &Object) {
+pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
@@ -509,134 +513,6 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c + egui::vec2(-2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
             p.circle_stroke(c + egui::vec2(2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
         }
-    }
-}
-
-/// A drawn eye toggle (filled dot shown, hollow hidden) with an accessible name.
-fn visibility_toggle(ui: &mut egui::Ui, visible: bool, name: String) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, visible, &name));
-    let col = if resp.hovered() { Color32::WHITE } else { theme::TEXT_DIM };
-    if visible {
-        ui.painter().circle_filled(rect.center(), 3.5, col);
-    } else {
-        ui.painter().circle_stroke(rect.center(), 3.5, egui::Stroke::new(1.0, col));
-    }
-    resp
-}
-
-fn tree(app: &mut ModelApp, ui: &mut egui::Ui) {
-    let ctx = ui.ctx().clone();
-    let order = app.doc.scene.tree_order();
-    if order.is_empty() {
-        ui.label(RichText::new(tl!("The scene is empty. Add a shape from the Create menu or the command palette.")).color(theme::TEXT_DIM));
-        return;
-    }
-    let tree_id = ui.make_persistent_id("scene-tree");
-    let mut move_to: Option<(usize, i32)> = None;
-    let mut toggle_vis: Option<(ObjectId, bool)> = None;
-    let mut reparent: Option<(ObjectId, Option<ObjectId>)> = None;
-    for (row, (id, depth)) in order.iter().enumerate() {
-        let Some(o) = app.doc.scene.get(*id).cloned() else { continue };
-        let selected = app.selection.contains(id);
-        let name = o.name.clone();
-        let visible = o.visible;
-        ui.horizontal(|ui| {
-            ui.add_space(*depth as f32 * 14.0);
-            let vis = visibility_toggle(ui, visible, crate::tlf!("Visible: {name}", name = name));
-            if vis.clicked() {
-                toggle_vis = Some((*id, !visible));
-            }
-            kind_badge(ui, &o);
-            let text = if visible { RichText::new(&name) } else { RichText::new(&name).color(theme::TEXT_DIM) };
-            let r = ui.add(egui::Button::selectable(selected, text).frame_when_inactive(false));
-            ui.ctx().accesskit_node_builder(r.id, |n| {
-                n.set_role(egui::accesskit::Role::TreeItem);
-                n.set_label(name.clone());
-                n.set_level(depth + 1);
-                n.set_selected(selected);
-            });
-            if r.clicked() {
-                let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
-                if add {
-                    if let Some(p) = app.selection.iter().position(|s| s == id) {
-                        app.selection.remove(p);
-                    } else {
-                        app.selection.push(*id);
-                    }
-                } else {
-                    app.select_only(*id);
-                }
-            }
-            if r.double_clicked() {
-                app.rename = Some((*id, name.clone()));
-            }
-            if app.tree_focus == Some(*id) {
-                r.request_focus();
-                app.tree_focus = None;
-            }
-            if r.has_focus() {
-                ui.memory_mut(|m| m.data.insert_temp(tree_id, row));
-                // Take the arrows so egui's own focus navigation does not move focus elsewhere.
-                let (up, down) =
-                    ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)));
-                if up {
-                    move_to = Some((row, -1));
-                } else if down {
-                    move_to = Some((row, 1));
-                }
-            }
-            r.context_menu(|ui| {
-                if ui.button(Action::Rename.label()).clicked() {
-                    app.rename = Some((*id, name.clone()));
-                    ui.close();
-                }
-                ui.menu_button(tl!("Move Under"), |ui| {
-                    if ui.button(tl!("Top Level")).clicked() {
-                        reparent = Some((*id, None));
-                        ui.close();
-                    }
-                    for (other, _) in &order {
-                        if other == id {
-                            continue;
-                        }
-                        let n = app.doc.scene.get(*other).map(|o| o.name.clone()).unwrap_or_default();
-                        if ui.button(n).clicked() {
-                            reparent = Some((*id, Some(*other)));
-                            ui.close();
-                        }
-                    }
-                });
-                if ui.button(Action::Duplicate.label()).clicked() {
-                    app.selection = vec![*id];
-                    app.act(&ctx, Action::Duplicate);
-                    ui.close();
-                }
-                if ui.button(Action::Delete.label()).clicked() {
-                    app.selection = vec![*id];
-                    app.act(&ctx, Action::Delete);
-                    ui.close();
-                }
-            });
-            // Remember the row widget ids for keyboard moves.
-            ui.memory_mut(|m| m.data.insert_temp(tree_id.with(row), r.id));
-        });
-    }
-    if let Some((row, dir)) = move_to {
-        let next = (row as i32 + dir).clamp(0, order.len() as i32 - 1) as usize;
-        if let Some((id, _)) = order.get(next) {
-            app.select_only(*id);
-            app.tree_focus = Some(*id);
-            if let Some(wid) = ui.memory(|m| m.data.get_temp::<egui::Id>(tree_id.with(next))) {
-                ui.memory_mut(|m| m.request_focus(wid));
-            }
-        }
-    }
-    if let Some((id, visible)) = toggle_vis {
-        app.run(Command::SetVisible { id, visible });
-    }
-    if let Some((id, parent)) = reparent {
-        app.run(Command::Reparent { id, parent });
     }
 }
 
@@ -710,7 +586,8 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         let t = t.sanitized();
         for r in pos.iter().chain(&rot).chain(&scl) {
             if r.changed() || r.drag_stopped() {
-                commit_edit(app, r, |o| o.transform = t, || Command::SetTransform { id, transform: t }, id);
+                let batch = crate::object_manager::transform_batch(app, id, obj.transform, t);
+                commit_edit(app, r, |o| o.transform = t, || batch, id);
                 break;
             }
         }
@@ -749,19 +626,22 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 set_name(ui, &r, tl!("Base colour"));
                 m.base_color = [rgb[0], rgb[1], rgb[2], m.base_color[3]];
                 let mm = m.clone();
-                commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
+                let batch = crate::object_manager::material_batch(app, id, mm.clone());
+                commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             let mut m2 = obj.material.clone();
             ui.horizontal(|ui| {
                 let r = drag(ui, &mut m2.metallic, 0.01, 0.0..=1.0, tl!("Metallic"));
                 let mm = m2.clone();
-                commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
+                let batch = crate::object_manager::material_batch(app, id, mm.clone());
+                commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             let mut m3 = obj.material.clone();
             ui.horizontal(|ui| {
                 let r = drag(ui, &mut m3.roughness, 0.01, 0.0..=1.0, tl!("Roughness"));
                 let mm = m3.clone();
-                commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
+                let batch = crate::object_manager::material_batch(app, id, mm.clone());
+                commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             crate::material_ui::rows(app, ui, id, &obj);
             ui.horizontal(|ui| {

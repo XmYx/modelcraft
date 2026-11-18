@@ -52,6 +52,10 @@ Object ids are numbers (`info` prints them).
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
+| `set_locked` | `ids`, `locked` (a locked object refuses edits) |
+| `set_template` | `ids`, `template` (drawn, never picked) |
+| `add_selection_set` | `name`, `ids` |
+| `remove_selection_set` | `index` |
 | `import` | `path` (.glb, .gltf, .obj, .stl, .ply, .fbx, .3mf), `up?` (auto, y, z), `scale?` (metres per file unit) |
 | `end_sculpt` | — |
 | `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge. Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |

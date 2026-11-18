@@ -1,0 +1,1 @@
+| 2026-11-17 | Object manager depth: tree search, drag-and-drop reparenting, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes as one undo step (commands `set_locked`, `set_template`, `add_selection_set`, `remove_selection_set`, `batch`) |
