@@ -402,7 +402,7 @@ A procedurally generated stand-in for a character: a tube of 100,000 vertices (1
 point), every joint keyed on two rotation channels (180 curves) so that every point moves on
 every frame. Each frame goes to the frame (curves → joint transforms) and evaluates the mesh
 through the dependency graph (the primitive and history are cached; only the skin runs). Two runs,
-measured while three other builds shared the machine; single-threaded.
+measured while three other builds shared the machine; single-threaded (as the code was then).
 
 | | Linear blend | Dual quaternion |
 |---|---|---|
@@ -414,8 +414,65 @@ measured while three other builds shared the machine; single-threaded.
 
 Binding (automatic heat weights: 60 conjugate-gradient solves over the surface): 10.6–11.4 s, once.
 The gap between the kernel and the evaluation (≈ 5 ms) is copying the mesh and rebuilding its
-positions for the new pose. These are engine numbers; playback in the app adds a full vertex
-upload and normals for the changed mesh each frame, which has not been measured yet.
+positions for the new pose. These are engine numbers from before skinning ran on several cores;
+the next section has the app's playback and the kernels as they are now.
+
+## Skinned character in the app (`modelcraft --bench-skin 300`, add `--bench-skin-dq`)
+
+The same character as above, built by the same code (`rig::bench_character`: 100,000 vertices,
+60 joints, heat weights, 4 influences), played in the app: each frame goes to the next frame
+(curves → joints, constraints), evaluates the mesh through the dependency graph, and the viewport
+turns the new mesh into triangles with smoothed normals, uploads it and draws it. RTX 4090,
+1600×1000, no vsync, 24 hardware threads. **The machine was shared with other builds throughout
+(load average 27 to 58 on 24 threads), so these numbers are noisy and pessimistic**; each line
+says the load it was taken under.
+
+| | Frame, mean (p95) | Frames per second | Evaluate | Upload (triangles, normals, buffers) | Load |
+|---|---|---|---|---|---|
+| Before: skinning and viewport data on one thread (`RAYON_NUM_THREADS=1`, same session as the next line) | 57.0 ms (95.5) | 17.6 | 5.8 ms | 38.3 ms | 27 |
+| **Now**, linear blend | 36.0–39.2 ms (52–66) | **25.5–27.8** | 4.0–4.3 ms | 20.7–21.1 ms | 28 |
+| **Now**, dual quaternion | 38.8 ms (55.0) | **25.8** | 4.5 ms | 21.0 ms | 28 |
+| Skinning on all cores, viewport data still on one thread, linear blend | 65.6 ms (101) | 15.2 | 8.3 ms | 44.4 ms | 46–58 |
+| The same, dual quaternion | 90.1 ms (152) | 11.1 | 12.9 ms | 64.7 ms | 46–58 |
+
+Pose (curves → 60 joints, constraints) is 0.10–0.19 ms in every run.
+
+Read honestly:
+- Playback of this character is about 26 frames per second, just at its 24: there is no
+  headroom, and under heavier load it falls to 15.
+- **The upload is the frame**, not the skinning: more than half of every frame goes into
+  rebuilding the mesh's drawing data (one vertex per face corner with a smoothed normal, 400,000
+  of them, and the triangle list) and creating new GPU buffers, although only positions changed.
+  Building that data in up to 8 runs of faces at once (`buffers::mesh_data`) took it from 38 to
+  21 ms in the same session. The fix that remains is structural: keep the GPU mesh and its
+  triangle list while a mesh only deforms, and write positions and normals into it.
+- Evaluation (4 ms) is mostly copying the mesh for the new pose (≈ 15 MB of topology that did
+  not change), not the skinning kernel.
+
+**Skinning kernels alone** (`modelcraft-cli bench-skin`, 100,000 points, 4 influences, best of
+five batches of ten):
+
+| | One core | In 4 pieces (`RAYON_NUM_THREADS=4`) | In 8 pieces (`=8`) | Default (at most 8 pieces, 24 threads), three runs |
+|---|---|---|---|---|
+| Linear blend | 1.05–1.94 ms | 0.36 ms | 0.57 ms | 0.32, 2.31, 3.93 ms |
+| Dual quaternion | 3.13–6.14 ms | 0.74 ms | 0.96 ms | 0.73, 5.60, 6.29 ms |
+
+On idle cores the kernels are 3 to 4 times faster in pieces (0.3 ms and 0.7 ms). On a saturated
+machine the same code can be *slower* than one core (the pieces wait for a thread): with one piece
+per hardware thread it was 4.9–7.8 ms against 2.0 ms, which is why skinning is cut into at most
+8 pieces. The results are bit-identical on one core and on many (tested).
+
+**Engine evaluation** (`bench-skin`, pose + evaluate, no viewport), under load 45–50: linear blend
+7.5–15.0 ms mean (65–131 evaluated frames per second), dual quaternion 8.2–11.0 ms (90–121);
+before this change, under the same kind of load, 6.2–13.7 ms and 11.1–12.5 ms. The spread between
+runs is larger than any difference: evaluation is dominated by the mesh copy, and nothing can be
+claimed here beyond "not slower".
+
+**Finding an object** (`Scene::get`) used to walk the object list; the scene now keeps an index
+from id to position, kept in step by everything that adds, removes or reorders objects (a test
+compares it with a walk of the list after each kind of change). On this 62-object scene it does
+not show (pose stayed at 0.1 ms); it is there for scenes with thousands of objects, where every
+world matrix walked the list once per ancestor. It was not timed on such a scene.
 
 ## UV unwrap (engine, `modelcraft-cli uv-bench --segments N`)
 

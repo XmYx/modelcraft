@@ -618,7 +618,7 @@ Weight: 3
 | Never-panic policy, hostile-input tests | | X | S | Lints deny panics; proptests for mesh ops and formats |
 | Bounded undo memory | | D | S | 1 GiB budget, oldest dropped |
 | Undo history kept across sessions | M Z | D | M | Saves store a base scene and the history's commands; open replays and checks them (`undo_history_survives_save_and_open`) |
-| Multithreaded dabs, evaluation and BVH build | C M Z | M | M | Single-threaded today |
+| Multithreaded dabs, evaluation and BVH build | C M Z | P | M | Skinning and the viewport's mesh data run on several cores (bit-identical to one core, tested; measured in performance.md) and the render BVH is built in parallel; sculpt dabs and the rest of the graph's evaluation are single-threaded |
 
 ## What works today (evidence)
 
@@ -664,6 +664,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | In-app performance: multithreading partial (skinning, viewport mesh data); playback of the benchmark character measured |
 | 2026-11-18 | minor | Finishing pass: joints, skinning with weight painting, Curve Editor, Key Sheet, and animation layers done; ghosts added to motion paths (partial) |
 | 2026-11-18 | minor | Deformation: blend shapes with in-betweens done; lattice partial |
 | 2026-11-18 | minor | IK and constraints: constraints and FK/IK blending done; IK solvers, baking constraints, expressions and driven keys partial |

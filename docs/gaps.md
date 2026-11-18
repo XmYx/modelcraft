@@ -200,8 +200,10 @@ Limits of what exists:
   rotation orders and no quaternion interpolation.
 - Rigging: a joint's rest orientation lives in its rotation, not in a separate channel. Heat
   weights skip the paper's visibility test, so two limbs that touch can share weights; weights
-  cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
-  `Scene::get` is a linear search, which shows with thousands of objects. A `.glb` export of a scene with
+  cannot be copied between meshes and are saved as JSON. Skinning runs on several cores and objects are found through an index, but playback of a
+  heavy skinned mesh is bound by the viewport rebuilding and re-uploading the whole mesh each
+  frame and by copying its unchanged topology (performance.md): about 26 frames per second for
+  100,000 vertices. `Scene::children` still walks the object list. A `.glb` export of a scene with
   skins, blend shapes, curves or constraints writes them (`craft-gltf-anim`, see
   architecture.md): one clip sampled every frame of the playback range from the solved scene,
   the four strongest joints per vertex, shapes at full weight. Not kept, and said in the export's

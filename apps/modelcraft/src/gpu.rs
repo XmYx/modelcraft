@@ -88,7 +88,12 @@ impl GpuState {
             e.2 = f;
             return key;
         }
+        // A mesh not seen before: triangles, normals and the upload. A deforming mesh comes
+        // through here every frame, so this is what playback of a skinned mesh pays.
+        let t0 = std::time::Instant::now();
         let g = GpuMesh::new(&self.rs.device, &buffers::mesh_data(m));
+        self.upload_ms = t0.elapsed().as_secs_f32() * 1000.0;
+        self.uploaded_vertices = m.vertex_count();
         self.meshes.insert(key, (m.clone(), g, f));
         key
     }

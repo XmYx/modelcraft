@@ -2566,6 +2566,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "proptest",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2705,6 +2706,7 @@ dependencies = [
  "modelcraft-scene",
  "pollster 0.4.0",
  "proptest",
+ "rayon",
  "wgpu",
 ]
 

@@ -328,49 +328,16 @@ fn bake(a: &[String]) -> Result<(), String> {
 /// and the kernels alone.
 fn bench_skin(verts: usize, joints: usize, frames: usize) -> Result<(), String> {
     use modelcraft_engine::animation::skin;
-    use modelcraft_engine::{AnimCommand, BindMethod, RigCommand};
+    use modelcraft_engine::{BindMethod, RigCommand};
     let joints = joints.clamp(2, 1000);
     let frames = frames.clamp(2, 100_000);
-    // Enough sides that the ring count stays within the primitive's limit.
-    let sides = (verts as u32).div_ceil(1000).clamp(64, 1024);
-    let rings = ((verts as u32 / sides).saturating_sub(1)).clamp(joints as u32, 1024);
-    let height = joints as f32;
     let mut d = Document::new();
     let run = |d: &mut Document, c: Command| d.execute(c).map_err(|e| e.to_string());
-    let mesh = run(&mut d, Command::AddPrimitive { kind: "cylinder".into(), name: None, parent: None })?.created.first().copied().ok_or("no mesh")?;
-    let primitive = modelcraft_engine::ops::primitives::Primitive::Cylinder { radius: 1.0, height, sides, rings, caps: false };
-    run(&mut d, Command::SetPrimitive { id: mesh, primitive })?;
-    let mut chain = Vec::with_capacity(joints);
-    for i in 0..joints {
-        let y = -height / 2.0 + height * i as f32 / (joints - 1) as f32;
-        let id = run(&mut d, Command::Rig(RigCommand::AddJoint { parent: chain.last().copied(), position: Some([0.0, y, 0.0]), name: None }))?
-            .created
-            .first()
-            .copied()
-            .ok_or("no joint")?;
-        chain.push(id);
-    }
-    let count = d.eval.evaluate(&d.scene, mesh).mesh.vertex_count();
     let t = Instant::now();
-    let skin_id =
-        run(&mut d, Command::Rig(RigCommand::BindSkin { mesh, joints: chain.clone(), method: BindMethod::Heat, influences: 4, dual_quaternion: false }))?
-            .created
-            .first()
-            .copied()
-            .ok_or("no skin")?;
-    println!("mesh: {count} vertices, {joints} joints; bind with heat weights (4 influences) {:.0} ms", ms(t));
-    // Every joint sways on Z and twists on Y, out of phase, so every point moves every frame.
-    let end = frames as f64 - 1.0;
-    for (i, j) in chain.iter().enumerate() {
-        for (path, amount) in [("rotate.z", 4.0), ("rotate.y", 6.0)] {
-            for (frame, sign) in [(0.0, 1.0), (end / 2.0, -1.0), (end, 1.0)] {
-                let value = sign * amount * if i % 2 == 0 { 1.0 } else { -1.0 };
-                run(&mut d, Command::Anim(AnimCommand::SetKey { id: *j, path: path.into(), frame: Some(frame), value: Some(value) }))?;
-            }
-        }
-    }
-    run(&mut d, Command::Anim(AnimCommand::SetTimeRange { start: Some(0.0), end: Some(end), fps: Some(24.0) }))?;
-    println!("animation: {} curves on {joints} joints, {frames} frames at 24 fps", d.scene.anim.tracks().len());
+    let (mesh, skin_id, _) = modelcraft_engine::rig::bench_character(&mut d, verts, joints, frames, BindMethod::Heat).map_err(|e| e.to_string())?;
+    let count = d.eval.evaluate(&d.scene, mesh).mesh.vertex_count();
+    println!("mesh: {count} vertices, {joints} joints; built and bound with heat weights (4 influences) in {:.0} ms", ms(t));
+    println!("animation: {} curves on {joints} joints, {frames} frames at 24 fps; {} threads", d.scene.anim.tracks().len(), rayon_threads());
     for dq in [false, true] {
         run(&mut d, Command::Rig(RigCommand::SetSkin { mesh, dual_quaternion: dq }))?;
         let (mut pose, mut eval) = (Vec::with_capacity(frames), Vec::with_capacity(frames));
@@ -406,14 +373,22 @@ fn bench_skin(verts: usize, joints: usize, frames: usize) -> Result<(), String> 
     let world: Vec<glam::Mat4> = bound.joints.iter().map(|j| scene.world_matrix(*j)).collect();
     let mats = skin::skin_matrices(&world, &bound.inverse_bind);
     let mut out = Vec::new();
-    for (name, f) in
-        [("linear blend", skin::linear_blend as fn(&[Vec3], &skin::SkinWeights, &[glam::Mat4], &mut Vec<Vec3>)), ("dual quaternion", skin::dual_quaternion)]
-    {
-        let t = Instant::now();
-        for _ in 0..20 {
-            f(&rest, &bound.weights, &mats, &mut out);
+    type Kernel = fn(&[Vec3], &skin::SkinWeights, &[glam::Mat4], &mut Vec<Vec3>, bool);
+    for (name, f) in [("linear blend", skin::linear_blend_with as Kernel), ("dual quaternion", skin::dual_quaternion_with)] {
+        let mut per = [0.0; 2];
+        for (slot, parallel) in per.iter_mut().zip([false, true]) {
+            // The best of five batches: the machine is rarely idle.
+            *slot = (0..5)
+                .map(|_| {
+                    let t = Instant::now();
+                    for _ in 0..10 {
+                        f(&rest, &bound.weights, &mats, &mut out, parallel);
+                    }
+                    ms(t) / 10.0
+                })
+                .fold(f64::MAX, f64::min);
         }
-        println!("kernel {name}: {:.2} ms per {count} points", ms(t) / 20.0);
+        println!("kernel {name}: {:.2} ms on one core, {:.2} ms on all, per {count} points", per[0], per[1]);
     }
     Ok(())
 }
@@ -657,6 +632,11 @@ fn uv_pack_bench(n: usize) -> Result<(), String> {
 fn pct(v: &mut [f64], q: f64) -> f64 {
     v.sort_by(f64::total_cmp);
     v.get(((v.len() as f64 - 1.0) * q).round().max(0.0) as usize).copied().unwrap_or(0.0)
+}
+
+/// How many threads the parallel kernels use.
+fn rayon_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
 fn ms(t: Instant) -> f64 {

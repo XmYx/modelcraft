@@ -589,6 +589,12 @@ impl Object {
     }
 }
 
+enum Slot {
+    At(usize),
+    Absent,
+    Unknown,
+}
+
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum SceneError {
     #[error("no object {0:?}")]
@@ -607,6 +613,9 @@ pub struct Scene {
     #[serde(default, skip_serializing_if = "Animation::is_default")]
     pub anim: Animation,
     /// Constraints, IK, driven keys and expressions ([`constraint`]).
+    /// Where each object sits in `objects` ([`Scene::get`]).
+    #[serde(skip)]
+    index: Box<Index>,
     /// Boxed: a scene is moved around by value (history entries, snapshots).
     #[serde(default, skip_serializing_if = "no_constraints")]
     pub constraints: Box<constraint::Constraints>,
@@ -634,6 +643,19 @@ fn is_false(v: &bool) -> bool {
     !*v
 }
 
+/// Object id → position in the object list, so finding an object does not walk the list. It is
+/// kept in step by everything that adds, removes or reorders objects; a scene straight from a
+/// file has none until it is repaired, and lookups then walk the list as before. It is not part
+/// of what a scene *is*: two scenes with the same objects are equal whatever their indexes hold.
+#[derive(Clone, Debug, Default)]
+struct Index(std::collections::HashMap<ObjectId, u32>);
+
+impl PartialEq for Index {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
 /// drag preview) can never reuse a revision that a cache has already seen.
 fn next_rev() -> u64 {
@@ -654,6 +676,7 @@ impl Scene {
         }
         let mut seen = std::collections::HashSet::new();
         self.objects.retain(|o| seen.insert(o.id));
+        self.reindex();
         let ids: std::collections::HashSet<ObjectId> = self.objects.iter().map(|o| o.id).collect();
         for o in &mut self.objects {
             if o.parent.is_some_and(|p| !ids.contains(&p) || p == o.id) {
@@ -680,6 +703,7 @@ impl Scene {
         for o in &mut self.objects {
             o.rev = next_rev();
         }
+        self.reindex();
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
@@ -697,7 +721,30 @@ impl Scene {
         &self.objects
     }
     pub fn get(&self, id: ObjectId) -> Option<&Object> {
-        self.objects.iter().find(|o| o.id == id)
+        match self.slot(id) {
+            Slot::At(i) => self.objects.get(i),
+            Slot::Absent => None,
+            Slot::Unknown => self.objects.iter().find(|o| o.id == id),
+        }
+    }
+
+    /// Where the index says `id` is. `Unknown` when the index is not in step with the list
+    /// (a scene not repaired yet) or points at another object: the caller then walks the list.
+    fn slot(&self, id: ObjectId) -> Slot {
+        if self.index.0.len() != self.objects.len() {
+            return Slot::Unknown;
+        }
+        match self.index.0.get(&id) {
+            None => Slot::Absent,
+            Some(i) if self.objects.get(*i as usize).is_some_and(|o| o.id == id) => Slot::At(*i as usize),
+            Some(_) => Slot::Unknown,
+        }
+    }
+
+    /// Rebuild the index after the list was reordered or objects were removed.
+    fn reindex(&mut self) {
+        self.index.0.clear();
+        self.index.0.extend(self.objects.iter().enumerate().map(|(i, o)| (o.id, i as u32)));
     }
     pub fn len(&self) -> usize {
         self.objects.len()
@@ -719,7 +766,7 @@ impl Scene {
     /// Mutable access; bumps the object's revision (and so invalidates its cached meshes).
     pub fn edit(&mut self, id: ObjectId) -> Result<&mut Object, SceneError> {
         let rev = next_rev();
-        let o = self.objects.iter_mut().find(|o| o.id == id).ok_or(SceneError::NoObject(id))?;
+        let o = self.object_mut(id).ok_or(SceneError::NoObject(id))?;
         o.rev = rev;
         Ok(o)
     }
@@ -745,6 +792,12 @@ impl Scene {
             template: false,
             rev: next_rev(),
         });
+        // Adding at the end keeps a complete index complete.
+        if self.index.0.len() + 1 == self.objects.len() {
+            self.index.0.insert(id, (self.objects.len() - 1) as u32);
+        } else {
+            self.reindex();
+        }
         Ok(id)
     }
 
@@ -754,10 +807,24 @@ impl Scene {
         self.next_id = self.next_id.max(object.id.0 + 1);
         let i = index.min(self.objects.len());
         self.objects.insert(i, object);
+        self.reindex();
     }
 
     pub fn index_of(&self, id: ObjectId) -> Option<usize> {
-        self.objects.iter().position(|o| o.id == id)
+        match self.slot(id) {
+            Slot::At(i) => Some(i),
+            Slot::Absent => None,
+            Slot::Unknown => self.objects.iter().position(|o| o.id == id),
+        }
+    }
+
+    /// An object for changing in place, without bumping its revision (the caller does).
+    pub(crate) fn object_mut(&mut self, id: ObjectId) -> Option<&mut Object> {
+        match self.slot(id) {
+            Slot::At(i) => self.objects.get_mut(i),
+            Slot::Absent => None,
+            Slot::Unknown => self.objects.iter_mut().find(|o| o.id == id),
+        }
     }
 
     /// Remove an object and its whole subtree; returns them with their indices (for undo).
@@ -774,6 +841,7 @@ impl Scene {
             }
             orig += 1;
         }
+        self.reindex();
         self.bump_ancestors_of_removed(&out);
         for (_, o) in &out {
             self.anim.remove_object(o.id);
@@ -869,6 +937,7 @@ impl Scene {
         if let Some(i) = self.index_of(id) {
             let o = self.objects.remove(i);
             self.objects.push(o);
+            self.reindex();
         }
         Ok(())
     }

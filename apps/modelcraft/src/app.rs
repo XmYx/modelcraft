@@ -393,6 +393,9 @@ impl ModelApp {
             app.agents.port = port;
             crate::agents::start(&mut app, ctx);
         }
+        if let Some(n) = cli.bench_skin {
+            crate::rig_tools::start_bench(&mut app, n, cli.bench_skin_dq);
+        }
         if let Some(n) = cli.bench_frames {
             let polys = cli.bench_polys.unwrap_or(1_000_000);
             let seg = ((polys as f32 / 6.0).sqrt().ceil() as u32).clamp(4, 1024);
