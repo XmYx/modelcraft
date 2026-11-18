@@ -42,7 +42,11 @@ mod rig_tools_tests;
 mod rig_ui;
 #[cfg(test)]
 mod rig_ui_tests;
+#[cfg(test)]
+mod script_cb_ui_tests;
 mod script_ui;
+#[cfg(test)]
+mod script_undo_ui_tests;
 mod sculpt_groups_ui;
 mod sculpt_ui;
 #[cfg(test)]

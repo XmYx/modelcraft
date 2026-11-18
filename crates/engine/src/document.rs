@@ -1105,24 +1105,67 @@ impl Document {
             return made;
         }
         if made > 1 && self.groups.is_empty() {
-            let entries = self.undo.take_last(made);
-            if entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. })) {
-                let first = entries.first();
-                let last = entries.last();
-                if let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (first, last) {
-                    let (before, after) = (before.clone(), after.clone());
-                    let bytes = 512 + self.scene.len() * 300;
-                    // The merged step replays as one batch of what the group ran.
-                    let cmd = Command::Batch { label: Some(g.label.clone()), commands: entries.iter().map(|e| e.command().clone()).collect() };
-                    self.undo.push(UndoEntry::Scene { label: g.label, cmd: Box::new(cmd), before, after, bytes });
-                    return made;
-                }
-            }
-            for e in entries {
-                self.undo.push_done(e);
-            }
+            self.fold_last(made, &g.label);
         }
         made
+    }
+
+    /// Merge the newest `n` undo entries into one step named `label`, when they are all scene
+    /// changes (the step then replays as one batch). Returns whether it did; otherwise the
+    /// entries are left as they were.
+    fn fold_last(&mut self, n: usize, label: &str) -> bool {
+        if n == 0 {
+            return false;
+        }
+        let entries = self.undo.take_last(n);
+        if entries.len() == n
+            && entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. }))
+            && let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (entries.first(), entries.last())
+        {
+            let (before, after) = (before.clone(), after.clone());
+            let bytes = 512 + self.scene.len() * 300;
+            let mut commands = Vec::new();
+            for e in &entries {
+                match e.command() {
+                    // Flatten, so merging again and again does not nest batches without end.
+                    Command::Batch { commands: inner, .. } => commands.extend(inner.iter().cloned()),
+                    c => commands.push(c.clone()),
+                }
+            }
+            let cmd = Command::Batch { label: Some(label.to_string()), commands };
+            self.undo.push_done(UndoEntry::Scene { label: label.to_string(), cmd: Box::new(cmd), before, after, bytes });
+            return true;
+        }
+        for e in entries {
+            self.undo.push_done(e);
+        }
+        false
+    }
+
+    /// A place in the undo history, for [`Document::fold_undo_since`]. It stays valid when old
+    /// entries are dropped to stay within the memory budget.
+    pub fn undo_mark(&self) -> usize {
+        self.undo.len() + self.undo.dropped
+    }
+
+    /// Merge the undo entries made since `mark` into one step. Without `into_previous` the step is
+    /// named `label`; with it the entry just before `mark` (the user's step the changes answer)
+    /// joins them and keeps its own name. Does not touch the redo history. Only scene changes
+    /// merge (a sculpt stroke before the mark is never joined); returns how many entries became
+    /// one, or 0 when nothing was merged.
+    pub fn fold_undo_since(&mut self, mark: usize, label: &str, into_previous: bool) -> usize {
+        self.sync_sculpt();
+        let made = self.undo_mark().saturating_sub(mark).min(self.undo.len());
+        if made == 0 {
+            return 0;
+        }
+        let mut n = made;
+        let mut name = label.to_string();
+        if into_previous && let Some(UndoEntry::Scene { label, .. }) = self.undo.newest(made) {
+            name = label.clone();
+            n += 1;
+        }
+        if self.fold_last(n, &name) { n } else { 0 }
     }
 
     /// How many undo groups are open.
