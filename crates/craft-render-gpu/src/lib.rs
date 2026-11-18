@@ -351,6 +351,9 @@ fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
 impl GpuRenderer {
     /// Upload `scene` and prepare to render it at the size in `settings`.
     pub fn new(ctx: &GpuContext, scene: &Scene, settings: RenderSettings) -> Result<GpuRenderer, GpuError> {
+        if settings.integrator.guiding || settings.integrator.adaptive_splitting {
+            return Err(GpuError::Unsupported("path guiding and adaptive splitting"));
+        }
         let (w, h) = (settings.width, settings.height);
         let max_side = ctx.caps.max_compute_workgroups_per_dimension.saturating_mul(8).min(craft_render_core::render::MAX_IMAGE_SIDE);
         if w == 0 || h == 0 || w > max_side || h > max_side {
@@ -884,5 +887,17 @@ mod tests {
         // The per-pixel variance estimate has the same total on both devices.
         let (gv, cv): (f64, f64) = (g.variance().iter().map(|v| f64::from(*v)).sum(), c.variance().iter().map(|v| f64::from(*v)).sum());
         assert!(cv > 0.0 && (gv - cv).abs() < 0.1 * cv, "variance {gv} against {cv}");
+    }
+
+    #[test]
+    fn gpu_declines_learned_sampling() {
+        // Path guiding and adaptive splitting exist on the CPU only; callers fall back to it.
+        let Some(ctx) = gpu() else { return };
+        let scene = scenes::cornell_box().unwrap();
+        for (guiding, adaptive_splitting) in [(true, false), (false, true)] {
+            let integrator = IntegratorSettings { guiding, adaptive_splitting, ..IntegratorSettings::default() };
+            let settings = RenderSettings { width: 16, height: 16, integrator, ..RenderSettings::default() };
+            assert!(matches!(GpuRenderer::new(&ctx, &scene, settings), Err(GpuError::Unsupported(_))));
+        }
     }
 }

@@ -1141,6 +1141,30 @@ fn select_pdf(entry: u32, p: vec3<f32>) -> f32 {
     return lights[entry].pmf;
 }
 
+const SUN_DISK_MIN: f32 = 1e-6;
+
+// Density over solid angle of a point of a sun's disk, `c` (a cosine) away from its axis.
+fn sun_density(tan_radius: f32, c: f32) -> f32 {
+    return 1.0 / (PI * tan_radius * tan_radius * c * c * c);
+}
+
+// rgb: radiance of the sun disks around `dir` (a direction that leaves the scene), w: the density
+// with which light sampling picks `dir` on them. Lights without a position follow those with one.
+fn sun_radiance(dir: vec3<f32>) -> vec4<f32> {
+    var out = vec4<f32>(0.0);
+    for (var i = params.positional; i < params.light_count; i++) {
+        let l = lights[i];
+        if l.kind == 6u && l.area > SUN_DISK_MIN {
+            let c = dot(dir, l.p0);
+            if c > 0.0 && max(1.0 - c * c, 0.0) <= l.area * l.area * c * c {
+                let density = sun_density(l.area, c);
+                out += vec4<f32>(l.radiance * density, l.pmf * density);
+            }
+        }
+    }
+    return out;
+}
+
 struct LightSample {
     wi: vec3<f32>,
     distance: f32,
@@ -1230,7 +1254,13 @@ fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
         let tx = vec3<f32>(1.0 + sign * n.x * n.x * fa, sign * fb, -sign * n.x);
         let ty = vec3<f32>(fb, sign + n.y * n.y * fa, -n.y);
         let local = normalize(vec3<f32>(disk.x, disk.y, 1.0));
-        return LightSample(tx * local.x + ty * local.y + n * local.z, INF, l.radiance, pmf, true);
+        let wi = tx * local.x + ty * local.y + n * local.z;
+        if l.area > SUN_DISK_MIN {
+            // A disk in the sky: radiance and a density over solid angle, whose ratio is the irradiance.
+            let density = sun_density(l.area, local.z);
+            return LightSample(wi, INF, l.radiance * density, pmf * density, false);
+        }
+        return LightSample(wi, INF, l.radiance, pmf, true);
     }
     if params.env_w != 0u {
         let wi = env_map_sample(u);
@@ -1355,6 +1385,23 @@ fn radiance(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
         if hit.slot == NO_HIT {
             if first {
                 f_albedo = min(env_radiance(d), vec3<f32>(1.0));
+            }
+            let sun = sun_radiance(d);
+            if sun.w > 0.0 {
+                // The path found a sun's disk by itself; light sampling could have aimed at it too.
+                var w = 1.0;
+                if prev_pdf < INF {
+                    if params.strategy == 0u {
+                        w = power_heuristic(prev_pdf, sun.w);
+                    } else if params.strategy == 1u {
+                        w = 0.0;
+                    }
+                }
+                var c = sanitize(throughput * sun.rgb * w);
+                if depth > 0u {
+                    c = min(c, vec3<f32>(clamp_to));
+                }
+                total += c;
             }
             if params.has_env != 0u {
                 var w = 1.0;

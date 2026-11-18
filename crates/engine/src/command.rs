@@ -256,6 +256,8 @@ pub enum Command {
     /// Tags, layers, user attributes, presets, pivots and instances:
     /// `{"cmd":"organize","op":"set_tag",…}` ([`crate::organize::OrganizeCommand`]).
     Organize(crate::organize::OrganizeCommand),
+    /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
+    Sim(crate::sim::SimCommand),
 }
 
 /// Most commands one batch may hold, and how deep batches may nest.
@@ -371,6 +373,7 @@ impl Command {
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
             Command::Organize(o) => o.label(),
+            Command::Sim(c) => c.label(),
         }
     }
 }

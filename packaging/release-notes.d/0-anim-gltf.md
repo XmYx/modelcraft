@@ -1,0 +1,1 @@
+- Export a rigged, animated character to `.glb` with its skeleton, skin weights, blend shapes and animation, and import such files as joints, skins, blend shapes and curves.

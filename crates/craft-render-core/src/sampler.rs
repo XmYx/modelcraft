@@ -128,6 +128,13 @@ impl Sampler {
         Some(Sampler { index: (sample << bits) | morton(x, y), seed: hash32(render_seed ^ 0x5bd1_e995), dim: 0 })
     }
 
+    /// An independent sequence for a branch of this sample's path (branch `id`), continuing at
+    /// the same dimension.
+    #[inline]
+    pub fn fork(&self, id: u32) -> Sampler {
+        Sampler { index: self.index, seed: hash_combine(self.seed ^ 0x3c6e_f372, id), dim: self.dim }
+    }
+
     /// Two numbers in `[0, 1)` that are well distributed together across sample indices.
     #[inline]
     pub fn next2(&mut self) -> Vec2 {
