@@ -233,6 +233,91 @@ pub enum RigCommand {
         #[serde(default)]
         keep: bool,
     },
+    /// Add a blend shape to `mesh` from the shape of `from` (a mesh with the same points). With
+    /// `target`, the shape becomes an in-between of that target, shown when its weight is `at`.
+    AddShape {
+        mesh: ObjectId,
+        from: ObjectId,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        target: Option<usize>,
+        #[serde(default = "one_weight")]
+        at: f32,
+    },
+    /// Change a blend shape: its weight (keyable as `target.<index>.weight`), its name.
+    SetShape {
+        mesh: ObjectId,
+        target: usize,
+        #[serde(default)]
+        weight: Option<f32>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Remove a blend shape, or one of its in-betweens with `frame`.
+    RemoveShape {
+        mesh: ObjectId,
+        target: usize,
+        #[serde(default)]
+        frame: Option<usize>,
+    },
+    /// Put a lattice of `divisions` cells around `mesh`; `linear` interpolates cell by cell.
+    AddLattice {
+        mesh: ObjectId,
+        #[serde(default = "two_cells")]
+        divisions: [u32; 3],
+        #[serde(default)]
+        linear: bool,
+    },
+    /// Move control points of a lattice by `translate` (in the lattice's space, whose box is one
+    /// unit wide), or put them at `to`; `reset` puts every point back first.
+    EditLattice {
+        id: ObjectId,
+        #[serde(default)]
+        points: Vec<u32>,
+        #[serde(default)]
+        translate: Option<[f32; 3]>,
+        #[serde(default)]
+        to: Option<[f32; 3]>,
+        #[serde(default)]
+        reset: bool,
+        #[serde(default)]
+        linear: Option<bool>,
+    },
+    /// Make a cluster on `mesh`: `points` (with `weights`, all 1 without them) and, with
+    /// `radius`, every point within it of the points' centre with a smooth falloff. The cluster
+    /// is an object at that centre; moving, turning or scaling it moves the points.
+    AddCluster {
+        mesh: ObjectId,
+        #[serde(default)]
+        points: Vec<u32>,
+        #[serde(default)]
+        weights: Vec<f32>,
+        #[serde(default)]
+        radius: Option<f32>,
+        #[serde(default)]
+        center: Option<[f32; 3]>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Set the weight of points in a cluster (0 removes them).
+    SetClusterWeights {
+        id: ObjectId,
+        points: Vec<u32>,
+        weight: f32,
+    },
+    /// Move a deformer `delta` places in its mesh's deformer stack (negative: earlier).
+    MoveInStack {
+        id: ObjectId,
+        delta: i32,
+    },
+}
+
+fn one_weight() -> f32 {
+    1.0
+}
+fn two_cells() -> [u32; 3] {
+    [2, 2, 2]
 }
 
 fn yes() -> bool {
@@ -268,6 +353,14 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("remove_constraint", "Remove a constraint: id"),
     ("match_ik", "Switch an IK chain without a jump: id, to (fk, ik)"),
     ("bake_constraints", "Key the transforms constraints give and switch the constraints off: objects, start?, end?, step (default 1), keep?"),
+    ("add_shape", "Add a blend shape from another mesh with the same points: mesh, from, name?, target? + at (an in-between of that target)"),
+    ("set_shape", "Change a blend shape: mesh, target, weight?, name?"),
+    ("remove_shape", "Remove a blend shape or one in-between: mesh, target, frame?"),
+    ("add_lattice", "Put a lattice around a mesh: mesh, divisions [x,y,z] (1-8, default 2), linear?"),
+    ("edit_lattice", "Move lattice control points: id, points, translate? or to? [x,y,z] in lattice space, reset?, linear?"),
+    ("add_cluster", "Make a cluster of points that follows its own transform: mesh, points?, weights?, radius? (soft falloff), center?, name?"),
+    ("set_cluster_weights", "Set the weight of points in a cluster: id, points, weight"),
+    ("move_in_stack", "Reorder a deformer in its mesh's deformer stack: id, delta"),
 ];
 
 impl RigCommand {
@@ -295,6 +388,15 @@ impl RigCommand {
             RigCommand::RemoveConstraint { .. } => "Remove constraint",
             RigCommand::MatchIk { .. } => "Match IK and FK",
             RigCommand::BakeConstraints { .. } => "Bake constraints",
+            RigCommand::AddShape { target: None, .. } => "Add blend shape",
+            RigCommand::AddShape { .. } => "Add in-between shape",
+            RigCommand::SetShape { .. } => "Blend shape",
+            RigCommand::RemoveShape { .. } => "Remove blend shape",
+            RigCommand::AddLattice { .. } => "Add lattice",
+            RigCommand::EditLattice { .. } => "Edit lattice",
+            RigCommand::AddCluster { .. } => "Add cluster",
+            RigCommand::SetClusterWeights { .. } => "Cluster weights",
+            RigCommand::MoveInStack { .. } => "Reorder deformers",
         }
         .into()
     }
@@ -343,6 +445,14 @@ pub fn apply(doc: &mut Document, cmd: &RigCommand, out: &mut Outcome) -> Result<
         | RigCommand::RemoveConstraint { .. }
         | RigCommand::MatchIk { .. }
         | RigCommand::BakeConstraints { .. } => return crate::constraints::apply(doc, cmd, out),
+        RigCommand::AddShape { .. }
+        | RigCommand::SetShape { .. }
+        | RigCommand::RemoveShape { .. }
+        | RigCommand::AddLattice { .. }
+        | RigCommand::EditLattice { .. }
+        | RigCommand::AddCluster { .. }
+        | RigCommand::SetClusterWeights { .. }
+        | RigCommand::MoveInStack { .. } => return crate::deformers::apply(doc, cmd, out),
         RigCommand::AddJoint { parent, position, name } => {
             let parent_world = match parent {
                 Some(p) => {

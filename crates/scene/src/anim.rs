@@ -238,6 +238,12 @@ impl Animation {
         self.tracks.retain(|t| !(t.target == id && t.path == path && t.layer == layer));
         self.tracks.len() != n
     }
+    /// Remove an attribute's curves from every layer; `true` when it had any.
+    pub fn remove_path(&mut self, id: ObjectId, path: &str) -> bool {
+        let n = self.tracks.len();
+        self.tracks.retain(|t| !(t.target == id && t.path == path));
+        self.tracks.len() != n
+    }
     /// Remove an object's curves from the active layer; `true` when it had any there.
     pub fn remove_object_tracks(&mut self, id: ObjectId) -> bool {
         let (n, layer) = (self.tracks.len(), self.active_layer);

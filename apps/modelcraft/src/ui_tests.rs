@@ -483,3 +483,46 @@ fn exchange_settings_from_the_file_menu() {
     assert_eq!(c.scale, Some(0.01));
     assert!(crate::actions::all().contains(&crate::actions::Action::ExportFbx), "Export FBX is in the palette");
 }
+
+#[test]
+fn patch_grouping_and_mesh_check_by_keyboard() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    let id = h.state().selection[0];
+    // One patch for the whole cube first, then group by angle: six sides, as one history step.
+    palette(&mut h, "Group Patches by Shell");
+    let steps = h.state().doc.scene.get(id).unwrap().steps().len();
+    assert_eq!(steps, 1);
+    palette(&mut h, "Group Patches by Angle");
+    let m = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    assert_eq!(modelcraft_engine::ops::patches::patches_in_use(&m).len(), 6);
+    // Face mode: a new patch from the selection, then select it back by one face.
+    h.key_press(Key::Num4);
+    h.run();
+    h.state_mut().components = [0, 1].into_iter().collect();
+    palette(&mut h, "New Patch from Selection");
+    let m = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    assert_eq!(m.patch(0), m.patch(1));
+    h.state_mut().components = [1].into_iter().collect();
+    palette(&mut h, "Select Patch");
+    assert_eq!(h.state().components.len(), 2);
+    // The mesh check finds no triangles on a cube and says so in the status bar (a live region).
+    palette(&mut h, "Select Triangles");
+    assert!(h.state().components.is_empty());
+    assert!(h.state().status.contains("No triangles"), "{}", h.state().status);
+    // The Properties section is reachable and names its counts.
+    h.get_by_label("Patches and Cleanup").click();
+    h.run();
+    assert!(h.query_by_label_contains("N-gons: 0").is_some());
+    h.get_by_label("Clean Up Mesh").click();
+    h.run();
+    let last = h.state().doc.scene.get(id).unwrap().steps().last().map(|s| s.op.name());
+    assert_eq!(last, Some("Clean up"));
+}

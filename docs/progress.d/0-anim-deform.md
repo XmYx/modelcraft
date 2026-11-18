@@ -1,0 +1,1 @@
+| 2026-11-18 | Deformation: blend shapes with in-between shapes and keyable weights, lattice (free-form) deformation as a Bézier volume or cell by cell with keyable control points, clusters with soft falloff, one deformer stack with skins in child order and a reorder command, their `rig` operations, Properties sections and the lattice cage in the viewport |
