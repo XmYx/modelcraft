@@ -22,6 +22,7 @@ pub mod anim;
 pub mod attr;
 pub mod constraint;
 mod eval;
+pub mod organize;
 pub mod pick;
 pub mod point_deform;
 pub mod rig;
@@ -37,6 +38,7 @@ pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
+pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
 pub use eval::{Evaluated, Evaluator, Instances, StepError};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
@@ -495,6 +497,11 @@ pub enum ObjectKind {
         #[serde(default)]
         target: Option<ObjectId>,
     },
+    /// Shows another object's evaluated mesh (and clones) under its own transform and material.
+    /// The mesh is shared, not copied: change the master and every instance follows.
+    Instance {
+        of: ObjectId,
+    },
 }
 
 impl ObjectKind {
@@ -508,6 +515,7 @@ impl ObjectKind {
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::Instance { .. } => "Instance",
         }
     }
 }
@@ -531,12 +539,55 @@ pub struct Object {
     /// Shown for reference: drawn, never picked in the viewport.
     #[serde(default, skip_serializing_if = "is_false")]
     pub template: bool,
+    /// Behaviours: display, render, protection, look-at ([`organize::Tag`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<Tag>,
+    /// The display layer the object is on ([`organize::DisplayLayer`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<u32>,
+    /// Named values the object carries ([`organize::UserValue`]).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub user: std::collections::BTreeMap<String, UserValue>,
+    /// The point, in the object's own space, that it turns and scales around, and that
+    /// `transform.translation` places in the parent's space.
+    #[serde(default, skip_serializing_if = "pivot_is_origin")]
+    pub pivot: Vec3,
     /// Bumped on every change; the evaluator's cache key. Not saved.
     #[serde(skip)]
     pub rev: u64,
 }
 
 impl Object {
+    /// The object's matrix in its parent's space: its transform about its pivot.
+    pub fn local_matrix(&self) -> Mat4 {
+        let m = self.transform.matrix();
+        if self.pivot == Vec3::ZERO { m } else { m * Mat4::from_translation(-self.pivot) }
+    }
+    /// Move the pivot to `pivot` (own space). With `keep_in_place` the translation changes to
+    /// match, so the object and its children stay where they are: `T R S (x - old)` must equal
+    /// `T' R S (x - new)`, so `T' = T + R S (new - old)`. Returns false (and changes nothing)
+    /// when that would leave the finite range.
+    pub fn set_pivot(&mut self, pivot: Vec3, keep_in_place: bool) -> bool {
+        if !pivot.is_finite() {
+            return false;
+        }
+        if keep_in_place {
+            let t = self.transform.translation + self.transform.rotation * (self.transform.scale * (pivot - self.pivot));
+            if !t.is_finite() {
+                return false;
+            }
+            self.transform.translation = t;
+        }
+        self.pivot = pivot;
+        true
+    }
+    /// The transform with the pivot folded in: placing the object by this alone, with no pivot,
+    /// gives the same matrix as [`Object::local_matrix`] (for file formats that have no pivot).
+    pub fn effective_transform(&self) -> Transform {
+        let mut t = self.transform;
+        t.translation -= t.rotation * (t.scale * self.pivot);
+        t
+    }
     pub fn steps(&self) -> &[Step] {
         match &self.kind {
             ObjectKind::Mesh { steps, .. } => steps,
@@ -550,7 +601,7 @@ impl Object {
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
-        256 + self.name.len() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
+        256 + self.name.len() + self.tags.len() * 48 + self.user.iter().map(|(k, v)| 48 + k.len() + if let UserValue::Text(t) = v { t.len() } else { 0 }).sum::<usize>() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
     }
 }
 
@@ -578,6 +629,12 @@ pub struct Scene {
     /// Named selections.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sets: Vec<SelectionSet>,
+    /// Display and render layers ([`organize::DisplayLayer`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<DisplayLayer>,
+    /// Saved attribute sets ([`organize::AttributePreset`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<AttributePreset>,
 }
 
 #[allow(clippy::borrowed_box)]
@@ -597,6 +654,10 @@ pub const MAX_SETS: usize = 1000;
 
 fn is_false(v: &bool) -> bool {
     !*v
+}
+
+fn pivot_is_origin(v: &Vec3) -> bool {
+    *v == Vec3::ZERO
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -654,11 +715,16 @@ impl Scene {
             s.ids.retain(|i| ids.contains(i));
             s.name = s.name.chars().take(256).collect();
         }
+        self.repair_organization();
         Ok(self)
     }
 
     pub fn objects(&self) -> &[Object] {
         &self.objects
+    }
+    /// Mutable objects without a revision bump, for repairs that change nothing a cache holds.
+    pub(crate) fn objects_mut_unbumped(&mut self) -> impl Iterator<Item = &mut Object> {
+        self.objects.iter_mut()
     }
     pub fn get(&self, id: ObjectId) -> Option<&Object> {
         self.objects.iter().find(|o| o.id == id)
@@ -707,6 +773,10 @@ impl Scene {
             kind,
             locked: false,
             template: false,
+            tags: Vec::new(),
+            layer: None,
+            user: Default::default(),
+            pivot: Vec3::ZERO,
             rev: next_rev(),
         });
         Ok(id)
@@ -746,6 +816,7 @@ impl Scene {
         for s in &mut self.sets {
             s.ids.retain(|i| !doomed.contains(i));
         }
+        self.prune_organization();
         out
     }
 
@@ -843,7 +914,7 @@ impl Scene {
         let mut c = self.get(id);
         for _ in 0..MAX_DEPTH {
             let Some(o) = c else { break };
-            m = o.transform.matrix() * m;
+            m = o.local_matrix() * m;
             c = o.parent.and_then(|p| self.get(p));
         }
         m
@@ -870,7 +941,7 @@ impl Scene {
         let mut c = self.get(id);
         for _ in 0..MAX_DEPTH {
             let Some(o) = c else { return true };
-            if !o.visible {
+            if !o.visible || o.layer.and_then(|l| self.layer(l)).is_some_and(|l| !l.visible) {
                 return false;
             }
             c = o.parent.and_then(|p| self.get(p));

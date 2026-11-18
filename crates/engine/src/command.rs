@@ -253,6 +253,9 @@ pub enum Command {
     Anim(crate::anim::AnimCommand),
     /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
     Rig(crate::rig::RigCommand),
+    /// Tags, layers, user attributes, presets, pivots and instances:
+    /// `{"cmd":"organize","op":"set_tag",…}` ([`crate::organize::OrganizeCommand`]).
+    Organize(crate::organize::OrganizeCommand),
 }
 
 /// Most commands one batch may hold, and how deep batches may nest.
@@ -367,6 +370,7 @@ impl Command {
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
+            Command::Organize(o) => o.label(),
         }
     }
 }

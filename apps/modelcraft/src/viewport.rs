@@ -8,7 +8,7 @@ use glam::{Mat4, Quat, Vec2 as GVec2, Vec3};
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::PolyMesh;
 use modelcraft_engine::scene::pick::{self, Ray};
-use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Scene, Step, StepOp};
+use modelcraft_engine::scene::{DisplayMode, Object, ObjectId, ObjectKind, Scene, Step, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Dab};
 use modelcraft_render::buffers::{self, LineVertex};
 use modelcraft_render::{Camera, ViewPreset};
@@ -89,7 +89,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
         .into_iter()
         .map(|(id, _)| id)
         .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. })))
+        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } | ObjectKind::Instance { .. })))
         .collect()
 }
 
@@ -770,8 +770,12 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             }
         }
     }
-    let lines = scene_lines(app, i);
-    let overlay = face_overlay(app);
+    let mut lines = scene_lines(app, i);
+    let mut overlay = face_overlay(app);
+    let extras = crate::display_modes::plan(&app.doc.scene, app.display_mode, &|id| app.selection.contains(&id), &items);
+    lines.extend(extras.lines);
+    overlay.extend(extras.overlay);
+    let modes = extras.modes;
     let Some(g) = &mut app.gpu else {
         cpu_view(app, ui, i, rect, &items, &lines);
         return;
@@ -779,9 +783,13 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
     let mut specs = Vec::new();
-    for (id, m, w, tint) in &items {
+    for (n, (id, m, w, tint)) in items.iter().enumerate() {
         let Some(o) = app.doc.scene.get(*id) else { continue };
-        let key = m.as_ref().map(|m| g.mesh(m));
+        let mode = modes.get(n).copied().unwrap_or_default();
+        if matches!(mode, DisplayMode::Wireframe | DisplayMode::SeeThrough | DisplayMode::BoundingBox) {
+            continue;
+        }
+        let key = if mode == DisplayMode::Flat { m.as_ref().map(|m| g.mesh_flat(m)) } else { m.as_ref().map(|m| g.mesh(m)) };
         let base = material_source(&app.doc.scene, o).material.base_color;
         specs.push(crate::gpu::DrawSpec {
             key,

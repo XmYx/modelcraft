@@ -69,6 +69,25 @@ pub fn mesh_data(m: &PolyMesh) -> MeshData {
     out
 }
 
+/// Drawing data with one normal per face (flat shading).
+pub fn flat_data(m: &PolyMesh) -> MeshData {
+    let corners: usize = (0..m.face_count() as u32).map(|f| m.face_len(f)).sum();
+    let mut out = MeshData { vertices: Vec::with_capacity(corners), indices: Vec::with_capacity(corners * 2) };
+    for f in 0..m.face_count() as u32 {
+        let n = m.face_normal(f).to_array();
+        let first = out.vertices.len() as u32;
+        let mut count = 0u32;
+        for h in m.face_half_edges(f) {
+            out.vertices.push(MeshVertex { pos: m.position(m.origin(h)).to_array(), normal: n, mask: 0.0, patch: m.patch(f) as f32 });
+            count += 1;
+        }
+        for i in 1..count.saturating_sub(1) {
+            out.indices.extend_from_slice(&[first, first + i, first + i + 1]);
+        }
+    }
+    out
+}
+
 /// Shared-vertex data (sculpt meshes): one vertex per mesh vertex.
 pub fn shared_data(positions: &[Vec3], normals: &[Vec3], mask: Option<&[f32]>, tris: &[[u32; 3]]) -> MeshData {
     let vertices = (0..positions.len()).map(|i| vertex_at(positions, normals, mask, i)).collect();

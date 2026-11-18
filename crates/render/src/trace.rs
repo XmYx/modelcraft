@@ -183,8 +183,8 @@ pub fn renderable(scene: &Scene) -> Vec<ObjectId> {
         .tree_order()
         .into_iter()
         .map(|(id, _)| id)
-        .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })))
+        .filter(|id| scene.renders(*id) && !scene.is_cage_input(*id))
+        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Instance { .. })))
         .collect()
 }
 

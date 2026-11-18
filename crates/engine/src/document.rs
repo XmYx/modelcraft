@@ -678,9 +678,17 @@ impl Document {
         let ids: Vec<ObjectId> = match cmd {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
+            Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::SetTransform { id, transform } => {
+                if let Some(o) = self.scene.get(*id)
+                    && let Some(channel) = self.scene.protected_channel(*id, &o.transform, &transform.sanitized())
+                {
+                    return invalid(format!("{} is protected: its {channel} cannot change until the protection tag is removed", o.name));
+                }
+                vec![*id]
+            }
             Command::Rename { id, .. }
             | Command::Reparent { id, .. }
-            | Command::SetTransform { id, .. }
             | Command::SetMaterial { id, .. }
             | Command::SetPrimitive { id, .. }
             | Command::SetCageLevels { id, .. }
@@ -693,8 +701,9 @@ impl Document {
             _ => return Ok(()),
         };
         for id in ids {
-            if let Some(o) = self.scene.get(id).filter(|o| o.locked) {
-                return invalid(format!("{} is locked; unlock it first", o.name));
+            if self.scene.is_locked(id) {
+                let name = self.scene.get(id).map_or("an object", |o| o.name.as_str());
+                return invalid(format!("{name} is locked; unlock it first"));
             }
         }
         Ok(())
@@ -757,6 +766,9 @@ impl Document {
                     if self.scene.get(*id).is_none() {
                         return Err(SceneError::NoObject(*id).into());
                     }
+                }
+                crate::organize::realize_instances_of(self, ids);
+                for id in ids {
                     self.scene.remove(*id);
                 }
             }
@@ -775,6 +787,10 @@ impl Document {
                     n.transform = o.transform;
                     n.material = o.material.clone();
                     n.visible = o.visible;
+                    n.pivot = o.pivot;
+                    n.layer = o.layer;
+                    n.user = o.user.clone();
+                    n.tags = o.tags.iter().filter(|t| !matches!(t, modelcraft_scene::Tag::LookAt { .. })).cloned().collect();
                     map.insert(old, nid);
                     out.created.push(nid);
                 }
@@ -921,6 +937,7 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;
@@ -1029,7 +1046,7 @@ impl Document {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
                 || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
-                || !self.scene.visible(id)
+                || !self.scene.renders(id)
             {
                 continue;
             }
@@ -1045,7 +1062,7 @@ impl Document {
             let instances = evaluated.as_ref().and_then(|e| e.instances.clone());
             let mesh = if instances.is_some() { None } else { evaluated.map(|e| e.mesh) };
             let here = items.len();
-            items.push(Item { name: o.name.clone(), parent, transform: o.transform, mesh, material: o.material.clone() });
+            items.push(Item { name: o.name.clone(), parent, transform: o.effective_transform(), mesh, material: o.material.clone() });
             if let Some(inst) = instances {
                 let material = inst.source_object.and_then(|s| self.scene.get(s)).map(|s| s.material.clone()).unwrap_or_default();
                 let mut baked_vertices = 0usize;

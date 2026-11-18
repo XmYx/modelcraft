@@ -250,6 +250,8 @@ pub struct ModelApp {
     pub stroke: Option<crate::viewport::StrokeInput>,
     pub show_wire: bool,
     pub show_patches: bool,
+    /// How the viewport draws surfaces (an object's Display tag overrides it).
+    pub display_mode: modelcraft_engine::scene::DisplayMode,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
     pub shot: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
@@ -368,6 +370,7 @@ impl ModelApp {
             stroke: None,
             show_wire: true,
             show_patches: false,
+            display_mode: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
             shot: Default::default(),

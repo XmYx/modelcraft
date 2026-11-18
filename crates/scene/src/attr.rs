@@ -8,6 +8,8 @@
 //! | `translate.x|y|z`, `scale.x|y|z` | the transform |
 //! | `rotate.x|y|z` | rotation as XYZ Euler angles in degrees |
 //! | `visible` | 1 shown, 0 hidden |
+//! | `pivot.x|y|z` | the pivot, in the object's own space |
+//! | `user.<name>`, `user.<name>.x|y|z` | a user attribute: a number or switch, or one part of a vector |
 //! | `material.metallic`, `material.base_color.0` … | the material, as it is saved |
 //! | `primitive.radius` … | a primitive's parameters |
 //! | `step.<step id>.distance` …, `step.<step id>.enabled` | a build-history step |
@@ -25,7 +27,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{Object, ObjectKind, SceneError, Source, StepOp};
+use crate::{Object, ObjectKind, SceneError, Source, StepOp, UserValue};
 
 /// Lists longer than this are not attributes (component selections, point lists).
 const MAX_LIST: usize = 4;
@@ -54,6 +56,16 @@ pub fn list(o: &Object) -> Vec<(String, f64)> {
         }
     }
     out.push(("visible".into(), if o.visible { 1.0 } else { 0.0 }));
+    for (a, x) in AXES.iter().zip(o.pivot.to_array()) {
+        out.push((format!("pivot.{a}"), x as f64));
+    }
+    for (name, v) in &o.user {
+        match v {
+            UserValue::Number(_) | UserValue::Switch(_) => out.extend(v.as_number().map(|n| (format!("user.{name}"), n))),
+            UserValue::Vector(a) => out.extend(AXES.iter().zip(a).map(|(ax, x)| (format!("user.{name}.{ax}"), *x as f64))),
+            UserValue::Text(_) | UserValue::Colour(_) => {}
+        }
+    }
     collect(&o.material, "material", &mut out);
     match &o.kind {
         ObjectKind::Mesh { source, steps } => {
@@ -84,6 +96,8 @@ pub fn get(o: &Object, path: &str) -> Option<f64> {
         "scale" => axis(rest).map(|i| o.transform.scale.to_array()[i] as f64),
         "rotate" => axis(rest).map(|i| o.transform.euler_degrees().to_array()[i] as f64),
         "visible" if rest.is_empty() => Some(if o.visible { 1.0 } else { 0.0 }),
+        "pivot" => axis(rest).map(|i| o.pivot.to_array()[i] as f64),
+        "user" => user_get(o, rest),
         "material" => read(&o.material, rest),
         _ => match &o.kind {
             ObjectKind::Mesh { source, steps } => match (head, source) {
@@ -136,6 +150,15 @@ pub fn set(o: &mut Object, path: &str, value: f64) -> Result<bool, SceneError> {
             Ok(true)
         }
         "visible" if rest.is_empty() => Ok(std::mem::replace(&mut o.visible, value >= 0.5) != (value >= 0.5)),
+        "pivot" => {
+            let i = axis(rest).ok_or_else(|| invalid(path))?;
+            let mut a = o.pivot.to_array();
+            let changed = a[i] != v;
+            a[i] = v;
+            o.pivot = Vec3::from_array(a);
+            Ok(changed)
+        }
+        "user" => user_set(o, rest, value).ok_or_else(|| invalid(path)),
         "material" => write(&mut o.material, rest, value).ok_or_else(|| invalid(path)),
         _ => match &mut o.kind {
             ObjectKind::Mesh { source, steps } => match (head, source) {
@@ -250,4 +273,36 @@ fn write<T: Serialize + DeserializeOwned + PartialEq>(part: &mut T, path: &str, 
     };
     let new: T = serde_json::from_value(root).ok()?;
     Some(std::mem::replace(part, new) != *part)
+}
+
+/// Split `name` or `name.x` at the last dot when the part after it is an axis.
+fn user_parts(rest: &str) -> (&str, Option<usize>) {
+    match rest.rsplit_once('.') {
+        Some((name, a)) if axis(a).is_some() => (name, axis(a)),
+        _ => (rest, None),
+    }
+}
+
+fn user_get(o: &Object, rest: &str) -> Option<f64> {
+    let (name, part) = user_parts(rest);
+    match (o.user.get(name)?, part) {
+        (UserValue::Vector(v), Some(i)) => v.get(i).map(|x| *x as f64),
+        (v @ (UserValue::Number(_) | UserValue::Switch(_)), None) => v.as_number(),
+        _ => None,
+    }
+}
+
+fn user_set(o: &mut Object, rest: &str, value: f64) -> Option<bool> {
+    let (name, part) = user_parts(rest);
+    match (o.user.get_mut(name)?, part) {
+        (UserValue::Vector(v), Some(i)) => {
+            let slot = v.get_mut(i)?;
+            let changed = *slot != value as f32;
+            *slot = value as f32;
+            Some(changed)
+        }
+        (UserValue::Number(n), None) => Some(std::mem::replace(n, value) != value),
+        (UserValue::Switch(b), None) => Some(std::mem::replace(b, value >= 0.5) != (value >= 0.5)),
+        _ => None,
+    }
 }
