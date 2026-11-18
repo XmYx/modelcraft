@@ -41,11 +41,15 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 const CORE: &[&str] = &[
     "modelcraft-mesh",
     "modelcraft-ops",
+    "modelcraft-uv",
+    "modelcraft-hair",
+    "modelcraft-clone",
     "modelcraft-scene",
     "modelcraft-sculpt",
     "modelcraft-formats",
     "modelcraft-engine",
     "modelcraft-render",
+    "modelcraft-script",
     "craft-render-bvh",
     "craft-render-core",
     "craft-render-gpu",
@@ -497,6 +501,55 @@ fn parity_ci() -> Result<(), String> {
     Ok(())
 }
 
+/// The generated script API page, as `cargo run -p modelcraft-script --example api_docs` prints it.
+fn script_docs_fresh() -> Result<String, String> {
+    let out = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(["run", "-q", "-p", "modelcraft-script", "--example", "api_docs"])
+        .current_dir(root())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("could not generate the script API reference:\n{}", String::from_utf8_lossy(&out.stderr)));
+    }
+    String::from_utf8(out.stdout).map_err(|e| e.to_string())
+}
+
+/// What a stale `docs/scripting-api.md` is called, or nothing when it is current.
+fn script_docs_staleness(have: &str, fresh: &str) -> Option<String> {
+    (have != fresh).then(|| "docs/scripting-api.md is out of date: run `cargo xtask script-docs --write`".to_string())
+}
+
+/// `docs/scripting-api.md`, generated from the script function table and the command registry.
+/// With `--write` it is rewritten; without it the command fails when the page is out of date.
+fn script_docs(write: bool) -> Result<(), String> {
+    let fresh = script_docs_fresh()?;
+    let path = root().join("docs/scripting-api.md");
+    if write {
+        std::fs::write(&path, &fresh).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("script-docs: wrote docs/scripting-api.md ({} lines)", fresh.lines().count());
+        return Ok(());
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    match script_docs_staleness(&have, &fresh) {
+        None => {
+            println!("script-docs: docs/scripting-api.md is current");
+            Ok(())
+        }
+        Some(e) => Err(e),
+    }
+}
+
+/// The check `ci` runs: a stale page only warns, like the parity block (commands change in many
+/// concurrent PRs, so committing the generated page there would make them all conflict).
+fn script_docs_ci() -> Result<(), String> {
+    let fresh = script_docs_fresh()?;
+    let have = std::fs::read_to_string(root().join("docs/scripting-api.md")).unwrap_or_default();
+    if let Some(w) = script_docs_staleness(&have, &fresh) {
+        eprintln!("xtask: warning: {w} (not a failure; refresh it in a separate change)");
+    }
+    Ok(())
+}
+
 fn ci() -> Result<(), String> {
     cargo(&["fmt", "--all", "--check"])?;
     cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])?;
@@ -505,6 +558,7 @@ fn ci() -> Result<(), String> {
     assets()?;
     licenses()?;
     parity_ci()?;
+    script_docs_ci()?;
     progress(true)
 }
 
@@ -518,10 +572,11 @@ fn main() -> ExitCode {
         "licenses" => licenses(),
         "progress" => progress(rest.first().is_some_and(|a| a == "--check")),
         "parity" => parity(rest.first().is_some_and(|a| a == "--write")),
+        "script-docs" => script_docs(rest.first().is_some_and(|a| a == "--write")),
         "version" => version(rest),
         "strings" => strings(rest),
         "icons" => icons(),
-        _ => Err("usage: cargo xtask <ci|layers|assets|licenses|progress [--check]|parity [--write]|version [set X]|strings [craft-i18n dir]|icons>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|assets|licenses|progress [--check]|parity [--write]|script-docs [--write]|version [set X]|strings [craft-i18n dir]|icons>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -575,6 +630,16 @@ mod tests {
         let n = super::icns(&[(b"ic07", vec![9; 4])]);
         assert_eq!(&n[..4], b"icns");
         assert_eq!(u32::from_be_bytes([n[4], n[5], n[6], n[7]]) as usize, n.len());
+    }
+
+    #[test]
+    fn a_stale_script_reference_warns_but_does_not_fail_ci() {
+        assert_eq!(super::script_docs_staleness("same", "same"), None);
+        let w = super::script_docs_staleness("old", "new").unwrap_or_default();
+        assert!(w.contains("out of date") && w.contains("script-docs --write"), "{w}");
+        // `ci` treats it as a warning: the check returns Ok even when the page is stale.
+        // (script_docs_ci compares with the file on disk and only prints.)
+        assert!(super::script_docs_staleness("old", "new").is_some());
     }
 
     #[test]

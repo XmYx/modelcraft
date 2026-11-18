@@ -58,7 +58,11 @@ pub fn shortcut_text(app: &ModelApp, a: Action) -> String {
 
 /// Run this frame's shortcuts.
 pub fn dispatch(app: &mut ModelApp, ctx: &egui::Context) -> Vec<Action> {
-    let typing = ctx.egui_wants_keyboard_input();
+    // For egui any focused widget "wants the keyboard", a viewport after a click included, and
+    // that used to switch off Undo and the other editing shortcuts right after every stroke.
+    // A focused viewport is not typing.
+    let on_viewport = ctx.memory(|m| m.focused()).is_some_and(|f| (0..4usize).any(|i| f == egui::Id::unique(("viewport", i))));
+    let typing = ctx.egui_wants_keyboard_input() && !on_viewport;
     let contexts = [context(app.workspace)];
     let active = Active { panel: None, contexts: &contexts, typing };
     let keymap = &app.keymap;

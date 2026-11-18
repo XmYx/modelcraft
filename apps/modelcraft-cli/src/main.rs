@@ -4,7 +4,9 @@
 #![forbid(unsafe_code)]
 
 mod bench_cmd;
+mod hair_cmd;
 mod render_cmd;
+mod script_cmd;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -14,7 +16,9 @@ use std::time::Instant;
 use glam::Vec3;
 use modelcraft_engine::scene::{ObjectKind, Scene};
 use modelcraft_engine::sculpt::{BrushKind, BrushSettings, Dab, SculptMesh};
-use modelcraft_engine::{COMMANDS, Command, Document};
+use modelcraft_engine::{COMMANDS, Command, Document, control as channel};
+
+mod mcp;
 
 const USAGE: &str = "Usage: modelcraft-cli <command> [args]
 
@@ -27,8 +31,13 @@ Commands:
                                     apply one JSON command per line, then save
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
-  export <project> <out.glb|obj|stl>
-  convert <in> <out>                any readable file to .glb, .obj, .stl or .modelcraft
+  export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
+  export-uv <project> <out.svg|png> [--size N] [--object ID]
+                                    the UV layout of a mesh object as a picture
+  convert <in> <out> [--up auto|y|z] [--scale M]
+                                    any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
+                                    .glb, .obj, .stl, .fbx or .modelcraft; --up and --scale
+                                    (metres per file unit) convert axes and units
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
                                     one command per line in, {\"ok\":…} per line out
@@ -37,12 +46,26 @@ Commands:
   cache-info <file.mcpc>            print a point cache's header and bounds
   bench-skin [--verts N] [--joints N] [--frames N]
                                     bind and play a skinned tube: weights, evaluation, playback
+  serve [project] [--port N]        the same channel on a loopback socket, behind a token
+                                    written to a file only you can read
+  call <method> ['<json params>'] [--port N] [--token T]
+                                    one request to a running app or `serve` (engine.execute,
+                                    document.info, document.save, …)
+  mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
+  uv <file>                         UV islands and distortion of every mesh object (JSON lines)
+  uv-bench [--segments N]           unwrap a sphere of N×N/2 quads: time and distortion
   -h, --help | -V, --version
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nRendering:\n{}\n{}\n", render_cmd::USAGE, bench_cmd::USAGE)
+    format!(
+        "{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n",
+        script_cmd::USAGE,
+        render_cmd::USAGE,
+        bench_cmd::USAGE,
+        hair_cmd::USAGE
+    )
 }
 
 fn main() -> ExitCode {
@@ -80,7 +103,7 @@ fn is_project(p: &Path) -> bool {
 }
 
 /// Open a project, or import any other readable file into a new document.
-fn load(path: &str) -> Result<Document, String> {
+pub(crate) fn load(path: &str) -> Result<Document, String> {
     let p = Path::new(path);
     if is_project(p) {
         let mut d = Document::open(p).map_err(|e| e.to_string())?;
@@ -94,7 +117,7 @@ fn load(path: &str) -> Result<Document, String> {
         Ok(d)
     } else {
         let mut d = Document::new();
-        let out = d.execute(Command::Import { path: path.to_string() }).map_err(|e| e.to_string())?;
+        let out = d.execute(Command::Import { path: path.to_string(), up: Default::default(), scale: None }).map_err(|e| e.to_string())?;
         for w in out.warnings {
             eprintln!("warning: {w}");
         }
@@ -102,9 +125,29 @@ fn load(path: &str) -> Result<Document, String> {
     }
 }
 
+/// `--up` and `--scale` (metres per file unit).
+fn convert_flags(a: &[String]) -> Result<modelcraft_engine::formats::exchange::Convert, String> {
+    use modelcraft_engine::formats::exchange::{Convert, Up};
+    let up = match flag(a, "--up").as_deref() {
+        None | Some("auto") => Up::Auto,
+        Some("y") | Some("Y") => Up::Y,
+        Some("z") | Some("Z") => Up::Z,
+        Some(other) => return Err(format!("--up takes auto, y or z, not {other:?}")),
+    };
+    let scale = match flag(a, "--scale") {
+        None => None,
+        Some(s) => Some(s.parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).ok_or_else(|| format!("--scale takes a positive number, not {s:?}"))?),
+    };
+    Ok(Convert { up, scale })
+}
+
 fn save(d: &mut Document, out: &str) -> Result<(), String> {
+    save_with(d, out, Default::default())
+}
+
+fn save_with(d: &mut Document, out: &str, convert: modelcraft_engine::formats::exchange::Convert) -> Result<(), String> {
     let p = Path::new(out);
-    if is_project(p) { d.save_as(p) } else { d.export(p) }.map_err(|e| e.to_string())?;
+    if is_project(p) { d.save_as(p) } else { d.export_with(p, convert) }.map_err(|e| e.to_string())?;
     // A CLI save is final: no journal left behind.
     d.detach_journal();
     Ok(())
@@ -146,8 +189,33 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             save(&mut d, &flag(a, "-o").unwrap_or_else(|| project.to_string()))
         }
-        "export" => save(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?),
-        "convert" => save(&mut load(arg(a, 0, "input")?)?, arg(a, 1, "output")?),
+        "export" => {
+            let c = convert_flags(a)?;
+            save_with(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?, c)
+        }
+        "export-uv" => {
+            let mut d = load(arg(a, 0, "project")?)?;
+            let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
+            let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
+            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+        }
+        "convert" => {
+            let c = convert_flags(a)?;
+            let input = arg(a, 0, "input")?;
+            let mut d = if is_project(Path::new(input)) {
+                load(input)?
+            } else {
+                let mut d = Document::new();
+                let out = d.execute(Command::Import { path: input.to_string(), up: c.up, scale: c.scale }).map_err(|e| e.to_string())?;
+                for w in out.warnings {
+                    eprintln!("warning: {w}");
+                }
+                d
+            };
+            // The conversion applies on the way in; the output is written as the scene is.
+            let out = if is_project(Path::new(input)) { c } else { Default::default() };
+            save_with(&mut d, arg(a, 1, "output")?, out)
+        }
         "recover" => {
             let p = PathBuf::from(arg(a, 0, "project")?);
             let mut d = Document::open(&p).map_err(|e| e.to_string())?;
@@ -174,12 +242,39 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         }
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
+        "run-script" => script_cmd::run(a, load, save),
+        "batch-script" => script_cmd::batch(a, load, save),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
             println!("{report}");
             Ok(())
         }
+        "serve" => serve(positional(a), flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?),
+        "call" => {
+            let method = arg(a, 0, "method")?;
+            let params = match a.get(1).filter(|p| !p.starts_with("--")) {
+                Some(p) => serde_json::from_str(p).map_err(|e| format!("params: {e}"))?,
+                None => serde_json::json!({}),
+            };
+            let port = flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?;
+            let mut c = mcp::app_connection(port, flag(a, "--token").as_deref())?;
+            let v = c.call(craft_control::client::Request::new(method, params)).map_err(|e| e.message().to_string())?;
+            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            Ok(())
+        }
+        "mcp" => {
+            let backend = if a.iter().any(|x| x == "--app") {
+                let port = flag(a, "--port").map(|p| p.parse::<u16>().map_err(|e| format!("--port: {e}"))).transpose()?;
+                mcp::Backend::App(Box::new(mcp::app_connection(port, None)?))
+            } else {
+                mcp::local(positional(a))?
+            };
+            mcp::serve(backend)
+        }
+        "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
+        "hair-bench" => hair_cmd::bench(a),
+        "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
@@ -362,8 +457,29 @@ fn validate(d: &mut Document) -> Result<(), String> {
     if bad == 0 { Ok(()) } else { Err("invalid meshes found".into()) }
 }
 
-/// The agent channel: newline-delimited JSON commands on stdin, one reply per line on stdout.
-/// Extra verbs: `{"cmd":"save","path":…}`, `{"cmd":"info"}`, `{"cmd":"export","path":…}`.
+/// The first argument that is not a flag (or a flag's value).
+fn positional(a: &[String]) -> Option<&str> {
+    let mut skip = false;
+    for x in a {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if matches!(x.as_str(), "--port" | "--token") {
+            skip = true;
+            continue;
+        }
+        if !x.starts_with("--") {
+            return Some(x);
+        }
+    }
+    None
+}
+
+/// The agent channel: newline-delimited JSON on stdin, one reply per line on stdout. A line is an
+/// engine command (`{"cmd": …}`), one of the extra verbs `{"cmd":"save","path":…}`,
+/// `{"cmd":"info"}`, `{"cmd":"export","path":…}`, or a control request `{"method": …, "params": …}`
+/// as the socket takes it.
 fn control(project: Option<&str>) -> Result<(), String> {
     let mut d = match project {
         Some(p) if Path::new(p).exists() => load(p)?,
@@ -376,45 +492,113 @@ fn control(project: Option<&str>) -> Result<(), String> {
         if line.trim().is_empty() {
             continue;
         }
-        if line.len() > 64 << 20 {
+        if line.len() > channel::MAX_LINE {
             let _ = writeln!(out, "{{\"ok\":false,\"error\":\"line too long\"}}");
             continue;
         }
         let reply = match serde_json::from_str::<serde_json::Value>(&line) {
             Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-            Ok(v) => match v.get("cmd").and_then(|c| c.as_str()) {
-                Some("save") | Some("export") => {
-                    let path = v.get("path").and_then(|p| p.as_str()).unwrap_or_default().to_string();
-                    match save(&mut d, &path) {
-                        Ok(()) => serde_json::json!({ "ok": true }),
-                        Err(e) => serde_json::json!({ "ok": false, "error": e }),
-                    }
+            Ok(v) => {
+                let (method, params) = match (v.get("method").and_then(|m| m.as_str()), v.get("cmd").and_then(|c| c.as_str())) {
+                    (Some(m), _) => (m.to_string(), v.get("params").cloned().unwrap_or(serde_json::json!({}))),
+                    (None, Some("save")) => ("document.save".into(), v.clone()),
+                    (None, Some("export")) => ("document.export".into(), v.clone()),
+                    (None, Some("info")) => ("document.info".into(), serde_json::json!({})),
+                    _ => ("engine.execute".into(), v.clone()),
+                };
+                let r = channel::handle(&mut d, &method, &params);
+                // A CLI save is final: no journal left behind.
+                if method == "document.save" {
+                    d.detach_journal();
                 }
-                Some("info") => {
-                    let objects: Vec<serde_json::Value> = d
-                        .scene
-                        .tree_order()
-                        .into_iter()
-                        .filter_map(|(id, depth)| {
-                            let o = d.scene.get(id)?.clone();
-                            let m = d.eval.evaluate(&d.scene, id).mesh;
-                            Some(serde_json::json!({"id": id.0, "name": o.name, "type": o.kind.type_name(), "depth": depth, "faces": m.face_count(), "steps": o.steps().len()}))
-                        })
-                        .collect();
-                    serde_json::json!({ "ok": true, "result": { "objects": objects, "undo": d.undo.labels() } })
-                }
-                _ => match serde_json::from_value::<Command>(v) {
-                    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-                    Ok(c) => match d.execute(c) {
-                        Ok(o) => serde_json::json!({ "ok": true, "result": o }),
-                        Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-                    },
-                },
-            },
+                r
+            }
         };
         writeln!(out, "{reply}").map_err(|e| e.to_string())?;
         out.flush().map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// The control channel on a loopback socket, answering until the process is stopped.
+fn serve(project: Option<&str>, port: Option<u16>) -> Result<(), String> {
+    let mut d = match project {
+        Some(p) if Path::new(p).exists() => load(p)?,
+        Some(p) => {
+            let mut d = Document::new();
+            d.path = Some(PathBuf::from(p));
+            d
+        }
+        None => Document::new(),
+    };
+    let l = channel::listen(port, None, || {}).map_err(|e| format!("cannot listen: {e}"))?;
+    match &l.token_file {
+        Some(f) => println!("listening on 127.0.0.1:{} (token in {})", l.port, f.display()),
+        None => println!("listening on 127.0.0.1:{} (token from MODELCRAFT_CONTROL_TOKEN)", l.port),
+    }
+    let _ = std::io::stdout().flush();
+    while let Ok(req) = l.requests.recv() {
+        let save = req.method == "document.save";
+        channel::answer(&mut d, req);
+        if save {
+            d.detach_journal();
+        }
+    }
+    Ok(())
+}
+
+fn distortion_json(d: &modelcraft_engine::uv::Distortion) -> serde_json::Value {
+    serde_json::json!({
+        "triangles": d.triangles, "flipped": d.flipped,
+        "mean_angle_error_deg": d.mean_angle_error_deg, "max_angle_error_deg": d.max_angle_error_deg,
+        "mean_stretch": d.mean_stretch, "max_stretch": d.max_stretch,
+        "area_rms_log": d.area_rms_log, "min_area_ratio": d.min_area_ratio, "max_area_ratio": d.max_area_ratio,
+    })
+}
+
+/// One JSON line per mesh object: its UV islands (cut along the UV discontinuities) and the
+/// distortion of its UVs. Objects without UVs report `"uvs":false`.
+fn uv_report(d: &mut Document) -> Result<(), String> {
+    use modelcraft_engine::uv::{Charts, SeamSet, measure};
+    let ids: Vec<_> = d.scene.objects().iter().filter(|o| matches!(o.kind, ObjectKind::Mesh { .. })).map(|o| o.id).collect();
+    for id in ids {
+        let m = d.eval.evaluate(&d.scene, id).mesh;
+        let name = d.scene.get(id).map(|o| o.name.clone()).unwrap_or_default();
+        if !m.has_uvs() {
+            println!("{}", serde_json::json!({ "id": id.0, "name": name, "uvs": false }));
+            continue;
+        }
+        let charts = Charts::build(&m, &SeamSet::from_uv_discontinuities(&m)).map_err(|e| e.to_string())?;
+        let (dist, _) = measure(&m);
+        println!("{}", serde_json::json!({ "id": id.0, "name": name, "uvs": true, "islands": charts.islands.len(), "distortion": distortion_json(&dist) }));
+    }
+    Ok(())
+}
+
+/// Unwrap a welded UV sphere (no seams: the automatic cut gives it a path) and report time and
+/// distortion. Reproduces the numbers in `docs/performance.md`.
+fn uv_bench(segments: u32) -> Result<(), String> {
+    use modelcraft_engine::ops::{edit, primitives::Primitive};
+    use modelcraft_engine::uv::{SeamSet, UnwrapOptions, measure, unwrap_mesh};
+    let segments = segments.clamp(4, 512);
+    let rings = (segments / 2).max(2);
+    let t = Instant::now();
+    let raw = Primitive::Sphere { radius: 1.0, segments, rings }.build().map_err(|e| e.to_string())?;
+    let mesh = edit::weld(&raw, 1e-5).map_err(|e| e.to_string())?;
+    println!("sphere {segments}x{rings}: {} quads, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
+    let t = Instant::now();
+    let (out, res) = unwrap_mesh(&mesh, &SeamSet::new(), &UnwrapOptions::default()).map_err(|e| e.to_string())?;
+    let solve = ms(t);
+    let isl = res.islands.first();
+    println!(
+        "unwrap (auto cut of {} edges, LSCM): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
+        res.cut.edges_added,
+        isl.map_or(0, |i| i.iterations),
+        isl.map_or(0.0, |i| i.residual),
+        isl.is_some_and(|i| i.converged)
+    );
+    let (dist, _) = measure(&out);
+    println!("{}", distortion_json(&dist));
     Ok(())
 }
 
@@ -430,7 +614,7 @@ fn ms(t: Instant) -> f64 {
 /// Sculpt latency on a dense quad sphere: build times, per-dab time for each brush, and, when a
 /// GPU is present, the chunked upload and a full 1920×1080 draw of the mesh.
 fn bench(polys: u32, dabs: usize) -> Result<(), String> {
-    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1024);
+    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1632);
     let t = Instant::now();
     let mesh = modelcraft_engine::ops::primitives::Primitive::RoundCube { radius: 1.0, segments: seg }.build().map_err(|e| e.to_string())?;
     let build_ms = ms(t);
@@ -500,7 +684,9 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                 }
             }
         }
+        let t = Instant::now();
         let undo = s.end_stroke().map(|(u, _)| u.indices.len()).unwrap_or(0);
+        let end_ms = ms(t);
         if kind == BrushKind::Mask {
             // Leave the surface free for the brushes that follow.
             s.mask_all(0.0);
@@ -508,19 +694,24 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
         }
         let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
         println!(
-            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts",
+            "{:<12} dab mean {:.3} ms p95 {:.3} ms | upload mean {:.3} ms ({} verts/dab) | draw+wait mean {:.2} ms | stroke touched {} verts, stroke end {:.1} ms",
             kind.label(),
             mean(&dab_t),
             pct(&mut dab_t, 0.95),
             mean(&up_t),
             touched / dabs.max(1),
             mean(&draw_t),
-            undo
+            undo,
+            end_ms
         );
     }
     let t = Instant::now();
     s.refit();
-    println!("bvh refit {:.1} ms", ms(t));
+    println!("full bvh refit {:.1} ms (a stroke end refits only what moved)", ms(t));
+    if polys > 2_000_000 {
+        println!("(history, detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
+        return Ok(());
+    }
     // A full scene-evaluation round trip on the same density through the engine.
     let mut d = Document::new();
     let id = d
@@ -537,6 +728,10 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
     let faces = d.eval.evaluate(&d.scene, id).mesh.face_count();
     println!("history: {}-quad base + 1 subdivision level = {} quads in {:.0} ms", 6 * (seg / 2) * (seg / 2), faces, ms(t));
     let _ = (Scene::new(), ObjectKind::Group);
+    if polys > 2_000_000 {
+        println!("(detail levels, live detail and even remesh are measured at --polys 1000000; skipped at this size)");
+        return Ok(());
+    }
     detail_bench(&mut d, id)
 }
 

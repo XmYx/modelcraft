@@ -10,6 +10,8 @@ use modelcraft_scene::rig::{JOINT_RADIUS, Skin};
 use modelcraft_scene::{ObjectId, ObjectKind, SceneError, Transform};
 use serde::{Deserialize, Serialize};
 
+use modelcraft_scene::constraint::IkSolver;
+
 use crate::command::Outcome;
 use crate::document::{Document, EngineError};
 
@@ -118,15 +120,214 @@ pub enum RigCommand {
         dual_quaternion: bool,
     },
     /// Remove the skin of a mesh.
-    UnbindSkin { mesh: ObjectId },
+    UnbindSkin {
+        mesh: ObjectId,
+    },
     /// Switch a skin between linear blending and dual quaternions.
-    SetSkin { mesh: ObjectId, dual_quaternion: bool },
+    SetSkin {
+        mesh: ObjectId,
+        dual_quaternion: bool,
+    },
     /// Change a bound mesh's weights.
     EditWeights {
         mesh: ObjectId,
         #[serde(flatten)]
         edit: WeightOp,
     },
+    /// Constrain `target` to `sources`: `kind` is point, orient, scale, parent or aim. With
+    /// `maintain_offset` (the default) the target stays where it is.
+    AddConstraint {
+        kind: String,
+        target: ObjectId,
+        sources: Vec<ObjectId>,
+        /// One weight per source (all 1 without it).
+        #[serde(default)]
+        weights: Vec<f32>,
+        #[serde(default = "yes")]
+        maintain_offset: bool,
+        /// Aim only: the axis that looks at the sources and the axis kept up.
+        #[serde(default = "axis_y")]
+        aim: String,
+        #[serde(default = "axis_z")]
+        up: String,
+        /// Aim only: an object the up axis points towards (world up without it).
+        #[serde(default)]
+        up_object: Option<ObjectId>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Inverse kinematics: the joints above `end` (`bones` of them turn) reach for `goal`. A
+    /// goal is created at the end joint without one. `solver`: auto, two_bone, fabrik, ccd.
+    AddIk {
+        end: ObjectId,
+        #[serde(default)]
+        goal: Option<ObjectId>,
+        #[serde(default)]
+        pole: Option<ObjectId>,
+        #[serde(default = "two_bones")]
+        bones: u32,
+        #[serde(default)]
+        solver: IkSolver,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Set a driven key: `path` of `target` follows `driver_path` of `driver`. The key pairs
+    /// `driver_value` with `value`; without them, the two attributes' current values.
+    SetDrivenKey {
+        driver: ObjectId,
+        driver_path: String,
+        target: ObjectId,
+        path: String,
+        #[serde(default)]
+        driver_value: Option<f64>,
+        #[serde(default)]
+        value: Option<f64>,
+    },
+    /// Drive `path` of `target` with a formula (an empty one removes it).
+    SetExpression {
+        target: ObjectId,
+        path: String,
+        expr: String,
+    },
+    /// Change a constraint: weight (the IK/FK blend of an IK constraint), on or off, name,
+    /// source weights, solver settings, pole.
+    SetConstraint {
+        id: u32,
+        #[serde(default)]
+        weight: Option<f32>,
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        source_weights: Option<Vec<f32>>,
+        #[serde(default)]
+        solver: Option<IkSolver>,
+        #[serde(default)]
+        iterations: Option<u32>,
+        /// An object id, or 0 for no pole.
+        #[serde(default)]
+        pole: Option<u64>,
+    },
+    RemoveConstraint {
+        id: u32,
+    },
+    /// Switch an IK constraint without a jump: `to` "fk" copies the solved rotations into the
+    /// joints and sets the blend to 0; "ik" moves the goal (and pole) onto the chain and sets it
+    /// to 1.
+    MatchIk {
+        id: u32,
+        to: String,
+    },
+    /// Turn what constraints do into keys: the transforms of `objects` over `start`..`end`
+    /// (the playback range without them), one key per `step` frames; the constraints driving
+    /// them are then switched off (`keep` leaves them on).
+    BakeConstraints {
+        objects: Vec<ObjectId>,
+        #[serde(default)]
+        start: Option<f64>,
+        #[serde(default)]
+        end: Option<f64>,
+        #[serde(default = "one_frame")]
+        step: f64,
+        #[serde(default)]
+        keep: bool,
+    },
+    /// Add a blend shape to `mesh` from the shape of `from` (a mesh with the same points). With
+    /// `target`, the shape becomes an in-between of that target, shown when its weight is `at`.
+    AddShape {
+        mesh: ObjectId,
+        from: ObjectId,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        target: Option<usize>,
+        #[serde(default = "one_weight")]
+        at: f32,
+    },
+    /// Change a blend shape: its weight (keyable as `target.<index>.weight`), its name.
+    SetShape {
+        mesh: ObjectId,
+        target: usize,
+        #[serde(default)]
+        weight: Option<f32>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Remove a blend shape, or one of its in-betweens with `frame`.
+    RemoveShape {
+        mesh: ObjectId,
+        target: usize,
+        #[serde(default)]
+        frame: Option<usize>,
+    },
+    /// Put a lattice of `divisions` cells around `mesh`; `linear` interpolates cell by cell.
+    AddLattice {
+        mesh: ObjectId,
+        #[serde(default = "two_cells")]
+        divisions: [u32; 3],
+        #[serde(default)]
+        linear: bool,
+    },
+    /// Move control points of a lattice by `translate` (in the lattice's space, whose box is one
+    /// unit wide), or put them at `to`; `reset` puts every point back first.
+    EditLattice {
+        id: ObjectId,
+        #[serde(default)]
+        points: Vec<u32>,
+        #[serde(default)]
+        translate: Option<[f32; 3]>,
+        #[serde(default)]
+        to: Option<[f32; 3]>,
+        #[serde(default)]
+        reset: bool,
+        #[serde(default)]
+        linear: Option<bool>,
+    },
+    /// Make a cluster on `mesh`: `points` (with `weights`, all 1 without them) and, with
+    /// `radius`, every point within it of the points' centre with a smooth falloff. The cluster
+    /// is an object at that centre; moving, turning or scaling it moves the points.
+    AddCluster {
+        mesh: ObjectId,
+        #[serde(default)]
+        points: Vec<u32>,
+        #[serde(default)]
+        weights: Vec<f32>,
+        #[serde(default)]
+        radius: Option<f32>,
+        #[serde(default)]
+        center: Option<[f32; 3]>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Set the weight of points in a cluster (0 removes them).
+    SetClusterWeights {
+        id: ObjectId,
+        points: Vec<u32>,
+        weight: f32,
+    },
+    /// Move a deformer `delta` places in its mesh's deformer stack (negative: earlier).
+    MoveInStack {
+        id: ObjectId,
+        delta: i32,
+    },
+}
+
+fn one_weight() -> f32 {
+    1.0
+}
+fn two_cells() -> [u32; 3] {
+    [2, 2, 2]
+}
+
+fn yes() -> bool {
+    true
+}
+fn two_bones() -> u32 {
+    2
+}
+fn one_frame() -> f64 {
+    1.0
 }
 
 /// The `op` names of the `rig` command with one-line descriptions.
@@ -141,6 +342,25 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "edit_weights",
         "Change weights: mesh, weights (normalize | prune + threshold | limit + max | mirror + axis, find, replace, tolerance | set + points, joint, weight | paint + joint, center, radius, strength)",
     ),
+    (
+        "add_constraint",
+        "Constrain an object: kind (point, orient, scale, parent, aim), target, sources, weights?, maintain_offset (default true), aim (default y), up (default z), up_object?, name?",
+    ),
+    ("add_ik", "Inverse kinematics on a joint chain: end, goal? (created without it), pole?, bones (default 2), solver (auto, two_bone, fabrik, ccd), name?"),
+    ("set_driven_key", "Make an attribute follow another through a curve: driver, driver_path, target, path, driver_value?, value?"),
+    ("set_expression", "Drive an attribute with a formula (frame, time, self.<path>, @<id>.<path>; empty removes): target, path, expr"),
+    ("set_constraint", "Change a constraint: id, weight? (IK/FK blend for IK), enabled?, name?, source_weights?, solver?, iterations?, pole? (0: none)"),
+    ("remove_constraint", "Remove a constraint: id"),
+    ("match_ik", "Switch an IK chain without a jump: id, to (fk, ik)"),
+    ("bake_constraints", "Key the transforms constraints give and switch the constraints off: objects, start?, end?, step (default 1), keep?"),
+    ("add_shape", "Add a blend shape from another mesh with the same points: mesh, from, name?, target? + at (an in-between of that target)"),
+    ("set_shape", "Change a blend shape: mesh, target, weight?, name?"),
+    ("remove_shape", "Remove a blend shape or one in-between: mesh, target, frame?"),
+    ("add_lattice", "Put a lattice around a mesh: mesh, divisions [x,y,z] (1-8, default 2), linear?"),
+    ("edit_lattice", "Move lattice control points: id, points, translate? or to? [x,y,z] in lattice space, reset?, linear?"),
+    ("add_cluster", "Make a cluster of points that follows its own transform: mesh, points?, weights?, radius? (soft falloff), center?, name?"),
+    ("set_cluster_weights", "Set the weight of points in a cluster: id, points, weight"),
+    ("move_in_stack", "Reorder a deformer in its mesh's deformer stack: id, delta"),
 ];
 
 impl RigCommand {
@@ -160,16 +380,33 @@ impl RigCommand {
                 WeightOp::Set { .. } => "Set weights",
                 WeightOp::Paint { .. } => "Paint weights",
             },
+            RigCommand::AddConstraint { .. } => "Add constraint",
+            RigCommand::AddIk { .. } => "Add IK",
+            RigCommand::SetDrivenKey { .. } => "Set driven key",
+            RigCommand::SetExpression { .. } => "Set expression",
+            RigCommand::SetConstraint { .. } => "Constraint settings",
+            RigCommand::RemoveConstraint { .. } => "Remove constraint",
+            RigCommand::MatchIk { .. } => "Match IK and FK",
+            RigCommand::BakeConstraints { .. } => "Bake constraints",
+            RigCommand::AddShape { target: None, .. } => "Add blend shape",
+            RigCommand::AddShape { .. } => "Add in-between shape",
+            RigCommand::SetShape { .. } => "Blend shape",
+            RigCommand::RemoveShape { .. } => "Remove blend shape",
+            RigCommand::AddLattice { .. } => "Add lattice",
+            RigCommand::EditLattice { .. } => "Edit lattice",
+            RigCommand::AddCluster { .. } => "Add cluster",
+            RigCommand::SetClusterWeights { .. } => "Cluster weights",
+            RigCommand::MoveInStack { .. } => "Reorder deformers",
         }
         .into()
     }
 }
 
-fn invalid<T>(m: impl Into<String>) -> Result<T, EngineError> {
+pub(crate) fn invalid<T>(m: impl Into<String>) -> Result<T, EngineError> {
     Err(EngineError::Invalid(m.into()))
 }
 
-fn axis_index(name: &str) -> Result<usize, EngineError> {
+pub(crate) fn axis_index(name: &str) -> Result<usize, EngineError> {
     ["x", "y", "z"].iter().position(|a| *a == name).ok_or_else(|| EngineError::Invalid("an axis is x, y or z".into()))
 }
 
@@ -177,7 +414,7 @@ fn is_joint(doc: &Document, id: ObjectId) -> bool {
     matches!(doc.scene.get(id).map(|o| &o.kind), Some(ObjectKind::Joint { .. }))
 }
 
-fn transform_of(m: Mat4) -> Transform {
+pub(crate) fn transform_of(m: Mat4) -> Transform {
     let (scale, rotation, translation) = m.to_scale_rotation_translation();
     Transform { translation, rotation, scale }.sanitized()
 }
@@ -200,6 +437,22 @@ fn skin_of(doc: &Document, mesh: ObjectId) -> Result<(ObjectId, Arc<Skin>), Engi
 
 pub fn apply(doc: &mut Document, cmd: &RigCommand, out: &mut Outcome) -> Result<(), EngineError> {
     match cmd {
+        RigCommand::AddConstraint { .. }
+        | RigCommand::AddIk { .. }
+        | RigCommand::SetDrivenKey { .. }
+        | RigCommand::SetExpression { .. }
+        | RigCommand::SetConstraint { .. }
+        | RigCommand::RemoveConstraint { .. }
+        | RigCommand::MatchIk { .. }
+        | RigCommand::BakeConstraints { .. } => return crate::constraints::apply(doc, cmd, out),
+        RigCommand::AddShape { .. }
+        | RigCommand::SetShape { .. }
+        | RigCommand::RemoveShape { .. }
+        | RigCommand::AddLattice { .. }
+        | RigCommand::EditLattice { .. }
+        | RigCommand::AddCluster { .. }
+        | RigCommand::SetClusterWeights { .. }
+        | RigCommand::MoveInStack { .. } => return crate::deformers::apply(doc, cmd, out),
         RigCommand::AddJoint { parent, position, name } => {
             let parent_world = match parent {
                 Some(p) => {

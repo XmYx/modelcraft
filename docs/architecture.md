@@ -7,16 +7,19 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L0 | `modelcraft-anim` | Keyed curves (stepped, linear, Bézier with automatic clamped tangents and weighted handles), extrapolation, baking, the scene clock and playback | glam |
 | L0 | `modelcraft-mesh` | `PolyMesh`: validated half-edge mesh, per-corner UVs, patches, polygon-list (de)serialisation | glam |
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
+| L1 | `modelcraft-uv` | Seams, islands, automatic cuts into discs, LSCM unwrap with pins (sparse Cholesky, nested dissection; conjugate gradients as fallback), island layout, distortion measures | mesh |
+| L1 | `modelcraft-hair` | Guide curves grown from a surface (density and length maps, seeded), render hairs interpolated from the guides (barycentric or nearest-k blend, clump, frizz, width taper), hard caps on counts and memory | mesh, rayon |
 | L1 | `modelcraft-sculpt` | `SculptMesh` (flat arrays, CSR adjacency, BVH), brushes, falloff, stamps, symmetry, masks, dirty chunks, stroke undo and replay | mesh |
 | L2 | `modelcraft-scene` | Objects, hierarchy, transforms, materials, history steps, the `Evaluator` (dependency graph with per-step caches), picking | mesh, ops |
-| L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh | scene, craft-mesh, craft-zip, craft-atomic |
+| L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh, UV layout pictures (SVG, PNG) | scene, craft-mesh, craft-zip, craft-atomic |
 | L4 | `modelcraft-engine` | `Document`, `Command`, undo (memory-bounded), journaling, sculpt session, export | all above |
 | L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries | glam, rayon |
 | L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator, the progressive film | craft-render-bvh |
 | L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline; capabilities from the created device | craft-render-core, wgpu |
 | L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback); `trace`: the scene graph exported to the path tracer | mesh, scene, craft-render-*, wgpu |
+| L5 | `modelcraft-script` | Sandboxed Rhai engine over the command registry: scene and mesh API, undo groups, permissions and limits (see [scripting.md](scripting.md)) | engine, rhai |
 | L5 | `modelcraft` (app) | egui UI: viewport, gizmos, panels, workspaces, palette, i18n, kittest tests | engine, render, egui/eframe |
-| L5 | `modelcraft-cli` | Batch commands, JSON-lines control channel, benchmarks | engine, render |
+| L5 | `modelcraft-cli` | Batch commands, scripts, JSON-lines control channel, benchmarks | engine, render, script |
 
 `cargo xtask layers` fails if any L0–L4 crate depends on egui, eframe, winit or rfd.
 
@@ -50,6 +53,20 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   matrices (`rig::pose_key`), so moving a joint re-runs the skin and nothing else. The maths
   (weights, linear blend, dual quaternions, heat weights, aiming and mirroring joints) is in
   `modelcraft-anim`, free of the scene.
+- **Deformer stack**: blend shapes, lattices and clusters are one object kind
+  (`ObjectKind::PointDeformer`, `modelcraft_scene::point_deform`), children of the mesh like a
+  skin. `rig::apply_stack` runs them and the skins in child order on the mesh's points, after the
+  parametric deformers; `Scene::move_in_stack` reorders them. Weights and control points are
+  attributes (`target.<i>.weight`, `point.<i>.x`), so they are keyed like everything else. The
+  maths (morph with in-betweens, free-form deformation, clusters) is in `modelcraft-anim::deform`.
+- **Constraints**: `Scene::constraints` holds constraints, IK, driven keys and formulas
+  (`modelcraft_scene::constraint`). Each names what it reads and writes (object and channel);
+  `Scene::solve_constraints` sorts them topologically (a reader after its writers), skips and
+  reports the ones in a cycle, and writes the results into the objects, after every command and
+  frame change. The transform an object has without its constraints is kept beside it, and every
+  solve starts from those, so weights and the IK/FK blend never accumulate and switching a
+  constraint off restores the object. The solvers (two-bone, FABRIK, CCD) and the formula
+  language are in `modelcraft-anim`.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.

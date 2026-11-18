@@ -1,0 +1,1 @@
+| 2026-11-17 | Clone generator: linear, radial, grid, scatter, surface and vertex layouts with seeded randomness, drawn as instances of one source mesh (new `modelcraft-clone` crate, capped at 10,000 clones, property-tested); `add_cloner` and `set_cloner` commands, Properties section, instanced viewport drawing and picking, export as shared-mesh nodes |

@@ -9,14 +9,14 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use crate::app::{ModelApp, SelectMode, Workspace};
 use crate::args::Cli;
 
-fn harness() -> Harness<'static, ModelApp> {
+pub(crate) fn harness() -> Harness<'static, ModelApp> {
     let ctx = egui::Context::default();
     let app = ModelApp::with_context(&ctx, Cli::default());
     Harness::builder().with_size(egui::vec2(1500.0, 950.0)).build_ui_state(|ui, app: &mut ModelApp| app.draw(ui), app)
 }
 
 /// Open the command palette with Ctrl+K, type, press Enter.
-fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
+pub(crate) fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);
     h.run();
     h.event(egui::Event::Text(text.to_string()));
@@ -270,6 +270,12 @@ fn detail_levels_and_shape_layers_by_keyboard() {
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes[0].strength, 0.25);
     assert_eq!(h.state().doc.undo.len(), before + 1, "one undo step per edit");
+    // The Brushes pane scrolls inside the dock, and with shape layers listed the radio sits below
+    // its visible part: ask for it to be scrolled into view first, as assistive technology and
+    // Tab focus do, then click it.
+    let base = h.get_by_role_and_label(Role::RadioButton, "Base sculpt");
+    base.scroll_to_me();
+    h.run();
     h.get_by_role_and_label(Role::RadioButton, "Base sculpt").click();
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().active_shape, None);
@@ -452,4 +458,190 @@ fn panels_dock_tab_and_hide_without_dragging() {
     let back = crate::dock::Layouts::from_saved(&saved);
     assert_eq!(back.get(ws), h.state().layouts.get(ws));
     assert!(back.get(ws).contains(&Pane::Viewport));
+}
+
+#[test]
+fn agents_drive_the_window_over_the_control_channel() {
+    use std::io::{BufRead, BufReader, Write};
+    let mut h = harness();
+    h.run();
+    let token = "feedfacefeedfacefeedfacefeedfacefeedface";
+    h.state_mut().agents.token = Some(token.into());
+    h.state_mut().agents.port = Some(0);
+    // Off by default; the Edit menu item turns it on.
+    assert!(!h.state().agents.is_on());
+    h.get_by_label("Edit").click();
+    h.run();
+    h.get_by_label("Allow Agents to Control ModelCraft").click();
+    h.run();
+    assert!(h.state().agents.is_on(), "{}", h.state().status);
+    assert!(h.state().status.contains("on port"), "the status bar says where: {}", h.state().status);
+    let port = h.state().agents.listening.as_ref().unwrap().port;
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    writeln!(s, r#"{{"id":1,"method":"engine.execute","params":{{"cmd":"add_primitive","kind":"cylinder"}},"token":"{token}"}}"#).unwrap();
+    // The window answers between frames.
+    let mut reader = BufReader::new(s.try_clone().unwrap());
+    let mut line = String::new();
+    let waiter = std::thread::spawn(move || {
+        reader.read_line(&mut line).unwrap();
+        line
+    });
+    for _ in 0..200 {
+        h.run();
+        if waiter.is_finished() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let reply = waiter.join().unwrap();
+    assert!(reply.contains("\"ok\":true"), "{reply}");
+    assert_eq!(h.state().doc.scene.len(), 1);
+    assert!(h.state().status.contains("An agent changed the scene"), "announced in the status bar: {}", h.state().status);
+    h.get_by_role_and_label(Role::TreeItem, "Cylinder");
+    crate::agents::stop(h.state_mut());
+    assert!(!h.state().agents.is_on());
+}
+
+#[test]
+fn exchange_settings_from_the_file_menu() {
+    let mut h = harness();
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    h.get_by_label("Exchange Settings").click();
+    h.run();
+    h.get_by_role_and_label(Role::RadioButton, "Z up").click();
+    h.run();
+    if h.query_by_role_and_label(Role::RadioButton, "Centimetres").is_none() {
+        // A choice closes the menu; open it again for the unit.
+        h.get_by_label("File").click();
+        h.run();
+        h.get_by_label("Exchange Settings").click();
+        h.run();
+    }
+    h.get_by_role_and_label(Role::RadioButton, "Centimetres").click();
+    h.run();
+    let c = h.state().exchange;
+    assert_eq!(c.up, modelcraft_engine::formats::exchange::Up::Z);
+    assert_eq!(c.scale, Some(0.01));
+    assert!(crate::actions::all().contains(&crate::actions::Action::ExportFbx), "Export FBX is in the palette");
+}
+
+#[test]
+fn patch_grouping_and_mesh_check_by_keyboard() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    let id = h.state().selection[0];
+    // One patch for the whole cube first, then group by angle: six sides, as one history step.
+    palette(&mut h, "Group Patches by Shell");
+    let steps = h.state().doc.scene.get(id).unwrap().steps().len();
+    assert_eq!(steps, 1);
+    palette(&mut h, "Group Patches by Angle");
+    let m = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    assert_eq!(modelcraft_engine::ops::patches::patches_in_use(&m).len(), 6);
+    // Face mode: a new patch from the selection, then select it back by one face.
+    h.key_press(Key::Num4);
+    h.run();
+    h.state_mut().components = [0, 1].into_iter().collect();
+    palette(&mut h, "New Patch from Selection");
+    let m = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    assert_eq!(m.patch(0), m.patch(1));
+    h.state_mut().components = [1].into_iter().collect();
+    palette(&mut h, "Select Patch");
+    assert_eq!(h.state().components.len(), 2);
+    // The mesh check finds no triangles on a cube and says so in the status bar (a live region).
+    palette(&mut h, "Select Triangles");
+    assert!(h.state().components.is_empty());
+    assert!(h.state().status.contains("No triangles"), "{}", h.state().status);
+    // The Properties section is reachable and names its counts.
+    h.get_by_label("Patches and Cleanup").click();
+    h.run();
+    assert!(h.query_by_label_contains("N-gons: 0").is_some());
+    h.get_by_label("Clean Up Mesh").click();
+    h.run();
+    let last = h.state().doc.scene.get(id).unwrap().steps().last().map(|s| s.op.name());
+    assert_eq!(last, Some("Clean up"));
+}
+
+#[test]
+fn radial_menu_by_number_and_by_name() {
+    let mut h = harness();
+    h.run();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.run();
+    assert!(h.state().radial.is_some());
+    assert!(h.query_by_role_and_label(Role::Menu, "Radial menu").is_some());
+    // The first slice has keyboard focus; its number picks it.
+    assert!(h.get_by_role_and_label(Role::MenuItem, "Add Cube").is_focused());
+    h.key_press(Key::Num2);
+    h.run();
+    assert!(h.state().radial.is_none(), "choosing closes it: {} {:?}", h.state().status, h.state().mode);
+    assert_eq!(h.state().doc.scene.len(), 1);
+    // Again, and pick a slice by name; Esc closes without acting.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.get_by_role_and_label(Role::MenuItem, "Add Torus").click();
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 2);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(h.state().radial.is_none());
+    assert_eq!(h.state().status, "Radial menu closed");
+    // In Sculpt the slices are brushes.
+    h.state_mut().set_workspace(Workspace::Sculpt);
+    assert!(crate::radial::items(h.state()).iter().all(|a| matches!(a, crate::actions::Action::Brush(_))));
+}
+
+#[test]
+fn preferences_shelf_units_and_display() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    h.run();
+    h.run();
+    assert!(h.state().prefs_window.open);
+    assert!(h.get_by_role_and_label(Role::ComboBox, "Language").is_focused(), "focus moves into the window");
+    // Display: the grid turns off.
+    h.get_by_label("Display").click();
+    h.run();
+    h.get_by_label("Show the ground grid").click();
+    h.run();
+    assert!(!h.state().show_grid);
+    // Shelf: filter, tick Subdivide; its button appears on the shelf and works.
+    h.get_by_label("Display").click();
+    h.run();
+    h.get_by_label("Quick Bar").click();
+    h.run();
+    h.get_by_label("Filter commands").focus();
+    h.run();
+    h.event(egui::Event::Text("Subdiv".into()));
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Subdivide").click();
+    h.run();
+    assert_eq!(h.state().shelf, vec!["mesh.subdivide".to_string()]);
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.state().prefs_window.open, "Esc closes it");
+    h.get_by_role_and_label(Role::Button, "Subdivide, on the Quick Bar").click();
+    h.run();
+    let id = h.state().selection[0];
+    assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 1);
+    // Units: Position reads in centimetres and typed values convert back to metres.
+    h.state_mut().unit = crate::prefs_ui::Unit::Cm;
+    h.run();
+    h.get_by_label("Position X").set_value_accesskit(150.0);
+    h.run();
+    let x = h.state().doc.scene.get(id).unwrap().transform.translation.x;
+    assert!((x - 1.5).abs() < 1e-5, "{x}");
 }

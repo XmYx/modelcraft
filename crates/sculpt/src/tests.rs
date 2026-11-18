@@ -627,3 +627,80 @@ mod brush_depth {
         }
     }
 }
+
+mod mask_ops {
+    use super::*;
+
+    fn masked(s: &SculptMesh) -> usize {
+        s.mask.iter().filter(|m| **m > 0.5).count()
+    }
+
+    #[test]
+    fn grow_shrink_blur_and_sharpen_change_the_edge_and_undo() {
+        let mut s = ball(24);
+        let mut b = BrushSettings::new(BrushKind::Mask, 0.4);
+        b.strength = 1.0;
+        b.falloff = Falloff::Constant;
+        stroke(&mut s, b, &[Vec3::Y; 3]);
+        let (start, mask0) = (masked(&s), s.mask.clone());
+        assert!(start > 20 && start < s.vertex_count() / 2);
+        let u = s.mask_grow();
+        let grown = masked(&s);
+        assert!(grown > start);
+        s.apply_undo(&u, false);
+        assert_eq!(s.mask, mask0);
+        s.mask_shrink();
+        assert!(masked(&s) < start && masked(&s) > 0);
+        s.apply_undo(&u, true);
+        // Blur makes in-between values; sharpen removes them again.
+        let soft = |s: &SculptMesh| s.mask.iter().filter(|m| **m > 0.05 && **m < 0.95).count();
+        let before = soft(&s);
+        s.mask_blur();
+        s.mask_blur();
+        assert!(soft(&s) > before + 10);
+        let blurred = soft(&s);
+        for _ in 0..4 {
+            s.mask_sharpen();
+        }
+        assert!(soft(&s) < blurred / 2);
+        assert!(s.mask.iter().all(|m| (0.0..=1.0).contains(m)));
+    }
+
+    #[test]
+    fn hollows_and_ridges_pick_opposite_parts_of_a_dented_surface() {
+        let mut s = ball(48);
+        let mut dig = BrushSettings::new(BrushKind::Draw, 0.25);
+        dig.invert = true;
+        stroke(&mut s, dig, &[Vec3::Y; 10]);
+        stroke(&mut s, BrushSettings::new(BrushKind::Draw, 0.12), &[Vec3::X; 10]);
+        let near = |s: &SculptMesh, c: Vec3| s.positions.iter().zip(&s.mask).filter(|(p, _)| p.distance(c) < 0.1).map(|(_, m)| *m).fold(0.0f32, f32::max);
+        s.mask_by_bend(false);
+        assert!(near(&s, Vec3::Y * 0.9) > 0.3, "the bottom of the dent is a hollow");
+        assert!(near(&s, Vec3::X * 1.1) < 0.2, "the top of the bump is not");
+        assert!(near(&s, -Vec3::Y) < 0.2, "the untouched ball is neither");
+        let u = s.mask_by_bend(true);
+        assert!(near(&s, Vec3::X * 1.1) > 0.3 && near(&s, Vec3::Y * 0.9) < 0.2);
+        assert!(!u.is_empty());
+    }
+
+    #[test]
+    fn a_stroke_refits_only_what_it_moved_and_picking_stays_exact() {
+        let mut s = ball(48);
+        for (kind, at) in [(BrushKind::Draw, Vec3::Y), (BrushKind::Inflate, Vec3::X), (BrushKind::Draw, Vec3::Y)] {
+            let (before, _, _) = s.raycast(at * 5.0, -at).unwrap();
+            let u = stroke(&mut s, BrushSettings::new(kind, 0.3), &[at; 6]);
+            // Every ray from outside towards the centre hits the surface where the surface is.
+            for i in 0..200 {
+                let d = Vec3::new((i as f32 * 0.37).sin(), (i as f32 * 0.91).cos(), (i as f32 * 0.53).sin()).normalize();
+                let (_, p, t) = s.raycast(d * 5.0, -d).unwrap();
+                let tri = s.triangles()[t as usize];
+                let far = tri.iter().map(|v| s.positions[*v as usize].distance(p)).fold(0.0f32, f32::max);
+                assert!(far < 0.2 && (p.normalize() - d).length() < 1e-3);
+            }
+            s.apply_undo(&u, false);
+            let (t, _, _) = s.raycast(at * 5.0, -at).unwrap();
+            assert!((t - before).abs() < 1e-4, "after undo the surface is back: {t} vs {before}");
+            s.apply_undo(&u, true);
+        }
+    }
+}

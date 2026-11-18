@@ -5,8 +5,12 @@
 //!   history*: an ordered list of [`Step`]s (extrude, bevel, subdivide, sculpt layer…). Each step
 //!   can be edited, switched off or removed later; [`Scene::collapse`] bakes them into the source.
 //! - A **smooth cage** object is a generator: it shows its first mesh child subdivided.
+//! - A **clone generator** lays out instances of its first mesh child ([`Cloner`]).
 //! - A **deformer** object bends, twists… its parent mesh, in its own frame.
 //! - A **group** only carries a transform.
+//! - **Blend shapes, lattices and clusters** are children of a mesh too: its deformer stack
+//!   ([`point_deform`]).
+//! - **Constraints** pose objects from other objects, in dependency order ([`constraint`]).
 //!
 //! The [`Evaluator`] is the dependency graph: it caches every step's output per object and
 //! re-evaluates only what an edit invalidated (each object has a revision counter; a generator's
@@ -16,20 +20,23 @@
 
 pub mod anim;
 pub mod attr;
+pub mod constraint;
 mod eval;
 pub mod pick;
+pub mod point_deform;
 pub mod rig;
 
 use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
+pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 use serde::{Deserialize, Serialize};
 
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
-pub use eval::{Evaluated, Evaluator, StepError};
+pub use eval::{Evaluated, Evaluator, Instances, StepError};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
 pub const MAX_DEPTH: usize = 64;
@@ -281,6 +288,14 @@ pub enum StepOp {
         axis: u32,
         weld: f32,
     },
+    /// Rebuild the patches from the shape (by angle or by connected shells).
+    GroupPatches {
+        grouping: modelcraft_ops::patches::Grouping,
+    },
+    /// Weld vertices closer than `distance` and remove faces with no area.
+    CleanUp {
+        distance: f32,
+    },
     Sculpt {
         layer: SculptLayer,
     },
@@ -289,9 +304,70 @@ pub enum StepOp {
     EvenRemesh {
         cell: f32,
     },
+    /// Flatten the surface into UVs: cut along `seams` (and along every edge sharper than
+    /// `angle` degrees), solve a least-squares conformal map per island and lay the islands out
+    /// in the unit square. Seams are vertex pairs and pins name a face corner, both in the
+    /// numbering of the step's input mesh.
+    Unwrap {
+        #[serde(default)]
+        seams: Vec<[u32; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<f32>,
+        #[serde(default)]
+        pins: Vec<UvPin>,
+        /// Add the cuts an island needs to be flattenable (a sphere gets a path, a tube a line).
+        #[serde(default = "yes")]
+        auto_cut: bool,
+        /// Margin around and between islands, as a fraction of the unit square.
+        #[serde(default = "default_margin")]
+        margin: f32,
+    },
+    /// Records seams (pairs of vertices of the step's input mesh) and changes nothing; the UV
+    /// editor reads the latest one, and an unwrap step takes them.
+    Seams {
+        #[serde(default)]
+        edges: Vec<[u32; 2]>,
+    },
+    /// Move, rotate and scale the UVs of the listed face corners (scale, then rotate, then
+    /// translate, about `pivot`).
+    TransformUvs {
+        corners: Vec<u32>,
+        #[serde(default)]
+        translate: [f32; 2],
+        #[serde(default)]
+        rotate_deg: f32,
+        #[serde(default = "unit_scale")]
+        scale: [f32; 2],
+        #[serde(default)]
+        pivot: [f32; 2],
+    },
+    /// Weld the UVs on the two sides of the listed edges.
+    StitchUvs {
+        edges: Vec<u32>,
+    },
+}
+
+fn unit_scale() -> [f32; 2] {
+    [1.0, 1.0]
+}
+
+/// A face corner held at a UV position while unwrapping.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UvPin {
+    pub corner: u32,
+    pub uv: [f32; 2],
+}
+
+fn default_margin() -> f32 {
+    0.01
 }
 
 impl StepOp {
+    /// A step that only records information and leaves the mesh as it is.
+    pub fn is_marker(&self) -> bool {
+        matches!(self, StepOp::Seams { .. })
+    }
+
     /// Stable id of the operation (also the English label key).
     pub fn name(&self) -> &'static str {
         match self {
@@ -312,8 +388,14 @@ impl StepOp {
             StepOp::Bridge { .. } => "Bridge",
             StepOp::FillHole { .. } => "Fill hole",
             StepOp::Mirror { .. } => "Mirror",
+            StepOp::GroupPatches { .. } => "Group patches",
+            StepOp::CleanUp { .. } => "Clean up",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
+            StepOp::Unwrap { .. } => "Unwrap UVs",
+            StepOp::Seams { .. } => "Seams",
+            StepOp::TransformUvs { .. } => "Transform UVs",
+            StepOp::StitchUvs { .. } => "Weld UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -325,6 +407,10 @@ impl StepOp {
             | StepOp::Flip { faces }
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
+            StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
+            StepOp::Seams { edges } => edges.len() * 8,
+            StepOp::TransformUvs { corners, .. } => corners.len() * 4,
+            StepOp::StitchUvs { edges } => edges.len() * 4,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }
@@ -367,6 +453,17 @@ pub enum ObjectKind {
     Skin {
         skin: Arc<rig::Skin>,
     },
+    /// Blend shapes, a lattice or a cluster in its parent mesh's deformer stack ([`point_deform`]).
+    PointDeformer {
+        deformer: point_deform::PointDeformer,
+    },
+    /// Lays out clones of its first mesh child (or smooth cage child). The clones are instances of
+    /// that child's evaluated mesh; `target` is the object the surface and vertices layouts sit on.
+    Cloner {
+        cloner: Cloner,
+        #[serde(default)]
+        target: Option<ObjectId>,
+    },
 }
 
 impl ObjectKind {
@@ -378,6 +475,8 @@ impl ObjectKind {
             ObjectKind::Deformer { .. } => "Deformer",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
+            ObjectKind::PointDeformer { deformer } => deformer.type_name(),
+            ObjectKind::Cloner { .. } => "Clone generator",
         }
     }
 }
@@ -411,6 +510,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
         256 + self.name.len() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
@@ -434,6 +534,15 @@ pub struct Scene {
     /// Curves, the current frame and the time settings ([`anim`]).
     #[serde(default, skip_serializing_if = "Animation::is_default")]
     pub anim: Animation,
+    /// Constraints, IK, driven keys and expressions ([`constraint`]).
+    /// Boxed: a scene is moved around by value (history entries, snapshots).
+    #[serde(default, skip_serializing_if = "no_constraints")]
+    pub constraints: Box<constraint::Constraints>,
+}
+
+#[allow(clippy::borrowed_box)]
+fn no_constraints(c: &Box<constraint::Constraints>) -> bool {
+    c.is_empty()
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -483,7 +592,9 @@ impl Scene {
             o.rev = next_rev();
         }
         self.anim.repair(|id| ids.contains(&id));
+        self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        point_deform::repair(&mut self);
         Ok(self)
     }
 
@@ -569,6 +680,7 @@ impl Scene {
         self.bump_ancestors_of_removed(&out);
         for (_, o) in &out {
             self.anim.remove_object(o.id);
+            self.constraints.remove_object(o.id);
         }
         out
     }
@@ -673,9 +785,21 @@ impl Scene {
         m
     }
 
-    /// True if an ancestor is a smooth cage (the object is shown through it, not directly).
+    /// True if the object is the input of its parent generator (a smooth cage's mesh child, or
+    /// the source a clone generator clones) and so is shown through it, not directly. Other
+    /// children of a clone generator are ordinary objects and draw as they are.
     pub fn is_cage_input(&self, id: ObjectId) -> bool {
-        self.get(id).and_then(|o| o.parent).and_then(|p| self.get(p)).is_some_and(|p| matches!(p.kind, ObjectKind::SmoothCage { .. }))
+        let Some(parent) = self.get(id).and_then(|o| o.parent) else { return false };
+        match self.get(parent).map(|p| &p.kind) {
+            Some(ObjectKind::SmoothCage { .. }) => true,
+            Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            _ => false,
+        }
+    }
+
+    /// The input a generator shows: the first mesh or smooth cage child.
+    pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
+        self.children(id).into_iter().find(|c| self.get(*c).is_some_and(|o| matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })))
     }
 
     pub fn visible(&self, id: ObjectId) -> bool {

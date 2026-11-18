@@ -1,0 +1,1 @@
+- Import FBX and 3MF files and export FBX; File ▸ Exchange Settings converts the up axis and unit on the way in and out.
