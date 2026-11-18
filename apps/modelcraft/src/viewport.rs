@@ -853,6 +853,7 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), sel_wire));
         }
     }
+    out.extend(crate::uv_ui::seam_lines(app));
     out
 }
 

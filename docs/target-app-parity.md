@@ -318,13 +318,13 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
-| UV editor | C M | M | L | |
-| Seams and unwrap (conformal / angle-based) | C M Z | P | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as a history step and CLI; no seam UI yet, no angle-based solver |
+| UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
+| Seams and unwrap (conformal / angle-based) | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport; no angle-based (ABF) solver |
 | Packing | C M | M | M | |
 | UDIM tiles | C M Z | M | M | |
 | Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
-| Relax, straighten, align and stitch tools | C M | M | M | |
-| Checker display, texel density, distortion heat map | C M Z | M | S | |
+| Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
+| Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
 

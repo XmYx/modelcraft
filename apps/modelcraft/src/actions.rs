@@ -82,6 +82,7 @@ pub enum Action {
     RenderView,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    Uv(crate::uv_ui::UvAction),
     MeshTool(crate::mesh_tools::Tool),
 }
 
@@ -161,6 +162,7 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
+    v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
     v
 }
 
@@ -328,6 +330,7 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
+            Uv(a) => a.label(),
         }
     }
 
@@ -419,6 +422,7 @@ impl Action {
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
+            Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
         };
@@ -510,6 +514,7 @@ impl Action {
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
+            Uv(a) => return a.default_binding(),
             _ => return None,
         })
     }
@@ -529,6 +534,7 @@ impl Action {
             Palette | KeyboardShortcuts | About => "Help",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
+            Uv(_) => "UV",
             _ => "View",
         }
     }
