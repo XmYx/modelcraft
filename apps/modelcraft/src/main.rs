@@ -26,6 +26,7 @@ mod exchange_ui;
 mod gpu;
 mod keys;
 mod material_ui;
+mod mesh_tools;
 mod panels;
 mod prefs;
 mod render_view;

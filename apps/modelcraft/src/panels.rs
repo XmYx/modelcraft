@@ -121,6 +121,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                ui.menu_button(tl!("Patches and Cleanup"), |ui| {
+                    for t in crate::mesh_tools::ALL {
+                        action_button(app, ui, Action::MeshTool(*t));
+                    }
+                });
             });
             ui.menu_button(tl!("Sculpt"), |ui| {
                 for k in modelcraft_engine::sculpt::brush::KINDS {
@@ -758,6 +763,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     crate::constraint_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
+        crate::mesh_tools::section(app, ui);
     }
     if let Some((verts, tris)) = app.doc.sculpt.as_ref().map(|s| (s.mesh.vertex_count(), s.mesh.triangle_count())) {
         egui::CollapsingHeader::new(tl!("Sculpt")).default_open(true).show(ui, |ui| {
