@@ -176,7 +176,11 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 37);
+    // Every command is listed once. (A fixed count here made every pull request that adds a
+    // command conflict with every other one.)
+    let names: std::collections::HashSet<&str> = crate::COMMANDS.iter().map(|c| c.0).collect();
+    assert_eq!(names.len(), crate::COMMANDS.len());
+    assert!(names.contains("add_primitive") && names.contains("sculpt_region"));
 }
 
 fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {
