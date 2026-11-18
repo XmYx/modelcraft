@@ -16,6 +16,8 @@ pub struct Agents {
     pub answered: u64,
     /// A token chosen in advance (tests); none writes a fresh one to the user's token file.
     pub token: Option<String>,
+    /// The scripts agents run with `script.run`.
+    pub script: modelcraft_script::channel::ScriptChannel,
 }
 
 impl Agents {
@@ -54,10 +56,13 @@ pub fn tick(app: &mut ModelApp) {
     }
     let Some(l) = &app.agents.listening else { return };
     let before = app.doc.revision;
-    let n = control::answer_pending(&mut app.doc, l);
+    let mut selection = app.selection.clone();
+    let script = &mut app.agents.script;
+    let n = control::answer_pending_with(&mut app.doc, l, &mut |doc, method, params| script.handle(doc, &mut selection, method, params));
     if n == 0 {
         return;
     }
+    app.selection = selection;
     app.agents.answered += n as u64;
     if app.doc.revision != before {
         app.prune_selection();

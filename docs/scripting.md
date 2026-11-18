@@ -161,6 +161,29 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
   [cli.md](cli.md#scripts).
 
+## Over the control channel
+
+`script.run` runs a script on the open scene from outside: through the window's loopback socket
+(`modelcraft-cli call script.run '{"source": "add_primitive(\"cube\")"}'`), through
+`modelcraft-cli serve` and `control`, and as the `script` tool of the MCP server (`modelcraft-cli
+mcp`, with `--app` for the running window). Parameters: `source` (up to 1 MiB), `name` (what error
+messages call it, default `agent.rhai`), `args` (an object of strings, numbers and booleans, read
+with `arg(name, default)`).
+
+The reply is `{"ok": true, "result": {...}}` where `result` is the report of the run: `ok`,
+`value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line,
+column, message) and `selection` when the script changed it. A script that fails is a successful
+reply with `result.ok == false` (the MCP tool marks it as an error and still returns the report);
+a malformed request is `{"ok": false, "error": ...}`.
+
+An agent's script is as powerful as the agent already is and no more: it runs with the default
+limits, with no file access at all (whatever the user allowed their own scripts), no script
+library, and the selection of the window (which the script may change). Its changes are ordinary
+commands, so each is an undo step (`undo_group` makes one for the whole script) and the window's
+status line says an agent changed the scene. Tools and callbacks it registers are dropped when it
+ends. Clients are asked for approval like for any other change (`script.run` is a *Changes*
+request), and the channel needs its token like every other method.
+
 ## Libraries
 
 A script can share code through Rhai modules kept in the scripts folder:

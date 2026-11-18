@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 mod api;
+pub mod channel;
 pub mod docs;
 pub mod draft;
 mod error;

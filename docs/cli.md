@@ -371,6 +371,7 @@ The same requests reach a document four ways (`crates/engine/src/control.rs`):
 | `document.revision` | — | `{document_id, revision}` |
 | `document.save` | `{path?}` | `{path}` |
 | `document.export` | `{path}` (.glb, .obj, .stl) | `{path}` |
+| `script.run` | `{source, name?, args?}` | the script's report: `{ok, value, output, commands, operations, seconds, error, selection?}` ([scripting.md](scripting.md#over-the-control-channel)) |
 
 Every reply is `{"ok":true,"result":…}` or `{"ok":false,"error":"…"}`.
 
