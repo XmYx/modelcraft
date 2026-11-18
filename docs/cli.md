@@ -149,6 +149,15 @@ lets them write in `--out-dir`).
 Errors print as `file:line:column: message` and give a non-zero exit status. Commands the script
 ran before an error stay applied in memory but nothing is saved.
 
+```
+modelcraft-cli macro-script <commands.jsonl|project.journal> [--name NAME] [-o <out.rhai>]
+```
+
+`macro-script` writes a [recorded macro](scripting.md#recorded-macros) script from one JSON command
+per line (as `run` reads them) or from a crash journal, printing it without `-o`. It replays the
+commands on an empty scene to learn which objects each one creates, so the script names them
+instead of relying on their numbers, and the script repeats the commands as one undo step.
+
 ### Rigging
 
 One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","parent":3}`.

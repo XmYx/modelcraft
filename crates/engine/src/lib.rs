@@ -16,6 +16,9 @@ mod deformers;
 mod document;
 mod groups;
 mod layers;
+pub mod record;
+#[cfg(test)]
+mod record_tests;
 pub mod rig;
 pub mod sim;
 mod undo;
@@ -25,6 +28,7 @@ pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskO
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
 pub use groups::{GroupOp, RegionAction, VisibilityOp};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
+pub use record::{MAX_RECORDED_COMMANDS, Recorded, RecordedCommand, Recorder};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
 pub use undo::{UndoEntry, UndoStack};
