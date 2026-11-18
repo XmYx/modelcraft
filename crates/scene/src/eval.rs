@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use modelcraft_ops::{OpError, edit, subdivide};
 
 use crate::{CloneSet, ObjectId, ObjectKind, PolyMesh, Scene, Source, Step, StepOp};
@@ -253,6 +253,9 @@ impl Evaluator {
                         self.runs += 1;
                         match cloner.generate_in(target_mesh.as_ref().map(|(m, _)| m.as_ref()), target_mesh.as_ref().map_or(Mat4::IDENTITY, |(_, f)| *f)) {
                             Ok(mut set) => {
+                                errors.extend(
+                                    apply_modifiers(scene, id, cloner.seed, &mut set).into_iter().map(|message| StepError { step: usize::MAX, message }),
+                                );
                                 for i in &mut set.instances {
                                     i.matrix *= local;
                                 }
@@ -297,6 +300,7 @@ impl Evaluator {
             | ObjectKind::Group
             | ObjectKind::Deformer { .. }
             | ObjectKind::Field { .. }
+            | ObjectKind::CloneModifier { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }
@@ -317,6 +321,25 @@ fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
 /// target sits relative to it, which the subtree revision does not cover.
 fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
     let mut key = scene.deep_rev(id);
+    if matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
+        // A clone modifier also depends on its target object, and on the time when it is animated.
+        let mut h = key;
+        let mut mix = |bits: u64| h = (h ^ bits).wrapping_mul(0x0100_0000_01b3);
+        for m in scene.clone_modifiers(id) {
+            let Some(ObjectKind::CloneModifier { modifier, target }) = scene.get(m).map(|o| &o.kind) else { continue };
+            if modifier.is_time_dependent() {
+                mix(scene.anim.frame.to_bits());
+                mix(scene.anim.time.fps.to_bits());
+            }
+            if let Some(t) = target.filter(|t| scene.get(*t).is_some()) {
+                mix(scene.deep_rev(t).rotate_left(21));
+                for f in target_frame(scene, id, t).to_cols_array() {
+                    mix(u64::from(f.to_bits()));
+                }
+            }
+        }
+        key = h;
+    }
     if let Some(ObjectKind::Cloner { target: Some(t), .. }) = scene.get(id).map(|o| &o.kind)
         && scene.get(*t).is_some()
     {
@@ -337,6 +360,37 @@ fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
         c = *of;
     }
     key
+}
+
+/// Run the clone modifiers inside generator `id`, in order, on the freshly laid out clones (in the
+/// generator's space). Returns what went wrong, for the status line.
+fn apply_modifiers(scene: &Scene, id: ObjectId, seed: u32, set: &mut modelcraft_clone::CloneSet) -> Vec<String> {
+    let mut problems = Vec::new();
+    let seconds = (scene.anim.frame / scene.anim.time.fps.max(1e-6)) as f32;
+    let to_generator = scene.world_matrix(id).inverse();
+    for m in scene.clone_modifiers(id) {
+        let Some(o) = scene.get(m) else { continue };
+        let ObjectKind::CloneModifier { modifier, target } = &o.kind else { continue };
+        let point = target.filter(|t| *t != id && scene.get(*t).is_some()).map(|t| to_generator.transform_point3(scene.world_matrix(t).w_axis.truncate()));
+        if modifier.needs_target() && point.is_none() {
+            problems.push(format!("{} needs a target object: choose one in the Properties panel", o.name));
+            continue;
+        }
+        // The fields inside the modifier weigh each clone, seen in the generator's space.
+        let mut stack = modelcraft_field::FieldStack::new();
+        let to_modifier = o.transform.matrix().inverse();
+        for c in scene.children(m) {
+            if let Some(f) = scene.get(c)
+                && f.visible
+                && let ObjectKind::Field { field } = &f.kind
+            {
+                stack.push(f.transform.matrix().inverse() * to_modifier, field.clone());
+            }
+        }
+        let weight = |p: Vec3| stack.weight(p);
+        modifier.apply(set, &modelcraft_clone::Context { seed, time: seconds, target: point, weight: &weight });
+    }
+    problems
 }
 
 fn same_source(a: &Source, b: &Source) -> bool {
