@@ -19,7 +19,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L1 | `craft-render-denoise` | Denoising without trained models: the spatiotemporal variance-guided filter and a first-order regression filter, steered by albedo, normal, depth and variance | rayon |
 | L1 | `craft-render-guide` | Learned sampling: a hash grid over space holding a radiance cache and a directional distribution of incoming light per cell, recorded lock-free and deterministically | glam, rayon |
 | L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator (plain, guided with adaptive roulette and splitting, and with resampled direct lighting), the fibre scattering model and curve sets for hair (`hair`), the progressive film | craft-render-bvh, craft-render-guide, craft-render-denoise |
-| L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline; capabilities from the created device | craft-render-core, wgpu |
+| L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline (software BVH traversal, binary or 8-wide; optionally hardware ray queries); capabilities from the created device | craft-render-core, wgpu |
 | L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback); `trace`: the scene graph exported to the path tracer | mesh, scene, craft-render-*, wgpu |
 | L5 | `modelcraft-script` | Sandboxed Rhai engine over the command registry: scene and mesh API, undo groups, permissions and limits (see [scripting.md](scripting.md)) | engine, rhai |
 | L5 | `modelcraft` (app) | egui UI: viewport, gizmos, panels, workspaces, palette, i18n, kittest tests | engine, render, egui/eframe |
@@ -174,3 +174,25 @@ included, stays in the app, and there is no shared EffectCraft crate. So the cur
 one (API gap to raise there: curve evaluation and editing behind `craft-timeline`'s key model).
 
 Not used yet but planned: `craft-ui` docking, `craft-control` and `craft-mcp-server`.
+
+## The one `unsafe` exception: hardware ray queries
+
+The workspace forbids `unsafe`. wgpu 30 exposes GPU ray queries only as an experimental feature, and
+turning any experimental feature on needs `wgpu::ExperimentalFeatures::enabled()`, an `unsafe fn` whose
+whole contract is that the caller accepts that wgpu's experimental APIs may still hold bugs. With the
+user's approval this is allowed in exactly one place, as an option:
+
+- It is compiled only with the cargo feature `hw-ray-query` of `craft-render-gpu` (forwarded by
+  `modelcraft-render` and `modelcraft-cli`), which is off by default, and used only when a render asks for it
+  (`GpuOptions::hardware_rays`, `--hardware-rays`), also off by default. The default build and CI contain no
+  `unsafe`: without the feature the crate keeps `#![forbid(unsafe_code)]`.
+- The call lives in one function of `crates/craft-render-gpu/src/hw.rs` with `#[allow(unsafe_code)]` and a
+  `// SAFETY:` comment. It is the only `#[allow(unsafe_code)]` in the crate (the crate's lint is `deny`
+  instead of `forbid` so that the one allowance can exist; the attribute in `lib.rs` restores `forbid` when
+  the feature is off).
+- The backend answers the same two queries as the software traversal (`trace_closest` and `trace_any`, the
+  functions `intersect` of `bvh_binary.wgsl`, `bvh_wide.wgsl` and `bvh_rayquery.wgsl`), over the same triangles
+  in the same slot order. A scene with cut-outs, one too large for the device, a device without the feature or
+  an acceleration structure that fails to build all fall back to software tracing with a log line.
+- A test (`hw_tests.rs`) compares hardware and software results on fixed rays and skips, with a message, on a
+  machine without ray-query support.

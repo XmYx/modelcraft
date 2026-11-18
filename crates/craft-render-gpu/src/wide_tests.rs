@@ -33,15 +33,11 @@ fn wide_trees_give_the_same_pictures_on_both_devices() {
     }
 }
 
-/// A timing, not a check: `cargo test --release -p craft-render-gpu -- --ignored --nocapture bench_wide`.
-/// A 2-million-triangle height field lit by a sun and a sky, 960×540, 16 samples.
-#[test]
-#[ignore = "benchmark"]
-fn bench_wide_traversal_on_the_gpu() {
+/// A 2-million-triangle height field lit by a sun and a sky (the benchmark scene).
+pub(crate) fn height_field_scene() -> Scene {
     use craft_render_core::shapes::MeshData;
     use craft_render_core::{Camera, Light, Material, SceneBuilder};
     use glam::{Mat4, Vec3};
-    let Some(ctx) = gpu() else { return };
     let n = 1000usize;
     let height = |x: usize, y: usize| ((x as f32 * 0.05).sin() + (y as f32 * 0.07).cos()) * 3.0;
     let mut mesh = MeshData::default();
@@ -63,7 +59,16 @@ fn bench_wide_traversal_on_the_gpu() {
     b.add_light(Light::Sun { direction: Vec3::new(0.4, 0.8, 0.3), irradiance: Vec3::splat(3.0), angular_radius: 0.02 }).unwrap();
     b.set_environment(Vec3::new(0.3, 0.4, 0.6));
     b.set_camera(Camera { eye: Vec3::new(50.0, 12.0, -20.0), target: Vec3::new(50.0, 0.0, 50.0), ..Camera::default() });
-    let binary = b.build();
+    b.build()
+}
+
+/// A timing, not a check: `cargo test --release -p craft-render-gpu -- --ignored --nocapture bench_wide`
+/// (the height field at 960×540, 16 samples).
+#[test]
+#[ignore = "benchmark"]
+fn bench_wide_traversal_on_the_gpu() {
+    let Some(ctx) = gpu() else { return };
+    let binary = height_field_scene();
     let mut wide = binary.clone();
     let t = std::time::Instant::now();
     assert!(wide.enable_wide_bvh());

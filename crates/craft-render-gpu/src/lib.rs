@@ -11,7 +11,14 @@
 //! - a scene that does not fit the device's limits is an error ([`GpuError::TooLarge`]), and
 //!   validation or device errors come back as [`GpuError::Device`]; nothing here panics.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
-#![forbid(unsafe_code)]
+#![cfg_attr(not(feature = "hw-ray-query"), forbid(unsafe_code))]
+#![cfg_attr(feature = "hw-ray-query", deny(unsafe_code))]
+
+#[cfg(feature = "hw-ray-query")]
+mod hw;
+
+/// Whether this build can use hardware ray queries (the `hw-ray-query` feature).
+pub const HARDWARE_RAYS_BUILT: bool = cfg!(feature = "hw-ray-query");
 
 use bytemuck::{Pod, Zeroable};
 use craft_render_core::bsdf::AlbedoTable;
@@ -45,6 +52,19 @@ pub struct Caps {
     pub max_compute_workgroups_per_dimension: u32,
     /// Storage buffers one shader stage may bind (the resampled direct light kernels need 10).
     pub max_storage_buffers: u32,
+    /// The device was opened with ray queries ([`GpuContext::new_hardware`]).
+    pub hardware_rays: bool,
+    /// Most triangles one acceleration structure may hold (0 without ray queries).
+    pub max_blas_primitives: u32,
+}
+
+/// Options of one render that are not part of the scene or the settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GpuOptions {
+    /// Trace through the GPU's ray-query hardware instead of the shader's own BVH traversal, when
+    /// the build and the device have it and the scene suits it (no cut-outs, small enough). Off by
+    /// default; anything that does not fit falls back to software without an error.
+    pub hardware_rays: bool,
 }
 
 /// A device and queue with their capabilities.
@@ -55,6 +75,12 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
+    /// A device that can run ray queries; always `None` unless this build has the `hw-ray-query` feature.
+    #[cfg(not(feature = "hw-ray-query"))]
+    pub fn new_hardware() -> Option<GpuContext> {
+        None
+    }
+
     /// Open the most capable adapter without a window. `None` when there is none (the caller
     /// renders on the CPU instead).
     pub fn new() -> Option<GpuContext> {
@@ -115,6 +141,8 @@ impl GpuContext {
             max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
             max_compute_workgroups_per_dimension: limits.max_compute_workgroups_per_dimension,
             max_storage_buffers: limits.max_storage_buffers_per_shader_stage,
+            hardware_rays: false,
+            max_blas_primitives: 0,
         };
         GpuContext { device, queue, caps }
     }
@@ -351,6 +379,9 @@ pub struct GpuRenderer {
     accum: wgpu::Buffer,
     params: Params,
     samples: u32,
+    hardware: bool,
+    /// Keeps the acceleration structures of the hardware path alive.
+    _accel: Option<Box<dyn std::any::Any>>,
 }
 
 fn storage<T: Pod>(ctx: &GpuContext, label: &'static str, data: &[T], fallback: T) -> Result<wgpu::Buffer, GpuError> {
@@ -365,10 +396,32 @@ fn storage<T: Pod>(ctx: &GpuContext, label: &'static str, data: &[T], fallback: 
     Ok(ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage: wgpu::BufferUsages::STORAGE }))
 }
 
-/// The shader: the path tracer with the traversal of one of the two hierarchies.
-fn shader_source(wide: bool) -> String {
-    let traversal = if wide { include_str!("bvh_wide.wgsl") } else { include_str!("bvh_binary.wgsl") };
-    format!("{}\n{}", include_str!("pathtrace.wgsl"), traversal)
+/// What answers the kernel's two ray queries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Traversal {
+    Binary,
+    Wide,
+    RayQuery,
+}
+
+/// The shader: the path tracer with one implementation of the ray queries.
+fn shader_source(traversal: Traversal) -> String {
+    match traversal {
+        Traversal::Binary => format!("{}\n{}", include_str!("pathtrace.wgsl"), include_str!("bvh_binary.wgsl")),
+        Traversal::Wide => format!("{}\n{}", include_str!("pathtrace.wgsl"), include_str!("bvh_wide.wgsl")),
+        // The directive must come before every declaration.
+        Traversal::RayQuery => format!("enable wgpu_ray_query;\n{}\n{}", include_str!("pathtrace.wgsl"), include_str!("bvh_rayquery.wgsl")),
+    }
+}
+
+#[cfg(feature = "hw-ray-query")]
+type HardwareAccel = hw::Accel;
+#[cfg(not(feature = "hw-ray-query"))]
+type HardwareAccel = ();
+
+/// What a renderer keeps so that the acceleration structures outlive its bind group.
+fn keep_alive(hardware: Option<HardwareAccel>) -> Option<Box<dyn std::any::Any>> {
+    hardware.map(|a| Box::new(a) as Box<dyn std::any::Any>)
 }
 
 fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
@@ -386,6 +439,11 @@ fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
 impl GpuRenderer {
     /// Upload `scene` and prepare to render it at the size in `settings`.
     pub fn new(ctx: &GpuContext, scene: &Scene, settings: RenderSettings) -> Result<GpuRenderer, GpuError> {
+        GpuRenderer::with_options(ctx, scene, settings, GpuOptions::default())
+    }
+
+    /// [`GpuRenderer::new`] with options.
+    pub fn with_options(ctx: &GpuContext, scene: &Scene, settings: RenderSettings, options: GpuOptions) -> Result<GpuRenderer, GpuError> {
         if !scene.curves.is_empty() {
             return Err(GpuError::Unsupported("hair curves"));
         }
@@ -524,13 +582,40 @@ impl GpuRenderer {
             words.extend(conditional.iter().map(|v| v.to_bits()));
         }
 
-        // The hierarchy the kernel walks: the compressed 8-wide one if the scene has it, else the binary one.
-        let wide = scene.accel.wide.as_ref();
-        let nodes_buf = match wide {
-            Some(w) => storage(ctx, "bvh nodes (8-wide)", bytemuck::cast_slice::<_, u32>(&w.nodes), 0u32)?,
-            None => storage(ctx, "bvh nodes", &scene.accel.bvh.nodes, Zeroable::zeroed())?,
+        // What answers the ray queries: the GPU's own ray-query hardware when asked for and available
+        // (anything that does not fit falls back), else the compressed 8-wide hierarchy if the scene
+        // has it, else the binary one.
+        #[cfg(feature = "hw-ray-query")]
+        let hardware = if options.hardware_rays && ctx.caps.hardware_rays {
+            match hw::build(ctx, scene) {
+                Ok(a) => Some(a),
+                Err(e) => {
+                    log::info!("craft-render: hardware rays are not used for this scene ({e}); tracing in software");
+                    None
+                }
+            }
+        } else {
+            None
         };
-        let node_count = wide.map_or(scene.accel.bvh.nodes.len(), |w| w.nodes.len()) as u32;
+        #[cfg(not(feature = "hw-ray-query"))]
+        let hardware: Option<()> = {
+            let _ = options;
+            None
+        };
+        let wide = scene.accel.wide.as_ref();
+        let traversal = if hardware.is_some() {
+            Traversal::RayQuery
+        } else if wide.is_some() {
+            Traversal::Wide
+        } else {
+            Traversal::Binary
+        };
+        let nodes_buf = match (&hardware, wide) {
+            (Some(_), _) => storage(ctx, "unused", &[0u32], 0u32)?,
+            (None, Some(w)) => storage(ctx, "bvh nodes (8-wide)", bytemuck::cast_slice::<_, u32>(&w.nodes), 0u32)?,
+            (None, None) => storage(ctx, "bvh nodes", &scene.accel.bvh.nodes, Zeroable::zeroed())?,
+        };
+        let node_count = wide.map_or(scene.accel.bvh.nodes.len(), |w| w.nodes.len()).max(1) as u32;
         let tris_buf = storage(ctx, "triangles", &tris, Zeroable::zeroed())?;
         let attrs_buf = storage(ctx, "triangle attributes", &attrs, Zeroable::zeroed())?;
         let mats_buf = storage(ctx, "materials", &materials, Zeroable::zeroed())?;
@@ -616,7 +701,7 @@ impl GpuRenderer {
             let device = &ctx.device;
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("craft path tracer"),
-                source: wgpu::ShaderSource::Wgsl(shader_source(wide.is_some()).into()),
+                source: wgpu::ShaderSource::Wgsl(shader_source(traversal).into()),
             });
             let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("params"),
@@ -638,8 +723,22 @@ impl GpuRenderer {
                 rs_buffers = [make("first surfaces", gbuf_size), make("reservoirs", resv_size)];
                 buffers.extend(rs_buffers.iter());
             }
-            let entries: Vec<wgpu::BindGroupEntry<'_>> =
-                buffers.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect();
+            #[cfg(feature = "hw-ray-query")]
+            let tlas = hardware.as_ref().map(|a| &a.tlas);
+            let entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    #[cfg(feature = "hw-ray-query")]
+                    if i == 1
+                        && let Some(t) = tlas
+                    {
+                        return wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::AccelerationStructure(t) };
+                    }
+                    wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }
+                })
+                .collect();
+            let is_hardware = hardware.is_some();
             if !restir {
                 let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some("craft path tracer"),
@@ -654,21 +753,34 @@ impl GpuRenderer {
                     layout: &pipeline.get_bind_group_layout(0),
                     entries: &entries,
                 });
-                return GpuRenderer { kernels: Kernels::Plain(pipeline), bind_group, params_buf, accum, params, samples: 0 };
+                return GpuRenderer {
+                    kernels: Kernels::Plain(pipeline),
+                    bind_group,
+                    params_buf,
+                    accum,
+                    params,
+                    samples: 0,
+                    hardware: is_hardware,
+                    _accel: keep_alive(hardware),
+                };
             }
             // The stages share one layout: the kernels use different subsets of the bindings.
             let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = (0..buffers.len() as u32)
                 .map(|binding| wgpu::BindGroupLayoutEntry {
                     binding,
                     visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: if binding == 0 {
-                            wgpu::BufferBindingType::Uniform
-                        } else {
-                            wgpu::BufferBindingType::Storage { read_only: (1..=7).contains(&binding) }
-                        },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    ty: if binding == 1 && is_hardware {
+                        wgpu::BindingType::AccelerationStructure { vertex_return: false }
+                    } else {
+                        wgpu::BindingType::Buffer {
+                            ty: if binding == 0 {
+                                wgpu::BufferBindingType::Uniform
+                            } else {
+                                wgpu::BufferBindingType::Storage { read_only: (1..=7).contains(&binding) }
+                            },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        }
                     },
                     count: None,
                 })
@@ -696,8 +808,22 @@ impl GpuRenderer {
                 shade: kernel("restir_shade"),
             };
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("craft restir"), layout: &layout, entries: &entries });
-            GpuRenderer { kernels: Kernels::Restir(kernels), bind_group, params_buf, accum, params, samples: 0 }
+            GpuRenderer {
+                kernels: Kernels::Restir(kernels),
+                bind_group,
+                params_buf,
+                accum,
+                params,
+                samples: 0,
+                hardware: is_hardware,
+                _accel: keep_alive(hardware),
+            }
         })
+    }
+
+    /// Whether the ray queries run on the GPU's ray-query hardware (see [`GpuOptions`]).
+    pub fn uses_hardware(&self) -> bool {
+        self.hardware
     }
 
     /// Samples accumulated in every pixel so far.
@@ -803,6 +929,9 @@ impl GpuRenderer {
 mod denoise_tests;
 
 #[cfg(test)]
+mod hw_tests;
+
+#[cfg(test)]
 mod wide_tests;
 
 #[cfg(test)]
@@ -832,6 +961,12 @@ pub(crate) mod tests {
     }
 
     /// The GPU for a test, or `None` (with a note) on machines without an adapter.
+    /// The turn to hold while a test opens a device of its own.
+    #[cfg(feature = "hw-ray-query")]
+    pub(crate) fn gpu_turn() -> std::sync::MutexGuard<'static, ()> {
+        ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     pub(crate) fn gpu() -> Option<TestGpu> {
         let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
         let ctx = GpuContext::new();
