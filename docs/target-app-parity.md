@@ -356,7 +356,7 @@ Weight: 7
 | Insert-mesh brushes and curve brushes | Z | M | L | |
 | Live booleans between sculpted parts | Z | M | L | |
 | 1 M+ polygons interactive | C M Z | D | M | 2.0 M triangles at ~280 fps while sculpting (measured) |
-| 20 M+ polygons interactive | Z | M | XL | Not reached: measured at 12.6 M triangles in the engine only (3–5 ms per dab with ~10 k vertices under the brush); 20 M and the app window at that size are not measured, and a session takes 6–10 s to start there |
+| 20 M+ polygons interactive | Z | M | XL | Not reached: at 12.6 M triangles the app window sculpts at 16.8 ms a frame (59.5 fps mean, p95 23.8 ms, a large brush) and orbits at 161 fps (measured); 20 M is not measured, and a session takes 6–10 s to start at 12.6 M |
 | Strokes are data: per-stroke undo, bit-exact replay after a crash | C M Z | X | S | Journaled |
 
 ## Sculpting: resolution and topology

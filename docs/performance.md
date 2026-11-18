@@ -18,6 +18,24 @@ clay dab per frame with X symmetry (each dab touching ~30 k vertices) for 300 fr
 
 In the same run: dab 1.21 ms mean (1.84 ms p95), dirty-chunk upload 0.45 ms mean (0.61 ms p95).
 
+### The app window after the per-frame copy was removed (2026-11-18)
+
+The Sculpt panel synced the sculpt session into the scene on every frame. During a stroke that
+copied every vertex and made the Properties panel rebuild the whole object, which the table
+above (measured before that panel existed) does not show. Measured with the machine's load
+average at 23 to 31 on 24 threads (other builds), `modelcraft --bench-viewport N [--bench-polys P]`:
+
+| Triangles | Session | Sculpt frame before | Sculpt frame after (mean / p95) | Orbit frame after | Dab | Upload |
+|---|---|---|---|---|---|---|
+| 2,007,372 | Wayland (60 Hz cap) | 64.7 ms (15.5 fps), p95 96.2 ms | 17.0 ms (59 fps) / 17.3 ms | 16.7 ms | 1.5 ms | 1.6 ms mean, 0.6 ms p50 |
+| 2,007,372 | X11, uncapped | not measured | 5.9 ms (169 fps) / 8.8 ms | 5.0 ms (198 fps) | 1.9 ms | 0.8 ms |
+| 12,582,912 | X11, uncapped | not measured | 16.8 ms (59.5 fps) / 23.8 ms | 6.2 ms (161 fps) | 11.2 ms mean, 16.2 ms p95 | 7.8 ms mean, 3.1 ms p50 |
+
+The 12.6 M row is the first measurement of the app window at that size (`--bench-polys 6291456`,
+the largest quad sphere the primitive makes): one clay dab per frame with X symmetry at a radius
+of 12 % of the object, which touches far more vertices than the engine bench's radius. 20 M
+triangles are still not measured: the primitive stops at 1024 segments.
+
 ## Sculpt latency (engine, `modelcraft-cli bench --polys 1000000 --dabs 300`)
 
 Mesh: 1,003,686 quads → 2,007,372 triangles. Generating it: 1.1 s; starting a sculpt session
