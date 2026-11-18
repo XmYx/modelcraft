@@ -228,7 +228,11 @@ fn unwrap_step_writes_uvs_that_later_steps_keep() {
     let mut ev = Evaluator::new();
     let id = s.add("Cube", cube_kind(), None).unwrap();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-        steps.push(Step { id: 1, enabled: true, op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01 } });
+        steps.push(Step {
+            id: 1,
+            enabled: true,
+            op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01, method: Default::default() },
+        });
         steps.push(Step { id: 2, enabled: true, op: StepOp::Subdivide { levels: 1 } });
     }
     let e = ev.evaluate(&s, id);
@@ -258,6 +262,7 @@ fn unwrap_step_with_stale_input_is_skipped() {
                 pins: vec![UvPin { corner: 9999, uv: [0.0, 0.0] }],
                 auto_cut: true,
                 margin: 5.0,
+                method: Default::default(),
             },
         });
     }
@@ -292,8 +297,8 @@ fn uv_edit_steps_move_weld_and_record_seams() {
     // Weld an edge; JSON defaults for the new steps.
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
         steps.clear();
-        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0] } });
-        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999] } });
+        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0], align: false, scale: false } });
+        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999], align: false, scale: false } });
     }
     let e = ev.evaluate(&s, id);
     assert_eq!(e.errors.len(), 1, "an edge that does not exist is reported, the step skipped");

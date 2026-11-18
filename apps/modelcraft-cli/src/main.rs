@@ -56,7 +56,8 @@ Commands:
   bench --groups [--polys N]        patch, visibility, region, shell, trim, occlusion, decimate and projection times
   uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
-  uv-bench [--segments N]           unwrap a sphere of N×N/2 quads: time and distortion
+  uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian] [--relax N]
+                                    unwrap a sphere (or tube, cone, torus, roundcube): time and distortion
   -h, --help | -V, --version
 ";
 
@@ -287,7 +288,13 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
-        "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
+        "uv-bench" => uv_bench(
+            flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64),
+            &flag(a, "--method").unwrap_or_else(|| "lscm".to_string()),
+            &flag(a, "--shape").unwrap_or_else(|| "sphere".to_string()),
+            &flag(a, "--cut").unwrap_or_else(|| "auto".to_string()),
+            flag(a, "--relax").and_then(|v| v.parse().ok()).unwrap_or(0),
+        ),
         "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
@@ -564,30 +571,81 @@ fn uv_report(d: &mut Document) -> Result<(), String> {
     Ok(())
 }
 
-/// Unwrap a welded UV sphere (no seams: the automatic cut gives it a path) and report time and
-/// distortion. Reproduces the numbers in `docs/performance.md`.
-fn uv_bench(segments: u32) -> Result<(), String> {
+/// Unwrap a welded shape (no seams unless the shape is developable: the automatic cut gives a
+/// closed one a path) with each solver asked for and report time and distortion. Reproduces the
+/// numbers in `docs/performance.md`.
+fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str, relax: u32) -> Result<(), String> {
     use modelcraft_engine::ops::{edit, primitives::Primitive};
-    use modelcraft_engine::uv::{SeamSet, UnwrapOptions, measure, unwrap_mesh};
+    use modelcraft_engine::uv::{RelaxMode, RelaxOptions, SeamSet, UnwrapMethod, UnwrapOptions, measure, relax_corners, unwrap_mesh};
     let segments = segments.clamp(4, 512);
     let rings = (segments / 2).max(2);
+    let prim = match shape {
+        "sphere" => Primitive::Sphere { radius: 1.0, segments, rings },
+        "tube" => Primitive::Cylinder { radius: 1.0, height: 2.0, sides: segments, rings, caps: false },
+        "cone" => Primitive::Cone { radius: 1.0, height: 1.5, sides: segments, caps: false },
+        "torus" => Primitive::Torus { radius: 1.0, tube: 0.35, segments, sides: (segments / 2).max(3) },
+        "roundcube" => Primitive::RoundCube { radius: 1.0, segments: (segments / 4).max(2) },
+        other => return Err(format!("unknown shape `{other}` (sphere, tube, cone, torus, roundcube)")),
+    };
+    let methods: Vec<(&str, UnwrapMethod)> = match method {
+        "lscm" => vec![("LSCM", UnwrapMethod::Lscm)],
+        "abf" => vec![("ABF", UnwrapMethod::Abf)],
+        "both" => vec![("LSCM", UnwrapMethod::Lscm), ("ABF", UnwrapMethod::Abf)],
+        other => return Err(format!("unknown method `{other}` (lscm, abf, both)")),
+    };
     let t = Instant::now();
-    let raw = Primitive::Sphere { radius: 1.0, segments, rings }.build().map_err(|e| e.to_string())?;
+    let raw = prim.build().map_err(|e| e.to_string())?;
     let mesh = edit::weld(&raw, 1e-5).map_err(|e| e.to_string())?;
-    println!("sphere {segments}x{rings}: {} quads, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
-    let t = Instant::now();
-    let (out, res) = unwrap_mesh(&mesh, &SeamSet::new(), &UnwrapOptions::default()).map_err(|e| e.to_string())?;
-    let solve = ms(t);
-    let isl = res.islands.first();
-    println!(
-        "unwrap (auto cut of {} edges, LSCM): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
-        res.cut.edges_added,
-        isl.map_or(0, |i| i.iterations),
-        isl.map_or(0.0, |i| i.residual),
-        isl.is_some_and(|i| i.converged)
-    );
-    let (dist, _) = measure(&out);
-    println!("{}", distortion_json(&dist));
+    println!("{shape} {segments}: {} faces, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
+    let mut seams = SeamSet::new();
+    match cut {
+        "auto" => {}
+        // One seam from the top to the bottom of the shape (pole to pole on a sphere, a line down
+        // a tube, apex to rim on a cone): a single interior everywhere else.
+        "meridian" => {
+            let key = |v: u32| f64::from(mesh.position(v).y) * 1000.0 - f64::from(mesh.position(v).z);
+            let ids = 0..mesh.vertex_count() as u32;
+            let top = ids.clone().max_by(|a, b| key(*a).total_cmp(&key(*b)));
+            let bottom = ids.min_by(|a, b| key(*a).total_cmp(&key(*b)));
+            if let (Some(top), Some(bottom)) = (top, bottom) {
+                seams.mark_path(&mesh, top, bottom).ok_or("no seam path between the ends of the shape")?;
+            }
+        }
+        other => return Err(format!("unknown cut `{other}` (auto, meridian)")),
+    }
+    for (label, m) in methods {
+        let t = Instant::now();
+        let (out, res) = unwrap_mesh(&mesh, &seams, &UnwrapOptions { method: m, ..UnwrapOptions::default() }).map_err(|e| e.to_string())?;
+        let solve = ms(t);
+        let isl = res.islands.first();
+        match isl.and_then(|i| i.abf) {
+            Some(a) => println!(
+                "unwrap {label} (auto cut of {} edges): {solve:.0} ms, {} Newton iterations, constraint residual {:.1e}, converged {}, fell back {}",
+                res.cut.edges_added,
+                a.iterations,
+                a.residual,
+                a.converged,
+                isl.is_some_and(|i| i.abf_fell_back())
+            ),
+            None => println!(
+                "unwrap {label} (auto cut of {} edges): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
+                res.cut.edges_added,
+                isl.map_or(0, |i| i.iterations),
+                isl.map_or(0.0, |i| i.residual),
+                isl.is_some_and(|i| i.converged)
+            ),
+        }
+        let (dist, _) = measure(&out);
+        println!("{}", distortion_json(&dist));
+        if relax > 0 {
+            for (label, mode) in [("rigid", RelaxMode::Rigid), ("conformal", RelaxMode::Conformal)] {
+                let t = Instant::now();
+                let (relaxed, rep) = relax_corners(&out, &[], &RelaxOptions { iterations: relax, mode }).map_err(|e| e.to_string())?;
+                println!("relax {label} x{relax}: {:.0} ms, energy {:.4e} -> {:.4e}, {} islands", ms(t), rep.energy_before, rep.energy_after, rep.islands);
+                println!("{}", distortion_json(&measure(&relaxed).0));
+            }
+        }
+    }
     Ok(())
 }
 

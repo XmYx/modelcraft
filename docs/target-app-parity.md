@@ -320,11 +320,11 @@ Weight: 4
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
 | Seams and conformal unwrap | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport |
-| Angle-based unwrap (ABF) | C M Z | M | M | |
+| Angle-based unwrap (ABF) | C M Z | D | M | `modelcraft-uv`: ABF with the reduced Newton system of ABF++ (Sheffer et al. 2001, 2005) as a second solver beside LSCM; chosen with the Unwrap solver box in the UV Editor, `Unwrap UVs (Angle-Based)` in the UV menu and the palette, `method` on the Unwrap step, or `uv-bench --method abf`; an island that does not converge falls back to LSCM and the report says so. Compared with LSCM in `docs/performance.md` |
 | Packing | C M | D | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density (a work bound and a shelf fallback above 500 islands); Pack UV Islands in the UV Editor and menu, history step, CLI |
 | UDIM tiles | C M Z | M | M | |
 | Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode); camera projection through the history step and CLI only |
-| Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
+| Relax, straighten, align and stitch tools | C M | D | M | `modelcraft-uv`: Relax UVs (local/global flattening of Liu et al. 2008, keep lengths or keep angles, on the selection with the rest held), Straighten UVs (selected chains of UV edges on the line between their ends, keeping edge-length ratios), Stitch UV Islands (moves one island onto its neighbour along the shared edges with a least-squares similarity, optionally matching scale, then welds), Weld, flip and numeric align; history steps, the UV Editor, menu and palette, `add_step` |
 | Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
