@@ -575,13 +575,13 @@ Weight: 6
 | OBJ import and export | C M Z | D | S | Quads kept |
 | STL export, STL and PLY import | C M Z | D | S | |
 | FBX import and export | C M Z | D | M | Import binary and ASCII 6.x/7.x through craft-mesh; export FBX 7.4 ASCII (meshes with quads, UVs, normals, material colour, hierarchy, TRS); round-trip tested |
-| USD: layers, references, variants, import and export | C M | M | XL | Later, with craft-usd |
+| USD: layers, references, variants, import and export | C M | P | XL | Text `.usda` read and written for the prim hierarchy, transforms, meshes with UVs and preview-surface materials (`convert`, File ▸ Export USD, Import); no layers, references, variants, binary `.usdc` or `.usdz` yet |
 | Alembic caches: import and export | C M | M | L | |
 | File references and proxies | C M | M | L | |
 | Asset browser / content library | C M | M | M | |
 | Live link with other apps (send and receive meshes) | C M Z | M | M | Planned with TextureCraft |
 | EXR and HDR images as textures and lighting | C M R | M | M | |
-| 3MF export for printing | C Z | M | S | |
+| 3MF export for printing | C Z | D | S | File ▸ Export 3MF and `convert`/`export` to .3mf: one object per mesh, world transform per build item, sRGB base colours, Z up and a named unit from Exchange Settings; round-tripped through craft-mesh's reader |
 | Up-axis and unit conversion on import and export | C M Z | D | S | FBX axes and unit read from the file; Y/Z up and metres/cm/mm/inches for any format (File ▸ Exchange Settings, `--up`, `--scale`) |
 | Native project, atomic saves | C M Z | D | S | `.modelcraft` ZIP |
 | Crash journal with exact replay | | X | S | Every command, sculpt strokes included |

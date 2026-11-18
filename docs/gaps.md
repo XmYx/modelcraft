@@ -302,7 +302,7 @@ The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs 
 
 ## Pipeline formats
 
-FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/formats/src/fbx_write.rs`, from public descriptions of the syntax and scene objects only; it belongs next to craft-mesh's reader once craft-libs takes writers. 3MF is read too; 3MF export (F5) remains. USD (**F3**) waits for a scene-level reader in craft-libs (craft-usd has wire primitives only). glTF stores triangles only, so our GLB round trip loses quads; quad hints in `extras` wait for craft-mesh to keep `extras`. craft-mesh writes GLB only; a `.gltf` JSON writer belongs there.
+FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/formats/src/fbx_write.rs`, from public descriptions of the syntax and scene objects only; it belongs next to craft-mesh's reader once craft-libs takes writers. 3MF is read and written (`threemf_write.rs`, with the file's unit and Z up). USD (**F3**) is partly in: text `.usda` is read and written by `crates/formats/src/usd.rs` (hierarchy, transforms, meshes with UVs, preview-surface materials); layers, references, variants, `.usdc` and `.usdz` remain (craft-usd has wire primitives only). glTF stores triangles only, so our GLB round trip loses quads; quad hints in `extras` wait for craft-mesh to keep `extras`. craft-mesh writes GLB only; a `.gltf` JSON writer belongs there.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

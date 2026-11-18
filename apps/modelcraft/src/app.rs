@@ -724,6 +724,8 @@ impl ModelApp {
             ExportObj => self.export_dialog("obj"),
             ExportStl => self.export_dialog("stl"),
             ExportFbx => self.export_dialog("fbx"),
+            Export3mf => self.export_dialog("3mf"),
+            ExportUsda => self.export_dialog("usda"),
             Undo => {
                 self.drag = None;
                 self.run(Command::Undo);
@@ -1082,7 +1084,7 @@ impl ModelApp {
     pub fn open_dialog(&mut self) {
         if let Some(p) = rfd::FileDialog::new()
             .add_filter("ModelCraft", &["modelcraft"])
-            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"])
+            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf", "usda", "usd"])
             .pick_file()
         {
             self.open_path(p);
@@ -1090,7 +1092,7 @@ impl ModelApp {
     }
 
     fn import_dialog(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"]).pick_file() {
+        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf", "usda", "usd"]).pick_file() {
             self.run(Command::Import { path: p.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
         }
     }

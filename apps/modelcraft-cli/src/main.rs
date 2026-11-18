@@ -31,12 +31,12 @@ Commands:
                                     apply one JSON command per line, then save
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
-  export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
+  export <project> <out.glb|obj|stl|fbx|3mf|usda> [--up y|z] [--scale M]
   export-uv <project> <out.svg|png> [--size N] [--object ID]
                                     the UV layout of a mesh object as a picture
   convert <in> <out> [--up auto|y|z] [--scale M]
                                     any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
-                                    .glb, .obj, .stl, .fbx or .modelcraft; --up and --scale
+                                    .glb, .obj, .stl, .fbx, .3mf, .usda or .modelcraft; --up and --scale
                                     (metres per file unit) convert axes and units
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
