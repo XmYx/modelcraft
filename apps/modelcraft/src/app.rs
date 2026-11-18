@@ -213,6 +213,8 @@ pub struct ModelApp {
     pub recovery_dir: Option<PathBuf>,
     /// The Animation panel: playback, key selection, views.
     pub anim: crate::anim_ui::AnimUi,
+    /// Hair grooming: brush, symmetry, the stroke in progress.
+    pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
     /// The allow-agents preference.
     pub allow_agents: bool,
@@ -332,6 +334,7 @@ impl ModelApp {
             autosave_at: None,
             recovery_dir: None,
             anim: Default::default(),
+            groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
             uv: Default::default(),
@@ -694,6 +697,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
@@ -748,6 +752,21 @@ impl ModelApp {
                 }
                 None => self.status = tl!("Select a mesh to deform"),
             },
+            AddField(kind) => {
+                // Into the selected deformer, or the deformer a selected field already sits in.
+                let scene = &self.doc.scene;
+                let target = self.active().and_then(|a| match scene.get(a).map(|o| (&o.kind, o.parent)) {
+                    Some((ObjectKind::Deformer { .. }, _)) => Some(a),
+                    Some((ObjectKind::Field { .. }, Some(p))) => Some(p),
+                    _ => None,
+                });
+                match target {
+                    Some(target) => {
+                        self.run(Command::AddField { kind: kind.into(), target });
+                    }
+                    None => self.status = tl!("Select a deformer for the falloff field"),
+                }
+            }
             AddCloner(kind) => {
                 // The selected mesh (or smooth cage) becomes the source; with none, a small cube is made.
                 let input = self
@@ -863,6 +882,7 @@ impl ModelApp {
             ScriptWindow => crate::script_ui::toggle(self),
             ScriptRun => crate::script_ui::run_editor(self, false),
             ScriptRunSelection => crate::script_ui::run_editor(self, true),
+            ScriptRecord => crate::script_macro::toggle(self),
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),

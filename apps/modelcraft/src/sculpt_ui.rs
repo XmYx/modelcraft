@@ -79,6 +79,24 @@ pub fn brush_options(app: &mut ModelApp, ui: &mut egui::Ui) {
             name(ui, &r, crate::tl!("Dab spacing"));
             ui.end_row();
         }
+        ui.label(crate::tl!("Radial copies"));
+        ui.horizontal(|ui| {
+            let mut n = u32::from(app.brush.symmetry.radial.max(1));
+            let r = ui
+                .add(egui::DragValue::new(&mut n).speed(0.1).range(1..=u32::from(modelcraft_engine::sculpt::brush::MAX_RADIAL)))
+                .on_hover_text(crate::tl!("Repeat every dab this many times around an axis of the object (1: off)"));
+            name(ui, &r, crate::tl!("Radial copies"));
+            app.brush.symmetry.radial = if n <= 1 { 0 } else { n.min(255) as u8 };
+            let axes = ["X", "Y", "Z"];
+            let now = axes.get(app.brush.symmetry.radial_axis as usize).copied().unwrap_or("Y");
+            let r = egui::ComboBox::from_id_salt("radial-axis").width(36.0).selected_text(now).show_ui(ui, |ui| {
+                for (k, axis) in axes.iter().enumerate() {
+                    ui.selectable_value(&mut app.brush.symmetry.radial_axis, k as u8, *axis);
+                }
+            });
+            name(ui, &r.response, crate::tl!("Radial axis"));
+        });
+        ui.end_row();
         if let modelcraft_engine::sculpt::Stamp::Image { turn, .. } = &mut app.brush.stamp {
             ui.label(crate::tl!("Stamp turn"));
             let mut deg = turn.to_degrees();

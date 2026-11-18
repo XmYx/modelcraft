@@ -11,7 +11,10 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
-use modelcraft_sim::SimObject;
+use modelcraft_sim::particles::ParticleSettings;
+use modelcraft_sim::{SimKind, SimObject};
+
+use crate::{CloneInstance, CloneSet, Instances};
 
 use crate::{ObjectId, ObjectKind, Scene};
 
@@ -22,10 +25,15 @@ impl Scene {
             .iter()
             .filter(|o| o.parent == Some(mesh) && o.visible)
             .filter_map(|o| match &o.kind {
-                ObjectKind::Sim { sim } if sim.cache.is_some() => Some((o.id, sim.clone())),
+                ObjectKind::Sim { sim } if sim.cache.is_some() && sim.kind.drives_mesh() => Some((o.id, sim.clone())),
                 _ => None,
             })
             .collect()
+    }
+
+    /// Whether the object is a particle system (a simulation shown as instances).
+    pub fn is_particles(&self, id: ObjectId) -> bool {
+        matches!(self.get(id).map(|o| &o.kind), Some(ObjectKind::Sim { sim }) if matches!(sim.kind, SimKind::Particles(_)))
     }
 
     /// Every simulation object under (or at) `id`'s children, with or without a cache.
@@ -44,10 +52,56 @@ impl Scene {
 /// A number that changes with the current frame while the mesh has a visible simulation with a
 /// cache; zero otherwise.
 pub fn sim_key(scene: &Scene, mesh: ObjectId) -> u64 {
-    if scene.sims_of(mesh).is_empty() {
+    let particles =
+        matches!(scene.get(mesh).map(|o| &o.kind), Some(ObjectKind::Sim { sim }) if matches!(sim.kind, SimKind::Particles(_)) && sim.cache.is_some());
+    if !particles && scene.sims_of(mesh).is_empty() {
         return 0;
     }
     (scene.anim.frame.to_bits().wrapping_mul(0x0100_0000_01b3) ^ 0x6a09_e667_f3bc_c908) | 1
+}
+
+/// A low-poly unit sphere, the shape of a particle that has no source object of its own.
+pub fn particle_sphere() -> Arc<PolyMesh> {
+    static SPHERE: std::sync::OnceLock<Arc<PolyMesh>> = std::sync::OnceLock::new();
+    SPHERE.get_or_init(|| Arc::new(crate::Primitive::Sphere { radius: 1.0, segments: 8, rings: 6 }.build().unwrap_or_default())).clone()
+}
+
+/// The particles of a system at the scene's current frame as instances of `source`, in the
+/// space of the system's own object (positions in the cache are world space). Dead slots are
+/// left out. At most [`crate::MAX_CLONES`] are drawn; `truncated` says when there are more.
+/// A source object brings its own size (`local`), the default sphere is scaled by each
+/// particle's size.
+pub fn particle_instances(
+    scene: &Scene,
+    id: ObjectId,
+    settings: &ParticleSettings,
+    cache: &modelcraft_sim::FrameCache,
+    source: Arc<PolyMesh>,
+    source_object: Option<ObjectId>,
+) -> Instances {
+    let mut points: Vec<Vec3> = Vec::new();
+    let mut set = CloneSet::default();
+    if cache.sample(scene.anim.frame, &mut points) {
+        let to_local = scene.world_matrix(id).inverse();
+        let to_local = if to_local.is_finite() { to_local } else { glam::Mat4::IDENTITY };
+        let local = source_object.and_then(|c| scene.get(c)).map(|o| o.transform.matrix());
+        for (i, p) in points.iter().enumerate() {
+            if !p.is_finite() {
+                continue;
+            }
+            if set.instances.len() >= crate::MAX_CLONES {
+                set.truncated = true;
+                break;
+            }
+            let size = settings.size_of(i);
+            let m = match local {
+                Some(l) => to_local * glam::Mat4::from_translation(*p) * glam::Mat4::from_scale(Vec3::splat(size / settings.size.max(1e-6))) * l,
+                None => to_local * glam::Mat4::from_scale_rotation_translation(Vec3::splat(size), glam::Quat::IDENTITY, *p),
+            };
+            set.instances.push(CloneInstance { matrix: if m.is_finite() { m } else { glam::Mat4::IDENTITY }, color: [1.0; 4], index: i as u32 });
+        }
+    }
+    Instances { source, source_object, clones: set }
 }
 
 /// Show the cached points of a mesh object's simulations at the current frame. Returns the
@@ -200,5 +254,48 @@ mod tests {
         let back = back.repaired().unwrap();
         let ObjectKind::Sim { sim } = &back.get(id).unwrap().kind else { panic!() };
         assert!(sim.timing.validate().is_ok());
+    }
+
+    #[test]
+    fn a_particle_system_evaluates_to_instances_at_the_current_frame() {
+        let (mut s, emitter) = plane();
+        let mut cache = FrameCache::new(24.0, 1.0, 1.0, 3);
+        cache.push(&[Vec3::new(1.0, 0.0, 0.0), modelcraft_sim::DEAD, Vec3::new(0.0, 2.0, 0.0)], usize::MAX).unwrap();
+        cache.push(&[Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 5.0), modelcraft_sim::DEAD], usize::MAX).unwrap();
+        let mut sim = SimObject::new(SimKind::Particles(ParticleSettings { size: 0.1, size_variation: 0.0, ..Default::default() }));
+        sim.cache = Some(Arc::new(cache));
+        let id = s.add("Particles", ObjectKind::Sim { sim: Arc::new(sim) }, Some(emitter)).unwrap();
+        assert!(s.is_particles(id) && !s.is_particles(emitter));
+        s.edit(id).unwrap().transform.translation = Vec3::new(10.0, 0.0, 0.0);
+        let mut ev = Evaluator::new();
+        s.set_frame(1.0);
+        let e = ev.evaluate(&s, id);
+        let inst = e.instances.expect("instances");
+        assert_eq!(inst.clones.instances.len(), 2, "the dead slot is not drawn");
+        assert_eq!(inst.clones.instances.iter().map(|c| c.index).collect::<Vec<_>>(), vec![0, 2]);
+        // World position = world(system) × matrix: the cache is in world space whatever the object does.
+        let world = s.world_matrix(id);
+        let p = (world * inst.clones.instances[0].matrix).transform_point3(Vec3::ZERO);
+        assert!((p - Vec3::new(1.0, 0.0, 0.0)).length() < 1e-5, "{p:?}");
+        assert!(((world * inst.clones.instances[0].matrix).transform_vector3(Vec3::X).length() - 0.1).abs() < 1e-5, "the size is the particle's");
+        // The next frame has other particles, and the emitter mesh is not deformed by the pool.
+        s.set_frame(2.0);
+        let e = ev.evaluate(&s, id);
+        assert_eq!(e.instances.unwrap().clones.instances.iter().map(|c| c.index).collect::<Vec<_>>(), vec![0, 1]);
+        assert!(ev.evaluate(&s, emitter).errors.is_empty(), "a particle cache is not a vertex cache");
+        assert_eq!(sim_key(&s, emitter), 0);
+        assert_ne!(sim_key(&s, id), 0);
+        // A mesh inside the system is the shape of each particle and is not drawn on its own.
+        let shape = s
+            .add("Pebble", ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::default_of("cube").unwrap() }, steps: vec![] }, Some(id))
+            .unwrap();
+        assert!(s.is_cage_input(shape));
+        s.set_frame(1.0);
+        let inst = ev.evaluate(&s, id).instances.unwrap();
+        assert_eq!(inst.source_object, Some(shape));
+        assert_eq!(inst.source.vertex_count(), 8);
+        // Hidden, it draws nothing.
+        s.edit(id).unwrap().visible = false;
+        assert!(s.sims_of(emitter).is_empty());
     }
 }
