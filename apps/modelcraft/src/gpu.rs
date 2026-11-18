@@ -9,6 +9,7 @@ use modelcraft_engine::mesh::PolyMesh;
 use modelcraft_render::buffers::LineVertex;
 use modelcraft_render::buffers::{self, MeshVertex};
 use modelcraft_render::gpu::{DrawItem, Frame, GpuMesh, Renderer, Target};
+use modelcraft_render::hair_gpu::{GpuHair, HairDraw};
 
 /// One object to draw: a cached mesh (`key`) or the sculpt mesh (`None`).
 pub struct DrawSpec {
@@ -21,6 +22,23 @@ pub struct DrawSpec {
     pub roughness: f32,
 }
 
+/// One hair object to draw: its uploaded strands (`key`, see [`GpuState::hair`]), the emitter's
+/// world matrix, a colour and the share of the strands to draw.
+pub struct HairSpec {
+    pub key: u64,
+    pub model: glam::Mat4,
+    pub color: [f32; 4],
+    pub fraction: f32,
+}
+
+/// Hair strands uploaded for one object: the revision they were made at and how many were made.
+struct HairEntry {
+    rev: u64,
+    generated: usize,
+    gpu: GpuHair,
+    used: u64,
+}
+
 pub struct GpuState {
     pub rs: egui_wgpu::RenderState,
     pub renderer: Renderer,
@@ -30,6 +48,7 @@ pub struct GpuState {
     /// The sculpt mesh's patch and visibility revision last uploaded, and the patch each vertex
     /// shows (empty while every triangle is in patch 0).
     sculpt_view: (u64, Vec<f32>),
+    hairs: HashMap<u64, HairEntry>,
     frame: u64,
     /// Time of the last sculpt upload, milliseconds (status bar and benchmarks).
     pub upload_ms: f32,
@@ -46,6 +65,7 @@ impl GpuState {
             meshes: HashMap::new(),
             sculpt: None,
             sculpt_view: (0, Vec::new()),
+            hairs: HashMap::new(),
             frame: 0,
             upload_ms: 0.0,
             uploaded_vertices: 0,
@@ -57,6 +77,23 @@ impl GpuState {
         let f = self.frame;
         // Drop meshes no view drew for a while.
         self.meshes.retain(|_, (_, _, used)| f.saturating_sub(*used) < 30);
+        self.hairs.retain(|_, e| f.saturating_sub(e.used) < 30);
+    }
+
+    /// Make sure the strands of hair object `key` at revision `rev` are uploaded, at least `wanted`
+    /// of them (a prefix of the groom). `build` makes that many strands. Returns the share of the uploaded strands that `wanted` is, or `None` when there is
+    /// nothing to draw.
+    pub fn hair(&mut self, key: u64, rev: u64, wanted: usize, build: impl FnOnce(usize) -> Option<modelcraft_hair::HairCurves>) -> Option<f32> {
+        let f = self.frame;
+        let fresh = self.hairs.get(&key).is_none_or(|e| e.rev != rev || e.generated < wanted);
+        if fresh {
+            let curves = build(wanted)?;
+            let gpu = GpuHair::new(&self.rs.device, curves.all_points(), curves.points_per_strand())?;
+            self.hairs.insert(key, HairEntry { rev, generated: gpu.strands, gpu, used: f });
+        }
+        let e = self.hairs.get_mut(&key)?;
+        e.used = f;
+        Some((wanted as f32 / e.gpu.strands.max(1) as f32).min(1.0))
     }
 
     /// The target of a view, (re)created at this size, and its egui texture.
@@ -109,9 +146,10 @@ impl GpuState {
         specs: &[DrawSpec],
         lines: &[LineVertex],
         overlay: &[LineVertex],
+        hair: &[HairSpec],
     ) -> Option<egui::TextureId> {
         self.target(view, size)?;
-        let GpuState { renderer, targets, meshes, sculpt, rs, .. } = self;
+        let GpuState { renderer, targets, meshes, sculpt, hairs, rs, .. } = self;
         let (target, id) = targets.get(&view)?;
         let draws = specs
             .iter()
@@ -131,7 +169,9 @@ impl GpuState {
                 })
             })
             .collect();
-        renderer.render(&rs.device, &rs.queue, target, &Frame { view_proj, eye, clear, draws, lines, overlay });
+        let hair =
+            hair.iter().filter_map(|h| hairs.get(&h.key).map(|e| HairDraw { hair: &e.gpu, model: h.model, color: h.color, fraction: h.fraction })).collect();
+        renderer.render(&rs.device, &rs.queue, target, &Frame { view_proj, eye, clear, draws, lines, overlay, hair });
         Some(*id)
     }
 

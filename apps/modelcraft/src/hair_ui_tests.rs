@@ -200,3 +200,42 @@ fn regrow_and_remove() {
     h.run();
     assert!(h.state().doc.scene.objects().iter().all(|o| !matches!(o.kind, ObjectKind::Hair { .. })), "{}", h.state().status);
 }
+
+#[test]
+fn the_display_percentage_and_limit_decide_how_many_strands_are_drawn() {
+    use crate::hair_ui::{DisplaySettings, EDIT_STRAND_LIMIT, strands_to_draw};
+    let d = DisplaySettings::default();
+    assert_eq!(strands_to_draw(0, &d), 0);
+    assert_eq!(strands_to_draw(20_000, &d), 20_000);
+    assert_eq!(strands_to_draw(1_000_000, &d), EDIT_STRAND_LIMIT, "the limit caps a large groom while editing");
+    assert_eq!(strands_to_draw(1_000_000, &DisplaySettings { limit: false, ..d }), 1_000_000);
+    assert_eq!(strands_to_draw(1_000_000, &DisplaySettings { limit: false, percent: 10.0, ..d }), 100_000);
+    assert_eq!(strands_to_draw(1_000, &DisplaySettings { percent: 0.1, ..d }), 1);
+    assert_eq!(strands_to_draw(50, &DisplaySettings { percent: 0.0, ..d }), 1, "a groom never disappears into a rounding error");
+    assert_eq!(strands_to_draw(50, &DisplaySettings { percent: f32::NAN, ..d }), 50);
+    assert_eq!(strands_to_draw(50, &DisplaySettings { strands: false, ..d }), 0);
+}
+
+#[test]
+fn display_options_are_named_controls_with_a_palette_path() {
+    let mut h = with_hair();
+    for name in ["Show Hair Strands", "Show Hair Guides", "Limit strands while editing"] {
+        h.get_by_role_and_label(Role::CheckBox, name);
+    }
+    h.get_by_role_and_label(Role::SpinButton, "Hair display percent").set_value_accesskit(25.0);
+    h.run();
+    assert_eq!(h.state().groom.display.percent, 25.0);
+    assert!(h.state().status.is_empty() || !h.state().status.contains("failed"));
+    h.get_by_label_contains("Showing 5000 of 20000 strands");
+    // Guides are drawn for selected hair; with them off nothing is, unless strands are off too.
+    assert_eq!(crate::hair_ui::guide_lines(h.state()).len(), 1000 * 7);
+    palette(&mut h, "Show Hair Guides");
+    assert!(!h.state().groom.display.guides);
+    assert!(crate::hair_ui::guide_lines(h.state()).is_empty());
+    palette(&mut h, "Show Hair Strands");
+    assert!(!h.state().groom.display.strands);
+    assert_eq!(h.state().status, "Hair strands hidden");
+    assert!(crate::hair_ui::guide_lines(h.state()).is_empty(), "guides off stays off");
+    palette(&mut h, "Show Hair Guides");
+    assert_eq!(crate::hair_ui::guide_lines(h.state()).len(), 1000 * 7, "with strands hidden the guides are what is shown");
+}

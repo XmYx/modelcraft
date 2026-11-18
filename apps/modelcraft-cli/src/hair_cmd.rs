@@ -6,10 +6,12 @@ use std::time::Instant;
 use modelcraft_hair::{Amount, Blend, Clump, Frizz, GrowSpec, InterpSpec, Limits, Surface, SurfaceMaps, estimate_bytes, grow_guides, interpolate};
 use modelcraft_mesh::PolyMesh;
 
-pub const USAGE: &str = "  hair-bench [--strands N] [--guides N] [--points N] [--segments N] [--blend bary|knn] [--clump A] [--frizz A]
+pub const USAGE: &str = "  hair-bench [--strands N] [--guides N] [--points N] [--segments N] [--blend bary|knn] [--clump A] [--frizz A] [--gpu]
                                     grow guides on a sphere and interpolate render hairs: time,
                                     strands per second and memory (defaults: 1000000 strands,
-                                    5000 guides, 8 points, 128 segments, knn, no clump or frizz)";
+                                    5000 guides, 8 points, 128 segments, knn, no clump or frizz);
+                                    --gpu then draws the hairs at 1920x1080 at several display
+                                    percentages and reports frame times (needs a GPU adapter)";
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
     a.iter().position(|x| x == name).and_then(|i| a.get(i + 1)).map(String::as_str)
@@ -67,5 +69,66 @@ pub fn bench(a: &[String]) -> Result<(), String> {
         h.bytes() as f64 / 1e6,
         estimate_bytes(strands, points) as f64 / 1e6
     );
+    if a.iter().any(|x| x == "--gpu") {
+        gpu_bench(&mesh, &h)?;
+    }
+    Ok(())
+}
+
+/// Draw the groom at 1920x1080 with the sphere under it, orbiting the camera, at several display
+/// percentages: mean and 95th percentile frame time (render, submit and wait for the GPU).
+fn gpu_bench(mesh: &PolyMesh, hair: &modelcraft_hair::HairCurves) -> Result<(), String> {
+    use modelcraft_render::Camera;
+    use modelcraft_render::gpu::{DrawItem, Frame, GpuMesh, Renderer, Target};
+    use modelcraft_render::hair_gpu::{GpuHair, HairDraw};
+    let Some((device, queue, name)) = modelcraft_render::gpu::headless() else {
+        println!("gpu: no adapter, skipped");
+        return Ok(());
+    };
+    println!("gpu: {name}");
+    let t = Instant::now();
+    let gpu_hair = GpuHair::new(&device, hair.all_points(), hair.points_per_strand()).ok_or("nothing to draw")?;
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    println!("upload: {} strands, {:.0} MB of GPU buffers in {:.0} ms", gpu_hair.strands, gpu_hair.bytes() as f64 / 1e6, ms(t));
+    let sphere = GpuMesh::new(&device, &modelcraft_render::buffers::mesh_data(mesh));
+    let target = Target::new(&device, [1920, 1080]);
+    let mut renderer = Renderer::new(&device);
+    for percent in [100.0f32, 50.0, 10.0, 1.0] {
+        let mut times = Vec::new();
+        for i in 0..70 {
+            let cam = Camera { distance: 3.2, yaw: i as f32 * 0.05, ..Default::default() };
+            let frame = Frame {
+                view_proj: cam.view_proj(1920.0 / 1080.0),
+                eye: cam.eye(),
+                clear: [0.1, 0.1, 0.1, 1.0],
+                draws: vec![DrawItem {
+                    mesh: &sphere,
+                    model: glam::Mat4::IDENTITY,
+                    color: [0.5; 4],
+                    selected: false,
+                    show_mask: false,
+                    patch_tint: false,
+                    roughness: 0.6,
+                }],
+                lines: &[],
+                overlay: &[],
+                hair: vec![HairDraw { hair: &gpu_hair, model: glam::Mat4::IDENTITY, color: [0.55, 0.38, 0.22, 0.9], fraction: percent / 100.0 }],
+            };
+            let t = Instant::now();
+            renderer.render(&device, &queue, &target, &frame);
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            if i >= 10 {
+                times.push(ms(t));
+            }
+        }
+        times.sort_by(f64::total_cmp);
+        let mean = times.iter().sum::<f64>() / times.len() as f64;
+        let p95 = times.get(((times.len() as f64) * 0.95) as usize).copied().unwrap_or(mean);
+        println!(
+            "draw {percent:>5.1} %: {} strands, mean {mean:.2} ms ({:.0} fps), 95th percentile {p95:.2} ms",
+            gpu_hair.strands_for(percent / 100.0),
+            1000.0 / mean
+        );
+    }
     Ok(())
 }

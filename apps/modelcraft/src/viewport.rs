@@ -826,7 +826,8 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             roughness: o.material.roughness,
         });
     }
-    if let Some(tex) = g.draw(i, size, cam.view_proj(aspect), cam.eye(), theme::VIEWPORT_BG, &specs, &lines, &overlay) {
+    let hair = crate::hair_ui::hair_specs(&mut app.doc, &app.groom, &app.selection, g);
+    if let Some(tex) = g.draw(i, size, cam.view_proj(aspect), cam.eye(), theme::VIEWPORT_BG, &specs, &lines, &overlay, &hair) {
         ui.painter_at(rect).image(tex, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
