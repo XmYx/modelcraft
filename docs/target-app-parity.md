@@ -500,7 +500,7 @@ Weight: 8
 | Motion-capture import (BVH) and mapping | C M | M | M | |
 | Cached playback | M | M | M | |
 | Camera sequencer / shot list | C M | M | M | |
-| Point cache of deformed meshes | C M | P | M | `modelcraft-cli bake` writes an object's vertices per frame to a documented `.mcpc` file (local or world space); no playback from a cache, no Alembic |
+| Point cache of deformed meshes | C M | P | M | `modelcraft-cli bake` writes an object's vertices per frame to a documented `.mcpc` file (local or world space); `sim attach_cache` plays such a file on a mesh through the timeline (see Simulation); no Alembic |
 | Turntable and simple timeline for sculpts | Z | P | S | Turntable command (one linear turn that repeats) and the timeline; no movie recording |
 
 ## Simulation
@@ -516,7 +516,7 @@ Weight: 6
 | Forces: gravity, wind, turbulence, vortex, attract | C M | M | M | |
 | Smoke and fire | C M | M | XL | |
 | Liquids | C M | M | XL | |
-| Simulation cache and playback | C M | M | M | |
+| Simulation cache and playback | C M | P | M | The framework is in: a fixed-step solver loop with substeps from a seed (repeatable bit for bit), a cache bounded in frames, points and bytes that bakes per frame, cancels between frames, saves in the project as a `.mcpc` blob and plays back by scene frame (linear between frames); a `.mcpc` file from any tool drives a mesh through `attach_cache`. No solver yet and no panel: nothing in the app bakes one |
 | Ropes and hair dynamics | C M | M | L | |
 | Cloth-like sculpt brushes | Z | M | M | |
 
@@ -629,6 +629,7 @@ Weight: 3
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Simulation framework: `crates/sim/src/tests.rs` (`the_same_seed_gives_the_same_cache_and_another_seed_does_not`, `memory_and_step_counts_are_bounded`, `cancelling_at_any_frame_reports_how_far_it_got` and `random_runs_stay_within_budget_and_sample_without_panicking` proptests), `crates/scene/src/sim.rs` (`the_timeline_plays_the_cache_and_only_then`), `crates/engine/src/sim_tests.rs` (`a_baked_point_cache_plays_on_the_timeline_and_survives_undo_and_save`), `crates/formats/src/project.rs` (`a_simulation_cache_is_saved_as_a_point_cache_blob_and_comes_back`).
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).

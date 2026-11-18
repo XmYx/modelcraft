@@ -51,6 +51,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Seams, Mark Seam, Clear Seam, Unwrap UVs, Pin | UV cutting and flattening tools | Generic modeling terms; no product-specific tool names used | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
+| Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
 | Clone modifiers (planned) | effectors | "Effector" is the reference's term, so it is not used | Use |
 | Falloff fields (planned) | fields | Generic geometry words | Use |
 

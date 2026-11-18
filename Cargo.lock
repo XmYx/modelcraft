@@ -2599,6 +2599,7 @@ dependencies = [
  "modelcraft-ops",
  "modelcraft-scene",
  "modelcraft-sculpt",
+ "modelcraft-sim",
  "modelcraft-uv",
  "proptest",
  "serde",
@@ -2618,6 +2619,7 @@ dependencies = [
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-scene",
+ "modelcraft-sim",
  "proptest",
  "serde",
  "serde_json",
@@ -2674,6 +2676,7 @@ dependencies = [
  "modelcraft-clone",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-sim",
  "modelcraft-uv",
  "proptest",
  "serde",
@@ -2703,6 +2706,17 @@ dependencies = [
  "modelcraft-ops",
  "proptest",
  "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "modelcraft-sim"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "proptest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

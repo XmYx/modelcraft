@@ -64,6 +64,19 @@ impl PointCache {
         self.positions.get(a..a.checked_add(self.vertices)?)
     }
 
+    /// The cache of a simulation, for writing it to a file or a project blob.
+    pub fn from_frame_cache(c: &modelcraft_sim::FrameCache) -> PointCache {
+        PointCache { fps: c.fps, start: c.start, step: c.step, vertices: c.points(), positions: c.positions().to_vec() }
+    }
+
+    /// The simulation cache this file holds, for playing it on a mesh. Fails when it is larger
+    /// than a simulation cache may be.
+    pub fn to_frame_cache(&self) -> Result<modelcraft_sim::FrameCache> {
+        let frames = self.frames();
+        let data = self.positions.get(..frames * self.vertices).unwrap_or_default().to_vec();
+        modelcraft_sim::FrameCache::from_positions(self.fps, self.start, self.step, self.vertices, data).map_err(|e| bad(&e.to_string()))
+    }
+
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let (v, f) = (u32::try_from(self.vertices).map_err(|_| bad("too many vertices"))?, u32::try_from(self.frames()).map_err(|_| bad("too many frames"))?);
         if ![self.fps, self.start, self.step].iter().all(|x| x.is_finite()) {
@@ -157,6 +170,22 @@ mod tests {
         let mut b = good;
         b[16..24].copy_from_slice(&f64::NAN.to_le_bytes());
         assert!(PointCache::from_bytes(&b).is_err());
+    }
+
+    #[test]
+    fn converts_to_and_from_a_simulation_cache() {
+        let mut c = PointCache::new(30.0, 5.0, 1.0, 2);
+        c.push(&[Vec3::ZERO, Vec3::X]).unwrap();
+        c.push(&[Vec3::Y, Vec3::Z]).unwrap();
+        let f = c.to_frame_cache().unwrap();
+        assert_eq!((f.fps, f.start, f.step, f.points(), f.frames()), (30.0, 5.0, 1.0, 2, 2));
+        assert_eq!(PointCache::from_frame_cache(&f), c);
+        // A file with more frames than a simulation cache holds is refused, not truncated.
+        let mut big = PointCache::new(24.0, 0.0, 1.0, 1);
+        for _ in 0..=modelcraft_sim::MAX_FRAMES {
+            big.push(&[Vec3::ZERO]).unwrap();
+        }
+        assert!(big.to_frame_cache().is_err());
     }
 
     proptest! {

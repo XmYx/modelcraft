@@ -886,6 +886,7 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::Undo
             | Command::Redo
             | Command::BeginSculpt { .. }
@@ -961,7 +962,10 @@ impl Document {
         let mut items = Vec::new();
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
-            if self.scene.is_cage_input(id) || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. }) || !self.scene.visible(id) {
+            if self.scene.is_cage_input(id)
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::Sim { .. })
+                || !self.scene.visible(id)
+            {
                 continue;
             }
             let evaluated = match o.kind {

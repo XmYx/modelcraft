@@ -5,6 +5,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | Layer | Crate | What it holds | Depends on |
 |---|---|---|---|
 | L0 | `modelcraft-anim` | Keyed curves (stepped, linear, Bézier with automatic clamped tangents and weighted handles), extrapolation, baking, the scene clock and playback | glam |
+| L0 | `modelcraft-sim` | The simulation kernel: a fixed-step solver loop with substeps (`Solver`, `bake`), the bounded `FrameCache` that plays back by scene frame and converts to a `.mcpc` point cache, seeded `Rng`, cancel and progress hooks, the simulation object's settings | glam |
 | L0 | `modelcraft-mesh` | `PolyMesh`: validated half-edge mesh, per-corner UVs, patches, polygon-list (de)serialisation | glam |
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
 | L1 | `modelcraft-uv` | Seams, islands, automatic cuts into discs, LSCM unwrap with pins (sparse Cholesky, nested dissection; conjugate gradients as fallback), island layout, distortion measures | mesh |
@@ -60,6 +61,15 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   solve starts from those, so weights and the IK/FK blend never accumulate and switching a
   constraint off restores the object. The solvers (two-bone, FABRIK, CCD) and the formula
   language are in `modelcraft-anim`.
+- **Simulation**: a simulation is an object (`ObjectKind::Sim`) under the mesh it drives, holding its
+  timing, seed and the `FrameCache` its last bake produced. The evaluator shows the cached points
+  of the scene's current frame after the mesh's history, deformers and skin
+  (`modelcraft_scene::sim`), and the mesh's cache key then also hashes the current frame, so
+  scrubbing or playing never runs a solver: it only samples the cache (linear between frames, the
+  first or last frame held outside it). Baking runs a `Solver` over the frame range on fixed steps
+  from a seed, so a run is repeatable bit for bit; frame count, substeps, steps, points and cache
+  bytes are all capped, and a bake can be cancelled between frames. The cache is saved in the
+  project as a `.mcpc` blob, not in the JSON.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.

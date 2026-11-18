@@ -43,6 +43,7 @@ const CORE: &[&str] = &[
     "modelcraft-ops",
     "modelcraft-uv",
     "modelcraft-clone",
+    "modelcraft-sim",
     "modelcraft-scene",
     "modelcraft-sculpt",
     "modelcraft-formats",

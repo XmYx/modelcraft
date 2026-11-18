@@ -15,6 +15,7 @@ pub mod control;
 mod document;
 mod layers;
 pub mod rig;
+pub mod sim;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef};
@@ -22,6 +23,7 @@ pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskO
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use rig::{BindMethod, RigCommand, WeightOp};
+pub use sim::SimCommand;
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
@@ -31,6 +33,7 @@ pub use modelcraft_mesh as mesh;
 pub use modelcraft_ops as ops;
 pub use modelcraft_scene as scene;
 pub use modelcraft_sculpt as sculpt;
+pub use modelcraft_sim as simulation;
 pub use modelcraft_uv as uv;
 
 #[cfg(test)]
@@ -39,3 +42,5 @@ mod anim_tests;
 mod constraint_tests;
 #[cfg(test)]
 mod rig_tests;
+#[cfg(test)]
+mod sim_tests;
