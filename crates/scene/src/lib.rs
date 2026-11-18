@@ -20,6 +20,7 @@ pub mod anim;
 pub mod attr;
 pub mod constraint;
 mod eval;
+pub mod hair;
 pub mod pick;
 pub mod rig;
 
@@ -409,6 +410,11 @@ pub enum ObjectKind {
         #[serde(default)]
         target: Option<ObjectId>,
     },
+    /// Hair growing from its parent mesh: guide curves, how render hairs are made from them, and
+    /// the maps that steer growth and grooming ([`hair`]).
+    Hair {
+        hair: Arc<hair::HairData>,
+    },
 }
 
 impl ObjectKind {
@@ -421,6 +427,7 @@ impl ObjectKind {
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::Hair { .. } => "Hair",
         }
     }
 }
@@ -454,6 +461,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::Hair { hair } => hair.heap_bytes(),
             _ => 0,
         };
         256 + self.name.len() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
@@ -537,6 +545,7 @@ impl Scene {
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        hair::repair(&mut self);
         Ok(self)
     }
 

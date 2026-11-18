@@ -13,6 +13,7 @@ mod command;
 mod constraints;
 pub mod control;
 mod document;
+pub mod hair;
 mod layers;
 pub mod rig;
 mod undo;
@@ -20,6 +21,7 @@ mod undo;
 pub use anim::{AnimCommand, KeyRef};
 pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
+pub use hair::{HairCommand, MapEdit, MapKind};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use undo::{UndoEntry, UndoStack};
@@ -37,5 +39,7 @@ pub use modelcraft_uv as uv;
 mod anim_tests;
 #[cfg(test)]
 mod constraint_tests;
+#[cfg(test)]
+mod hair_tests;
 #[cfg(test)]
 mod rig_tests;

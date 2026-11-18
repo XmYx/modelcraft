@@ -15,6 +15,7 @@ modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
 modelcraft-uv = { workspace = true }
 modelcraft-clone = { workspace = true }
+modelcraft-hair = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

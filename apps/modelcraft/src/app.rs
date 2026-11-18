@@ -250,6 +250,8 @@ pub struct ModelApp {
     pub recovery_dir: Option<PathBuf>,
     /// The Animation panel: playback, key selection, views.
     pub anim: crate::anim_ui::AnimUi,
+    /// Hair grooming: brush, symmetry, the stroke in progress.
+    pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
     /// The allow-agents preference.
     pub allow_agents: bool,
@@ -353,6 +355,7 @@ impl ModelApp {
             autosave_at: None,
             recovery_dir: None,
             anim: Default::default(),
+            groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
         };
@@ -675,6 +678,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Hair(a) => crate::hair_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();

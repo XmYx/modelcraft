@@ -246,7 +246,9 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } => Evaluated::default(),
+            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } | ObjectKind::Hair { .. } => {
+                Evaluated::default()
+            }
         };
         self.finals.insert(id, (key, result.clone()));
         result

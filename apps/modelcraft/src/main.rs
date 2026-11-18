@@ -24,6 +24,9 @@ mod constraint_ui_tests;
 mod demo;
 mod exchange_ui;
 mod gpu;
+mod hair_ui;
+#[cfg(test)]
+mod hair_ui_tests;
 mod keys;
 mod material_ui;
 mod panels;

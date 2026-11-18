@@ -22,6 +22,7 @@ modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
+modelcraft-cli hair-bench --strands 1000000   # grow guides and interpolate hairs: time and memory
 ```
 
 ## Commands
@@ -109,6 +110,27 @@ it is granted: they may read the script's folder and the project's folder, and w
 `--max-ops N` change the limits, and `--no-save` runs without writing. Errors print as
 `file:line:column: message` and give a non-zero exit status. Commands the script ran before an
 error stay applied in memory but nothing is saved.
+
+### Hair
+
+One command, `hair`, with the operation in `op`: `{"cmd":"hair","op":"add","mesh":3}`. Hair is an
+object under the mesh it grows from. Every operation is one undo step; strokes, numeric brush
+applications and map edits give the same result from the window, a script or the journal.
+
+| `op` | Fields |
+|---|---|
+| `add` | `mesh`, `grow?` (`amount` {`Count`: n} or {`PerUnitArea`: d}, `length`, `length_jitter`, `points_per_strand`, `seed`, `lean`, `lean_toward`, `bend`), `interp?` (`amount`, `blend` (`Barycentric` or {`Nearest`: {`k`}}), `points_per_strand?`, `length_jitter`, `clump`, `frizz`, `width`), `name?`; without them: 1,000 guides a tenth of the mesh's diagonal long and 20,000 hairs |
+| `remove` | `id` |
+| `regrow` | `id`, `grow?`: grow the guides again, following the density map; grooming is lost |
+| `set_render` | `id`, `interp` |
+| `stroke` | `id`, `stroke`: `brush` {`kind` (comb, cut, length, puff, smooth, clump, frizz), `radius`, `strength`, `falloff`, `invert`, `cut_length`, `frequency`, `seed`}, `symmetry` {`x`, `y`, `z`}, `dabs` [{`center`, `normal`, `delta`, `pressure`}] in the emitter's space |
+| `apply` | `id`, `brush`, `symmetry?`, `center?` [x, y, z], `direction?` [x, y, z]: one dab, over the whole groom when `center` is left out; `direction` is the comb movement |
+| `map` | `id`, `map` (mask, density), `edit`: `fill` + `value` · `invert` · `clear` · `paint` + `center`, `radius`, `value`, `strength`, `falloff` |
+
+The mask (1 where brushes act fully, 0 where they never touch a guide) and the density (where
+`regrow` puts guides) are values on the emitter's vertices. Limits (checked before allocating):
+200,000 guides, 5,000,000 hairs, 64 points per strand and 40 million points per operation, 50,000
+dabs per stroke.
 
 ### Rigging
 
