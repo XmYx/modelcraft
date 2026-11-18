@@ -458,4 +458,159 @@ mod tests {
         }
         assert!(import(b"", Kind::Glb, &mut |_| None).is_err());
     }
+
+    // ---- UV round trip (the TextureCraft hand-off goes through GLB) ----
+
+    use modelcraft_ops::edit;
+
+    /// Every distinct (position, UV) pair of a mesh, quantised so float noise does not matter.
+    fn corner_set(m: &PolyMesh) -> std::collections::BTreeSet<[i64; 5]> {
+        let q = |v: f32| (f64::from(v) * 1e4).round() as i64;
+        let mut s = std::collections::BTreeSet::new();
+        for f in 0..m.face_count() as u32 {
+            for h in m.face_half_edges(f) {
+                let (p, uv) = (m.position(m.origin(h)), m.uv(h));
+                s.insert([q(p.x), q(p.y), q(p.z), (f64::from(uv.x) * 1e4).round() as i64, (f64::from(uv.y) * 1e4).round() as i64]);
+            }
+        }
+        s
+    }
+
+    /// Interior edges whose two sides carry different UVs.
+    fn seam_edges(m: &PolyMesh) -> usize {
+        (0..m.edge_count() as u32)
+            .filter(|e| {
+                let h = m.edge_half_edge(*e);
+                let t = m.twin(h);
+                if m.face_of(h) == modelcraft_mesh::NONE || m.face_of(t) == modelcraft_mesh::NONE {
+                    return false;
+                }
+                let same = |a: u32, b: u32| (m.uv(a) - m.uv(b)).abs().max_element() <= 1e-5;
+                !(same(h, m.next(t)) && same(m.next(h), t))
+            })
+            .count()
+    }
+
+    fn one(mesh: PolyMesh) -> Vec<Item> {
+        vec![Item { name: "Mesh".into(), parent: None, transform: Transform::default(), mesh: Some(Arc::new(mesh)), material: Material::default() }]
+    }
+
+    fn assert_uvs_survive(m: &PolyMesh, kind: Kind) {
+        let bytes = export(&one(m.clone()), kind).unwrap();
+        let (back, _) = import(&bytes, kind, &mut |_| None).unwrap();
+        let b = back.iter().find_map(|i| i.mesh.clone()).unwrap();
+        assert!(b.has_uvs(), "{kind:?}: UVs lost");
+        // The positions and UVs of every corner come back, and nothing else appears.
+        let (want, got) = (corner_set(m), corner_set(&b));
+        let missing: Vec<_> = want.difference(&got).take(3).collect();
+        let extra: Vec<_> = got.difference(&want).take(3).collect();
+        assert!(missing.is_empty() && extra.is_empty(), "{kind:?}: missing {missing:?}, extra {extra:?}");
+        // Seams (UV discontinuities) are neither created nor healed.
+        assert_eq!(seam_edges(&b), seam_edges(m), "{kind:?}: seam count changed");
+    }
+
+    #[test]
+    fn uvs_round_trip_exactly_through_glb_and_obj_for_every_primitive() {
+        for kind in modelcraft_ops::primitives::KINDS {
+            let mesh = Primitive::default_of(kind).unwrap().build().unwrap();
+            for format in [Kind::Glb, Kind::Obj] {
+                assert_uvs_survive(&mesh, format);
+            }
+        }
+    }
+
+    #[test]
+    fn uvs_outside_the_unit_square_and_a_flat_layout_survive() {
+        // Tiled UVs (a texture repeated 3 times, and a negative offset) are legal in glTF and OBJ.
+        let mut m = Primitive::Plane { width: 2.0, depth: 2.0, segments: 3 }.build().unwrap();
+        let uvs: Vec<Vec2> = m.corner_uvs().iter().map(|u| *u * 3.0 + Vec2::new(-1.5, 0.25)).collect();
+        m.set_uvs(&uvs).unwrap();
+        for format in [Kind::Glb, Kind::Obj] {
+            assert_uvs_survive(&m, format);
+        }
+        // A cube with every face split in UV space (six islands) keeps its twelve seam edges.
+        let cube = Primitive::Cube { size: Vec3::ONE, segments: 1 }.build().unwrap();
+        assert_eq!(seam_edges(&cube), 12);
+        assert_uvs_survive(&cube, Kind::Glb);
+        // Welded geometry with a single seam (a tube closed with one seam line) stays a tube.
+        let tube = edit::weld(&Primitive::Cylinder { radius: 1.0, height: 2.0, sides: 12, rings: 2, caps: false }.build().unwrap(), 1e-5).unwrap();
+        assert!(seam_edges(&tube) > 0);
+        for format in [Kind::Glb, Kind::Obj] {
+            assert_uvs_survive(&tube, format);
+        }
+    }
+
+    #[test]
+    fn obj_stores_v_upwards_and_glb_downwards() {
+        // The plane's corner at the top left of the image has uv (0, 0).
+        let m = Primitive::Plane { width: 2.0, depth: 2.0, segments: 1 }.build().unwrap();
+        let obj = String::from_utf8(export(&one(m.clone()), Kind::Obj).unwrap()).unwrap();
+        let vts: Vec<(f32, f32)> = obj
+            .lines()
+            .filter_map(|l| l.strip_prefix("vt "))
+            .map(|l| {
+                let mut it = l.split_whitespace().filter_map(|x| x.parse::<f32>().ok());
+                (it.next().unwrap(), it.next().unwrap())
+            })
+            .collect();
+        assert_eq!(vts.len(), 4);
+        // Our (u, v) = (0, 0) is the image's top left: OBJ has v up, so it is written as (0, 1).
+        assert!(vts.contains(&(0.0, 1.0)) && vts.contains(&(1.0, 0.0)), "{vts:?}");
+        // GLB keeps (u, v) as they are: read the TEXCOORD_0 floats back from the binary chunk.
+        let glb = export(&one(m.clone()), Kind::Glb).unwrap();
+        let uvs = glb_texcoords(&glb);
+        assert_eq!(uvs.len(), 4);
+        assert!(uvs.contains(&[0.0, 0.0]) && uvs.contains(&[1.0, 1.0]) && uvs.contains(&[1.0, 0.0]) && uvs.contains(&[0.0, 1.0]), "{uvs:?}");
+        let want: Vec<[f32; 2]> = m.corner_uvs().iter().map(|u| u.to_array()).collect();
+        assert!(want.iter().all(|u| uvs.contains(u)), "{want:?} vs {uvs:?}");
+    }
+
+    /// TEXCOORD_0 of the first primitive of a GLB, read from its binary chunk without craft-mesh.
+    fn glb_texcoords(bytes: &[u8]) -> Vec<[f32; 2]> {
+        let json = glb_json(bytes);
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let bin = 20 + json_len;
+        let bin_len = u32::from_le_bytes(bytes[bin..bin + 4].try_into().unwrap()) as usize;
+        assert_eq!(&bytes[bin + 4..bin + 8], b"BIN\0");
+        let data = &bytes[bin + 8..bin + 8 + bin_len];
+        let acc = &json["accessors"][json["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"].as_u64().unwrap() as usize];
+        let view = &json["bufferViews"][acc["bufferView"].as_u64().unwrap() as usize];
+        let offset = view["byteOffset"].as_u64().unwrap_or(0) as usize + acc["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let stride = view["byteStride"].as_u64().unwrap_or(8) as usize;
+        (0..acc["count"].as_u64().unwrap() as usize)
+            .map(|i| {
+                let at = offset + i * stride;
+                [f32::from_le_bytes(data[at..at + 4].try_into().unwrap()), f32::from_le_bytes(data[at + 4..at + 8].try_into().unwrap())]
+            })
+            .collect()
+    }
+
+    /// The JSON chunk of a GLB, read without craft-mesh: what any glTF consumer starts from.
+    fn glb_json(bytes: &[u8]) -> serde_json::Value {
+        assert_eq!(&bytes[0..4], b"glTF");
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 2);
+        let len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        assert_eq!(&bytes[16..20], b"JSON");
+        serde_json::from_slice(&bytes[20..20 + len]).unwrap()
+    }
+
+    #[test]
+    fn the_glb_a_consumer_receives_has_texcoords_for_every_primitive() {
+        let json = glb_json(&export(&items(), Kind::Glb).unwrap());
+        let prims = json["meshes"].as_array().unwrap().iter().flat_map(|m| m["primitives"].as_array().unwrap().clone()).collect::<Vec<_>>();
+        assert!(!prims.is_empty());
+        for p in &prims {
+            let attrs = &p["attributes"];
+            let uv = &json["accessors"][attrs["TEXCOORD_0"].as_u64().expect("TEXCOORD_0") as usize];
+            let pos = &json["accessors"][attrs["POSITION"].as_u64().unwrap() as usize];
+            assert_eq!(uv["type"], "VEC2");
+            assert_eq!(uv["componentType"], 5126, "float");
+            assert_eq!(uv["count"], pos["count"], "one UV per vertex");
+        }
+        // Without UVs there is no TEXCOORD_0 (a consumer then unwraps by itself).
+        let mut bare = Primitive::Cube { size: Vec3::ONE, segments: 1 }.build().unwrap();
+        bare.clear_uvs();
+        let json = glb_json(&export(&one(bare), Kind::Glb).unwrap());
+        assert!(json["meshes"][0]["primitives"][0]["attributes"].get("TEXCOORD_0").is_none());
+    }
 }

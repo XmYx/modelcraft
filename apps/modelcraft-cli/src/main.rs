@@ -31,6 +31,8 @@ Commands:
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
   export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
+  export-uv <project> <out.svg|png> [--size N] [--object ID]
+                                    the UV layout of a mesh object as a picture
   convert <in> <out> [--up auto|y|z] [--scale M]
                                     any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
                                     .glb, .obj, .stl, .fbx or .modelcraft; --up and --scale
@@ -183,6 +185,12 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "export" => {
             let c = convert_flags(a)?;
             save_with(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?, c)
+        }
+        "export-uv" => {
+            let mut d = load(arg(a, 0, "project")?)?;
+            let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
+            let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
+            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
         }
         "convert" => {
             let c = convert_flags(a)?;

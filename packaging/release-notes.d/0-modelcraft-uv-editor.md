@@ -1,0 +1,1 @@
+- New UV Editor (UV menu, Cmd/Ctrl+Shift+U): select, move, rotate and scale UVs by mouse, keyboard or numbers; mark seams (red in the viewport), unwrap, weld and pin; checker and distortion heat map views.

@@ -318,15 +318,16 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
-| UV editor | C M | M | L | |
-| Seams and unwrap (conformal / angle-based) | C M Z | P | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as a history step and CLI; no seam UI yet, no angle-based solver |
+| UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
+| Seams and unwrap (conformal / angle-based) | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport; no angle-based (ABF) solver |
 | Packing | C M | M | M | |
 | UDIM tiles | C M Z | M | M | |
 | Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
-| Relax, straighten, align and stitch tools | C M | M | M | |
-| Checker display, texel density, distortion heat map | C M Z | M | S | |
+| Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
+| Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
+| UV layout export as an image | C M Z | P | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines, from the engine and `modelcraft-cli export-uv`; no menu entry yet. UVs round-trip exactly through GLB and OBJ (tested) |
 
 ## Sculpting: brushes, strokes and masks
 
@@ -556,6 +557,8 @@ Weight: 5
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
 | User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder; no scripted tool registration or recorded macros yet |
+| Script editor with a console | C M | M | M | |
+| User tools, shelves and recorded macros | C M Z | P | M | Any command can sit on the Quick Bar; no recorded macros or user-written tools yet |
 | Event callbacks (scene changed, selection changed) | C M | M | M | |
 | Plugin SDK for native extensions | C M Z | M | L | |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
@@ -595,11 +598,11 @@ Weight: 4
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |
 | Customisable shortcuts | C M Z | D | S | Suite Keyboard Shortcuts dialog (craft-keymap): conflicts, saved sets, per-workspace contexts |
-| Radial and marking menus | C M Z | M | M | |
-| User palettes and shelves | C M Z | M | M | |
+| Radial and marking menus | C M Z | D | M | Radial Menu (Shift+Q): eight context actions (add objects, component tools, brushes); numbers 1–8, Tab and Enter, or the pointer |
+| User palettes and shelves | C M Z | D | M | Quick Bar: any command as a button, edited in Preferences or from its context menu, saved in the preferences |
 | Undo history panel (jump to any step) | M Z | D | S | |
 | Open Recent, incremental save | C M Z | D | S | |
-| Preferences | C M Z | P | S | Navigation, snapping, brush size, shortcuts; no units or display settings |
+| Preferences | C M Z | D | S | Preferences window (Ctrl+,): language, navigation, length units, display (grid, axis triad, wireframe, patches), snapping steps, brush size, Quick Bar, shortcuts |
 | Translated interface | C M Z | P | M | Strings go through craft-i18n; no shipped translations |
 | Accessibility: keyboard paths, screen-reader tree | | X | S | Tree items, viewport object nodes, numeric gizmo path, kittest tests |
 

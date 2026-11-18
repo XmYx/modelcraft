@@ -2614,6 +2614,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "craft-atomic",
+ "craft-image-codecs",
  "craft-mesh",
  "craft-zip",
  "glam",
