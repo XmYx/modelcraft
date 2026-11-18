@@ -25,11 +25,12 @@ mod limits;
 pub mod macros;
 mod pacing;
 mod perm;
+pub mod plugin;
 mod session;
 
 pub use api::events::{Event, EventKind, ToolInfo};
 pub use error::{ErrorKind, ScriptError};
-pub use host::{LineKind, OutLine, RunContext};
+pub use host::{LineKind, OutLine, Policy, RunContext};
 pub use limits::Limits;
 pub use pacing::{EventPacer, PlaybackPolicy};
 pub use perm::{Access, Permissions};

@@ -252,7 +252,7 @@ Protocol from [render-research.md](render-research.md) §8: six scenes built in 
 independent halves (the last column is the reference's own error, a quarter of the squared
 difference between the halves); five seeds per budget, mean relative MSE (ε = 0.01). Two of the
 protocol's eight scenes are missing because the engine has no volumes, subsurface, hair or
-instancing yet; FLIP is not implemented yet, so only relMSE is reported.
+instancing yet; relMSE is the main measure and FLIP (below) can be added with `--flip`.
 
 ```
 modelcraft-cli render-bench                 # CPU, all scenes, 1/4/16/64/256 spp, 5 seeds
@@ -388,7 +388,7 @@ spp under a load average of 38–53, against the plain run's under a load of abo
 
 `render-bench` now prints the median next to the mean and takes `--guiding` and `--splitting`;
 its reference is always the plain estimator, so a technique that changed the expected image would
-show as an error that stops falling. FLIP is still not implemented.
+show as an error that stops falling.
 
 ### Sample order, feature images and environment sampling (measured by their tests)
 
@@ -583,6 +583,32 @@ About 7 to 9× the software path on this scene. Hardware and software agree on f
 every pixel differs by more than 0.2 % in none of 3,072 pixels on each of cornell, materials and night-street, and the
 8-sample images differ by a relative MSE below 1e-7. Not measured: other vendors, Metal and DX12 (the feature
 lists Vulkan), scenes near the device's limits, acceleration structure rebuilds for animation.
+
+### FLIP (`render-bench --flip`)
+
+`craft-render-core::flip` implements the FLIP difference of Andersson et al. 2020 (colour pipeline: opponent
+space, contrast sensitivity filters at 67 pixels per degree, CIELAB with the Hunt effect, HyAB distance
+remapped; feature pipeline: edges and points; combined as `colour ^ (1 − features)`), in the low-dynamic-range
+form: the benchmark's linear images are clamped to [0, 1] at exposure 0 first. It was written from the paper's
+description and has **not been compared with the authors' reference implementation**, so its numbers are
+comparable with each other (same code, same images) but not with published FLIP figures. Tests: identical images
+give 0, the value is in [0, 1] and grows with noise, black against white is the maximum, a shifted edge shows at
+the edge, bad input is `None`.
+
+Mean FLIP of the benchmark scenes, 256×256, GPU renders, five seeds, against the 4096-sample reference (the CPU's
+are the same). Raw, then after the filters of the denoising section (FLIP before / after):
+
+| Scene | spp | Raw | after regression (NFOR) | after SVGF |
+|---|---|---|---|---|
+| cornell | 4 / 16 / 64 | 0.085 / 0.052 / 0.032 | 0.050 / 0.033 / 0.024 | 0.063 / 0.038 / – |
+| studio | 4 / 16 / 64 | 0.092 / 0.049 / 0.026 | 0.045 / 0.031 / 0.021 | 0.045 / 0.029 / – |
+| night-street | 4 / 16 / 64 | 0.188 / 0.115 / 0.072 | 0.171 / 0.089 / 0.054 | 0.176 / 0.104 / – |
+| showcase | 4 / 16 / 64 | 0.227 / 0.123 / 0.071 | 0.120 / 0.092 / 0.065 | 0.222 / 0.088 / – |
+
+FLIP falls with samples like relMSE does, and it says the filters help less than relMSE suggests: the regression's
+9 to 14× lower relMSE on cornell at 16 and 64 spp is 1.6× and 1.3× lower FLIP, because FLIP counts the lost fine
+detail that relMSE hardly sees. The 1 spp SVGF figures (cornell 0.134 → 0.091, studio 0.167 → 0.062, night-street 0.312 → 0.216,
+showcase 0.350 → 0.233) are in the same direction.
 
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
@@ -980,6 +1006,26 @@ A bake runs on the window's thread, so the app waits for it; scrubbing afterward
 baked hair's strands are made again for each frame shown). Exports: 10,000 strands of 10 points as glTF
 lines is 2.3 MB (100,000 points, 90,000 segments); 3,000 guides of 10 points as one frame of point cache
 is 0.36 MB.
+
+## Script memory (`cargo test -p modelcraft-script --test memory -- --nocapture`)
+
+How far the process's peak resident size (`VmHWM`) grows while a hostile script runs under the
+default limits (10 M operations, 10 s, 256 KiB of strings and 20,000 array and 2,000 map entries per
+container, 4 M geometry items). Linux, test profile, release-like `opt-level` of this workspace, one
+run on a shared 24-core machine; the process starts at its own baseline and the peak only rises, so
+a script that needs less than an earlier one in the list shows +0. There is no allocator cap
+(`docs/scripting.md`, "Memory"), so these are measurements, guarded by a 512 MiB budget per script.
+
+| Script | Peak growth | Time until stopped |
+|---|---|---|
+| map keys with integer values, in a loop | +63 MiB | 1.1 s |
+| map keys with an array of 8 each | +140 MiB | 1.2 s |
+| map keys with a 1 KiB string each | +0 MiB (stopped by the string limit) | 1.0 s |
+| array `push` of an array in a loop | +0 MiB (stopped by the array limit) | 0.02 s |
+| string doubling | +0 MiB | 0.00 s |
+| nested containers, 1000 arrays of 1000 | +0 MiB | 0.01 s |
+| mesh vertices in a loop | +0 MiB (stopped by the geometry budget) | 0.29 s |
+| all seven together | +203 MiB | |
 
 ## How the numbers stay low
 

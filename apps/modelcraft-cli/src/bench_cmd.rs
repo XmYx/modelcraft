@@ -27,6 +27,8 @@ pub const USAGE: &str = "  render-bench [options]            error against time 
       --restir-candidates N --restir-neighbors N
       --hardware-rays               trace through the GPU's ray-query hardware when built and available
       --bvh binary|wide             trace through the binary tree or its 8-wide form
+      --flip                        also report the FLIP difference to the reference (display-referred,
+                                    exposure 0, clamped to [0, 1]; 67 pixels per degree)
       --denoise [svgf|nfor]         also filter each image and report its error and the filter's time
                                     (the reference is always rendered without either)";
 
@@ -44,6 +46,7 @@ pub struct BenchArgs {
     pub denoise: DenoiseMode,
     pub wide_bvh: bool,
     pub hardware_rays: bool,
+    pub flip: bool,
 }
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
@@ -82,6 +85,7 @@ pub fn parse(a: &[String]) -> Result<BenchArgs, String> {
         denoise: crate::render_cmd::parse_denoise(a)?,
         wide_bvh: crate::render_cmd::parse_bvh(a)?,
         hardware_rays: a.iter().any(|x| x == "--hardware-rays"),
+        flip: a.iter().any(|x| x == "--flip"),
     })
 }
 
@@ -102,6 +106,12 @@ fn run(scene: &Arc<Scene>, gpu: Option<&GpuContext>, settings: RenderSettings, s
             Ok((r.film().clone(), t.elapsed().as_secs_f64()))
         }
     }
+}
+
+/// The mean FLIP difference between an image and the reference (both `size × size`).
+fn flip_of(size: u32, image: &[[f32; 3]], reference: &[[f32; 3]]) -> f64 {
+    let n = size as usize;
+    modelcraft_render::pathtrace::flip::flip(n, n, image, reference, modelcraft_render::pathtrace::flip::DEFAULT_PPD).map_or(f64::NAN, |f| f64::from(f.mean))
 }
 
 /// The middle value (the mean of the middle two for an even count); rare bright samples move it
@@ -147,21 +157,30 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
     for spp in &args.budgets {
         let (mut errors, mut seconds) = (Vec::new(), Vec::new());
         let (mut filtered_errors, mut filter_seconds) = (Vec::new(), Vec::new());
+        let (mut flips, mut filtered_flips) = (Vec::new(), Vec::new());
         for seed in 0..args.seeds {
             let (film, s) = run(&scene, gpu, tested(seed + 1), *spp, args.hardware_rays)?;
             errors.push(relative_mse(&film.mean(), &reference));
+            if args.flip {
+                flips.push(flip_of(args.size, &film.mean(), &reference));
+            }
             seconds.push(s);
             if args.denoise != DenoiseMode::Off {
                 let t = Instant::now();
                 let image = film.denoise(args.denoise).map_err(|e| e.to_string())?;
                 filter_seconds.push(t.elapsed().as_secs_f64());
                 filtered_errors.push(relative_mse(&image, &reference));
+                if args.flip {
+                    filtered_flips.push(flip_of(args.size, &image, &reference));
+                }
             }
         }
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
         let (e, s) = (mean(&errors), mean(&seconds));
         let denoised = (!filtered_errors.is_empty()).then(|| (mean(&filtered_errors), median(&filtered_errors), mean(&filter_seconds)));
         rows.push(serde_json::json!({
+            "flip": (!flips.is_empty()).then(|| mean(&flips)),
+            "denoised_flip": (!filtered_flips.is_empty()).then(|| mean(&filtered_flips)),
             "denoised_rel_mse": denoised.map(|d| d.0),
             "denoised_rel_mse_median": denoised.map(|d| d.1),
             "denoise_seconds": denoised.map(|d| d.2),
@@ -209,9 +228,11 @@ pub fn time_to(rows: &[serde_json::Value], target: f64) -> Option<f64> {
 pub fn run_all(args: &BenchArgs) -> Result<(), String> {
     let gpu = if args.gpu { Some(crate::render_cmd::open_gpu(args.hardware_rays).ok_or("no GPU adapter is available")?) } else { None };
     let mut table = String::from(
-        "| Scene | Triangles | spp | Seconds | relMSE mean (min–max) | relMSE median | Efficiency | Seconds to relMSE 0.01 |\n|---|---|---|---|---|---|---|---|\n",
+        "| Scene | Triangles | spp | Seconds | relMSE mean (min–max) | relMSE median | FLIP | Efficiency | Seconds to relMSE 0.01 |\n|---|---|---|---|---|---|---|---|---|\n",
     );
-    let mut filtered = String::from("| Scene | spp | relMSE before | relMSE after | Times lower | Filter ms per image |\n|---|---|---|---|---|---|\n");
+    let mut filtered = String::from(
+        "| Scene | spp | relMSE before | relMSE after | Times lower | FLIP before | FLIP after | Filter ms per image |\n|---|---|---|---|---|---|---|---|\n",
+    );
     for name in &args.scenes {
         match bench_scene(name, args, gpu.as_ref()) {
             Ok(report) => {
@@ -219,10 +240,13 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
                 for r in report["budgets"].as_array().into_iter().flatten() {
                     if let (Some(after), Some(secs)) = (r["denoised_rel_mse"].as_f64(), r["denoise_seconds"].as_f64()) {
                         let before = r["rel_mse"].as_f64().unwrap_or(0.0);
+                        let fl = |k: &str| r[k].as_f64().map_or_else(|| "-".to_string(), |v| format!("{v:.4}"));
                         filtered.push_str(&format!(
-                            "| {name} | {} | {before:.4} | {after:.4} | {:.1} | {:.1} |\n",
+                            "| {name} | {} | {before:.4} | {after:.4} | {:.1} | {} | {} | {:.1} |\n",
                             r["spp"],
                             before / after.max(1e-12),
+                            fl("flip"),
+                            fl("denoised_flip"),
                             secs * 1000.0
                         ));
                     }
@@ -232,7 +256,7 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
                 for (i, r) in rows.iter().enumerate() {
                     let f = |k: &str| r[k].as_f64().unwrap_or(0.0);
                     table.push_str(&format!(
-                        "| {} | {} | {} | {:.3} | {:.4} ({:.4}–{:.4}) | {:.4} | {:.1} | {} |\n",
+                        "| {} | {} | {} | {:.3} | {:.4} ({:.4}–{:.4}) | {:.4} | {} | {:.1} | {} |\n",
                         if i == 0 { name.as_str() } else { "" },
                         if i == 0 { report["triangles"].to_string() } else { String::new() },
                         r["spp"],
@@ -241,6 +265,7 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
                         f("rel_mse_min"),
                         f("rel_mse_max"),
                         f("rel_mse_median"),
+                        r["flip"].as_f64().map_or_else(|| "-".to_string(), |v| format!("{v:.4}")),
                         f("efficiency"),
                         if i == 0 { reach.as_str() } else { "" },
                     ));
@@ -249,7 +274,7 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
             }
             Err(e) => {
                 println!("{}", serde_json::json!({ "scene": name, "declined": e }));
-                table.push_str(&format!("| {name} | | | | not rendered: {e} | | |\n"));
+                table.push_str(&format!("| {name} | | | | not rendered: {e} | | | |\n"));
             }
         }
     }
@@ -282,6 +307,12 @@ mod tests {
         assert!((time_to(&curve, 0.01).unwrap() - 4.0).abs() < 1e-6);
         assert!(time_to(&curve, 1e-6).is_none());
         assert!(bench_scene("teapot", &args, None).is_err());
+        // FLIP against the reference: present with --flip, in range, and falling as samples rise.
+        let flipped = parse(&a(&["--scenes", "cornell", "--size", "24", "--spp", "1,16", "--seeds", "2", "--reference", "128", "--flip"])).unwrap();
+        let rows = bench_scene("cornell", &flipped, None).unwrap()["budgets"].as_array().unwrap().clone();
+        let (f1, f16) = (rows[0]["flip"].as_f64().unwrap(), rows[1]["flip"].as_f64().unwrap());
+        assert!(0.0 < f16 && f16 < f1 && f1 <= 1.0, "{f1} {f16}");
+        assert!(rows[0]["denoised_flip"].is_null());
         assert!(parse(&a(&["--device", "abacus"])).is_err() && parse(&a(&["--spp", "many"])).is_err());
     }
 }

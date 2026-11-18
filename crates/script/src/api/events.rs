@@ -129,6 +129,9 @@ pub fn event_map(e: &Event, selection: &[modelcraft_engine::scene::ObjectId]) ->
 }
 
 fn add_tool(s: &Shared, label: &str, tip: &str, f: FnPtr) -> R<()> {
+    if !s.policy.get().register_tools {
+        return Err(rt("this plugin may not add menu commands (permission register_tools was not granted)"));
+    }
     let label = label.trim();
     if label.is_empty() || label.chars().count() > 80 {
         return Err(rt("a tool needs a label of 1 to 80 characters"));
@@ -145,6 +148,9 @@ fn add_tool(s: &Shared, label: &str, tip: &str, f: FnPtr) -> R<()> {
 }
 
 fn add_handler(s: &Shared, kind: EventKind, f: FnPtr) -> R<()> {
+    if !s.policy.get().listen_events {
+        return Err(rt("this plugin may not listen to events (permission listen_events was not granted)"));
+    }
     let mut r = s.registry.try_borrow_mut().map_err(|_| rt("the callback list is busy"))?;
     let owner = r.owner.clone();
     let Some(ast) = r.ast.clone() else { return Err(rt("callbacks can only be registered while a script runs")) };

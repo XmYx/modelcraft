@@ -457,7 +457,7 @@ Weight: 6
 | OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
-| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference; no time limit or per-ray statistics |
+| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference (relative MSE, and with `--flip` the FLIP perceptual difference, written from the paper and not checked against the reference implementation); no time limit or per-ray statistics |
 
 ## Rigging
 
@@ -559,7 +559,7 @@ Weight: 5
 | Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
 | User tools, shelves and recorded macros | C M Z | D | M | Record Macro (Scripts menu, command palette, Scripts window) turns what the user does into a script that replays as one undo step; Save as Tool puts it in the Scripts menu or the Quick Scripts strip; scripts can also register menu commands (`register_tool`); any command can sit on the Quick Bar; `modelcraft-cli macro-script` writes a macro from a command file or journal ([scripting.md](scripting.md#recorded-macros)) |
 | Event callbacks (scene changed, selection changed) | C M | D | M | `on_selection_changed`, `on_scene_changed`, `on_scene_loaded` and `on_frame_changed` in scripts; the app reports them once per frame, never during a drag or stroke ([scripting.md](scripting.md)) |
-| Plugin SDK for native extensions | C M Z | M | L | |
+| Plugin SDK for native extensions | C M Z | P | L | Script-based plugins only, by design (no native or dynamic code): a folder with `plugin.json` (id, version, plugin API, entry, permissions), installed from the Plugins window, a permission prompt before anything runs, a remembered grant (new permissions on update ask again), a per-plugin sandbox (scene editing, menu tools, event callbacks, project file read and write, own library folder) over the scripting limits; no archives, signing, registry or native extensions ([plugins.md](plugins.md)) |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
 
 ## Pipeline formats and referencing

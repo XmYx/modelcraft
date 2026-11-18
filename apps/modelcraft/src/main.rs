@@ -47,6 +47,9 @@ mod modifier_ui_tests;
 mod object_manager;
 mod organize_ui;
 mod panels;
+mod plugin_ui;
+#[cfg(test)]
+mod plugin_ui_tests;
 mod prefs;
 mod prefs_ui;
 mod radial;

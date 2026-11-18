@@ -136,6 +136,11 @@ impl Session {
         self.library.set_root(root);
     }
 
+    /// Limit what the next runs may do (a plugin's sandbox).
+    pub fn set_policy(&self, policy: crate::Policy) {
+        self.shared.policy.set(policy);
+    }
+
     /// Change what files the next runs may touch.
     pub fn set_permissions(&self, perms: Permissions) {
         if let Ok(mut p) = self.shared.perms.try_borrow_mut() {
