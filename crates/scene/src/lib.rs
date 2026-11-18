@@ -8,6 +8,8 @@
 //! - A **clone generator** lays out instances of its first mesh child ([`Cloner`]).
 //! - A **deformer** object bends, twists… its parent mesh, in its own frame.
 //! - A **group** only carries a transform.
+//! - **Blend shapes, lattices and clusters** are children of a mesh too: its deformer stack
+//!   ([`point_deform`]).
 //! - **Constraints** pose objects from other objects, in dependency order ([`constraint`]).
 //!
 //! The [`Evaluator`] is the dependency graph: it caches every step's output per object and
@@ -21,6 +23,7 @@ pub mod attr;
 pub mod constraint;
 mod eval;
 pub mod pick;
+pub mod point_deform;
 pub mod rig;
 
 use std::sync::Arc;
@@ -412,6 +415,10 @@ pub enum ObjectKind {
     Skin {
         skin: Arc<rig::Skin>,
     },
+    /// Blend shapes, a lattice or a cluster in its parent mesh's deformer stack ([`point_deform`]).
+    PointDeformer {
+        deformer: point_deform::PointDeformer,
+    },
     /// Lays out clones of its first mesh child (or smooth cage child). The clones are instances of
     /// that child's evaluated mesh; `target` is the object the surface and vertices layouts sit on.
     Cloner {
@@ -430,6 +437,7 @@ impl ObjectKind {
             ObjectKind::Deformer { .. } => "Deformer",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
+            ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
         }
     }
@@ -464,6 +472,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
         256 + self.name.len() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
@@ -547,6 +556,7 @@ impl Scene {
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        point_deform::repair(&mut self);
         Ok(self)
     }
 

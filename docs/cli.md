@@ -149,6 +149,21 @@ One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","
 | `match_ik` | `id`, `to`: `fk` (the joints keep the solved pose, blend 0) or `ik` (the goal and pole move onto the chain, blend 1) |
 | `bake_constraints` | `objects`, `start?`, `end?` (the playback range without them), `step` (default 1), `keep?`: key the solved transforms, then switch the constraints off |
 
+| `add_shape` | `mesh`, `from` (a mesh with the same points, in the shape wanted), `name?`; with `target` (a shape's index) and `at` (0–1) the shape becomes an in-between of that target |
+| `set_shape` | `mesh`, `target`, `weight?`, `name?` |
+| `remove_shape` | `mesh`, `target`, `frame?` (one in-between; the whole shape without it) |
+| `add_lattice` | `mesh`, `divisions` [x, y, z] (1–8 cells, default 2), `linear?` (cell by cell instead of one Bézier volume) |
+| `edit_lattice` | `id`, `points` (control point indices, X fastest, then Y, then Z), `translate?` or `to?` [x, y, z] in the lattice's space (the box is one unit wide), `reset?`, `linear?` |
+| `add_cluster` | `mesh`, `points?`, `weights?`, `radius?` (every point within it of the centre, with a smooth falloff), `center?` [x, y, z] in the mesh's space, `name?` |
+| `set_cluster_weights` | `id`, `points`, `weight` (0 takes them out) |
+| `move_in_stack` | `id`, `delta` (negative: earlier) |
+
+Blend shapes, lattices, clusters and skins are children of the mesh they deform and run in child
+order after the parametric deformers: the deformer stack. A blend shape's weight is the attribute
+`target.<index>.weight` of the blend-shape object and a lattice's control points are
+`point.<index>.x|y|z` of the lattice, so `anim set_key` keys them. A cluster follows its own
+transform.
+
 Constraints run after every command and frame change, in dependency order: a constraint that reads
 what another writes runs after it, and constraints that depend on themselves are skipped and named
 in the command's `warnings`. A constraint's weight is the attribute `constraint.<id>.weight` of its
