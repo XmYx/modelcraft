@@ -37,11 +37,7 @@ fn angle_energy(m: &PolyMesh) -> f64 {
             for k in 0..3 {
                 let ang3 = |a: DVec3, b: DVec3, c: DVec3| (b - a).cross(c - a).length().atan2((b - a).dot(c - a));
                 let ang2 = |a: DVec2, b: DVec2, c: DVec2| (b - a).perp_dot(c - a).abs().atan2((b - a).dot(c - a));
-                corners.push((
-                    charts.corner_vertex[t[k] as usize],
-                    ang3(p[k], p[(k + 1) % 3], p[(k + 2) % 3]),
-                    ang2(q[k], q[(k + 1) % 3], q[(k + 2) % 3]),
-                ));
+                corners.push((charts.corner_vertex[t[k] as usize], ang3(p[k], p[(k + 1) % 3], p[(k + 2) % 3]), ang2(q[k], q[(k + 1) % 3], q[(k + 2) % 3])));
             }
         }
     }
@@ -84,7 +80,10 @@ fn a_cylinder_unrolls_exactly() {
 fn a_cone_cut_along_a_generatrix_is_developable() {
     let m = welded(Primitive::Cone { radius: 1.0, height: 1.5, sides: 24, caps: false });
     let apex = (0..m.vertex_count() as u32).max_by(|a, b| m.position(*a).y.total_cmp(&m.position(*b).y)).unwrap();
-    let rim = (0..m.vertex_count() as u32).filter(|v| m.position(*v).y < m.position(apex).y - 1.0).min_by(|a, b| m.position(*a).z.total_cmp(&m.position(*b).z)).unwrap();
+    let rim = (0..m.vertex_count() as u32)
+        .filter(|v| m.position(*v).y < m.position(apex).y - 1.0)
+        .min_by(|a, b| m.position(*a).z.total_cmp(&m.position(*b).z))
+        .unwrap();
     let mut seams = SeamSet::new();
     assert!(seams.mark_path(&m, apex, rim).unwrap() >= 1);
     let (out, res) = unwrap_mesh(&m, &seams, &abf()).unwrap();
@@ -120,7 +119,10 @@ fn abf_is_closer_to_the_surface_angles_than_lscm_on_curved_islands() {
         assert!(res.islands.iter().all(|i| i.abf.is_some_and(|a| a.converged)), "{name}: {:?}", res.islands);
         let (el, ea) = (angle_energy(&lscm), angle_energy(&abf_mesh));
         let (dl, da) = (measure(&lscm).0, measure(&abf_mesh).0);
-        eprintln!("{name}: ABF energy {ea:.4} vs LSCM {el:.4}; max angle error {:.2} vs {:.2} deg; area rms {:.3} vs {:.3}", da.max_angle_error_deg, dl.max_angle_error_deg, da.area_rms_log, dl.area_rms_log);
+        eprintln!(
+            "{name}: ABF energy {ea:.4} vs LSCM {el:.4}; max angle error {:.2} vs {:.2} deg; area rms {:.3} vs {:.3}",
+            da.max_angle_error_deg, dl.max_angle_error_deg, da.area_rms_log, dl.area_rms_log
+        );
         // ABF minimises exactly this energy over every valid flattening that has the same cuts.
         assert!(ea <= el * 1.0001 + 1e-9, "{name}: ABF {ea} should not exceed LSCM {el}");
         assert_eq!(da.flipped, 0, "{name}: {da:?}");
