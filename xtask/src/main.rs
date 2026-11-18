@@ -39,6 +39,7 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 }
 
 const CORE: &[&str] = &[
+    "modelcraft-anim",
     "modelcraft-mesh",
     "modelcraft-ops",
     "modelcraft-field",
@@ -58,6 +59,7 @@ const CORE: &[&str] = &[
     "craft-render-core",
     "craft-render-gpu",
     "craft-render-guide",
+    "craft-render-denoise",
 ];
 
 fn layers() -> Result<(), String> {

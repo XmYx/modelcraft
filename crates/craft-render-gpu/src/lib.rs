@@ -293,7 +293,7 @@ impl GpuMaterial {
 }
 
 /// What one pixel accumulates on the GPU: radiance and samples, base colour and depth, normal and
-/// squared luminance, motion.
+/// squared luminance, motion, the radiance of the odd samples.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GpuPixel {
@@ -301,6 +301,7 @@ struct GpuPixel {
     albedo: [f32; 4],
     normal: [f32; 4],
     motion: [f32; 4],
+    odd: [f32; 4],
 }
 
 #[repr(C)]
@@ -379,6 +380,9 @@ fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
 impl GpuRenderer {
     /// Upload `scene` and prepare to render it at the size in `settings`.
     pub fn new(ctx: &GpuContext, scene: &Scene, settings: RenderSettings) -> Result<GpuRenderer, GpuError> {
+        if !scene.curves.is_empty() {
+            return Err(GpuError::Unsupported("hair curves"));
+        }
         let (w, h) = (settings.width, settings.height);
         let restir = settings.integrator.restir.active(&settings.integrator, w as usize * h as usize) && !scene.lights.is_empty();
         if (settings.integrator.guiding || settings.integrator.adaptive_splitting) && !restir {
@@ -776,11 +780,15 @@ impl GpuRenderer {
             film.depth[i] = src.albedo[3];
             film.luminance_sq[i] = src.normal[3];
             film.motion[i] = [src.motion[0], src.motion[1]];
+            film.odd[i] = [src.odd[0], src.odd[1], src.odd[2]];
         }
         film.samples = self.samples;
         Ok(film)
     }
 }
+
+#[cfg(test)]
+mod denoise_tests;
 
 #[cfg(test)]
 mod restir_tests;

@@ -15,9 +15,10 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L2 | `modelcraft-scene` | Objects, hierarchy, transforms, materials, history steps, the `Evaluator` (dependency graph with per-step caches), picking | mesh, ops |
 | L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh, UV layout pictures (SVG, PNG) | scene, craft-mesh, craft-zip, craft-atomic |
 | L4 | `modelcraft-engine` | `Document`, `Command`, undo (memory-bounded), journaling, sculpt session, export | all above |
-| L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries | glam, rayon |
+| L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries, hair curves as round cones (`curves`) | glam, rayon |
+| L1 | `craft-render-denoise` | Denoising without trained models: the spatiotemporal variance-guided filter and a first-order regression filter, steered by albedo, normal, depth and variance | rayon |
 | L1 | `craft-render-guide` | Learned sampling: a hash grid over space holding a radiance cache and a directional distribution of incoming light per cell, recorded lock-free and deterministically | glam, rayon |
-| L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator (plain, guided with adaptive roulette and splitting, and with resampled direct lighting), the progressive film | craft-render-bvh, craft-render-guide |
+| L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator (plain, guided with adaptive roulette and splitting, and with resampled direct lighting), the fibre scattering model and curve sets for hair (`hair`), the progressive film | craft-render-bvh, craft-render-guide, craft-render-denoise |
 | L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline; capabilities from the created device | craft-render-core, wgpu |
 | L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback); `trace`: the scene graph exported to the path tracer | mesh, scene, craft-render-*, wgpu |
 | L5 | `modelcraft-script` | Sandboxed Rhai engine over the command registry: scene and mesh API, undo groups, permissions and limits (see [scripting.md](scripting.md)) | engine, rhai |

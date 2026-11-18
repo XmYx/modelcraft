@@ -17,6 +17,7 @@ mod document;
 mod groups;
 pub mod hair;
 mod layers;
+pub mod organize;
 pub mod record;
 #[cfg(test)]
 mod record_tests;
@@ -29,8 +30,9 @@ pub use anim::{AnimCommand, KeyRef, PastedKey};
 pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
 pub use groups::{GroupOp, RegionAction, VisibilityOp};
-pub use hair::{HairCommand, MapEdit, MapKind};
+pub use hair::{HairCommand, HairExportFormat, HairExportWhat, MapEdit, MapKind};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
+pub use organize::OrganizeCommand;
 pub use record::{MAX_RECORDED_COMMANDS, Recorded, RecordedCommand, Recorder};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
@@ -63,6 +65,8 @@ mod gltf_tests;
 mod groups_tests;
 #[cfg(test)]
 mod hair_tests;
+#[cfg(test)]
+mod organize_tests;
 #[cfg(test)]
 mod rig_tests;
 #[cfg(test)]

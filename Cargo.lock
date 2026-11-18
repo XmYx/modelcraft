@@ -1042,12 +1042,21 @@ name = "craft-render-core"
 version = "0.1.0"
 dependencies = [
  "craft-render-bvh",
+ "craft-render-denoise",
  "craft-render-guide",
  "craft-texture",
  "glam 0.30.10",
  "proptest",
  "rayon",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-render-denoise"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rayon",
 ]
 
 [[package]]
@@ -2654,6 +2663,7 @@ dependencies = [
  "modelcraft-scene",
  "modelcraft-script",
  "modelcraft-sculpt",
+ "modelcraft-sim",
  "rfd",
  "serde",
  "serde_json",
@@ -2691,6 +2701,7 @@ dependencies = [
  "modelcraft-scene",
  "modelcraft-script",
  "modelcraft-sculpt",
+ "modelcraft-sim",
  "serde_json",
  "wgpu",
 ]
@@ -2773,6 +2784,7 @@ dependencies = [
  "glam 0.30.10",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-sim",
  "proptest",
  "rayon",
  "serde",
@@ -2814,7 +2826,9 @@ dependencies = [
  "craft-render-gpu",
  "glam 0.30.10",
  "log",
+ "modelcraft-hair",
  "modelcraft-mesh",
+ "modelcraft-ops",
  "modelcraft-scene",
  "modelcraft-sim",
  "pollster 0.4.0",

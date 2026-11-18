@@ -5,6 +5,7 @@ use craft_texture::Image;
 use glam::{Mat3A, Mat4, Vec2, Vec3, Vec3A};
 
 use crate::camera::Camera;
+use crate::hair::{CurveSet, FibreHit, HairParams, SharedCurves, leave_fibre};
 pub use crate::light::{EmissiveTri, EnvMap, Light, LightSample, LightSampling, Lights};
 use crate::material::Material;
 use crate::math::Frame;
@@ -17,6 +18,8 @@ pub const MAX_MATERIALS: usize = 1 << 20;
 pub const MAX_LIGHTS: usize = 1 << 20;
 /// Most textures a scene may hold.
 pub const MAX_TEXTURES: usize = 4096;
+/// Most curve sets (hair objects) a scene may hold.
+pub const MAX_CURVE_SETS: usize = 256;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum SceneError {
@@ -30,6 +33,8 @@ pub enum SceneError {
     TooManyTextures,
     #[error("a mesh refers to vertex {0}, which it does not have")]
     BadIndex(u32),
+    #[error("the scene has more than {MAX_CURVE_SETS} curve sets or {} curve segments", craft_render_bvh::curves::MAX_SEGMENTS)]
+    TooManyCurves,
     #[error("the image size {0}×{1} is outside 1..={max}", max = crate::render::MAX_IMAGE_SIDE)]
     BadImageSize(u32, u32),
 }
@@ -67,11 +72,47 @@ pub struct Scene {
     pub lights: Lights,
     pub camera: Camera,
     pub bounds: Aabb,
+    /// Hair and fibres: round-cone curves with their own scattering model ([`crate::hair`]).
+    pub curves: Vec<SharedCurves>,
 }
 
 impl Scene {
     pub fn triangle_count(&self) -> usize {
         self.positions.len()
+    }
+
+    /// Curve segments over all curve sets.
+    pub fn curve_segment_count(&self) -> usize {
+        self.curves.iter().map(|c| c.bvh.segment_count()).sum()
+    }
+
+    /// The nearest fibre the ray hits closer than `tmax`: the curve set it belongs to and the hit.
+    #[inline]
+    pub fn intersect_curves(&self, ray: &Ray, tmax: f32) -> Option<(usize, FibreHit)> {
+        let mut best: Option<(usize, FibreHit)> = None;
+        let mut limit = tmax;
+        for (i, set) in self.curves.iter().enumerate() {
+            if let Some(h) = set.intersect(ray, limit) {
+                limit = h.t;
+                best = Some((i, h));
+            }
+        }
+        best
+    }
+
+    /// Whether anything blocks the segment from a fibre hit along `dir` up to `distance`.
+    pub fn occluded_from_fibre(&self, hit: &FibreHit, dir: Vec3A, distance: f32) -> bool {
+        let mut ray = leave_fibre(hit, dir, f32::INFINITY);
+        if distance.is_finite() {
+            let to = hit.p + dir * distance - ray.origin;
+            let len = to.length();
+            ray.tmax = len * (1.0 - 2e-4) - 1e-5;
+            if ray.tmax <= 0.0 {
+                return false;
+            }
+            ray.dir = to / len;
+        }
+        self.blocked(&ray)
     }
 
     /// Geometry and shading data at a hit of `ray`.
@@ -128,15 +169,22 @@ impl Scene {
             }
             ray.dir = to / len;
         }
-        if !self.has_cutouts {
-            return self.accel.occluded(&ray);
-        }
-        self.accel.occluded_with(&ray, |hit| {
-            let opacity = self.opacity_at(hit);
-            opacity >= 1.0
-                || (opacity > 0.0
-                    && (crate::sampler::hash_combine(hit.prim, hit.u.to_bits() ^ hit.v.to_bits().rotate_left(16)) >> 8) as f32 / 16_777_216.0 < opacity)
-        })
+        self.blocked(&ray)
+    }
+
+    /// Whether triangles (cut-outs by opacity) or fibres lie inside the ray's interval.
+    fn blocked(&self, ray: &Ray) -> bool {
+        let triangles = if !self.has_cutouts {
+            self.accel.occluded(ray)
+        } else {
+            self.accel.occluded_with(ray, |hit| {
+                let opacity = self.opacity_at(hit);
+                opacity >= 1.0
+                    || (opacity > 0.0
+                        && (crate::sampler::hash_combine(hit.prim, hit.u.to_bits() ^ hit.v.to_bits().rotate_left(16)) >> 8) as f32 / 16_777_216.0 < opacity)
+            })
+        };
+        triangles || self.curves.iter().any(|c| c.occluded(ray))
     }
 
     /// Opacity of the surface at a hit.
@@ -236,6 +284,18 @@ impl SceneBuilder {
         Ok(self.objects - 1)
     }
 
+    /// Add hair or fibres: `points` holds `points_per_strand` points per strand back to back (world
+    /// space) and `radii` the radius at each point. Returns the curve set's index.
+    pub fn add_curves(&mut self, points: &[Vec3], radii: &[f32], points_per_strand: usize, params: HairParams) -> Result<usize, SceneError> {
+        let s = &mut self.scene;
+        let segments = points.len().saturating_sub(points.len() / points_per_strand.max(1));
+        if s.curves.len() >= MAX_CURVE_SETS || s.curve_segment_count().saturating_add(segments) > craft_render_bvh::curves::MAX_SEGMENTS {
+            return Err(SceneError::TooManyCurves);
+        }
+        s.curves.push(std::sync::Arc::new(CurveSet::new(points, radii, points_per_strand, params)));
+        Ok(s.curves.len() - 1)
+    }
+
     pub fn add_light(&mut self, light: Light) -> Result<(), SceneError> {
         if self.scene.lights.analytic.len() >= MAX_LIGHTS {
             return Err(SceneError::TooManyLights);
@@ -302,6 +362,9 @@ impl SceneBuilder {
         s.has_cutouts = s.materials.iter().any(Material::has_cutouts);
         s.accel = TriangleBvh::build(&s.positions);
         s.bounds = s.accel.bvh.bounds();
+        for c in &s.curves {
+            s.bounds = s.bounds.union(c.bounds());
+        }
         s.lights.emissive.clear();
         for (i, t) in s.positions.iter().enumerate() {
             let Some(m) = s.materials.get(s.tri_material[i] as usize) else { continue };

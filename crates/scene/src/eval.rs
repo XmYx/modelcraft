@@ -172,7 +172,7 @@ impl Evaluator {
                     .filter_map(|c| scene.get(c))
                     .filter(|c| c.visible)
                     .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer, scene.field_stack(c.id))),
+                        ObjectKind::Deformer { deformer } => Some((c.local_matrix().inverse(), *deformer, scene.field_stack(c.id))),
                         _ => None,
                     })
                     .collect();
@@ -205,7 +205,7 @@ impl Evaluator {
                     None => Evaluated::default(),
                     Some(c) => {
                         let inner = self.evaluate_depth(scene, c, depth + 1);
-                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        let local = scene.get(c).map(|o| o.local_matrix()).unwrap_or(Mat4::IDENTITY);
                         let mut m = (*inner.mesh).clone();
                         m.map_positions(|_, p| local.transform_point3(p));
                         self.runs += 1;
@@ -230,7 +230,7 @@ impl Evaluator {
                     Some(c) => {
                         let inner = self.evaluate_depth(scene, c, depth + 1);
                         errors.extend(inner.errors);
-                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        let local = scene.get(c).map(|o| o.local_matrix()).unwrap_or(Mat4::IDENTITY);
                         // The surface and vertices layouts sit on the target, seen from this generator.
                         let target_mesh = match target.filter(|t| *t != id && cloner.layout.needs_target()) {
                             Some(t) if scene.get(t).is_some() => {
@@ -260,6 +260,8 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
+            // The master's result, shared: the same mesh allocation, so the GPU upload is shared too.
+            ObjectKind::Instance { of } if *of != id => self.evaluate_depth(scene, *of, depth + 1),
             ObjectKind::Sim { sim } => {
                 // A particle system is a generator: its pool, as instances of its source object
                 // (a mesh inside it) or of a small sphere. Other simulations drive their mesh.
@@ -280,7 +282,8 @@ impl Evaluator {
                 }
                 out
             }
-            ObjectKind::Group
+            ObjectKind::Instance { .. }
+            | ObjectKind::Group
             | ObjectKind::Deformer { .. }
             | ObjectKind::Field { .. }
             | ObjectKind::Joint { .. }
@@ -341,6 +344,16 @@ fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
             h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
         key = h;
+    }
+    // An instance depends on its master (and on the master's master, when it is an instance too).
+    let mut c = id;
+    for _ in 0..crate::MAX_DEPTH {
+        let Some(ObjectKind::Instance { of }) = scene.get(c).map(|o| &o.kind) else { break };
+        if *of == id || scene.get(*of).is_none() {
+            break;
+        }
+        key = key.wrapping_mul(0x0100_0000_01b3) ^ scene.deep_rev(*of).rotate_left(13);
+        c = *of;
     }
     key
 }

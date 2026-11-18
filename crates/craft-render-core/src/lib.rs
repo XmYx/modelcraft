@@ -19,7 +19,9 @@
 
 pub mod bsdf;
 pub mod camera;
+pub mod denoise;
 pub mod guided;
+pub mod hair;
 pub mod integrator;
 pub mod light;
 pub mod material;
@@ -34,8 +36,10 @@ pub mod sky;
 
 pub use camera::Camera;
 pub use craft_render_bvh as bvh;
+pub use craft_render_denoise as filters;
 pub use craft_render_guide as guide;
 pub use craft_texture as texture;
+pub use denoise::DenoiseMode;
 pub use integrator::{IntegratorSettings, Strategy};
 pub use light::{Light, LightSampling};
 pub use material::Material;
@@ -44,6 +48,10 @@ pub use restir::{RestirMode, RestirSettings};
 pub use scene::{Scene, SceneBuilder, SceneError};
 pub use shapes::MeshData;
 
+#[cfg(test)]
+mod denoise_tests;
+#[cfg(test)]
+mod hair_tests;
 #[cfg(test)]
 mod restir_tests;
 #[cfg(test)]

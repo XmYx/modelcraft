@@ -148,11 +148,10 @@ mod tests {
 
     #[test]
     fn a_huge_array_is_refused_not_allocated() {
-        let big = Primitive::Sphere { radius: 1.0, segments: 400, rings: 400 }.build();
-        if let Ok(big) = big {
-            let r = Array::Linear { count: u32::MAX, offset: Vec3::X, rotation: Vec3::ZERO, scale: Vec3::ZERO }.build(&big);
-            assert!(matches!(r, Err(OpError::TooLarge(_))) || r.is_ok());
-        }
+        // About 160 000 faces times the most copies is far past the result limit.
+        let big = Primitive::Sphere { radius: 1.0, segments: 400, rings: 400 }.build().expect("a 400 by 400 sphere");
+        let r = Array::Linear { count: u32::MAX, offset: Vec3::X, rotation: Vec3::ZERO, scale: Vec3::ZERO }.build(&big);
+        assert!(matches!(r, Err(OpError::TooLarge(_))), "{:?}", r.map(|m| m.face_count()));
         assert_eq!(Array::Linear { count: u32::MAX, offset: Vec3::X, rotation: Vec3::ZERO, scale: Vec3::ZERO }.matrices().len(), MAX_COPIES as usize);
     }
 

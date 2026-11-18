@@ -1,0 +1,1 @@
+- The Render View has a new option, "Denoise": it smooths the noise out of the picture while keeping edges and textures, with a quick filter while the picture is still rendering and a better one when it is finished. `modelcraft-cli render --denoise` does the same for saved images (an `.exr` keeps the original as `noisy.R/G/B`).
