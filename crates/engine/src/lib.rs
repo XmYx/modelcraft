@@ -42,4 +42,6 @@ mod constraint_tests;
 #[cfg(test)]
 mod deformer_tests;
 #[cfg(test)]
+mod gltf_tests;
+#[cfg(test)]
 mod rig_tests;

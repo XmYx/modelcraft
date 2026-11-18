@@ -51,6 +51,7 @@ const CORE: &[&str] = &[
     "modelcraft-engine",
     "modelcraft-render",
     "modelcraft-script",
+    "craft-gltf-anim",
     "craft-render-bvh",
     "craft-render-core",
     "craft-render-gpu",

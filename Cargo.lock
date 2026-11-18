@@ -872,6 +872,15 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
 
 [[package]]
+name = "craft-gltf-anim"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-hdr"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
@@ -2594,6 +2603,7 @@ dependencies = [
  "chrono",
  "craft-atomic",
  "craft-control",
+ "craft-gltf-anim",
  "glam",
  "modelcraft-anim",
  "modelcraft-clone",
@@ -2616,10 +2626,12 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "craft-atomic",
+ "craft-gltf-anim",
  "craft-image-codecs",
  "craft-mesh",
  "craft-zip",
  "glam",
+ "modelcraft-anim",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-scene",

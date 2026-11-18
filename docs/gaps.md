@@ -203,8 +203,16 @@ Limits of what exists:
   separate channel. Skin weights are painted by a command dab, not by a viewport brush; heat
   weights skip the paper's visibility test, so two limbs that touch can share weights; weights
   cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
-  `Scene::get` is a linear search, which shows with thousands of objects. glTF export writes
-  the posed mesh, not the skin or the animation.
+  `Scene::get` is a linear search, which shows with thousands of objects. A `.glb` export of a scene with
+  skins, blend shapes, curves or constraints writes them (`craft-gltf-anim`, see
+  architecture.md): one clip sampled every frame of the playback range from the solved scene,
+  the four strongest joints per vertex, shapes at full weight. Not kept, and said in the export's
+  warnings: lattices and clusters, in-between shapes, a second skin on one mesh. Import reads the
+  first clip (the file's other clips are listed in the warnings; choosing one needs a `clip`
+  option on the import command), bakes rotations and spline channels to one key per frame, and
+  ignores cameras, lights, textures and extensions. The rigged writer keeps base colour,
+  metallic and roughness only, no textures. Axis and unit conversion on a rigged export falls
+  back to the static writer.
 - Constraints and IK: no joint limits, stretch or spline IK; constraints act on whole channels
   (no per-axis skipping); FABRIK cannot fold a chain that lies exactly on the line to its goal.
   Dependencies are tracked per object and channel (translate, rotate, scale, or one other
