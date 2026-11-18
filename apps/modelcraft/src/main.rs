@@ -27,13 +27,7 @@ mod deform_ui_tests;
 mod demo;
 mod dock;
 mod exchange_ui;
-mod field_ui;
-#[cfg(test)]
-mod field_ui_tests;
 mod gpu;
-mod hair_ui;
-#[cfg(test)]
-mod hair_ui_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
@@ -51,9 +45,6 @@ mod rig_ui;
 mod rig_ui_tests;
 #[cfg(test)]
 mod script_cb_ui_tests;
-mod script_macro;
-#[cfg(test)]
-mod script_macro_ui_tests;
 mod script_ui;
 #[cfg(test)]
 mod script_undo_ui_tests;

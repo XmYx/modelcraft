@@ -113,7 +113,6 @@ impl InterpSpec {
 /// The strand list is in random order, so the first `n` strands of a groom are a uniform random
 /// subset of it (see [`HairCurves::prefix_for_fraction`]).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "RawCurves")]
 pub struct HairCurves {
     points_per_strand: usize,
     points: Vec<Vec3>,
@@ -121,24 +120,6 @@ pub struct HairCurves {
     root_width: Vec<f32>,
     tip_width: Vec<f32>,
     taper_exponent: f32,
-}
-
-/// The stored form of [`HairCurves`]: read from a file, then checked by [`HairCurves::from_parts`].
-#[derive(serde::Deserialize)]
-struct RawCurves {
-    points_per_strand: usize,
-    points: Vec<Vec3>,
-    roots: Vec<SurfacePoint>,
-    root_width: Vec<f32>,
-    tip_width: Vec<f32>,
-    taper_exponent: f32,
-}
-
-impl TryFrom<RawCurves> for HairCurves {
-    type Error = HairError;
-    fn try_from(r: RawCurves) -> Result<HairCurves, HairError> {
-        HairCurves::from_parts(r.points_per_strand, r.points, r.roots, r.root_width, r.tip_width, r.taper_exponent, &Limits::default())
-    }
 }
 
 impl HairCurves {

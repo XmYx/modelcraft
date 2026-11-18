@@ -188,18 +188,7 @@ pub fn renderable(scene: &Scene) -> Vec<ObjectId> {
         .collect()
 }
 
-/// The generators a render shows as instances of one mesh: clone generators and particle systems.
-pub fn instanced(scene: &Scene) -> Vec<ObjectId> {
-    scene
-        .tree_order()
-        .into_iter()
-        .map(|(id, _)| id)
-        .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) || scene.is_particles(*id))
-        .collect()
-}
-
-/// World-space bounds of everything [`renderable`] and [`instanced`], or `None` for an empty scene.
+/// World-space bounds of everything [`renderable`], or `None` for an empty scene.
 pub fn scene_bounds(scene: &Scene, eval: &mut Evaluator) -> Option<(Vec3, Vec3)> {
     let mut bounds: Option<(Vec3, Vec3)> = None;
     for id in renderable(scene) {
@@ -214,24 +203,6 @@ pub fn scene_bounds(scene: &Scene, eval: &mut Evaluator) -> Option<(Vec3, Vec3)>
             let p = w.transform_point3(corner);
             if p.is_finite() {
                 bounds = Some(bounds.map_or((p, p), |(a, b)| (a.min(p), b.max(p))));
-            }
-        }
-    }
-    for id in instanced(scene) {
-        let Some(inst) = eval.evaluate(scene, id).instances else { continue };
-        if inst.source.vertex_count() == 0 {
-            continue;
-        }
-        let (lo, hi) = inst.source.bounds();
-        let w = scene.world_matrix(id);
-        for c in &inst.clones.instances {
-            let m = w * c.matrix;
-            for k in 0..8 {
-                let corner = Vec3::new(if k & 1 == 0 { lo.x } else { hi.x }, if k & 2 == 0 { lo.y } else { hi.y }, if k & 4 == 0 { lo.z } else { hi.z });
-                let p = m.transform_point3(corner);
-                if p.is_finite() {
-                    bounds = Some(bounds.map_or((p, p), |(a, b)| (a.min(p), b.max(p))));
-                }
             }
         }
     }
@@ -263,22 +234,6 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
         }
         let material = b.add_material(converted)?;
         b.add_mesh(&trace_mesh(&mesh), scene.world_matrix(id), material)?;
-    }
-    // Clones and particles: the one source mesh placed once per instance.
-    for id in instanced(scene) {
-        let Some(object) = scene.get(id) else { continue };
-        let Some(inst) = eval.evaluate(scene, id).instances else { continue };
-        if inst.source.face_count() == 0 || inst.clones.instances.is_empty() {
-            continue;
-        }
-        // The source object's own material, else the generator's.
-        let owner = inst.source_object.and_then(|s| scene.get(s)).unwrap_or(object);
-        let material = b.add_material(trace_material(&owner.material))?;
-        let data = trace_mesh(&inst.source);
-        let world = scene.world_matrix(id);
-        for c in &inst.clones.instances {
-            b.add_mesh(&data, world * c.matrix, material)?;
-        }
     }
     let (lo, hi) = scene_bounds(scene, eval).unwrap_or((Vec3::splat(-1.0), Vec3::splat(1.0)));
     let centre = (lo + hi) * 0.5;
@@ -376,31 +331,6 @@ mod tests {
         assert!(c[0] > 2.0 * c[1] && c[0] > 0.05, "{c:?}");
         let mean = mean_rgb(&img);
         assert!(mean[1] > 0.05 && mean[1] < 2.0, "{mean:?}");
-    }
-
-    #[test]
-    fn particles_and_clones_render_as_instances_of_their_source() {
-        use modelcraft_sim::{FrameCache, SimKind, SimObject, particles::ParticleSettings};
-        let mut s = Scene::new();
-        let emitter = s.add("Emitter", ObjectKind::Group, None).unwrap();
-        let mut cache = FrameCache::new(24.0, 1.0, 1.0, 4);
-        cache.push(&[Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), modelcraft_sim::DEAD, Vec3::new(0.0, 3.0, 0.0)], usize::MAX).unwrap();
-        let mut sim = SimObject::new(SimKind::Particles(ParticleSettings { size: 0.2, size_variation: 0.0, ..Default::default() }));
-        sim.cache = Some(Arc::new(cache));
-        let id = s.add("Spray", ObjectKind::Sim { sim: Arc::new(sim) }, Some(emitter)).unwrap();
-        s.edit(id).unwrap().material = Material { base_color: [0.1, 0.9, 0.1, 1.0], ..Material::default() };
-        s.set_frame(1.0);
-        let mut eval = Evaluator::new();
-        let (lo, hi) = scene_bounds(&s, &mut eval).unwrap();
-        assert!(hi.y > 3.1 && lo.y < -0.1 && hi.x > 2.1, "the bounds cover the particles: {lo:?} {hi:?}");
-        let options = ExportOptions { lighting: Lighting::Sky(Vec3::ONE), ground: false, ..ExportOptions::default() };
-        let t = export_scene(&s, &mut eval, &Camera::default(), &options).unwrap();
-        let per = trace_mesh(&modelcraft_scene::sim::particle_sphere()).indices.len();
-        assert_eq!(t.triangle_count(), 3 * per, "three live particles, each a sphere");
-        assert_eq!(t.materials.len(), 1);
-        // Hidden, they are gone.
-        s.edit(id).unwrap().visible = false;
-        assert_eq!(export_scene(&s, &mut eval, &Camera::default(), &options).unwrap().triangle_count(), 0);
     }
 
     #[test]

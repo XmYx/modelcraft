@@ -11,7 +11,6 @@
 //!   system, and an island whose solve does not converge falls back to LSCM ([`AbfReport`]).
 //! - [`measure`]: angle, stretch and area distortion of a UV layout, per triangle and overall.
 //! - [`transform_corners`], [`stitch_edges`]: editing UVs by hand (move, rotate, scale, weld seams).
-//! - [`transfer_uvs`]: give a mesh the UVs of another by closest-point lookup, island by island.
 //! - [`relax_corners`], [`straighten_corners`], [`stitch_islands`]: relax a layout with the local/global
 //!   flattening of Liu et al. 2008, straighten chains of UV edges, sew islands together by moving them.
 //!
@@ -35,7 +34,6 @@ mod lscm;
 mod seams;
 mod sparse;
 mod tools;
-mod transfer;
 
 pub use abf::AbfReport;
 pub use charts::{Charts, CutReport, Island, cut_to_disks, face_triangles};
@@ -45,7 +43,6 @@ pub use layout::shelf;
 pub use lscm::{IslandReport, Pin};
 pub use seams::{MAX_SEAMS, SeamSet, shortest_path};
 pub use tools::{MAX_RELAX_ITERATIONS, RelaxMode, RelaxOptions, RelaxReport, StitchOptions, relax_corners, stitch_islands, straighten_corners};
-pub use transfer::{MAX_TRANSFER_FACES, TransferOptions, TransferReport, transfer_uvs};
 
 use glam::{DVec2, Vec2};
 use modelcraft_mesh::{MeshError, PolyMesh};
@@ -243,5 +240,3 @@ mod abf_tests;
 mod tests;
 #[cfg(test)]
 mod tools_tests;
-#[cfg(test)]
-mod transfer_tests;

@@ -1,2 +1,0 @@
-- Three more sculpt brushes: Rotate turns what it catches, Elastic Move drags the surface like rubber and keeps its volume, Scrape planes away what stands proud.
-- Radial copies repeat every dab around an axis of the object, with or without the mirrors.

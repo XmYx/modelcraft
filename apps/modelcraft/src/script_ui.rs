@@ -36,7 +36,7 @@ const HIGHLIGHT_LIMIT: usize = 200_000;
 pub const STARTUP: &str = "startup.rhai";
 /// Scripts in this subfolder of the scripts folder become buttons in the Quick Scripts strip.
 pub const QUICK_DIR: &str = "quick";
-pub const EXT: &str = "rhai";
+const EXT: &str = "rhai";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConsoleKind {
@@ -72,8 +72,6 @@ enum Then {
     New,
     Open(PathBuf),
     Pick,
-    /// A new unsaved script with this text (a recorded macro).
-    Text(String),
 }
 
 pub struct ScriptState {
@@ -118,7 +116,6 @@ pub struct ScriptState {
     /// The undo history's mark at the end of the last frame: steps made after it are the
     /// user's (or an agent's), and callbacks that answer them join the newest one.
     last_mark: usize,
-    pub macros: crate::script_macro::MacroState,
 }
 
 impl Default for ScriptState {
@@ -162,7 +159,6 @@ impl ScriptState {
             clock: std::time::Instant::now(),
             was_playing: false,
             last_mark: 0,
-            macros: Default::default(),
         };
         s.reload();
         s
@@ -503,8 +499,6 @@ pub fn tick(app: &mut ModelApp) {
     let user_step = app.doc.undo_mark() > app.script.last_mark && !app.doc.undo.can_redo();
     let mark = app.doc.undo_mark();
     let redo = app.doc.undo.take_redo();
-    // A recording holds what the user does, not what callbacks answer with.
-    app.doc.pause_recording(true);
     for e in &immediate {
         fire(app, e, None);
     }
@@ -530,7 +524,6 @@ pub fn tick(app: &mut ModelApp) {
             app.script.pacer.record_cost(now, spent);
         }
     }
-    app.doc.pause_recording(false);
     app.doc.fold_undo_since(mark, &tl!("Script callbacks"), user_step);
     app.doc.undo.restore_redo(redo);
     app.script.last_mark = app.doc.undo_mark();
@@ -602,13 +595,6 @@ fn load(app: &mut ModelApp, path: &Path) {
     }
 }
 
-/// Open `text` as a new unsaved script in the window (asking first when the editor has unsaved
-/// edits).
-pub fn open_text(app: &mut ModelApp, text: String) {
-    app.script.open = true;
-    guard(app, Then::Text(text));
-}
-
 fn new_script(app: &mut ModelApp) {
     app.script.text.clear();
     app.script.saved.clear();
@@ -618,7 +604,7 @@ fn new_script(app: &mut ModelApp) {
     app.script.focus_pending = true;
 }
 
-pub(crate) fn save_to(app: &mut ModelApp, path: &Path) -> bool {
+fn save_to(app: &mut ModelApp, path: &Path) -> bool {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -659,12 +645,6 @@ fn save_as(app: &mut ModelApp) -> bool {
 fn then(app: &mut ModelApp, t: Then) {
     match t {
         Then::New => new_script(app),
-        Then::Text(text) => {
-            new_script(app);
-            app.script.text = text;
-            app.script.goto = Some(1);
-            app.script.open = true;
-        }
         Then::Open(p) => load(app, &p),
         Then::Pick => {
             let mut d = rfd::FileDialog::new().add_filter("Rhai", &[EXT]);
@@ -851,8 +831,6 @@ fn body(app: &mut ModelApp, ui: &mut egui::Ui) {
             "Lets scripts write files in the folders listed below. Reading is limited to the project's folder, the scripts folder and the script's own."
         ));
     });
-
-    crate::script_macro::row(app, ui);
 
     if app.script.allow_writes {
         let roots = write_roots(app);
@@ -1041,11 +1019,6 @@ pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
             app.act(&ctx, a);
             ui.close();
         }
-    }
-    let record = if app.doc.is_recording() { tl!("Stop Recording Macro") } else { Action::ScriptRecord.label() };
-    if ui.button(record).clicked() {
-        app.act(&ctx, Action::ScriptRecord);
-        ui.close();
     }
     ui.separator();
     if ui.button(tl!("Reload Scripts")).clicked() {

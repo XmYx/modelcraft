@@ -153,44 +153,6 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
   [cli.md](cli.md#scripts).
 
-## Recorded macros
-
-Scripts menu, "Record Macro" (also in the command palette, and the first button of the Scripts
-window): from then on the commands the user runs are recorded; stop with the same command and the
-macro opens in the Scripts window as an ordinary script. Ctrl+Enter replays it as one undo step.
-
-```rhai
-// Macro: Macro 1 (3 commands), recorded in ModelCraft. Edit it freely; it runs as one undo step.
-let sel = selection();
-undo_group("Macro: Macro 1", || {
-    let r1 = cmd::add_primitive(#{ kind: "cube", name: "Box" }).created;
-    cmd::set_transform(#{ id: r1[0], transform: #{ ... } });
-    cmd::rename(#{ id: r1[0], name: "Crate" });
-});
-```
-
-- **What is recorded.** Commands that made an undo step, one step each (an `undo_group` a script
-  ran is one step), a frame change before a command that follows it, and starting or ending a
-  sculpt session. An Undo while recording takes the last step off the record and a Redo puts it
-  back, so the macro holds what the user kept. Changes callbacks make are not recorded. At most
-  20,000 commands are kept (the window says when it cut), and a macro over 8 MiB is refused.
-- **Objects.** Objects the macro created are bound to variables and later commands use them
-  (`r1[0]`), so a macro works in any scene. Objects that existed and were selected when recording
-  started are `sel[i]`, the i-th object of the selection the macro runs with: the script stops
-  with "select N object(s) first" when fewer are selected. Any other object keeps its number and
-  the macro's first lines say so.
-- **Save as Tool.** The Scripts window's "Save as Tool" writes the editor's text, with the name
-  typed beside it, to `Macros/<name>.rhai` in the scripts folder (a Scripts submenu) or, with
-  "Quick Scripts strip" checked, to `quick/<name>.rhai`. A file that is not a macro written this
-  way is never replaced: the name gets a number.
-- **From a file.** `modelcraft-cli macro-script steps.jsonl --name Pair -o pair.rhai` writes a macro
-  from one JSON command per line (the format of `run`) or from a crash journal, by replaying the
-  commands on an empty scene to learn which objects each creates.
-- **Limits.** A `batch` command is written as one command, so ids created inside it stay numbers;
-  a very long sculpt stroke (more than 20,000 dabs) is more than a script array may hold and the
-  replay stops with a limit error. `modelcraft_script::macros` has the writer, and
-  `Document::start_recording` the recorder in the engine.
-
 ## The model
 
 - **Everything a script changes is a command.** Every entry of
