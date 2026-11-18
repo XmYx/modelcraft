@@ -41,11 +41,25 @@ pub struct IntegratorSettings {
     pub strategy: Strategy,
     /// How lights with a position are chosen for direct lighting.
     pub light_sampling: LightSampling,
+    /// Learn where light comes from while rendering and send part of the paths that way (path
+    /// guiding; see [`crate::guided`]). Off by default; the GPU path does not have it.
+    pub guiding: bool,
+    /// End or multiply paths by what they are expected to add to their pixel, from a radiance
+    /// cache filled while rendering, instead of by throughput alone (see [`crate::guided`]).
+    pub adaptive_splitting: bool,
 }
 
 impl Default for IntegratorSettings {
     fn default() -> Self {
-        IntegratorSettings { max_depth: 12, roulette_start: 3, clamp_indirect: 0.0, strategy: Strategy::Mis, light_sampling: LightSampling::Tree }
+        IntegratorSettings {
+            max_depth: 12,
+            roulette_start: 3,
+            clamp_indirect: 0.0,
+            strategy: Strategy::Mis,
+            light_sampling: LightSampling::Tree,
+            guiding: false,
+            adaptive_splitting: false,
+        }
     }
 }
 
@@ -90,6 +104,20 @@ pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler,
         let Some(hit) = scene.accel.intersect(&ray) else {
             if first {
                 features.albedo = scene.lights.environment_radiance(ray.dir).min(Vec3A::ONE);
+            }
+            let (sun, sun_pdf) = scene.lights.sun_radiance(ray.dir);
+            if sun_pdf > 0.0 {
+                // The path found a sun's disk by itself; light sampling could have aimed at it too.
+                let w = if prev_pdf.is_infinite() {
+                    1.0
+                } else {
+                    match cfg.strategy {
+                        Strategy::Mis => power_heuristic(prev_pdf, sun_pdf),
+                        Strategy::BsdfOnly => 1.0,
+                        Strategy::LightOnly => 0.0,
+                    }
+                };
+                add(throughput * sun * w, depth);
             }
             if scene.lights.has_environment() {
                 let env = scene.lights.environment_radiance(ray.dir);
@@ -201,7 +229,7 @@ pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler,
 
 /// Apply the material's normal map, bump map and anisotropy direction to the shading frame.
 #[inline]
-fn shading_frame(scene: &Scene, m: &Material, tri: u32, sf: &mut Surface) {
+pub(crate) fn shading_frame(scene: &Scene, m: &Material, tri: u32, sf: &mut Surface) {
     let needs_axes = m.normal_texture.is_some() || m.bump_texture.is_some() || m.specular_roughness_anisotropy > 0.0;
     if !needs_axes {
         return;

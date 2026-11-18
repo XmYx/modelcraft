@@ -18,6 +18,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shape layers | sculpt layers / 3D layers with an intensity | Generic words; the reference product's layer names avoided | Use |
 | Live detail | dynamic topology | No live software mark found | Use |
 | Even remesh | voxel remeshing products | Generic words; product names avoided | Use |
+| Rectangle Mask, Lasso Mask, Rectangle Hide, Lasso Hide (region tools); Clip, Trim by plane; Shell | selection-rectangle and lasso masking and visibility, clip and trim brushes, mesh extraction | Generic tool words; the reference product's tool names avoided | Use |
 | Pull, Plateau, Buildup, Surface grab, Gouge, Slide, Bulge (brushes) | the reference sculpting app's hook, layer, clay build-up, topological move, groove, nudge and blob brushes | Plain verbs and nouns; the reference brush names avoided | Use |
 | Trim, Fill, Polish (brushes) | planar trim, fill and polish brushes | Generic tool words | Use |
 | Hardness | brush focal shift | Generic | Use |
@@ -45,6 +46,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Stepped, Linear, Curved (interpolation); Automatic, Flat, Free, Split (tangents); Hold, Continue, Repeat, Repeat with offset, Back and forth (outside the keys) | key interpolation, tangent types, pre/post infinity | Plain words; no product's tangent-type names ("spline", "clamped", "plateau") used as labels | Use |
 | Keyboard Shortcuts (dialog) | shortcut editors | Generic; the dialog is the suite's shared craft-keymap one | Use |
 | Render View, Update while editing | interactive / progressive render windows (the references use product-specific names for theirs) | Generic words; no live software mark found for the phrase in class 9; the references' own names avoided | Use |
+| Learn where light comes from (Render View) | path guiding, light cache or irradiance-map style options (the references use product-specific names) | A plain description of what it does; no product name used | Use |
 | Studio, Daylight, Panorama image (Render View lighting) | dome lights, physical sun-and-sky systems, HDRI lighting | Generic words; the references' product names for their skies and domes avoided | Use |
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |

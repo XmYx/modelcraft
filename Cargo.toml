@@ -27,6 +27,7 @@ craft-render-bvh = { path = "crates/craft-render-bvh" }
 craft-render-core = { path = "crates/craft-render-core" }
 craft-gltf-anim = { path = "crates/craft-gltf-anim" }
 craft-render-gpu = { path = "crates/craft-render-gpu" }
+craft-render-guide = { path = "crates/craft-render-guide" }
 modelcraft-uv = { path = "crates/uv" }
 modelcraft-uvpack = { path = "crates/uvpack" }
 modelcraft-hair = { path = "crates/hair" }
@@ -105,6 +106,8 @@ opt-level = 3
 [profile.dev.package.craft-render-bvh]
 opt-level = 3
 [profile.dev.package.craft-render-core]
+opt-level = 3
+[profile.dev.package.craft-render-guide]
 opt-level = 3
 
 # The Craft apps build against the suite's egui and winit forks (same revisions as craft-libs).
