@@ -20,6 +20,7 @@
 pub mod bsdf;
 pub mod camera;
 pub mod denoise;
+pub mod flip;
 pub mod guided;
 pub mod hair;
 pub mod integrator;
