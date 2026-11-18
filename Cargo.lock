@@ -2854,7 +2854,7 @@ dependencies = [
 name = "modelcraft-uvpack"
 version = "0.1.0"
 dependencies = [
- "glam",
+ "glam 0.30.10",
  "modelcraft-mesh",
  "modelcraft-ops",
  "proptest",

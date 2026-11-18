@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cloth::ClothSettings;
 use crate::rigid::RigidSettings;
 use crate::{DEFAULT_CACHE_BYTES, FrameCache, MAX_CACHE_BYTES, SimTiming};
 
@@ -22,6 +23,8 @@ pub enum SimKind {
     /// A rigid body: falls, collides and is constrained with the other bodies of the scene
     /// ([`crate::rigid`]). Baking one bakes every body.
     Rigid(RigidSettings),
+    /// Cloth: stretch, shear and bend constraints with collisions, pins and wind ([`crate::cloth`]).
+    Cloth(ClothSettings),
 }
 
 impl SimKind {
@@ -30,6 +33,7 @@ impl SimKind {
         match self {
             SimKind::Cache => "Cache",
             SimKind::Rigid(_) => "Rigid body",
+            SimKind::Cloth(_) => "Cloth",
         }
     }
 
@@ -95,8 +99,10 @@ impl SimObject {
     /// Repair settings read from a file.
     pub fn sanitize(&mut self) {
         self.timing = self.timing.sanitized();
-        if let SimKind::Rigid(r) = &mut self.kind {
-            r.sanitize();
+        match &mut self.kind {
+            SimKind::Rigid(r) => r.sanitize(),
+            SimKind::Cloth(c) => c.sanitize(),
+            SimKind::Cache => {}
         }
         self.max_cache_mib = self.max_cache_mib.clamp(1, (MAX_CACHE_BYTES >> 20) as u32);
     }
