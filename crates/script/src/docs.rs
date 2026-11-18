@@ -158,14 +158,14 @@ pub const API: &[(&str, &str, &str)] = &[
     (
         "Tools and callbacks",
         "register_tool(label, fn)",
-        "Add a command to the app's Scripts menu that runs `fn`. Registering the same label again replaces it; running the script again replaces everything it registered.",
+        "Add a command that runs `fn`; the app lists it in the Scripts menu (the app's wiring lands in a later change). Registering the same label again replaces it; running the script again replaces everything it registered.",
     ),
     ("Tools and callbacks", "register_tool(label, tip, fn)", "The same with a tooltip."),
     ("Tools and callbacks", "tool_count() -> int", "How many tools are registered."),
     (
         "Tools and callbacks",
         "on_event(name, fn)",
-        "Call `fn(event)` when an event happens. Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.",
+        "Call `fn(event)` when an event happens (the host reports events; the app's wiring lands in a later change). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.",
     ),
     ("Tools and callbacks", "on_scene_loaded(fn)", "Call `fn(event)` when a project is opened, imported or started new."),
     ("Tools and callbacks", "on_selection_changed(fn)", "Call `fn(event)` when the selection changes; `event.selection` is the new selection."),
@@ -253,6 +253,8 @@ pub fn render_markdown(examples: &[(String, String)]) -> String {
         }
         out.push('\n');
     }
+    let mut out = out.trim_end().to_string();
+    out.push('\n');
     out
 }
 
