@@ -25,6 +25,7 @@ mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
 mod demo;
+mod dock;
 mod exchange_ui;
 mod gpu;
 mod keys;

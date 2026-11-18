@@ -595,7 +595,7 @@ Weight: 4
 |---|---|---|---|---|
 | Dense dark theme, light theme from the system | C M Z | D | S | Text ≥ 4.5:1 (tested) |
 | Workspace layouts (model, sculpt, paint) | C M Z | D | S | Ctrl+1..3 |
-| Dockable panels | C M | P | M | Dock left/right, float, hide per workspace; no tabs, splits or saved layouts |
+| Dockable panels | C M | D | M | craft-ui docking: tab groups, splits, floating, per-workspace layouts saved in the preferences; moves by drag, tab menu, panel options menu or View ▸ Panels |
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |
 | Customisable shortcuts | C M Z | D | S | Suite Keyboard Shortcuts dialog (craft-keymap): conflicts, saved sets, per-workspace contexts |
