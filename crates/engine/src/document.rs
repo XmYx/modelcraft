@@ -319,6 +319,10 @@ impl Document {
             layer.mask = mask;
             if let Some(t) = topology {
                 layer.topology = t;
+                // The faces changed with the triangles: patches kept on the layer follow.
+                if !layer.patches.is_empty() {
+                    layer.patches = Arc::new(s.mesh.face_patches());
+                }
             }
         }
     }
@@ -344,7 +348,13 @@ impl Document {
         if layer.positions.len() != input.vertex_count() {
             return invalid("the sculpt layer no longer matches the mesh (an earlier step changed the vertex count)");
         }
-        let mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
+        let mut mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
+        if layer.patches.len() == mesh.face_count() {
+            mesh.set_face_patches(&layer.patches);
+        }
+        if layer.hidden.len() == mesh.face_count() {
+            mesh.set_face_hidden(&layer.hidden);
+        }
         self.sculpt = Some(SculptSession { id, step_id, mesh, unsynced: false, had_topology: layer.topology.is_some(), topo_synced: 0 });
         Ok(())
     }
@@ -375,6 +385,8 @@ impl Document {
             Some("live detail works on the base detail level only, with no finer levels kept")
         } else if !l.shapes.is_empty() {
             Some("merge or remove the shape layers before using live detail")
+        } else if !l.hidden.is_empty() {
+            Some("show everything before using live detail")
         } else {
             None
         }
@@ -511,12 +523,62 @@ impl Document {
                     MaskOp::Shrink => s.mesh.mask_shrink(),
                     MaskOp::Hollows => s.mesh.mask_by_bend(false),
                     MaskOp::Ridges => s.mesh.mask_by_bend(true),
+                    MaskOp::Occlusion => s.mesh.mask_by_occlusion(),
                 };
                 s.unsynced = true;
                 if !change.is_empty() {
                     self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
                 }
                 Outcome::default()
+            }
+            Command::SculptRegion { id, region, action: action @ (crate::groups::RegionAction::Mask | crate::groups::RegionAction::Unmask) } => {
+                self.ensure_session(*id)?;
+                if !region.is_valid() {
+                    return invalid("the region needs 3 to 4096 corners with finite numbers");
+                }
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let change = s.mesh.mask_region(region, if *action == crate::groups::RegionAction::Mask { 1.0 } else { 0.0 });
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptClip { id, point, normal } => {
+                self.ensure_session(*id)?;
+                if !point.is_finite() || !normal.is_finite() || normal.length_squared() == 0.0 {
+                    return invalid("the plane needs a finite point and a normal with a length");
+                }
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let change = s.mesh.clip_plane(*point, *normal);
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptGroups { id, .. } | Command::SculptVisibility { id, .. } | Command::SculptRegion { id, .. } | Command::SculptExtract { id, .. } => {
+                let id = *id;
+                self.ensure_session(id)?;
+                if self.sculpt.as_ref().is_some_and(|s| s.mesh.in_stroke()) {
+                    return invalid("finish the stroke first");
+                }
+                let c = cmd.clone();
+                let out = self.scene_change(&cmd, move |doc| match &c {
+                    Command::SculptGroups { op, .. } => doc.apply_groups(id, *op),
+                    Command::SculptVisibility { op, .. } => doc.apply_visibility(id, *op),
+                    Command::SculptRegion { region, action, .. } => doc.apply_region_view(id, region, *action == crate::groups::RegionAction::Isolate),
+                    Command::SculptExtract { thickness, .. } => doc.apply_extract(id, *thickness),
+                    _ => Ok(Outcome::default()),
+                })?;
+                self.sync_session_view(id)?;
+                out
             }
             Command::SculptDetail { id, .. } | Command::SculptShape { id, .. } => {
                 let id = *id;
@@ -970,6 +1032,11 @@ impl Document {
             | Command::SculptStroke { .. }
             | Command::SculptMask { .. }
             | Command::SculptDetail { .. }
+            | Command::SculptGroups { .. }
+            | Command::SculptVisibility { .. }
+            | Command::SculptRegion { .. }
+            | Command::SculptClip { .. }
+            | Command::SculptExtract { .. }
             | Command::SculptShape { .. } => {
                 return invalid("not a scene command");
             }
