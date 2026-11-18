@@ -144,6 +144,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for a in [Action::DetailUp, Action::DetailDown, Action::ShapeAdd, Action::LiveDetail, Action::EvenRemesh] {
                     action_button(app, ui, a);
                 }
+                crate::sculpt_groups_ui::menu(app, ui);
             });
             ui.menu_button(tl!("Scripts"), |ui| crate::script_ui::menu(app, ui));
             ui.menu_button(tl!("View"), |ui| {
@@ -420,7 +421,7 @@ pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
     let idx = PanelId::ALL.iter().position(|x| *x == p).unwrap_or(0);
     ui.horizontal(|ui| {
         let header_id = egui::Id::unique(("panel-focus", idx));
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 30.0, 20.0), egui::Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 44.0, 20.0), egui::Sense::hover());
         let resp = ui.interact(rect, header_id, egui::Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, p.label()));
         ui.painter().text(
@@ -957,6 +958,7 @@ fn brushes(app: &mut ModelApp, ui: &mut egui::Ui) {
         });
     }
     crate::sculpt_ui::layers(app, ui);
+    crate::sculpt_groups_ui::panel(app, ui);
 }
 
 fn falloff_label(f: Falloff) -> String {
@@ -1007,6 +1009,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
+    crate::sculpt_groups_ui::dialogs(app, ctx);
     rename(app, ctx);
     if app.about {
         let mut open = true;

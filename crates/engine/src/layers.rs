@@ -58,7 +58,8 @@ fn detail(layer: &mut SculptLayer, input: &PolyMesh, op: DetailOp) -> Result<(),
             if layer.level >= MAX_DETAIL_LEVEL {
                 return invalid("this is the highest detail level");
             }
-            let coarse = level_mesh(input, layer.level)?;
+            let mut coarse = level_mesh(input, layer.level)?;
+            crate::groups::tag_faces(&mut coarse);
             let faces = subdivide::face_count_after(&coarse, 1);
             if faces > modelcraft_ops::MAX_RESULT_FACES {
                 return invalid(format!("the next detail level would have {faces} faces, more than the limit"));
@@ -74,6 +75,13 @@ fn detail(layer: &mut SculptLayer, input: &PolyMesh, op: DetailOp) -> Result<(),
             if !layer.finer.is_empty() {
                 layer.finer.remove(0);
             }
+            let parent = crate::groups::parents(&fine);
+            if layer.patches.len() == coarse.face_count() {
+                layer.patches = Arc::new(crate::groups::refine_faces(&layer.patches, &parent));
+            }
+            if layer.hidden.len() == coarse.face_count() {
+                layer.hidden = Arc::new(crate::groups::refine_faces(&layer.hidden, &parent));
+            }
             layer.positions = Arc::new(up);
             layer.mask = Arc::new(mask);
             layer.level += 1;
@@ -85,11 +93,19 @@ fn detail(layer: &mut SculptLayer, input: &PolyMesh, op: DetailOp) -> Result<(),
             if !layer.shapes.is_empty() {
                 return invalid("merge or remove the shape layers before stepping down a detail level");
             }
-            let coarse = level_mesh(input, layer.level - 1)?;
+            let mut coarse = level_mesh(input, layer.level - 1)?;
+            crate::groups::tag_faces(&mut coarse);
             let fine = level_mesh(&coarse, 1)?;
             let refine = Refine::new(&coarse);
             let (down, disp) = detail::step_down(&refine, &fine, &layer.positions).map_err(bad)?;
             let mask: Vec<f32> = layer.mask.iter().take(down.len()).copied().collect();
+            let parent = crate::groups::parents(&fine);
+            if layer.patches.len() == fine.face_count() {
+                layer.patches = Arc::new(crate::groups::coarsen_faces(&layer.patches, &parent, coarse.face_count()));
+            }
+            if layer.hidden.len() == fine.face_count() {
+                layer.hidden = Arc::new(crate::groups::coarsen_faces(&layer.hidden, &parent, coarse.face_count()));
+            }
             layer.finer.insert(0, Arc::new(disp));
             layer.positions = Arc::new(down);
             layer.mask = Arc::new(mask);

@@ -351,6 +351,8 @@ mod tests {
                                 anchor: Arc::new(vec![Vec3::ONE; n]),
                                 level: 0,
                                 topology: Some(Arc::new(Primitive::Cube { size: Vec3::ONE, segments: 1 }.build().unwrap())),
+                                patches: Arc::new(vec![3, 3, 1, 1, 1, 2]),
+                                hidden: Arc::new(vec![false, true, true, false, false, false]),
                             },
                         },
                     }],

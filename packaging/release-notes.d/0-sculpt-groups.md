@@ -1,0 +1,6 @@
+- Patches while sculpting: make them by crease angle, by UV island, by connected part or from the mask, and show them with View ▸ Show Patches.
+- Hide, show and isolate patches (Shift+H, Alt+H and Shift+I in the Sculpt workspace, or the patch list in the Sculpt panel); hidden parts are not sculpted.
+- Rectangle and lasso tools mask or hide what you drag around; Region by Numbers does the same from the keyboard.
+- Clip or Trim by Plane flattens one side of a sculpt onto a plane or cuts it away and closes the cut.
+- Mask Occlusion masks folds and holes; Extract Shell from Mask makes a new object from the masked area.
+- The side panels no longer grow a little every frame.

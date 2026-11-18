@@ -306,6 +306,7 @@ fn same_step(a: &Step, b: &Step) -> bool {
                 && x.topology.as_ref().map(Arc::as_ptr) == y.topology.as_ref().map(Arc::as_ptr)
                 && Arc::ptr_eq(&x.positions, &y.positions)
                 && Arc::ptr_eq(&x.mask, &y.mask)
+                && Arc::ptr_eq(&x.patches, &y.patches)
         }
         _ => a == b,
     }
@@ -412,8 +413,12 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
                 return Err(OpError::Invalid(format!("the sculpt layer has {} points but the mesh now has {nv}", layer.positions.len())));
             }
             out.set_positions(&layer.positions)?;
+            if layer.patches.len() == out.face_count() {
+                out.set_patches(&layer.patches)?;
+            }
             Ok(out)
         }
         StepOp::EvenRemesh { cell } => modelcraft_ops::remesh::even_remesh(m, *cell),
+        StepOp::TrimPlane { point, normal, cap } => modelcraft_ops::trim::trim_plane(m, *point, *normal, *cap),
     }
 }
