@@ -251,6 +251,8 @@ impl ModelApp {
             crate::agents::start(&mut app, &cc.egui_ctx);
         }
         app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
+        let drafts = app.recovery_dir.as_ref().map(|d| d.join("scripts"));
+        crate::script_recover::init(&mut app, drafts);
         crate::script_ui::startup(&mut app);
         app
     }
@@ -1216,6 +1218,7 @@ impl eframe::App for ModelApp {
     }
 
     fn on_exit(&mut self) {
+        crate::script_recover::flush(self);
         self.store_prefs();
         if let Some(store) = &mut self.prefs {
             let _ = store.flush();
@@ -1244,6 +1247,7 @@ impl ModelApp {
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
         crate::script_ui::tick(self);
+        crate::script_recover::tick(self, &ctx);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
