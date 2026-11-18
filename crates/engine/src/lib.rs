@@ -12,6 +12,7 @@ pub mod anim;
 mod command;
 mod constraints;
 pub mod control;
+mod deformers;
 mod document;
 pub mod hair;
 mod layers;
@@ -39,6 +40,8 @@ pub use modelcraft_uv as uv;
 mod anim_tests;
 #[cfg(test)]
 mod constraint_tests;
+#[cfg(test)]
+mod deformer_tests;
 #[cfg(test)]
 mod hair_tests;
 #[cfg(test)]

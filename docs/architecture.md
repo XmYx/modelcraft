@@ -11,7 +11,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L1 | `modelcraft-hair` | Guide curves grown from a surface (density and length maps, seeded), render hairs interpolated from the guides (barycentric or nearest-k blend, clump, frizz, width taper), hard caps on counts and memory | mesh, rayon |
 | L1 | `modelcraft-sculpt` | `SculptMesh` (flat arrays, CSR adjacency, BVH), brushes, falloff, stamps, symmetry, masks, dirty chunks, stroke undo and replay | mesh |
 | L2 | `modelcraft-scene` | Objects, hierarchy, transforms, materials, history steps, the `Evaluator` (dependency graph with per-step caches), picking | mesh, ops |
-| L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh | scene, craft-mesh, craft-zip, craft-atomic |
+| L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh, UV layout pictures (SVG, PNG) | scene, craft-mesh, craft-zip, craft-atomic |
 | L4 | `modelcraft-engine` | `Document`, `Command`, undo (memory-bounded), journaling, sculpt session, export | all above |
 | L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries | glam, rayon |
 | L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator, the progressive film | craft-render-bvh |
@@ -53,6 +53,12 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   matrices (`rig::pose_key`), so moving a joint re-runs the skin and nothing else. The maths
   (weights, linear blend, dual quaternions, heat weights, aiming and mirroring joints) is in
   `modelcraft-anim`, free of the scene.
+- **Deformer stack**: blend shapes, lattices and clusters are one object kind
+  (`ObjectKind::PointDeformer`, `modelcraft_scene::point_deform`), children of the mesh like a
+  skin. `rig::apply_stack` runs them and the skins in child order on the mesh's points, after the
+  parametric deformers; `Scene::move_in_stack` reorders them. Weights and control points are
+  attributes (`target.<i>.weight`, `point.<i>.x`), so they are keyed like everything else. The
+  maths (morph with in-betweens, free-form deformation, clusters) is in `modelcraft-anim::deform`.
 - **Constraints**: `Scene::constraints` holds constraints, IK, driven keys and formulas
   (`modelcraft_scene::constraint`). Each names what it reads and writes (object and channel);
   `Scene::solve_constraints` sorts them topologically (a reader after its writers), skips and

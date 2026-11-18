@@ -38,6 +38,11 @@ pub(crate) fn register(engine: &mut Engine, s: &Rc<Shared>) {
         Ok(names.into_iter().map(Dynamic::from).collect())
     });
     let sh = s.clone();
+    engine.register_fn("make_dir", move |path: &str| -> R<()> {
+        let p = sh.path(path, Access::Write)?;
+        std::fs::create_dir_all(&p).map_err(|e| rt(format!("{path}: {e}")))
+    });
+    let sh = s.clone();
     engine.register_fn("export_scene", move |path: &str| -> R<()> {
         sh.check_time()?;
         let p = sh.path(path, Access::Write)?;

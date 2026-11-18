@@ -32,6 +32,8 @@ Commands:
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
   export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
+  export-uv <project> <out.svg|png> [--size N] [--object ID]
+                                    the UV layout of a mesh object as a picture
   convert <in> <out> [--up auto|y|z] [--scale M]
                                     any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
                                     .glb, .obj, .stl, .fbx or .modelcraft; --up and --scale
@@ -194,6 +196,12 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             let c = convert_flags(a)?;
             save_with(&mut load(arg(a, 0, "project")?)?, arg(a, 1, "output")?, c)
         }
+        "export-uv" => {
+            let mut d = load(arg(a, 0, "project")?)?;
+            let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
+            let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
+            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+        }
         "convert" => {
             let c = convert_flags(a)?;
             let input = arg(a, 0, "input")?;
@@ -238,6 +246,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
         "run-script" => script_cmd::run(a, load, save),
+        "batch-script" => script_cmd::batch(a, load, save),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;

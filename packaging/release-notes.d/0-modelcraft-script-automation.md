@@ -1,0 +1,1 @@
+- `modelcraft-cli batch-script` runs a script over many files, and `run-script` accepts `--arg name=value`, `-e '<script>'` and `--json`.

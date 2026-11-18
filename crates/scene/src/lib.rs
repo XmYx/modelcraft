@@ -8,6 +8,8 @@
 //! - A **clone generator** lays out instances of its first mesh child ([`Cloner`]).
 //! - A **deformer** object bends, twists… its parent mesh, in its own frame.
 //! - A **group** only carries a transform.
+//! - **Blend shapes, lattices and clusters** are children of a mesh too: its deformer stack
+//!   ([`point_deform`]).
 //! - **Constraints** pose objects from other objects, in dependency order ([`constraint`]).
 //!
 //! The [`Evaluator`] is the dependency graph: it caches every step's output per object and
@@ -22,6 +24,7 @@ pub mod constraint;
 mod eval;
 pub mod hair;
 pub mod pick;
+pub mod point_deform;
 pub mod rig;
 
 use std::sync::Arc;
@@ -286,6 +289,14 @@ pub enum StepOp {
         axis: u32,
         weld: f32,
     },
+    /// Rebuild the patches from the shape (by angle or by connected shells).
+    GroupPatches {
+        grouping: modelcraft_ops::patches::Grouping,
+    },
+    /// Weld vertices closer than `distance` and remove faces with no area.
+    CleanUp {
+        distance: f32,
+    },
     Sculpt {
         layer: SculptLayer,
     },
@@ -312,6 +323,33 @@ pub enum StepOp {
         #[serde(default = "default_margin")]
         margin: f32,
     },
+    /// Records seams (pairs of vertices of the step's input mesh) and changes nothing; the UV
+    /// editor reads the latest one, and an unwrap step takes them.
+    Seams {
+        #[serde(default)]
+        edges: Vec<[u32; 2]>,
+    },
+    /// Move, rotate and scale the UVs of the listed face corners (scale, then rotate, then
+    /// translate, about `pivot`).
+    TransformUvs {
+        corners: Vec<u32>,
+        #[serde(default)]
+        translate: [f32; 2],
+        #[serde(default)]
+        rotate_deg: f32,
+        #[serde(default = "unit_scale")]
+        scale: [f32; 2],
+        #[serde(default)]
+        pivot: [f32; 2],
+    },
+    /// Weld the UVs on the two sides of the listed edges.
+    StitchUvs {
+        edges: Vec<u32>,
+    },
+}
+
+fn unit_scale() -> [f32; 2] {
+    [1.0, 1.0]
 }
 
 /// A face corner held at a UV position while unwrapping.
@@ -326,6 +364,11 @@ fn default_margin() -> f32 {
 }
 
 impl StepOp {
+    /// A step that only records information and leaves the mesh as it is.
+    pub fn is_marker(&self) -> bool {
+        matches!(self, StepOp::Seams { .. })
+    }
+
     /// Stable id of the operation (also the English label key).
     pub fn name(&self) -> &'static str {
         match self {
@@ -346,9 +389,14 @@ impl StepOp {
             StepOp::Bridge { .. } => "Bridge",
             StepOp::FillHole { .. } => "Fill hole",
             StepOp::Mirror { .. } => "Mirror",
+            StepOp::GroupPatches { .. } => "Group patches",
+            StepOp::CleanUp { .. } => "Clean up",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::Unwrap { .. } => "Unwrap UVs",
+            StepOp::Seams { .. } => "Seams",
+            StepOp::TransformUvs { .. } => "Transform UVs",
+            StepOp::StitchUvs { .. } => "Weld UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -361,6 +409,9 @@ impl StepOp {
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
             StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
+            StepOp::Seams { edges } => edges.len() * 8,
+            StepOp::TransformUvs { corners, .. } => corners.len() * 4,
+            StepOp::StitchUvs { edges } => edges.len() * 4,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }
@@ -403,6 +454,10 @@ pub enum ObjectKind {
     Skin {
         skin: Arc<rig::Skin>,
     },
+    /// Blend shapes, a lattice or a cluster in its parent mesh's deformer stack ([`point_deform`]).
+    PointDeformer {
+        deformer: point_deform::PointDeformer,
+    },
     /// Lays out clones of its first mesh child (or smooth cage child). The clones are instances of
     /// that child's evaluated mesh; `target` is the object the surface and vertices layouts sit on.
     Cloner {
@@ -426,6 +481,7 @@ impl ObjectKind {
             ObjectKind::Deformer { .. } => "Deformer",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
+            ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
             ObjectKind::Hair { .. } => "Hair",
         }
@@ -462,6 +518,7 @@ impl Object {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
             ObjectKind::Hair { hair } => hair.heap_bytes(),
+            ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
         256 + self.name.len() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
@@ -546,6 +603,7 @@ impl Scene {
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
         hair::repair(&mut self);
+        point_deform::repair(&mut self);
         Ok(self)
     }
 

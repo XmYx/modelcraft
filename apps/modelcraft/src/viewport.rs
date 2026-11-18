@@ -813,7 +813,7 @@ fn line(a: Vec3, b: Vec3, c: [f32; 4]) -> [LineVertex; 2] {
 /// Grid, wireframes of selected objects and cages, selected edges.
 fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     let mut out = buffers::grid(20, 0.5, [0.24, 0.25, 0.27, 1.0], [0.34, 0.35, 0.38, 1.0]);
-    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right {
+    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right || !app.show_grid {
         out.clear();
     }
     for (a, b, color) in crate::rig_ui::bone_lines(app) {
@@ -858,6 +858,7 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), sel_wire));
         }
     }
+    out.extend(crate::uv_ui::seam_lines(app));
     out
 }
 
@@ -939,7 +940,9 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
             egui::StrokeKind::Inside,
         );
     }
-    axis_triad(&painter, &cam, rect);
+    if app.show_axes {
+        axis_triad(&painter, &cam, rect);
+    }
     // Component points.
     if app.workspace == Workspace::Model
         && app.mode == SelectMode::Vertex

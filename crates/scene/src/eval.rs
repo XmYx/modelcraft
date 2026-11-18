@@ -124,7 +124,10 @@ impl Evaluator {
             let i = cache.outputs.len();
             let prev = cache.outputs.last().cloned().unwrap_or_else(|| src.clone());
             let Some(step) = steps.get(i) else { break };
-            let out = if step.enabled {
+            let out = if step.enabled && step.op.is_marker() {
+                // Nothing to compute: share the previous output instead of copying it.
+                prev
+            } else if step.enabled {
                 self.runs += 1;
                 match run_step(&prev, &step.op) {
                     Ok(m) => Arc::new(m),
@@ -180,7 +183,7 @@ impl Evaluator {
                     }
                     e.mesh = Arc::new(m);
                 }
-                let (skinned, problems) = crate::rig::apply_skins(scene, id, &e.mesh);
+                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
                 if let Some(m) = skinned {
                     e.mesh = Arc::new(m);
                 }
@@ -246,9 +249,12 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } | ObjectKind::Hair { .. } => {
-                Evaluated::default()
-            }
+            ObjectKind::Group
+            | ObjectKind::Deformer { .. }
+            | ObjectKind::Joint { .. }
+            | ObjectKind::Skin { .. }
+            | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Hair { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result
@@ -365,6 +371,22 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1) };
             modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
+        StepOp::Seams { .. } => Ok(m.clone()),
+        StepOp::TransformUvs { corners, translate, rotate_deg, scale, pivot } => {
+            let t = modelcraft_uv::UvTransform {
+                translate: glam::Vec2::from(*translate),
+                rotate_deg: *rotate_deg,
+                scale: glam::Vec2::from(*scale),
+                pivot: glam::Vec2::from(*pivot),
+            };
+            modelcraft_uv::transform_corners(m, corners, &t).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::StitchUvs { edges } => {
+            edit::check_selection(edges, ne, "edge")?;
+            modelcraft_uv::stitch_edges(m, edges).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
+        StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
         StepOp::Sculpt { layer } => {
             let base = layer.topology.as_deref().unwrap_or(m);
             let mut out = if layer.level == 0 { base.clone() } else { subdivide::catmull_clark(base, u32::from(layer.level))? };

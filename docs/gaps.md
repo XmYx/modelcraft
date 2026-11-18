@@ -58,7 +58,7 @@ formats, UI/UX.
 | 3 | **U3** Vertex colour painting and conversion to textures | UV and paint | 17.5 | 0.83 | 4.7 |
 | 4 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | UI/UX | 25.5 | 1.19 | 4.6 |
 | 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 4 | 0.18 | 4.6 |
-| 6 | **M14** Patch grouping tools and mesh cleanup in the UI | Modeling | 3 | 0.13 | 4.3 |
+| 6 | ~~**M14** Patch grouping tools and mesh cleanup in the UI~~ (done) | Modeling | 3 | 0.13 | 4.3 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 65 | 2.71 | 4.2 |
 | 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 54 | 2.24 | 4.1 |
 | 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 11 | 0.44 | 4.0 |
@@ -79,7 +79,7 @@ users and sit lower only because they are expensive.
 | 3 | **U3** Vertex colour painting and conversion to textures | UV and paint | 3 | 17.5 | 0.83 | 4.7 | — | 17.6 % | 61.5 |
 | 4 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | UI/UX | 5 | 25.5 | 1.19 | 4.6 | — | 18.8 % | 87 |
 | 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 1 | 4 | 0.18 | 4.6 | — | 19.0 % | 91 |
-| 6 | **M14** Patch grouping tools and mesh cleanup in the UI | Modeling | 2 | 3 | 0.13 | 4.3 | — | 19.1 % | 94 |
+| 6 | ~~**M14** Patch grouping tools and mesh cleanup in the UI~~ (done) | Modeling | 2 | 3 | 0.13 | 4.3 | — | 19.1 % | 94 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 6 | 65 | 2.71 | 4.2 | A1 | 21.8 % | 159 |
 | 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
 | 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 2 | 11 | 0.44 | 4.0 | — | 24.5 % | 224 |
@@ -213,6 +213,15 @@ Limits of what exists:
   constrained object by number takes the other channels' solved values as authored. The driven
   key's curve has no editor yet (keys are set from poses or by command). Formulas give one
   number; when the scripting crate lands they can call into it instead of growing.
+- Deformer stack (owned by the animation and rigging stream: blend shapes, lattice / FFD,
+  clusters; the parametric deformers such as bend, shear, wrap and spline wrap belong to the
+  procedural-modeling stream): the stack deformers and skins run in child order *after* the
+  parametric deformers, whose loop in `eval.rs` this stream did not touch. One order for both
+  kinds needs that loop to hand its deformers to `rig::apply_stack`; until then a bend always
+  runs before a lattice. Lattice control points and cluster weights are edited by number and by
+  command, not picked or painted in the viewport; a lattice only moves points inside its box;
+  blend-shape targets are made from another mesh and are not edited in place; shape offsets are
+  saved as JSON, not as a blob.
 - Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
   be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
 - Motion paths are drawn, not edited, and there are no ghosts. Point caches are written
@@ -245,7 +254,6 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 | **M11** NURBS curves and surfaces with trimming and tessellation | 5 | 178 | 2.37 | 70 | — |
 | **M12** Voronoi fracture | 1 | 25 | 0.67 | 36 | D1 |
 | **M13** GPU subdivision | 1 | 25 | 0.56 | 44 | — |
-| **M14** Patch grouping tools and mesh cleanup in the UI | 2 | 3 | 0.13 | 6 | — |
 
 ## UV and paint
 
@@ -297,7 +305,7 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3** builds on craft-ui `docking` for tabs and splits. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
+Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

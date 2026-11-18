@@ -265,3 +265,40 @@ fn unwrap_step_with_stale_input_is_skipped() {
     assert!(e.errors.is_empty(), "{:?}", e.errors);
     assert!(e.mesh.has_uvs());
 }
+
+#[test]
+fn uv_edit_steps_move_weld_and_record_seams() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let id = s.add("Cube", cube_kind(), None).unwrap();
+    let base = ev.evaluate(&s, id).mesh;
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
+        steps.push(Step { id: 1, enabled: true, op: StepOp::Seams { edges: vec![[0, 1], [1, 2]] } });
+        steps.push(Step {
+            id: 2,
+            enabled: true,
+            op: StepOp::TransformUvs { corners: vec![0, 1, 2, 3], translate: [0.5, 0.0], rotate_deg: 0.0, scale: [1.0, 1.0], pivot: [0.0, 0.0] },
+        });
+    }
+    let e = ev.evaluate(&s, id);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    // The marker shares the mesh; the transform moved exactly four corners.
+    for c in 0..base.corner_count() as u32 {
+        let moved = c < 4;
+        assert_eq!((e.mesh.uv(c) - base.uv(c)).length() > 0.4, moved, "corner {c}");
+    }
+    let steps_only_seams = ev.steps_output(&s, id, 1);
+    assert!(std::sync::Arc::ptr_eq(&steps_only_seams.mesh, &base) || steps_only_seams.mesh.corner_uvs() == base.corner_uvs());
+    // Weld an edge; JSON defaults for the new steps.
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
+        steps.clear();
+        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0] } });
+        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999] } });
+    }
+    let e = ev.evaluate(&s, id);
+    assert_eq!(e.errors.len(), 1, "an edge that does not exist is reported, the step skipped");
+    let back: Step = serde_json::from_str(r#"{"id":1,"op":"transform_uvs","corners":[1,2]}"#).unwrap();
+    assert!(matches!(back.op, StepOp::TransformUvs { scale: [1.0, 1.0], rotate_deg, .. } if rotate_deg == 0.0));
+    let back: Step = serde_json::from_str(r#"{"id":1,"op":"seams"}"#).unwrap();
+    assert!(back.op.is_marker());
+}

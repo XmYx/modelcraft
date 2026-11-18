@@ -16,6 +16,8 @@ use std::time::Duration;
 pub struct Limits {
     pub max_operations: u64,
     pub max_time: Duration,
+    /// Wall-clock limit of one event callback (they run between frames).
+    pub max_event_time: Duration,
     /// Deepest nesting of script function calls.
     pub max_call_depth: usize,
     /// Deepest nesting of one expression, and of a function body.
@@ -39,6 +41,7 @@ impl Default for Limits {
         Limits {
             max_operations: 10_000_000,
             max_time: Duration::from_secs(10),
+            max_event_time: Duration::from_secs(2),
             max_call_depth: 24,
             max_expr_depth: 48,
             max_string_bytes: 256 * 1024,

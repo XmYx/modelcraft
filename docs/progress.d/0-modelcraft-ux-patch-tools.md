@@ -1,0 +1,1 @@
+| 2026-11-17 | Patch grouping and mesh cleanup: group patches by crease angle or shell, new patch from selection, select patch; a mesh check for n-gons, triangles, open borders, faces with no area and poles; Clean Up Mesh (history steps `group_patches`, `clean_up`) |

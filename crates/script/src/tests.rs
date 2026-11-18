@@ -5,7 +5,7 @@ use std::time::Duration;
 use modelcraft_engine::scene::ObjectId;
 use modelcraft_engine::{Command, Document};
 
-use crate::{ErrorKind, Limits, Permissions, RunContext, RunReport, Session};
+use crate::{ErrorKind, Event, EventKind, Limits, Permissions, RunContext, RunReport, Session};
 
 fn run_with(session: &mut Session, doc: &mut Document, src: &str) -> RunReport {
     let mut ctx = RunContext::default();
@@ -608,4 +608,171 @@ fn a_script_cannot_catch_a_limit() {
     // Ordinary errors can be caught.
     let (_, r) = ok(r#"let out = "none"; try { name_of(9); } catch (e) { out = "caught"; } out"#);
     assert_eq!(r.value.as_deref(), Some("caught"));
+}
+
+// ---- arguments, tools and callbacks ----
+
+#[test]
+fn arguments_read_as_the_most_specific_value() {
+    let mut d = Document::new();
+    let mut s = Session::new(Limits::default(), Permissions::none());
+    s.set_args([("n", "7"), ("x", "2.5"), ("on", "true"), ("name", "cube"), ("odd", "1e999")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+    s.set_current_file(Some("scene.modelcraft".into()));
+    let r = run_with(
+        &mut s,
+        &mut d,
+        r#"[arg("n", 0) + 1, arg("x", 0.0) * 2.0, arg("on", false), arg("name", "x"), arg("missing", "dflt"), arg("odd", 0), args().len(), current_file()].to_string()"#,
+    );
+    assert_eq!(r.value.as_deref(), Some("[8, 5.0, true, \"cube\", \"dflt\", \"1e999\", 5, \"scene.modelcraft\"]"), "{:?}", r.error);
+    s.set_current_file(None);
+    assert_eq!(run_with(&mut s, &mut d, "current_file() == ()").value.as_deref(), Some("true"));
+    assert_eq!(run_with(&mut s, &mut d, "round_to(3.14159, 2)").value.as_deref(), Some("3.14"));
+    assert_eq!(run_with(&mut s, &mut d, "round_to(7, 99)").value.as_deref(), Some("7.0"));
+}
+
+#[test]
+fn make_dir_needs_a_write_grant() {
+    let w = tmp("mkdir");
+    let mut d = Document::new();
+    assert!(run(&mut d, r#"make_dir("a/b")"#).error.is_some_and(|e| e.message.contains("may not use writing")));
+    let mut s = Session::new(Limits::default(), Permissions::none().with_base(&w).allow_write(&w));
+    assert!(run_with(&mut s, &mut d, r#"make_dir("a/b"); write_text("a/b/f.txt", "x")"#).ok());
+    assert!(w.join("a/b/f.txt").exists());
+    assert!(run_with(&mut s, &mut d, r#"make_dir("../outside")"#).error.is_some());
+}
+
+#[test]
+fn a_script_registers_tools_the_app_can_run() {
+    let mut d = Document::new();
+    let mut s = Session::new(Limits::default(), Permissions::none());
+    let mut ctx = RunContext::default();
+    let r = s.run(
+        &mut d,
+        &mut ctx,
+        "tools.rhai",
+        r#"
+        let made = 0;
+        register_tool("Add Row", "Adds a row of cubes", || {
+            made += 1;
+            for i in 0..3 { let c = add_primitive("cube", "Row " + made + "." + i); move_to(c, i * 3, 0, 0); }
+            print("made row " + made);
+        });
+        register_tool("Break", || { name_of(404); });
+        tool_count()
+    "#,
+    );
+    assert!(r.ok(), "{:?}", r.error);
+    assert_eq!(r.value.as_deref(), Some("2"));
+    assert_eq!(d.scene.len(), 0, "registering runs nothing");
+    let tools = s.tools();
+    assert_eq!(
+        tools.iter().map(|t| (t.label.as_str(), t.tip.as_str(), t.owner.as_str())).collect::<Vec<_>>(),
+        vec![("Add Row", "Adds a row of cubes", "tools.rhai"), ("Break", "", "tools.rhai")]
+    );
+    // Running a tool runs its closure, which keeps its captured state between runs.
+    let r = s.run_tool(&mut d, &mut ctx, "Add Row");
+    assert!(r.ok(), "{:?}", r.error);
+    assert_eq!(r.lines[0].text, "made row 1");
+    assert_eq!(s.run_tool(&mut d, &mut ctx, "Add Row").lines[0].text, "made row 2");
+    assert_eq!(d.scene.len(), 6);
+    // A failing tool reports where, in the script that registered it.
+    let e = s.run_tool(&mut d, &mut ctx, "Break").error.unwrap();
+    assert_eq!((e.file.as_str(), e.line), ("tools.rhai", Some(8)));
+    assert!(s.run_tool(&mut d, &mut ctx, "Nothing").error.is_some_and(|e| e.message.contains("no tool called")));
+    // Running the script again replaces its tools; the same label is replaced, not doubled.
+    s.run(&mut d, &mut ctx, "tools.rhai", r#"register_tool("Only", || {}); register_tool("Only", || { add_group("second"); });"#);
+    assert_eq!(s.tools().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), vec!["Only".to_string()]);
+    s.run_tool(&mut d, &mut ctx, "Only");
+    assert!(d.scene.objects().iter().any(|o| o.name == "second"));
+    // A different script's tools stay.
+    s.run(&mut d, &mut ctx, "other.rhai", r#"register_tool("Other", || {});"#);
+    s.run(&mut d, &mut ctx, "tools.rhai", "1");
+    assert_eq!(s.tools().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), vec!["Other".to_string()]);
+    // Bad labels and too many tools are refused.
+    assert!(s.run(&mut d, &mut ctx, "x.rhai", r#"register_tool("  ", || {});"#).error.is_some());
+    let many = s.run(&mut d, &mut ctx, "many.rhai", r#"for i in 0..200 { register_tool("T" + i, || {}); }"#);
+    assert!(many.error.is_some_and(|e| e.message.contains("at most")));
+}
+
+#[test]
+fn callbacks_receive_their_event_and_only_theirs() {
+    let mut d = Document::new();
+    let a = d.execute(Command::AddGroup { name: None }).unwrap().created[0];
+    let mut s = Session::new(Limits::default(), Permissions::none());
+    let mut ctx = RunContext { selection: vec![a] };
+    let r = s.run(
+        &mut d,
+        &mut ctx,
+        "watch.rhai",
+        r#"
+        on_selection_changed(|e| { print("selected " + e.selection.len() + " via " + e.event); });
+        on_scene_loaded(|e| { print("loaded"); });
+        on_frame_changed(|e| { print("frame " + e.frame); });
+        on_event("scene_changed", |e| { add_group("reaction"); });
+    "#,
+    );
+    assert!(r.ok(), "{:?}", r.error);
+    assert_eq!(s.callback_count(EventKind::SelectionChanged), 1);
+    assert!(s.has_callbacks());
+    let texts = |reports: Vec<RunReport>| reports.into_iter().flat_map(|r| r.lines.into_iter().map(|l| l.text)).collect::<Vec<_>>();
+    assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::SelectionChanged)), vec!["selected 1 via selection_changed"]);
+    assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::SceneLoaded)), vec!["loaded"]);
+    assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::FrameChanged { frame: 12.5 })), vec!["frame 12.5"]);
+    // A callback changes the scene through commands, as undoable steps.
+    let reports = s.fire(&mut d, &mut ctx, &Event::SceneChanged);
+    assert!(reports[0].ok() && reports[0].commands == 1);
+    assert!(d.scene.objects().iter().any(|o| o.name == "reaction"));
+    // No callback for an event: nothing runs.
+    let mut quiet = Session::new(Limits::default(), Permissions::none());
+    assert!(!quiet.has_callbacks());
+    assert!(quiet.fire(&mut d, &mut ctx, &Event::SelectionChanged).is_empty());
+    // Unknown event names are refused.
+    assert!(s.run(&mut d, &mut ctx, "x.rhai", r#"on_event("tuesday", || {});"#).error.is_some_and(|e| e.message.contains("unknown event")));
+    // Removing them.
+    s.run(&mut d, &mut ctx, "watch.rhai", "clear_callbacks();");
+    assert!(!s.has_callbacks());
+}
+
+#[test]
+fn callbacks_can_change_the_selection_and_are_replaced_when_their_script_runs_again() {
+    let mut d = Document::new();
+    let a = d.execute(Command::AddGroup { name: None }).unwrap().created[0];
+    let b = d.execute(Command::AddGroup { name: None }).unwrap().created[0];
+    let mut s = Session::new(Limits::default(), Permissions::none());
+    let mut ctx = RunContext { selection: vec![a] };
+    s.run(&mut d, &mut ctx, "w.rhai", "on_selection_changed(|e| { set_selection([2]); });");
+    s.run(&mut d, &mut ctx, "w.rhai", "on_selection_changed(|e| { set_selection([2]); });");
+    assert_eq!(s.callback_count(EventKind::SelectionChanged), 1, "running the script again replaced it");
+    let r = s.fire(&mut d, &mut ctx, &Event::SelectionChanged);
+    assert_eq!(r[0].selection, Some(vec![b]));
+}
+
+#[test]
+fn a_failing_callback_is_switched_off_and_a_runaway_one_is_stopped() {
+    let mut d = Document::new();
+    let mut s = Session::new(Limits { max_event_time: Duration::from_millis(100), ..Limits::default() }, Permissions::none());
+    let mut ctx = RunContext::default();
+    s.run(&mut d, &mut ctx, "bad.rhai", r#"on_scene_changed(|e| { name_of(404); }); on_selection_changed(|e| { add_group("ok"); });"#);
+    for i in 1..=3 {
+        let reports = s.fire(&mut d, &mut ctx, &Event::SceneChanged);
+        assert!(reports[0].error.is_some(), "call {i}");
+        if i == 3 {
+            assert!(reports[0].lines.iter().any(|l| l.text.contains("switched off")), "{:?}", reports[0].lines);
+        }
+    }
+    assert_eq!(s.callback_count(EventKind::SceneChanged), 0);
+    assert!(s.fire(&mut d, &mut ctx, &Event::SceneChanged).is_empty());
+    assert_eq!(s.callback_count(EventKind::SelectionChanged), 1, "the others stay");
+    // A success resets the count.
+    s.run(&mut d, &mut ctx, "flaky.rhai", r#"let n = 0; on_scene_changed(|e| { n += 1; if n % 3 != 0 { throw "no"; } });"#);
+    for _ in 0..9 {
+        s.fire(&mut d, &mut ctx, &Event::SceneChanged);
+    }
+    assert_eq!(s.callback_count(EventKind::SceneChanged), 1, "two failures then a success never reach three in a row");
+    // A callback that never returns is stopped by the shorter event limit.
+    s.run(&mut d, &mut ctx, "spin.rhai", "on_frame_changed(|e| { loop { } });");
+    let t = std::time::Instant::now();
+    let reports = s.fire(&mut d, &mut ctx, &Event::FrameChanged { frame: 1.0 });
+    assert_eq!(reports[0].error.as_ref().map(|e| e.kind), Some(ErrorKind::Limit));
+    assert!(t.elapsed() < Duration::from_secs(3));
 }

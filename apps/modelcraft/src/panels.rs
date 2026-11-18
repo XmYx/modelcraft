@@ -70,6 +70,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::TransformDialog,
                     Action::Palette,
                     Action::KeyboardShortcuts,
+                    Action::Preferences,
                 ] {
                     action_button(app, ui, a);
                 }
@@ -121,6 +122,11 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                ui.menu_button(tl!("Patches and Cleanup"), |ui| {
+                    for t in crate::mesh_tools::ALL {
+                        action_button(app, ui, Action::MeshTool(*t));
+                    }
+                });
             });
             ui.menu_button(tl!("Sculpt"), |ui| {
                 for k in modelcraft_engine::sculpt::brush::KINDS {
@@ -149,6 +155,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::RadialMenu,
                     Action::RenderView,
                 ] {
                     action_button(app, ui, a);
@@ -169,6 +176,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     }
                 });
             });
+            crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
@@ -495,6 +503,13 @@ fn kind_badge(ui: &mut egui::Ui, o: &Object) {
                 p.add(egui::Shape::line(pts, egui::Stroke::new(1.2, k)));
             }
         }
+        ObjectKind::PointDeformer { .. } => {
+            // A stack deformer: a small grid.
+            let g = Color32::from_rgb(200, 140, 230);
+            p.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), 0.0, egui::Stroke::new(1.2, g), egui::StrokeKind::Inside);
+            p.line_segment([c + egui::vec2(-5.0, 0.0), c + egui::vec2(5.0, 0.0)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(0.0, -5.0), c + egui::vec2(0.0, 5.0)], egui::Stroke::new(1.0, g));
+        }
         ObjectKind::Skin { .. } => {
             // A skin: two linked circles.
             let k = Color32::from_rgb(240, 200, 120);
@@ -690,7 +705,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(tl!("Transform")).default_open(true).show(ui, |ui| {
         let mut t = obj.transform;
         let mut euler = t.euler_degrees();
-        let pos = vec3_row(ui, &tl!("Position"), &mut t.translation, 0.01);
+        let per = app.unit.per_metre();
+        let mut shown = t.translation * per;
+        let pos = vec3_row(ui, &tl!("Position"), &mut shown, 0.01);
+        if pos.iter().any(|r| r.changed()) {
+            t.translation = shown / per;
+        }
         let rot = vec3_row(ui, &tl!("Rotation"), &mut euler, 0.5);
         let scl = vec3_row(ui, &tl!("Scale"), &mut t.scale, 0.01);
         t.set_euler_degrees(euler);
@@ -764,10 +784,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
         });
     }
+    crate::deform_ui::properties(app, ui, id);
     crate::constraint_ui::properties(app, ui, id);
     crate::hair_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
+        crate::mesh_tools::section(app, ui);
     }
     if let Some((verts, tris)) = app.doc.sculpt.as_ref().map(|s| (s.mesh.vertex_count(), s.mesh.triangle_count())) {
         egui::CollapsingHeader::new(tl!("Sculpt")).default_open(true).show(ui, |ui| {
@@ -1103,6 +1125,7 @@ pub struct Palette {
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
+    crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
