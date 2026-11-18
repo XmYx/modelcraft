@@ -1,0 +1,1 @@
+- Cloth: simulate a mesh as cloth with stretch, shear and bend, pin vertices (by list, by sculpt mask or to a moving object), drop it on other objects, add wind and self collision, and bake it to a cache that plays on the timeline (commands only; the panel follows).

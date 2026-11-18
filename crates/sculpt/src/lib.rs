@@ -588,6 +588,8 @@ impl SculptMesh {
 }
 
 #[cfg(test)]
+mod brush_more_tests;
+#[cfg(test)]
 mod groups_tests;
 #[cfg(test)]
 mod tests;
