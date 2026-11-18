@@ -212,6 +212,7 @@ samples per second.
 | `--samples N` | Samples per pixel, default 64 |
 | `--depth N` | Bounces, default 12 |
 | `--device auto\|cpu\|gpu` | `auto` uses a hardware GPU when there is one and falls back to the CPU; `gpu` fails if it cannot |
+| `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
@@ -227,7 +228,7 @@ or compositor reads: `albedo.R/G/B`, `N.X/Y/Z` (world-space normal), `Z` (distan
 camera), `motion.X/Y` and `variance`, all 32-bit float. The feature images come from the CPU path.
 
 `modelcraft-cli render-bench [--scenes a,b] [--size N] [--spp 1,4,16] [--seeds N] [--reference N]
-[--device cpu|gpu] [--order z|independent]` measures error against samples and time on the
+[--device cpu|gpu] [--order z|independent] [--guiding] [--splitting]` measures error against samples and time on the
 benchmark scenes, each against its own converged reference, and prints one JSON line per scene and
 a table ([performance.md](performance.md) explains the protocol).
 
