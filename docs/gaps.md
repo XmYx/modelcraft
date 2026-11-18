@@ -198,9 +198,7 @@ audio and the sculpt turntable. Everything else is not started. **A1** came firs
 Limits of what exists:
 - Rotation is keyed as XYZ Euler angles (keying one angle keys all three); there are no other
   rotation orders and no quaternion interpolation.
-- Rigging: joints are added by command and moved with the gizmo or by number (no click-to-place
-  tool, no viewport picking of joints); a joint's rest orientation lives in its rotation, not in a
-  separate channel. Skin weights are painted by a command dab, not by a viewport brush; heat
+- Rigging: a joint's rest orientation lives in its rotation, not in a separate channel. Heat
   weights skip the paper's visibility test, so two limbs that touch can share weights; weights
   cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
   `Scene::get` is a linear search, which shows with thousands of objects. A `.glb` export of a scene with
@@ -230,13 +228,16 @@ Limits of what exists:
   command, not picked or painted in the viewport; a lattice only moves points inside its box;
   blend-shape targets are made from another mesh and are not edited in place; shape offsets are
   saved as JSON, not as a blob.
-- Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
-  be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
-- Motion paths are drawn, not edited, and there are no ghosts. Point caches are written
-  (`modelcraft-cli bake`) but cannot be played back on a mesh yet.
-- No box selection or copy/paste of keys.
-- The Curve Editor fits its value axis to the shown curves; hide curves to see small ones next to
-  large ones.
+- Animation layers: the Key Sheet and Curve Editor show the active layer only; a layer's weight
+  curve is keyed and cleared from the panel but has no row in the editors.
+- Motion paths are drawn, not edited. Ghosts come from the curves (constraints do not show in
+  them) and draw joints as bones and other objects as axis crosses, not as meshes.
+- Pasting keys with one other object selected goes onto that object; there is no paste that
+  replaces a time range or ripples later keys.
+- The Curve Editor's value range is fitted to the shown curves or set by hand (numbers, zoom
+  buttons); there is no wheel zoom on the value axis and no normalised view.
+- The weight brush's ring on screen has a fixed size (the radius is in scene units in
+  Properties); weight marks are subsampled above 30,000 vertices; strokes are not mirrored.
 - Playback shows whole frames at the scene rate on the UI thread.
 - Duplicating an object does not copy its curves.
 - The app's shortcut handler gives every key to a focused widget, so with keyboard focus on a
