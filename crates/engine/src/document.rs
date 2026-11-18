@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project, uvlayout};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, Field, Modifier, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome};
@@ -941,10 +941,20 @@ impl Document {
                 let name = self.scene.unique_name(&title(kind));
                 out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
             }
+            Command::AddCloneModifier { kind, cloner } => {
+                let modifier = Modifier::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone modifier {kind:?}")))?;
+                if !matches!(self.scene.get(*cloner).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
+                    return invalid("clone modifiers go inside a clone generator");
+                }
+                let name = self.scene.unique_name(&format!("{} modifier", title(kind)));
+                let id = self.scene.add(name, ObjectKind::CloneModifier { modifier, target: None }, Some(*cloner))?;
+                out.warnings.extend(self.eval.evaluate(&self.scene, *cloner).errors.iter().map(|e| e.message.clone()));
+                out.created.push(id);
+            }
             Command::AddField { kind, target } => {
                 let field = Field::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown field {kind:?}")))?;
-                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. })) {
-                    return invalid("falloff fields go inside a deformer");
+                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. })) {
+                    return invalid("falloff fields go inside a deformer or a clone modifier");
                 }
                 let name = self.scene.unique_name(&format!("{} field", title(kind)));
                 out.created.push(self.scene.add(name, ObjectKind::Field { field }, Some(*target))?);
@@ -1009,6 +1019,22 @@ impl Document {
                 ObjectKind::Field { field: f } => *f = field.sanitized(),
                 _ => return invalid("not a falloff field"),
             },
+            Command::SetCloneModifier { id, modifier, target } => {
+                let parent = self.scene.get(*id).and_then(|o| o.parent);
+                if target.is_some_and(|t| t == *id || Some(t) == parent || self.scene.get(t).is_none()) {
+                    return invalid("the target must be another object in the scene, not the clone generator");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::CloneModifier { modifier: m, target: t } => {
+                        *m = modifier.sanitized();
+                        *t = *target;
+                    }
+                    _ => return invalid("not a clone modifier"),
+                }
+                if let Some(p) = parent {
+                    out.warnings.extend(self.eval.evaluate(&self.scene, p).errors.iter().map(|e| e.message.clone()));
+                }
+            }
             Command::SetCloner { id, cloner, target } => {
                 if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
                     return invalid("the target must be another object in the scene");
@@ -1333,7 +1359,7 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
                 // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
                 || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
                 || !self.scene.visible(id)

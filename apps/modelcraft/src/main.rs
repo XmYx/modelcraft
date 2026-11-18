@@ -18,6 +18,9 @@ mod args;
 mod clone_ui;
 #[cfg(test)]
 mod clone_ui_tests;
+mod modifier_ui;
+#[cfg(test)]
+mod modifier_ui_tests;
 mod constraint_ui;
 #[cfg(test)]
 mod constraint_ui_tests;

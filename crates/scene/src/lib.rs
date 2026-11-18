@@ -32,7 +32,7 @@ pub mod sim;
 use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
-pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
+pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES, Modifier};
 pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
@@ -584,6 +584,14 @@ pub enum ObjectKind {
     PointDeformer {
         deformer: point_deform::PointDeformer,
     },
+    /// A clone modifier inside a clone generator: it moves, turns, scales and tints the clones.
+    /// Falloff fields inside it weigh where it acts; `target` is the object the `target` mode
+    /// pulls toward.
+    CloneModifier {
+        modifier: Modifier,
+        #[serde(default)]
+        target: Option<ObjectId>,
+    },
     /// Lays out clones of its first mesh child (or smooth cage child). The clones are instances of
     /// that child's evaluated mesh; `target` is the object the surface and vertices layouts sit on.
     Cloner {
@@ -615,6 +623,7 @@ impl ObjectKind {
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::CloneModifier { .. } => "Clone modifier",
             ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
         }
@@ -1059,6 +1068,11 @@ impl Scene {
             c = o.parent.and_then(|p| self.get(p));
         }
         true
+    }
+
+    /// The visible clone modifiers inside the clone generator `id`, in order.
+    pub fn clone_modifiers(&self, id: ObjectId) -> Vec<ObjectId> {
+        self.children(id).into_iter().filter(|c| self.get(*c).is_some_and(|o| o.visible && matches!(o.kind, ObjectKind::CloneModifier { .. }))).collect()
     }
 
     /// The falloff fields inside `id` (a deformer), each with the matrix taking the deformer's
