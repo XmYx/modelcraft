@@ -8,6 +8,9 @@ use modelcraft_mesh::PolyMesh;
 
 use crate::pick::{self, Ray};
 
+/// How many pixels nearer an edge must be than a vertex to win over it.
+pub const EDGE_BIAS: f32 = 6.0;
+
 /// Most vertices plus edges looked at in one query; a bigger scene is sampled evenly, so a snap
 /// stays interactive and the cost is the same for a huge mesh as for a large one.
 pub const BUDGET: usize = 400_000;
@@ -50,14 +53,15 @@ pub type Placed<'a> = (Mat4, &'a PolyMesh);
 /// the surface.
 pub fn snap(meshes: &[Placed<'_>], targets: SnapTargets, project: &dyn Fn(Vec3) -> Option<Vec2>, cursor: Vec2, radius: f32, ray: &Ray) -> Option<SnapHit> {
     let mut best: Option<SnapHit> = None;
+    // A vertex beats an edge unless the edge is much nearer, and both beat the surface, which
+    // answers only when nothing else is in range.
+    let score = |h: &SnapHit| match h.kind {
+        SnapKind::Vertex => h.pixels,
+        SnapKind::Edge => h.pixels + EDGE_BIAS,
+        SnapKind::Surface => radius + 2.0 * EDGE_BIAS + 1.0,
+    };
     let mut consider = |h: SnapHit| {
-        // Prefer the more specific kind when the distances are within a pixel.
-        let rank = |k: SnapKind| match k {
-            SnapKind::Vertex => 0,
-            SnapKind::Edge => 1,
-            SnapKind::Surface => 2,
-        };
-        if best.is_none_or(|b| h.pixels + 1.0 < b.pixels || (h.pixels < b.pixels + 1.0 && rank(h.kind) < rank(b.kind))) {
+        if best.is_none_or(|b| score(&h) < score(&b)) {
             best = Some(h);
         }
     };

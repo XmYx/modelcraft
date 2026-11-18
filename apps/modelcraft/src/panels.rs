@@ -170,6 +170,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                crate::snap_ui::menu(app, ui);
                 ui.checkbox(&mut app.show_wire, tl!("Wireframe on Selection"));
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
                 ui.menu_button(tl!("Navigation"), |ui| {

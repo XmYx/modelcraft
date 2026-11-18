@@ -27,9 +27,9 @@ pub mod organize;
 pub mod pick;
 pub mod point_deform;
 pub mod rig;
-pub mod snap;
 mod rle;
 pub mod sim;
+pub mod snap;
 
 use std::sync::Arc;
 
