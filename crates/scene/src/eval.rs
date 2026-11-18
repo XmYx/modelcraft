@@ -334,10 +334,10 @@ impl Evaluator {
         self.runs += 1;
         let mut errors = inner.errors;
         match op(&m) {
-            Ok(r) => Evaluated { mesh: Arc::new(r), errors, instances: None },
+            Ok(r) => Evaluated { mesh: Arc::new(r), errors, ..Evaluated::default() },
             Err(e) => {
                 errors.push(StepError { step: usize::MAX, message: e.to_string() });
-                Evaluated { mesh: Arc::new(m), errors, instances: None }
+                Evaluated { mesh: Arc::new(m), errors, ..Evaluated::default() }
             }
         }
     }
