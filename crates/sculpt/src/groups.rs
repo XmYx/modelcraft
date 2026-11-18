@@ -336,7 +336,7 @@ impl SculptMesh {
     }
 
     /// True for a vertex that only hidden triangles use.
-    fn vertex_hidden(&self, v: u32) -> bool {
+    pub(crate) fn vertex_hidden(&self, v: u32) -> bool {
         if self.hidden.is_empty() {
             return false;
         }

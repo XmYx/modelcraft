@@ -53,7 +53,7 @@ Commands:
                                     document.info, document.save, …)
   mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
-  bench --groups [--polys N]        patch, visibility, region, shell, trim and occlusion times
+  bench --groups [--polys N]        patch, visibility, region, shell, trim, occlusion, decimate and projection times
   uv-pack-bench [--islands N] [--tiles T]
                                     pack N random island rectangles (into T UDIM tiles): time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
@@ -766,6 +766,9 @@ fn bench_groups(polys: u32) -> Result<(), String> {
         front_only: true,
         eye: cam.eye(),
     };
+    if std::env::var("MODELCRAFT_BENCH_ONLY").as_deref() == Ok("decimate") {
+        return bench_decimate(&mesh);
+    }
     let t = Instant::now();
     let (by_angle, count) = groups::patches_by_normal(&mesh, 30.0);
     println!("patches by angle (30 degrees): {count} patches, {:.0} ms", ms(t));
@@ -798,6 +801,24 @@ fn bench_groups(polys: u32) -> Result<(), String> {
     let changed = s.mask_by_occlusion().indices.len();
     let rays = (groups::OCCLUSION_RAY_BUDGET / s.vertex_count().max(1)).clamp(4, 24);
     println!("occlusion mask ({rays} rays per vertex): {changed} vertices changed, {:.0} ms", ms(t));
+    bench_decimate(&mesh)
+}
+
+/// Decimate to a tenth, then project a plain ball of the same count onto a bumpy one.
+fn bench_decimate(mesh: &modelcraft_engine::mesh::PolyMesh) -> Result<(), String> {
+    let t = Instant::now();
+    let low = modelcraft_engine::ops::decimate::decimate(mesh, 0.1).map_err(|e| e.to_string())?;
+    let far = low.positions().iter().map(|p| (p.length() - 1.0).abs()).fold(0.0f32, f32::max);
+    let chord = (0..low.face_count() as u32).map(|f| 1.0 - low.face_center(f).length()).fold(0.0f32, f32::max);
+    println!("decimate to 10 %: {} triangles, {:.0} ms; vertices within {far:.1e} of the sphere, faces within {chord:.1e}", low.face_count(), ms(t));
+    let mut bumpy = mesh.clone();
+    bumpy.map_positions(|_, p| p * (1.0 + 0.03 * (p.x * 40.0).sin() * (p.y * 40.0).cos()));
+    let source = SculptMesh::new(&bumpy, None, None);
+    let mut target = SculptMesh::new(mesh, None, None);
+    let t = Instant::now();
+    let moved = target.project_onto(&source, 0.2).indices.len();
+    let worst = target.positions.iter().map(|p| source.closest_point(*p, 0.05).map(|q| q.distance(*p)).unwrap_or(0.05)).fold(0.0f32, f32::max);
+    println!("project onto a detailed mesh of the same size: {moved} vertices, {:.0} ms; worst distance left {worst:.1e}", ms(t));
     Ok(())
 }
 
