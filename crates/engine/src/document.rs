@@ -908,6 +908,11 @@ impl Document {
             | Command::SetPrimitive { id, .. }
             | Command::SetCageLevels { id, .. }
             | Command::SetDeformer { id, .. }
+            | Command::SetArray { id, .. }
+            | Command::SetSymmetry { id, .. }
+            | Command::SetField { id, .. }
+            | Command::SetCloneModifier { id, .. }
+            | Command::SetCloner { id, .. }
             | Command::AddStep { id, .. }
             | Command::TransferUvs { id, .. }
             | Command::SetStep { id, .. }
