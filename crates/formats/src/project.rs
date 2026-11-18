@@ -7,6 +7,7 @@
 //! | `blobs/<object>-source.bin` | a stored mesh ([`crate::blob`]) |
 //! | `blobs/<object>-<step>.bin` | a sculpt layer |
 //! | `blobs/<object>-<step>-topology.bin` | the triangles of a sculpt layer changed by live detail (a mesh blob) |
+//! | `blobs/<object>-cache.mcpc` | the baked points of a simulation object (a `.mcpc` point cache, see [`crate::pointcache`]) |
 //! | `history/base.modelcraft` | optional: the scene before the oldest kept undo step, itself a project (without history) |
 //! | `history/commands.json` | optional: `{format, version, done, undone}`, the commands of the undo history ([`History`]) |
 //!
@@ -63,6 +64,9 @@ fn layer_key(id: ObjectId, step: u64) -> String {
 fn topology_key(id: ObjectId, step: u64) -> String {
     format!("{}/step/{step}/topology", id.0)
 }
+fn cache_key(id: ObjectId) -> String {
+    format!("{}/cache", id.0)
+}
 
 fn zip_err(e: craft_zip::Error) -> FormatError {
     FormatError::Malformed(e.to_string())
@@ -116,6 +120,13 @@ pub fn to_bytes_with_history<T: Serialize>(scene: &Scene, history: Option<&Histo
     let ids: Vec<ObjectId> = light.objects().iter().map(|o| o.id).collect();
     for id in ids {
         let Ok(o) = light.edit(id) else { continue };
+        if let ObjectKind::Sim { sim } = &o.kind
+            && let Some(cache) = &sim.cache
+        {
+            let entry = format!("blobs/{}-cache.{}", id.0, crate::pointcache::EXTENSION);
+            data.push((entry.clone(), crate::pointcache::PointCache::from_frame_cache(cache).to_bytes()?));
+            blobs.insert(cache_key(id), entry);
+        }
         if let ObjectKind::Mesh { source, steps } = &mut o.kind {
             if let Source::Mesh { mesh } = source {
                 let entry = format!("blobs/{}-source.bin", id.0);
@@ -199,6 +210,13 @@ pub fn from_bytes_with_history<T: for<'de> Deserialize<'de>>(bytes: &[u8], with_
     let ids: Vec<ObjectId> = scene.objects().iter().map(|o| o.id).collect();
     for id in ids {
         let Ok(o) = scene.edit(id) else { continue };
+        if let ObjectKind::Sim { sim } = &mut o.kind
+            && let Some(entry) = env.blobs.get(&cache_key(id))
+        {
+            let b = zip.read(entry, MAX_BLOB_BYTES).map_err(zip_err)?.ok_or_else(|| FormatError::Malformed(format!("{entry} is missing")))?;
+            Arc::make_mut(sim).cache = Some(Arc::new(crate::pointcache::PointCache::from_bytes(&b)?.to_frame_cache()?));
+            continue;
+        }
         let ObjectKind::Mesh { source, steps } = &mut o.kind else { continue };
         if let Source::Mesh { mesh } = source
             && let Some(entry) = env.blobs.get(&source_key(id))
@@ -333,6 +351,8 @@ mod tests {
                                 anchor: Arc::new(vec![Vec3::ONE; n]),
                                 level: 0,
                                 topology: Some(Arc::new(Primitive::Cube { size: Vec3::ONE, segments: 1 }.build().unwrap())),
+                                patches: Arc::new(vec![3, 3, 1, 1, 1, 2]),
+                                hidden: Arc::new(vec![false, true, true, false, false, false]),
                             },
                         },
                     }],
@@ -347,6 +367,34 @@ mod tests {
 
     fn strip_revs(s: &Scene) -> String {
         serde_json::to_value(s).unwrap()["objects"].to_string()
+    }
+
+    #[test]
+    fn a_simulation_cache_is_saved_as_a_point_cache_blob_and_comes_back() {
+        use modelcraft_sim::{FrameCache, SimKind, SimObject};
+        let mut s = sample();
+        let mesh = s.objects().iter().find(|o| o.name == "Box").unwrap().id;
+        let mut cache = FrameCache::new(30.0, 4.0, 1.0, 2);
+        cache.push(&[Vec3::ZERO, Vec3::X], usize::MAX).unwrap();
+        cache.push(&[Vec3::Y, modelcraft_sim::DEAD], usize::MAX).unwrap();
+        let mut sim = SimObject::new(SimKind::Cache);
+        sim.cache = Some(Arc::new(cache.clone()));
+        let id = s.add("Cache", ObjectKind::Sim { sim: Arc::new(sim) }, Some(mesh)).unwrap();
+        let bytes = to_bytes(&s).unwrap();
+        let json = String::from_utf8_lossy(&bytes);
+        assert!(json.contains(&format!("blobs/{}-cache.mcpc", id.0)), "stored as an .mcpc entry");
+        let back = from_bytes(&bytes).unwrap();
+        let ObjectKind::Sim { sim } = &back.get(id).unwrap().kind else { panic!("not a simulation") };
+        let got = sim.cache.as_ref().unwrap();
+        assert_eq!((got.fps, got.start, got.points(), got.frames()), (30.0, 4.0, 2, 2));
+        assert_eq!(got.frame(0), cache.frame(0));
+        assert!(!got.frame(1).unwrap()[1].is_finite(), "a dead point stays dead");
+        // A simulation without a cache stores no blob.
+        let mut empty = s.clone();
+        if let ObjectKind::Sim { sim } = &mut empty.edit(id).unwrap().kind {
+            Arc::make_mut(sim).cache = None;
+        }
+        assert!(!String::from_utf8_lossy(&to_bytes(&empty).unwrap()).contains("-cache.mcpc"));
     }
 
     #[test]

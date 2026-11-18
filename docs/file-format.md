@@ -13,7 +13,8 @@ A ZIP archive (written by craft-zip, saved atomically by craft-atomic):
 | `history/commands.json` | optional: `{ "format": "modelcraft.history", "version": 1, "done": [<Command>…], "undone": [<Command>…] }` |
 
 `scene` is the serde form of `modelcraft_scene::Scene`: `objects` (id, name, parent, transform
-{translation, rotation quaternion xyzw, scale}, visible, material, kind) and `next_id`. Large arrays
+{translation, rotation quaternion xyzw, scale}, visible, material, kind, `locked` and `template`
+when true), `next_id` and `sets` (selection sets `{name, ids}`, left out when there are none). Large arrays
 (stored meshes, sculpt layers) are left empty in the JSON and listed in `blobs` as
 `"<object>/source"` or `"<object>/step/<step id>"` → entry name.
 
@@ -23,6 +24,12 @@ count against the bytes present before allocating; a mesh blob is rebuilt throug
 Schema 2 (this version) added detail levels and shape layers to sculpt layers: `level`,
 `shapes` (name, strength) and `active_shape` in the JSON, and the finer-level displacements, the
 shape offsets and the anchor in the layer blob (version 2). Schema 1 files still open.
+
+A sculpt layer may also carry `patches` and `hidden` in the JSON, one value per face of the mesh
+it shows, both as run lengths: `patches` is `[value, count, value, count, …]`, `hidden` is the
+lengths of alternating runs starting with a shown one (`[3, 2]`: three faces shown, two hidden).
+Both are optional and left out when empty, so the schema number did not change; a reader refuses
+runs that would expand past the element limit.
 
 A newer `schema_version` is refused with a clear message; `0` is invalid. Scenes are repaired on
 load (unique ids, parents exist, no cycles, depth ≤ 64, finite transforms).
@@ -70,6 +77,17 @@ object id, the transform it has without its constraints (the objects themselves 
 pose). On load, weights and solver settings are clamped, duplicate ids and constraints on missing
 objects are dropped, and counts are capped (4096 constraints, 16 sources each). Builds from before
 constraints ignore the block.
+
+## Simulation caches in a project
+
+A simulation object's baked points are not in `project.json`. Each one is stored as
+`blobs/<object id>-cache.mcpc`, a complete point cache (below) listed in `blobs` under
+`<object id>/cache`; the object's JSON holds its kind, timing (`start_frame`, `end_frame`, `fps`,
+`substeps`), `seed`, `max_cache_mib` and `baked_with` (a hash of the settings the cache was baked
+with, so a changed setting marks the cache stale). A point that does not exist at a frame (an
+unborn or dead particle) is stored as NaN. On load the counts are checked against the bytes
+present, caches above 100,000 frames, 4,000,000 points per frame or 2 GiB are refused, and timing
+is repaired into its limits. Readers that do not know the `sim` object type cannot open the file.
 
 ## Point cache (`.mcpc`)
 

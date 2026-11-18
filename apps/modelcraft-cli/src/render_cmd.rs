@@ -22,6 +22,8 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
       --device auto|cpu|gpu         auto uses a hardware GPU when there is one
       --yaw DEG --pitch DEG --fov DEG   camera around the framed scene; --ortho for no perspective
       --exposure EV                 brightness in stops (default 0)
+      --guiding --splitting         learn where light comes from and sample that way; end or
+                                    multiply paths by their expected contribution (CPU only)
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
@@ -53,6 +55,9 @@ pub struct RenderArgs {
     pub env: Option<String>,
     pub env_rotation: f32,
     pub ground: bool,
+    /// Path guiding and adaptive roulette/splitting (CPU only).
+    pub guiding: bool,
+    pub splitting: bool,
 }
 
 impl Default for RenderArgs {
@@ -74,6 +79,8 @@ impl Default for RenderArgs {
             env: None,
             env_rotation: 0.0,
             ground: true,
+            guiding: false,
+            splitting: false,
         }
     }
 }
@@ -132,6 +139,8 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         ortho: a.iter().any(|x| x == "--ortho"),
         sky,
         ground: !a.iter().any(|x| x == "--no-ground"),
+        guiding: a.iter().any(|x| x == "--guiding"),
+        splitting: a.iter().any(|x| x == "--splitting"),
     })
 }
 
@@ -181,7 +190,7 @@ pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
     let settings = RenderSettings {
         width: args.width,
         height: args.height,
-        integrator: IntegratorSettings { max_depth: args.depth, ..IntegratorSettings::default() },
+        integrator: IntegratorSettings { max_depth: args.depth, guiding: args.guiding, adaptive_splitting: args.splitting, ..IntegratorSettings::default() },
         seed: args.seed,
         ..RenderSettings::default()
     };

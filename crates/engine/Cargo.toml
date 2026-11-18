@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 modelcraft-anim = { workspace = true }
+modelcraft-sim = { workspace = true }
 modelcraft-mesh = { workspace = true }
 modelcraft-ops = { workspace = true }
 modelcraft-field = { workspace = true }
@@ -30,5 +31,6 @@ craft-control = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+craft-gltf-anim = { workspace = true }
 serde_json = { workspace = true }
 proptest = { workspace = true }

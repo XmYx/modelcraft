@@ -1,0 +1,1 @@
+- Simulation caches: a `.mcpc` point cache can drive a mesh and plays back through the timeline; caches are saved in the project. The solvers (rigid bodies, cloth, particles) follow.

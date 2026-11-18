@@ -157,7 +157,7 @@ impl Evaluator {
             return Evaluated::default();
         }
         // A skinned mesh also depends on where its joints are.
-        let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id);
+        let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id) ^ crate::sim::sim_key(scene, id);
         if let Some((k, e)) = self.finals.get(&id)
             && *k == key
         {
@@ -189,6 +189,11 @@ impl Evaluator {
                 }
                 let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
                 if let Some(m) = skinned {
+                    e.mesh = Arc::new(m);
+                }
+                e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
+                let (simulated, problems) = crate::sim::apply_sims(scene, id, &e.mesh);
+                if let Some(m) = simulated {
                     e.mesh = Arc::new(m);
                 }
                 e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
@@ -258,7 +263,8 @@ impl Evaluator {
             | ObjectKind::Field { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
-            | ObjectKind::PointDeformer { .. } => Evaluated::default(),
+            | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Sim { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result
@@ -305,6 +311,7 @@ fn same_step(a: &Step, b: &Step) -> bool {
                 && x.topology.as_ref().map(Arc::as_ptr) == y.topology.as_ref().map(Arc::as_ptr)
                 && Arc::ptr_eq(&x.positions, &y.positions)
                 && Arc::ptr_eq(&x.mask, &y.mask)
+                && Arc::ptr_eq(&x.patches, &y.patches)
         }
         _ => a == b,
     }
@@ -411,8 +418,12 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
                 return Err(OpError::Invalid(format!("the sculpt layer has {} points but the mesh now has {nv}", layer.positions.len())));
             }
             out.set_positions(&layer.positions)?;
+            if layer.patches.len() == out.face_count() {
+                out.set_patches(&layer.patches)?;
+            }
             Ok(out)
         }
         StepOp::EvenRemesh { cell } => modelcraft_ops::remesh::even_remesh(m, *cell),
+        StepOp::TrimPlane { point, normal, cap } => modelcraft_ops::trim::trim_plane(m, *point, *normal, *cap),
     }
 }

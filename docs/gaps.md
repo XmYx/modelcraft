@@ -164,7 +164,7 @@ The biggest single gap: two whole areas (weights 8 and 6) and the materials area
 
 ## Sculpting
 
-Of **S4**, the mask tools are in (hollows, ridges, blur, sharpen, grow, shrink); occlusion masks, lasso and clip tools, hiding by patch and shell extraction are not. Of **S9**, sculpting was measured at 12.6 M triangles (dabs under 10 ms in the engine) and stroke ends refit only what moved; 20 M, the app window at that size, session start (6–10 s at 12.6 M) and threads are open: a thread pool for dabs was measured slower on a busy machine and not kept. Brush depth (**S3**) is mostly in: ten more brushes, hardness, five stroke modes, eight built-in stamp pictures and presets. Left of it: rotate, elastic-move and scrape brushes, curve strokes, importing your own stamp images, radial symmetry and the pen-pressure check. Live detail and even remesh (**S2**) are in, live detail partly: it only splits (collapsing short edges and flipping edges are missing, so a region never gets coarser and slivers appear at the rim of a refined area), it works on the base detail level without shape layers, and every split re-uploads the whole mesh to the GPU. Even remesh needs a closed mesh and drops UVs and patches. Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
+**S4** is in except for its edges: mask tools (hollows, ridges, occlusion, blur, sharpen, grow, shrink), patches made while sculpting (by angle, UV island, part, from the mask), hide, show, isolate and invert, rectangle and lasso tools for masking and hiding with a by-numbers dialog, clip and trim by a plane, and shells from the mask. Left of it: a slice that keeps both halves, planes at a free angle and drawn clip outlines, a smoothed shell rim, and cheap undo of a visibility change (it rebuilds the sculpt session, about a second at 2 M triangles). Patches made while sculpting live on the sculpt layer; the modeling stream's patch tools (**M14**) work on history steps, and the two do not yet share one patch list in the UI. Of **S9**, sculpting was measured at 12.6 M triangles (dabs under 10 ms in the engine) and stroke ends refit only what moved; 20 M, the app window at that size, session start (6–10 s at 12.6 M) and threads are open: a thread pool for dabs was measured slower on a busy machine and not kept. Brush depth (**S3**) is mostly in: ten more brushes, hardness, five stroke modes, eight built-in stamp pictures and presets. Left of it: rotate, elastic-move and scrape brushes, curve strokes, importing your own stamp images, radial symmetry and the pen-pressure check. Live detail and even remesh (**S2**) are in, live detail partly: it only splits (collapsing short edges and flipping edges are missing, so a region never gets coarser and slivers appear at the rim of a refined area), it works on the base detail level without shape layers, and every split re-uploads the whole mesh to the GPU. Even remesh needs a closed mesh and drops UVs and patches. Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -203,8 +203,16 @@ Limits of what exists:
   separate channel. Skin weights are painted by a command dab, not by a viewport brush; heat
   weights skip the paper's visibility test, so two limbs that touch can share weights; weights
   cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
-  `Scene::get` is a linear search, which shows with thousands of objects. glTF export writes
-  the posed mesh, not the skin or the animation.
+  `Scene::get` is a linear search, which shows with thousands of objects. A `.glb` export of a scene with
+  skins, blend shapes, curves or constraints writes them (`craft-gltf-anim`, see
+  architecture.md): one clip sampled every frame of the playback range from the solved scene,
+  the four strongest joints per vertex, shapes at full weight. Not kept, and said in the export's
+  warnings: lattices and clusters, in-between shapes, a second skin on one mesh. Import reads the
+  first clip (the file's other clips are listed in the warnings; choosing one needs a `clip`
+  option on the import command), bakes rotations and spline channels to one key per frame, and
+  ignores cameras, lights, textures and extensions. The rigged writer keeps base colour,
+  metallic and roughness only, no textures. Axis and unit conversion on a rigged export falls
+  back to the static writer.
 - Constraints and IK: no joint limits, stretch or spline IK; constraints act on whole channels
   (no per-axis skipping); FABRIK cannot fold a chain that lies exactly on the line to its goal.
   Dependencies are tracked per object and channel (translate, rotate, scale, or one other
@@ -269,7 +277,7 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 ## Scripting and node graph
 
-Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1's language (Rhai, see [scripting.md](scripting.md)), object-model API and headless API are in; the script editor, event callbacks and user tools remain. The node view (**G3**) shows the dependency graph the evaluator already has.
+Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1 is in except recorded macros: the language (Rhai, see [scripting.md](scripting.md)), the object-model and headless APIs, the Scripts window, callbacks and scripted tools. The node view (**G3**) shows the dependency graph the evaluator already has.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -281,7 +289,7 @@ Every action is already a serializable command, so **G1** binds a language to an
 
 ## Simulation
 
-Not started. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
+The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs a solver on fixed substeps from a seed, caches every frame within bounds and plays it back through the timeline. The solvers come next, one slice each: rigid bodies, cloth, particles, then the panel and soft bodies. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -305,7 +313,7 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
+Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4**: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes are in; tags, layers, instances, user attributes, attribute presets and pivots remain.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

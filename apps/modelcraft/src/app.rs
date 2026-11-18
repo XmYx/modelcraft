@@ -242,6 +242,7 @@ pub struct ModelApp {
     pub unit: crate::prefs_ui::Unit,
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
+    pub objects: crate::object_manager::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -249,6 +250,8 @@ pub struct ModelApp {
     pub stroke: Option<crate::viewport::StrokeInput>,
     pub show_wire: bool,
     pub show_patches: bool,
+    /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
+    pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
     pub shot: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
@@ -359,6 +362,7 @@ impl ModelApp {
             show_axes: true,
             unit: Default::default(),
             language: None,
+            objects: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -366,6 +370,7 @@ impl ModelApp {
             stroke: None,
             show_wire: true,
             show_patches: false,
+            sculpt_groups: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
             shot: Default::default(),
@@ -524,6 +529,7 @@ impl ModelApp {
                 self.doc.keep_history = keep;
                 self.selection.clear();
                 self.components.clear();
+                crate::script_ui::scene_loaded(self);
                 self.start_autosave();
                 self.status = tl!("New scene");
             }
@@ -730,6 +736,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
@@ -741,8 +748,11 @@ impl ModelApp {
                     };
                     self.add_step(op);
                 } else if !self.selection.is_empty() {
-                    let ids = std::mem::take(&mut self.selection);
-                    self.run(Command::Delete { ids });
+                    // A refused delete (a locked object) keeps the selection.
+                    let ids = self.selection.clone();
+                    if self.run(Command::Delete { ids }) {
+                        self.selection.clear();
+                    }
                 }
             }
             Duplicate => {
@@ -912,6 +922,7 @@ impl ModelApp {
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
+            Objects(op) => crate::object_manager::run(self, op),
         }
     }
 
@@ -1064,6 +1075,7 @@ impl ModelApp {
                     self.doc = doc;
                     self.selection.clear();
                     self.components.clear();
+                    crate::script_ui::scene_loaded(self);
                     self.status = match note {
                         Some(n) => crate::tlf!("Opened {file}. {note}", file = path.display(), note = history_note(&n)),
                         None => crate::tlf!("Opened {file}", file = path.display()),
@@ -1077,6 +1089,7 @@ impl ModelApp {
             }
         } else {
             self.run(Command::Import { path: path.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
+            crate::script_ui::scene_loaded(self);
             self.frame_selection();
         }
     }
@@ -1270,6 +1283,7 @@ impl ModelApp {
         crate::agents::tick(self);
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
+        crate::script_ui::tick(self);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
@@ -1320,6 +1334,9 @@ impl ModelApp {
             return;
         }
         if crate::uv_ui::keys(self, ctx) {
+            return;
+        }
+        if crate::sculpt_groups_ui::escape(self, ctx) {
             return;
         }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {

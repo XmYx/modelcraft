@@ -25,6 +25,8 @@ mod eval;
 pub mod pick;
 pub mod point_deform;
 pub mod rig;
+mod rle;
+pub mod sim;
 
 use std::sync::Arc;
 
@@ -34,6 +36,7 @@ pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
+pub use modelcraft_sim::{FrameCache, SimKind, SimObject};
 pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
@@ -191,6 +194,18 @@ pub struct SculptLayer {
     /// the step's input (triangles; patches kept, UVs not).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topology: Option<Arc<PolyMesh>>,
+    /// A patch id for every face of the mesh this layer shows (patches made while sculpting).
+    /// Empty: the faces keep the patches they come with.
+    #[serde(default, skip_serializing_if = "arc_vec_is_empty", with = "rle::patches")]
+    pub patches: Arc<Vec<u32>>,
+    /// Hidden faces of the mesh this layer shows (a view state: nothing is removed). Empty:
+    /// everything shows.
+    #[serde(default, skip_serializing_if = "arc_vec_is_empty", with = "rle::hidden")]
+    pub hidden: Arc<Vec<bool>>,
+}
+
+fn arc_vec_is_empty<T>(v: &Arc<Vec<T>>) -> bool {
+    v.is_empty()
 }
 
 fn is_zero(v: &u8) -> bool {
@@ -220,7 +235,7 @@ impl SculptLayer {
             + self.anchor.len()
             + self.finer.iter().map(|f| f.len()).sum::<usize>()
             + self.shapes.iter().map(|s| s.delta.len()).sum::<usize>();
-        v3 * 12 + self.mask.len() * 4 + self.topology.as_ref().map(|t| t.heap_bytes()).unwrap_or(0)
+        v3 * 12 + self.mask.len() * 4 + self.patches.len() * 4 + self.hidden.len() + self.topology.as_ref().map(|t| t.heap_bytes()).unwrap_or(0)
     }
 }
 
@@ -305,6 +320,12 @@ pub enum StepOp {
     /// and patches).
     EvenRemesh {
         cell: f32,
+    },
+    /// Cut away everything on the side of a plane its normal points to; `cap` closes the cut.
+    TrimPlane {
+        point: Vec3,
+        normal: Vec3,
+        cap: bool,
     },
     /// Flatten the surface into UVs: cut along `seams` (and along every edge sharper than
     /// `angle` degrees), solve a least-squares conformal map per island and lay the islands out
@@ -421,6 +442,7 @@ impl StepOp {
             StepOp::CleanUp { .. } => "Clean up",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
+            StepOp::TrimPlane { .. } => "Trim by plane",
             StepOp::Unwrap { .. } => "Unwrap UVs",
             StepOp::PackUvs { .. } => "Pack UV islands",
             StepOp::ProjectUvs { .. } => "Project UVs",
@@ -501,6 +523,11 @@ pub enum ObjectKind {
         #[serde(default)]
         target: Option<ObjectId>,
     },
+    /// A simulation driving its parent mesh: settings, and the cache the last bake produced
+    /// ([`sim`]).
+    Sim {
+        sim: Arc<SimObject>,
+    },
 }
 
 impl ObjectKind {
@@ -515,6 +542,7 @@ impl ObjectKind {
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::Sim { .. } => "Simulation",
         }
     }
 }
@@ -532,6 +560,12 @@ pub struct Object {
     #[serde(default)]
     pub material: Material,
     pub kind: ObjectKind,
+    /// Protected: edits to it are refused until it is unlocked.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+    /// Shown for reference: drawn, never picked in the viewport.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub template: bool,
     /// Bumped on every change; the evaluator's cache key. Not saved.
     #[serde(skip)]
     pub rev: u64,
@@ -548,6 +582,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::Sim { sim } => sim.heap_bytes(),
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
@@ -576,11 +611,28 @@ pub struct Scene {
     /// Boxed: a scene is moved around by value (history entries, snapshots).
     #[serde(default, skip_serializing_if = "no_constraints")]
     pub constraints: Box<constraint::Constraints>,
+    /// Named selections.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sets: Vec<SelectionSet>,
 }
 
 #[allow(clippy::borrowed_box)]
 fn no_constraints(c: &Box<constraint::Constraints>) -> bool {
     c.is_empty()
+}
+
+/// A named list of objects, to select them together again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SelectionSet {
+    pub name: String,
+    pub ids: Vec<ObjectId>,
+}
+
+/// Most selection sets in a scene.
+pub const MAX_SETS: usize = 1000;
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Revisions come from one process-wide counter, so a scene restored from a snapshot (undo, a
@@ -632,7 +684,13 @@ impl Scene {
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        sim::repair(&mut self);
         point_deform::repair(&mut self);
+        self.sets.truncate(MAX_SETS);
+        for s in &mut self.sets {
+            s.ids.retain(|i| ids.contains(i));
+            s.name = s.name.chars().take(256).collect();
+        }
         Ok(self)
     }
 
@@ -684,6 +742,8 @@ impl Scene {
             visible: true,
             material: Material::default(),
             kind,
+            locked: false,
+            template: false,
             rev: next_rev(),
         });
         Ok(id)
@@ -719,6 +779,9 @@ impl Scene {
         for (_, o) in &out {
             self.anim.remove_object(o.id);
             self.constraints.remove_object(o.id);
+        }
+        for s in &mut self.sets {
+            s.ids.retain(|i| !doomed.contains(i));
         }
         out
     }

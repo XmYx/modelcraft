@@ -5,6 +5,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | Layer | Crate | What it holds | Depends on |
 |---|---|---|---|
 | L0 | `modelcraft-anim` | Keyed curves (stepped, linear, Bézier with automatic clamped tangents and weighted handles), extrapolation, baking, the scene clock and playback | glam |
+| L0 | `modelcraft-sim` | The simulation kernel: a fixed-step solver loop with substeps (`Solver`, `bake`), the bounded `FrameCache` that plays back by scene frame and converts to a `.mcpc` point cache, seeded `Rng`, cancel and progress hooks, the simulation object's settings | glam |
 | L0 | `modelcraft-mesh` | `PolyMesh`: validated half-edge mesh, per-corner UVs, patches, polygon-list (de)serialisation | glam |
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
 | L1 | `modelcraft-uv` | Seams, islands, automatic cuts into discs, LSCM unwrap with pins (sparse Cholesky, nested dissection; conjugate gradients as fallback), island layout, distortion measures | mesh |
@@ -15,7 +16,8 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | L3 | `modelcraft-formats` | `.modelcraft` project (craft-zip + blobs), crash journal, glTF/GLB/OBJ/STL/PLY through craft-mesh, UV layout pictures (SVG, PNG) | scene, craft-mesh, craft-zip, craft-atomic |
 | L4 | `modelcraft-engine` | `Document`, `Command`, undo (memory-bounded), journaling, sculpt session, export | all above |
 | L1 | `craft-render-bvh` | Binned-SAH BVH (parallel build), flat GPU-ready nodes, closest-hit and any-hit triangle queries | glam, rayon |
-| L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator, the progressive film | craft-render-bvh |
+| L1 | `craft-render-guide` | Learned sampling: a hash grid over space holding a radiance cache and a directional distribution of incoming light per cell, recorded lock-free and deterministically | glam, rayon |
+| L2 | `craft-render-core` | The path tracer's CPU reference: scene description, cameras, sampling, the surface model, lights, the integrator (plain, and guided with adaptive roulette and splitting), the progressive film | craft-render-bvh, craft-render-guide |
 | L3 | `craft-render-gpu` | The same path tracer as a wgpu compute pipeline; capabilities from the created device | craft-render-core, wgpu |
 | L4 | `modelcraft-render` | Camera, CPU vertex data, wgpu pipelines (MSAA offscreen target, mesh/line/overlay passes, readback); `trace`: the scene graph exported to the path tracer | mesh, scene, craft-render-*, wgpu |
 | L5 | `modelcraft-script` | Sandboxed Rhai engine over the command registry: scene and mesh API, undo groups, permissions and limits (see [scripting.md](scripting.md)) | engine, rhai |
@@ -68,6 +70,15 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   solve starts from those, so weights and the IK/FK blend never accumulate and switching a
   constraint off restores the object. The solvers (two-bone, FABRIK, CCD) and the formula
   language are in `modelcraft-anim`.
+- **Simulation**: a simulation is an object (`ObjectKind::Sim`) under the mesh it drives, holding its
+  timing, seed and the `FrameCache` its last bake produced. The evaluator shows the cached points
+  of the scene's current frame after the mesh's history, deformers and skin
+  (`modelcraft_scene::sim`), and the mesh's cache key then also hashes the current frame, so
+  scrubbing or playing never runs a solver: it only samples the cache (linear between frames, the
+  first or last frame held outside it). Baking runs a `Solver` over the frame range on fixed steps
+  from a seed, so a run is repeatable bit for bit; frame count, substeps, steps, points and cache
+  bytes are all capped, and a bake can be cancelled between frames. The cache is saved in the
+  project as a `.mcpc` blob, not in the JSON.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.
@@ -115,6 +126,14 @@ app-local snapshot autosave; the two are candidates for one shared recovery crat
 
 Gaps found, to raise in craft-libs rather than copy:
 - `craft-mesh` ignores glTF `extras` and writes GLB only (no `.gltf` JSON); it cannot carry quads.
+- `craft-mesh` has no skins, morph targets or animations: its glTF reader drops them and its
+  writer cannot emit them. Until it can, `crates/craft-gltf-anim` carries them: a plain document
+  model (nodes, one triangle list per mesh with up to four joints per vertex and position morph
+  targets, skins, clips with translation / rotation / scale / weights channels, PBR factors), a
+  GLB writer and a GLB / `.gltf` reader with limits. It depends on serde_json and thiserror only
+  (no app type, no maths crate: plain arrays in glTF's conventions), follows craft-mesh's error
+  and `Limits` shape, and is meant to move to craft-libs, as a module of craft-mesh or beside
+  it. `modelcraft-formats::gltf_rig` maps it to and from the scene. Not opened upstream yet.
 - No shared GPU crate on main yet (RFC-0022 / craft-libs #663): the viewport uses wgpu directly
   behind `modelcraft-render`, with a CPU fallback, ready to move to `craft-gpu`. `craft-render-gpu`
   follows the RFC's rules too (capabilities from the created device, no adapter is a defined

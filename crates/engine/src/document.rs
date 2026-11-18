@@ -319,6 +319,10 @@ impl Document {
             layer.mask = mask;
             if let Some(t) = topology {
                 layer.topology = t;
+                // The faces changed with the triangles: patches kept on the layer follow.
+                if !layer.patches.is_empty() {
+                    layer.patches = Arc::new(s.mesh.face_patches());
+                }
             }
         }
     }
@@ -344,7 +348,13 @@ impl Document {
         if layer.positions.len() != input.vertex_count() {
             return invalid("the sculpt layer no longer matches the mesh (an earlier step changed the vertex count)");
         }
-        let mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
+        let mut mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
+        if layer.patches.len() == mesh.face_count() {
+            mesh.set_face_patches(&layer.patches);
+        }
+        if layer.hidden.len() == mesh.face_count() {
+            mesh.set_face_hidden(&layer.hidden);
+        }
         self.sculpt = Some(SculptSession { id, step_id, mesh, unsynced: false, had_topology: layer.topology.is_some(), topo_synced: 0 });
         Ok(())
     }
@@ -375,6 +385,8 @@ impl Document {
             Some("live detail works on the base detail level only, with no finer levels kept")
         } else if !l.shapes.is_empty() {
             Some("merge or remove the shape layers before using live detail")
+        } else if !l.hidden.is_empty() {
+            Some("show everything before using live detail")
         } else {
             None
         }
@@ -460,6 +472,9 @@ impl Document {
                 if !matches!(self.scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
                     return invalid("only mesh objects can be sculpted");
                 }
+                if let Some(o) = self.scene.get(id).filter(|o| o.locked) {
+                    return invalid(format!("{} is locked; unlock it first", o.name));
+                }
                 if needs_layer {
                     let input = self.eval.steps_output(&self.scene, id, usize::MAX).mesh;
                     let layer = SculptLayer::new(input.positions().to_vec());
@@ -508,12 +523,62 @@ impl Document {
                     MaskOp::Shrink => s.mesh.mask_shrink(),
                     MaskOp::Hollows => s.mesh.mask_by_bend(false),
                     MaskOp::Ridges => s.mesh.mask_by_bend(true),
+                    MaskOp::Occlusion => s.mesh.mask_by_occlusion(),
                 };
                 s.unsynced = true;
                 if !change.is_empty() {
                     self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
                 }
                 Outcome::default()
+            }
+            Command::SculptRegion { id, region, action: action @ (crate::groups::RegionAction::Mask | crate::groups::RegionAction::Unmask) } => {
+                self.ensure_session(*id)?;
+                if !region.is_valid() {
+                    return invalid("the region needs 3 to 4096 corners with finite numbers");
+                }
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let change = s.mesh.mask_region(region, if *action == crate::groups::RegionAction::Mask { 1.0 } else { 0.0 });
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptClip { id, point, normal } => {
+                self.ensure_session(*id)?;
+                if !point.is_finite() || !normal.is_finite() || normal.length_squared() == 0.0 {
+                    return invalid("the plane needs a finite point and a normal with a length");
+                }
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let change = s.mesh.clip_plane(*point, *normal);
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptGroups { id, .. } | Command::SculptVisibility { id, .. } | Command::SculptRegion { id, .. } | Command::SculptExtract { id, .. } => {
+                let id = *id;
+                self.ensure_session(id)?;
+                if self.sculpt.as_ref().is_some_and(|s| s.mesh.in_stroke()) {
+                    return invalid("finish the stroke first");
+                }
+                let c = cmd.clone();
+                let out = self.scene_change(&cmd, move |doc| match &c {
+                    Command::SculptGroups { op, .. } => doc.apply_groups(id, *op),
+                    Command::SculptVisibility { op, .. } => doc.apply_visibility(id, *op),
+                    Command::SculptRegion { region, action, .. } => doc.apply_region_view(id, region, *action == crate::groups::RegionAction::Isolate),
+                    Command::SculptExtract { thickness, .. } => doc.apply_extract(id, *thickness),
+                    _ => Ok(Outcome::default()),
+                })?;
+                self.sync_session_view(id)?;
+                out
             }
             Command::SculptDetail { id, .. } | Command::SculptShape { id, .. } => {
                 let id = *id;
@@ -666,6 +731,38 @@ impl Document {
     }
 
     fn apply_scene(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
+        self.check_unlocked(cmd)?;
+        self.apply_scene_unchecked(cmd)
+    }
+
+    /// Refuse an edit of a locked object.
+    fn check_unlocked(&self, cmd: &Command) -> Result<(), EngineError> {
+        let ids: Vec<ObjectId> = match cmd {
+            Command::Delete { ids } => ids.clone(),
+            Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
+            Command::Rename { id, .. }
+            | Command::Reparent { id, .. }
+            | Command::SetTransform { id, .. }
+            | Command::SetMaterial { id, .. }
+            | Command::SetPrimitive { id, .. }
+            | Command::SetCageLevels { id, .. }
+            | Command::SetDeformer { id, .. }
+            | Command::AddStep { id, .. }
+            | Command::SetStep { id, .. }
+            | Command::EnableStep { id, .. }
+            | Command::RemoveStep { id, .. }
+            | Command::Collapse { id } => vec![*id],
+            _ => return Ok(()),
+        };
+        for id in ids {
+            if let Some(o) = self.scene.get(id).filter(|o| o.locked) {
+                return invalid(format!("{} is locked; unlock it first", o.name));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_scene_unchecked(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
         let mut out = Outcome::default();
         match cmd {
             Command::AddPrimitive { kind, name, parent } => {
@@ -846,9 +943,19 @@ impl Document {
                     let q = dir.join(file);
                     (std::fs::metadata(&q).ok()?.len() <= MAX_IMPORT_BYTES).then(|| std::fs::read(q).ok()).flatten()
                 };
+                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Import").to_string();
+                // A glTF with skins, morph targets or clips keeps them: joints, skins, blend
+                // shapes and curves (glTF is Y up and in metres by its specification).
+                if matches!(kind, Kind::Glb | Kind::Gltf) && modelcraft_formats::gltf_rig::file_has_rig(&bytes) {
+                    let root = self.scene.add(self.scene.unique_name(&stem), ObjectKind::Group, None)?;
+                    let (created, warnings) = modelcraft_formats::gltf_rig::import_into(&mut self.scene, &bytes, &mut resolve, Some(root), None)?;
+                    out.created.push(root);
+                    out.created.extend(created);
+                    out.warnings = warnings;
+                    return Ok(out);
+                }
                 let (items, warnings) = exchange::import_with(&bytes, kind, &mut resolve, exchange::Convert { up: *up, scale: *scale })?;
                 out.warnings = warnings;
-                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Import").to_string();
                 let root = if items.len() > 1 { Some(self.scene.add(self.scene.unique_name(&stem), ObjectKind::Group, None)?) } else { None };
                 out.created.extend(root);
                 let mut ids: Vec<ObjectId> = Vec::with_capacity(items.len());
@@ -898,6 +1005,38 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
+            Command::SetLocked { ids, locked } => {
+                for id in ids {
+                    self.scene.edit(*id)?.locked = *locked;
+                }
+            }
+            Command::SetTemplate { ids, template } => {
+                for id in ids {
+                    self.scene.edit(*id)?.template = *template;
+                }
+            }
+            Command::AddSelectionSet { name, ids } => {
+                let name: String = name.trim().chars().take(256).collect();
+                if name.is_empty() {
+                    return invalid("a selection set needs a name");
+                }
+                if self.scene.sets.len() >= modelcraft_scene::MAX_SETS {
+                    return invalid("too many selection sets");
+                }
+                let mut ids: Vec<ObjectId> = ids.iter().copied().filter(|i| self.scene.get(*i).is_some()).collect();
+                ids.dedup();
+                if ids.is_empty() {
+                    return invalid("select objects first");
+                }
+                self.scene.sets.push(modelcraft_scene::SelectionSet { name, ids });
+            }
+            Command::RemoveSelectionSet { index } => {
+                if *index >= self.scene.sets.len() {
+                    return invalid(format!("no selection set {index}"));
+                }
+                self.scene.sets.remove(*index);
+            }
             Command::Undo
             | Command::Redo
             | Command::BeginSculpt { .. }
@@ -905,6 +1044,11 @@ impl Document {
             | Command::SculptStroke { .. }
             | Command::SculptMask { .. }
             | Command::SculptDetail { .. }
+            | Command::SculptGroups { .. }
+            | Command::SculptVisibility { .. }
+            | Command::SculptRegion { .. }
+            | Command::SculptClip { .. }
+            | Command::SculptExtract { .. }
             | Command::SculptShape { .. } => {
                 return invalid("not a scene command");
             }
@@ -974,7 +1118,7 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } | ObjectKind::Sim { .. })
                 || !self.scene.visible(id)
             {
                 continue;
@@ -1016,9 +1160,23 @@ impl Document {
 
     /// Export into another up axis or unit (`convert.scale`: metres per file unit).
     pub fn export_with(&mut self, path: &Path, convert: exchange::Convert) -> Result<(), EngineError> {
+        self.export_report(path, convert).map(|_| ())
+    }
+
+    /// [`Document::export_with`], returning what the format could not keep. A `.glb` of a scene
+    /// with skins, blend shapes, curves or constraints is written with them (joints, weights,
+    /// morph targets and one clip of the playback range) instead of as the posed mesh.
+    pub fn export_report(&mut self, path: &Path, convert: exchange::Convert) -> Result<Vec<String>, EngineError> {
         let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl or .fbx".into()))?;
+        if kind == Kind::Glb && convert == exchange::Convert::default() && modelcraft_formats::gltf_rig::scene_has_rig(&self.scene) {
+            self.sync_sculpt();
+            let (bytes, warnings) = modelcraft_formats::gltf_rig::export_glb(&self.scene)?;
+            craft_atomic_write(path, &bytes)?;
+            return Ok(warnings);
+        }
         let bytes = exchange::export_with(&self.export_items(), kind, convert)?;
-        craft_atomic_write(path, &bytes)
+        craft_atomic_write(path, &bytes)?;
+        Ok(Vec::new())
     }
 
     /// Bake the vertices of one object over a run of frames: its final mesh (history, deformers,

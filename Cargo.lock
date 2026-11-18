@@ -872,6 +872,15 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
 
 [[package]]
+name = "craft-gltf-anim"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-hdr"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=0649a07aa11834fa5bd7052c8b97a861db532a22#0649a07aa11834fa5bd7052c8b97a861db532a22"
@@ -1018,6 +1027,7 @@ name = "craft-render-core"
 version = "0.1.0"
 dependencies = [
  "craft-render-bvh",
+ "craft-render-guide",
  "craft-texture",
  "glam",
  "proptest",
@@ -1036,6 +1046,15 @@ dependencies = [
  "pollster 0.4.0",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "craft-render-guide"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "proptest",
+ "rayon",
 ]
 
 [[package]]
@@ -2594,6 +2613,7 @@ dependencies = [
  "chrono",
  "craft-atomic",
  "craft-control",
+ "craft-gltf-anim",
  "glam",
  "modelcraft-anim",
  "modelcraft-clone",
@@ -2603,6 +2623,7 @@ dependencies = [
  "modelcraft-ops",
  "modelcraft-scene",
  "modelcraft-sculpt",
+ "modelcraft-sim",
  "modelcraft-uv",
  "modelcraft-uvpack",
  "proptest",
@@ -2627,13 +2648,16 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "craft-atomic",
+ "craft-gltf-anim",
  "craft-image-codecs",
  "craft-mesh",
  "craft-zip",
  "glam",
+ "modelcraft-anim",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-scene",
+ "modelcraft-sim",
  "proptest",
  "serde",
  "serde_json",
@@ -2705,6 +2729,7 @@ dependencies = [
  "modelcraft-field",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-sim",
  "modelcraft-uv",
  "modelcraft-uvpack",
  "proptest",
@@ -2735,6 +2760,17 @@ dependencies = [
  "modelcraft-ops",
  "proptest",
  "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "modelcraft-sim"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "proptest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

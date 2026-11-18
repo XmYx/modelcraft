@@ -73,11 +73,11 @@ fn to_screen(cam: &Camera, rect: Rect, p: Vec3) -> Option<Pos2> {
     Some(pos2(rect.left() + (n.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - n.y * 0.5) * rect.height()))
 }
 
-fn ndc(rect: Rect, p: Pos2) -> GVec2 {
+pub(crate) fn ndc(rect: Rect, p: Pos2) -> GVec2 {
     GVec2::new((p.x - rect.left()) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.top()) / rect.height() * 2.0)
 }
 
-fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
+pub(crate) fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
     let (origin, dir) = cam.ray(ndc(rect, p), rect.aspect_ratio());
     Ray { origin, dir }
 }
@@ -210,7 +210,12 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
     match app.workspace {
-        Workspace::Sculpt => sculpt_input(app, ui, &resp, i, rect),
+        Workspace::Sculpt => {
+            // The rectangle and lasso tools take the drag instead of the brush.
+            if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
+                sculpt_input(app, ui, &resp, i, rect);
+            }
+        }
         _ => model_input(app, ui, &resp, i, rect),
     }
     render(app, ui, i, rect);
@@ -290,7 +295,7 @@ fn navigate(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     }
 }
 
-fn is_nav(app: &ModelApp, ui: &egui::Ui) -> bool {
+pub(crate) fn is_nav(app: &ModelApp, ui: &egui::Ui) -> bool {
     ui.input(|i| match app.nav {
         NavPreset::AltMouse => i.modifiers.alt,
         _ => false,
@@ -545,6 +550,9 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
     }
     let mut best: Option<(f32, ObjectId)> = None;
     for id in drawables(&app.doc.scene) {
+        if app.doc.scene.get(id).is_some_and(|o| o.template) {
+            continue;
+        }
         let w = app.doc.scene.world_matrix(id);
         let r = ray.transformed(w.inverse());
         let dist = match &app.doc.sculpt {
@@ -608,6 +616,9 @@ fn box_select(app: &mut ModelApp, i: usize, rect: Rect, sel: Rect, add: bool) {
     }
     if app.mode == SelectMode::Object {
         for id in drawables(&app.doc.scene) {
+            if app.doc.scene.get(id).is_some_and(|o| o.template) {
+                continue;
+            }
             let e = app.doc.eval.evaluate(&app.doc.scene, id);
             let (lo, hi) = match &e.instances {
                 // A clone generator is as wide as its clones; with none there is nothing to select.
@@ -976,7 +987,9 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     if app.workspace == Workspace::Model {
         gizmo(app, &painter, i, rect);
     }
+    crate::sculpt_groups_ui::overlay(app, &painter, i);
     if app.workspace == Workspace::Sculpt
+        && app.sculpt_groups.tool == crate::sculpt_groups_ui::RegionTool::Brush
         && let Some(at) = resp.hover_pos()
     {
         let col = if app.brush.kind == BrushKind::Mask { Color32::from_rgb(110, 160, 255) } else { theme::ACCENT };
