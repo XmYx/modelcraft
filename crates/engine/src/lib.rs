@@ -12,6 +12,7 @@ pub mod anim;
 mod command;
 pub mod control;
 mod document;
+mod groups;
 mod layers;
 pub mod rig;
 mod undo;
@@ -19,6 +20,7 @@ mod undo;
 pub use anim::{AnimCommand, KeyRef};
 pub use command::{COMMANDS, Command, DetailOp, MaskOp, Outcome, ShapeOp};
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
+pub use groups::{GroupOp, RegionAction, VisibilityOp};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use undo::{UndoEntry, UndoStack};
@@ -33,5 +35,7 @@ pub use modelcraft_sculpt as sculpt;
 
 #[cfg(test)]
 mod anim_tests;
+#[cfg(test)]
+mod groups_tests;
 #[cfg(test)]
 mod rig_tests;

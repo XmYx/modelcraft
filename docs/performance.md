@@ -136,6 +136,31 @@ Even remesh (closed quad spheres, unit radius):
 symmetry and normals) + chunk upload (≈0.5 ms) + one frame (≈3.5 ms uncapped) ≈ **5 ms** before
 display latency.
 
+## Patches, visibility and regions (`modelcraft-cli bench --groups --polys 1000000`)
+
+Measured 2026-11-18 on a quad sphere of 1,003,686 quads (2,007,372 triangles), single-threaded,
+with the machine's load average at 51 on 24 threads (other builds), so these are upper bounds.
+
+| What | Time |
+|---|---|
+| Patches by angle (30°) | 47 ms |
+| Patches by UV island (6 islands) | 27 ms |
+| Bring patches into the sculpt session | 2 ms |
+| Faces inside a 64-corner lasso, front faces only (14,920 faces) | 59 ms |
+| Hide them in the session | 2 ms |
+| Mask the same lasso (15,197 vertices) | 33 ms |
+| Shell from that mask (30,392 faces) | 72 ms |
+| Clip to a plane (244,928 vertices moved) | 27 ms |
+| Trim by a plane with a cap (652,430 faces left) | 2.5 s |
+| Occlusion mask, 4 rays per vertex (4.0 M rays) | 3.8 s |
+
+Trim rebuilds the whole mesh through the validating builder, which is where its time goes. The
+occlusion mask casts about four million rays whatever the size (24 per vertex on small meshes,
+never fewer than 4), so a 12.6 M-triangle mesh takes about six times as long. Undoing a change of
+patches or visibility restores the scene and rebuilds the sculpt session (about 0.8 s here); doing
+one does not rebuild it. In the app, a change of patches or visibility uploads the whole sculpt
+mesh again (not measured separately; the same upload as starting a session).
+
 ## Render engine (path tracer)
 
 Measured 2026-11-17 on the same machine, release build. `modelcraft-cli render` prints one JSON

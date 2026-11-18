@@ -20,6 +20,7 @@ pub mod attr;
 mod eval;
 pub mod pick;
 pub mod rig;
+mod rle;
 
 use std::sync::Arc;
 
@@ -184,6 +185,18 @@ pub struct SculptLayer {
     /// the step's input (triangles; patches kept, UVs not).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topology: Option<Arc<PolyMesh>>,
+    /// A patch id for every face of the mesh this layer shows (patches made while sculpting).
+    /// Empty: the faces keep the patches they come with.
+    #[serde(default, skip_serializing_if = "arc_vec_is_empty", with = "rle::patches")]
+    pub patches: Arc<Vec<u32>>,
+    /// Hidden faces of the mesh this layer shows (a view state: nothing is removed). Empty:
+    /// everything shows.
+    #[serde(default, skip_serializing_if = "arc_vec_is_empty", with = "rle::hidden")]
+    pub hidden: Arc<Vec<bool>>,
+}
+
+fn arc_vec_is_empty<T>(v: &Arc<Vec<T>>) -> bool {
+    v.is_empty()
 }
 
 fn is_zero(v: &u8) -> bool {
@@ -213,7 +226,7 @@ impl SculptLayer {
             + self.anchor.len()
             + self.finer.iter().map(|f| f.len()).sum::<usize>()
             + self.shapes.iter().map(|s| s.delta.len()).sum::<usize>();
-        v3 * 12 + self.mask.len() * 4 + self.topology.as_ref().map(|t| t.heap_bytes()).unwrap_or(0)
+        v3 * 12 + self.mask.len() * 4 + self.patches.len() * 4 + self.hidden.len() + self.topology.as_ref().map(|t| t.heap_bytes()).unwrap_or(0)
     }
 }
 
@@ -291,6 +304,12 @@ pub enum StepOp {
     EvenRemesh {
         cell: f32,
     },
+    /// Cut away everything on the side of a plane its normal points to; `cap` closes the cut.
+    TrimPlane {
+        point: Vec3,
+        normal: Vec3,
+        cap: bool,
+    },
 }
 
 impl StepOp {
@@ -316,6 +335,7 @@ impl StepOp {
             StepOp::Mirror { .. } => "Mirror",
             StepOp::Sculpt { .. } => "Sculpt layer",
             StepOp::EvenRemesh { .. } => "Even remesh",
+            StepOp::TrimPlane { .. } => "Trim by plane",
         }
     }
     pub fn heap_bytes(&self) -> usize {

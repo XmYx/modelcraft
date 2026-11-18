@@ -176,7 +176,7 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 30);
+    assert_eq!(crate::COMMANDS.len(), 35);
 }
 
 fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {

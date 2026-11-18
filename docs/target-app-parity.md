@@ -338,8 +338,8 @@ Weight: 7
 | Flatten, crease | C M Z | D | S | |
 | Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | P | L | Ten more, nineteen in all: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge. No rotate, elastic move or scrape yet |
 | Mask brush; clear, invert, fill; mask by patch | C M Z | D | S | |
-| Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | P | M | Mask hollows, mask ridges, blur, sharpen, grow, shrink; no occlusion mask |
-| Lasso and rectangle masks; clip, trim and slice brushes | Z | M | M | |
+| Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | D | M | Mask hollows, mask ridges, mask occlusion (4 to 24 rays per vertex), blur, sharpen, grow, shrink |
+| Lasso and rectangle masks; clip, trim and slice brushes | Z | P | M | Rectangle and lasso tools that mask or hide, with Region by Numbers as their keyboard path; clip to a plane and trim by a plane (a capped history step) across an object axis. No slice that keeps both halves, no plane at a free angle, no drawn clip outline |
 | X, Y, Z symmetry | C M Z | D | S | |
 | Radial and topological symmetry | C Z | M | M | |
 | Pen pressure to strength and size | C M Z | P | S | Through egui touch force; not verified on every tablet driver |
@@ -347,7 +347,7 @@ Weight: 7
 | Image alphas and an alpha library | C M Z | P | M | Eight built-in pictures (drawn in code), with a turn angle; importing your own images is missing |
 | Stroke types: lazy / stabilized, dots, spray, rectangle drag, curve strokes | C M Z | P | M | Spaced (with a spacing control), Dots, Spray, Trail (stabilized) and Drag out; no curve strokes |
 | Brush presets and saved brushes | C M Z | D | S | Ten built-in presets; save and remove your own (kept in the preferences) |
-| Polygon-group visibility: hide, show, isolate | Z | M | M | |
+| Polygon-group visibility: hide, show, isolate | Z | D | M | Patches by angle, UV island, part and from the mask while sculpting; hide, show and isolate a patch (under the pointer, in the middle of the view, or in the patch list), invert, hide masked. Hidden faces are skipped by picking and brushes and saved with the sculpt. Live detail waits until everything shows |
 | Sculpt layers with blend strength | C Z | D | L | "Shape layers": named offsets with a strength of −1..1; record, merge, remove. No per-layer mask; stepping down a detail level needs them merged |
 | Morph target and restore brush | C Z | M | M | |
 | Gizmo deformers in sculpt mode (bend, twist, stretch with a handle) | Z | M | M | |
@@ -370,7 +370,7 @@ Weight: 6
 | Automatic quad retopology with guides and density | C M Z | M | XL | |
 | Decimation that keeps UVs and vertex colour | Z | M | L | |
 | Project detail from one mesh to another | M Z | M | M | |
-| Extract a shell from a mask | Z | M | S | |
+| Extract a shell from a mask | Z | D | S | A new object from the fully masked faces, thickened along the normals with a closed rim; the rim is not smoothed |
 | Close holes and make watertight | Z | P | S | Fill one hole at a time |
 
 ## Painting, texturing and baking

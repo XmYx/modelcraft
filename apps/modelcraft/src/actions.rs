@@ -82,6 +82,7 @@ pub enum Action {
     RenderView,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    Sculpt(crate::sculpt_groups_ui::SculptAction),
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -159,6 +160,7 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
+    v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v
 }
 
@@ -325,6 +327,7 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
+            Sculpt(a) => a.label(),
         }
     }
 
@@ -415,6 +418,7 @@ impl Action {
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
+            Sculpt(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
         };
@@ -506,6 +510,7 @@ impl Action {
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
+            Sculpt(a) => return a.default_binding(),
             _ => return None,
         })
     }
@@ -520,7 +525,7 @@ impl Action {
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
-            | LiveDetail | EvenRemesh => "Sculpt",
+            | LiveDetail | EvenRemesh | Sculpt(_) => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
             Anim(_) => "Animate",

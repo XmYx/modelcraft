@@ -433,6 +433,15 @@ impl PolyMesh {
         Ok(())
     }
 
+    /// Replace the patch id of every face (same count); topology is unchanged.
+    pub fn set_patches(&mut self, patches: &[u32]) -> Result<(), MeshError> {
+        if patches.len() != self.face_patch.len() {
+            return Err(MeshError::Topology(format!("{} patch ids for {} faces", patches.len(), self.face_patch.len())));
+        }
+        self.face_patch.copy_from_slice(patches);
+        Ok(())
+    }
+
     /// Move each vertex to `f(index, position)`; a non-finite result keeps the old position.
     pub fn map_positions(&mut self, mut f: impl FnMut(u32, Vec3) -> Vec3) {
         for (i, p) in self.positions.iter_mut().enumerate() {
