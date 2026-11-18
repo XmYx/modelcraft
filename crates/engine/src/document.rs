@@ -931,6 +931,7 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;
@@ -1038,7 +1039,7 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } | ObjectKind::Sim { .. })
                 || !self.scene.visible(id)
             {
                 continue;

@@ -66,6 +66,16 @@ Object ids are numbers (`info` prints them).
 | `batch` | `commands` [{cmd…}…], `label?` (scene commands as one undo step, all or none) |
 | `undo`, `redo` | — |
 
+### Simulation
+
+One command, `sim`, with the operation in `op`: `{"cmd":"sim","op":"attach_cache","mesh":3,"path":"fall.mcpc"}`.
+A simulation object sits under the mesh it drives and plays the points of its cache for the scene's
+current frame (linear between frames; the first or last frame holds outside the cache).
+`attach_cache` reads a `.mcpc` file whose point count is the mesh's vertex count, so any tool that
+writes the format (or `modelcraft-cli bake`) can drive a mesh. `set` changes `start_frame`,
+`end_frame`, `fps`, `substeps` (1 to 64), `seed` and `max_cache_mib`; `clear_cache` throws a baked
+cache away. `modelcraft-cli commands` lists them as `sim op=…`.
+
 ### Animation
 
 One command, `anim`, with the operation in `op`: `{"cmd":"anim","op":"set_key",…}`.

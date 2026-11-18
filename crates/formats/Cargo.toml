@@ -17,6 +17,7 @@ craft-gltf-anim = { workspace = true }
 modelcraft-anim = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-ops = { workspace = true }
+modelcraft-sim = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

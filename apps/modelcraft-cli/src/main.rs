@@ -173,6 +173,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             for (name, help) in modelcraft_engine::rig::COMMANDS {
                 println!("rig op={name}\t{help}");
             }
+            for (name, help) in modelcraft_engine::sim::COMMANDS {
+                println!("sim op={name}\t{help}");
+            }
             Ok(())
         }
         "new" => save(&mut Document::new(), arg(a, 0, "output file")?),
