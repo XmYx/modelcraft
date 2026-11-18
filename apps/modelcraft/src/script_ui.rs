@@ -118,7 +118,10 @@ pub struct ScriptState {
     /// The undo history's mark at the end of the last frame: steps made after it are the
     /// user's (or an agent's), and callbacks that answer them join the newest one.
     last_mark: usize,
+<<<<<<< HEAD
     pub macros: crate::script_macro::MacroState,
+=======
+>>>>>>> origin/staging
 }
 
 impl Default for ScriptState {
@@ -162,7 +165,10 @@ impl ScriptState {
             clock: std::time::Instant::now(),
             was_playing: false,
             last_mark: 0,
+<<<<<<< HEAD
             macros: Default::default(),
+=======
+>>>>>>> origin/staging
         };
         s.reload();
         s
@@ -503,8 +509,11 @@ pub fn tick(app: &mut ModelApp) {
     let user_step = app.doc.undo_mark() > app.script.last_mark && !app.doc.undo.can_redo();
     let mark = app.doc.undo_mark();
     let redo = app.doc.undo.take_redo();
+<<<<<<< HEAD
     // A recording holds what the user does, not what callbacks answer with.
     app.doc.pause_recording(true);
+=======
+>>>>>>> origin/staging
     for e in &immediate {
         fire(app, e, None);
     }
@@ -530,7 +539,10 @@ pub fn tick(app: &mut ModelApp) {
             app.script.pacer.record_cost(now, spent);
         }
     }
+<<<<<<< HEAD
     app.doc.pause_recording(false);
+=======
+>>>>>>> origin/staging
     app.doc.fold_undo_since(mark, &tl!("Script callbacks"), user_step);
     app.doc.undo.restore_redo(redo);
     app.script.last_mark = app.doc.undo_mark();

@@ -50,12 +50,14 @@ pub struct Bench {
     pub sculpt_ms: Vec<f32>,
     pub dab_ms: Vec<f32>,
     pub upload_ms: Vec<f32>,
-    last: Option<std::time::Instant>,
+    /// Playing the skinned benchmark character instead of sculpting ([`crate::rig_tools`]).
+    pub skin: Option<crate::rig_tools::SkinBench>,
+    pub(crate) last: Option<std::time::Instant>,
 }
 
 impl Bench {
     pub fn new(total: u32) -> Self {
-        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), last: None }
+        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), skin: None, last: None }
     }
 }
 
@@ -117,6 +119,9 @@ pub fn show(app: &mut ModelApp, ui: &mut egui::Ui) {
 }
 
 fn bench_tick(app: &mut ModelApp) {
+    if app.bench.as_ref().is_some_and(|b| b.skin.is_some()) {
+        return crate::rig_tools::bench_tick(app);
+    }
     let Some(b) = &mut app.bench else { return };
     let now = std::time::Instant::now();
     let dt = b.last.map(|t| now.duration_since(t).as_secs_f32() * 1000.0);

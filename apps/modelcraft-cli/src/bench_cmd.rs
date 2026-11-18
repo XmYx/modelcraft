@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use modelcraft_render::pathtrace::{Film, PixelOrder, RenderSettings, Renderer, Scene, relative_mse, scenes};
+use modelcraft_render::pathtrace::{Film, PixelOrder, RenderSettings, Renderer, RestirSettings, Scene, relative_mse, scenes};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
 
 pub const USAGE: &str = "  render-bench [options]            error against time on the benchmark scenes (JSON lines, then a table)
@@ -23,6 +23,8 @@ pub const USAGE: &str = "  render-bench [options]            error against time 
       --order z|independent         pixel order of the sample sequence (default z)
       --guiding                     learn where light comes from and sample that way (CPU)
       --splitting                   end or multiply paths by their expected contribution (CPU)
+      --restir unbiased|viewport    resampled direct light at the first surface (CPU and GPU)
+      --restir-candidates N --restir-neighbors N
                                     (the reference is always rendered without either)";
 
 pub struct BenchArgs {
@@ -35,6 +37,7 @@ pub struct BenchArgs {
     pub order: PixelOrder,
     pub guiding: bool,
     pub splitting: bool,
+    pub restir: RestirSettings,
 }
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
@@ -69,6 +72,7 @@ pub fn parse(a: &[String]) -> Result<BenchArgs, String> {
         },
         guiding: a.iter().any(|x| x == "--guiding"),
         splitting: a.iter().any(|x| x == "--splitting"),
+        restir: crate::render_cmd::parse_restir(a)?,
     })
 }
 
@@ -115,6 +119,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         let mut s = settings(seed);
         s.integrator.guiding = args.guiding;
         s.integrator.adaptive_splitting = args.splitting;
+        s.integrator.restir = args.restir;
         s
     };
     // The reference: two independent halves, compared and then averaged.
@@ -151,6 +156,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         "size": args.size,
         "guiding": args.guiding,
         "splitting": args.splitting,
+        "restir": format!("{:?}", args.restir.mode),
         "triangles": scene.triangle_count(),
         "build_seconds": build_seconds,
         "reference_spp": half * 2,

@@ -1200,11 +1200,14 @@ impl Document {
         }
         if made > 1 && self.groups.is_empty() {
             self.fold_last(made, &g.label);
+<<<<<<< HEAD
         }
         if self.groups.is_empty()
             && let Some(rec) = self.recorder.as_mut()
         {
             rec.close_group(&g.label, true, made > 0);
+=======
+>>>>>>> origin/staging
         }
         made
     }
@@ -1332,7 +1335,8 @@ impl Document {
     /// with skins, blend shapes, curves or constraints is written with them (joints, weights,
     /// morph targets and one clip of the playback range) instead of as the posed mesh.
     pub fn export_report(&mut self, path: &Path, convert: exchange::Convert) -> Result<Vec<String>, EngineError> {
-        let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl or .fbx".into()))?;
+        let kind =
+            Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl, .fbx, .3mf or .usda".into()))?;
         if kind == Kind::Glb && convert == exchange::Convert::default() && modelcraft_formats::gltf_rig::scene_has_rig(&self.scene) {
             self.sync_sculpt();
             let (bytes, warnings) = modelcraft_formats::gltf_rig::export_glb(&self.scene)?;

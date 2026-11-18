@@ -19,7 +19,10 @@ mod error;
 pub mod highlight;
 mod host;
 mod limits;
+<<<<<<< HEAD
 pub mod macros;
+=======
+>>>>>>> origin/staging
 mod pacing;
 mod perm;
 mod session;

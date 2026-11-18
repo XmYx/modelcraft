@@ -8,6 +8,7 @@ use std::time::Instant;
 use modelcraft_engine::Document;
 use modelcraft_render::pathtrace::integrator::IntegratorSettings;
 use modelcraft_render::pathtrace::{Film, RenderSettings, Renderer, Scene, scenes};
+use modelcraft_render::pathtrace::{RestirMode, RestirSettings};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
 use modelcraft_render::trace::{ExportOptions, Lighting, export_scene, load_panorama, scene_bounds};
 use modelcraft_render::{Camera, Projection};
@@ -24,6 +25,11 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
       --exposure EV                 brightness in stops (default 0)
       --guiding --splitting         learn where light comes from and sample that way; end or
                                     multiply paths by their expected contribution (CPU only)
+      --restir MODE                 resampled direct light at the first surface (ReSTIR DI):
+                                    unbiased (same expected image, for finals) or viewport
+                                    (adds temporal reuse, faster to clean, slightly biased)
+      --restir-candidates N         light samples per pixel and pass (default 8)
+      --restir-neighbors N          neighbouring pixels merged per pass (default 4)
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
@@ -58,6 +64,7 @@ pub struct RenderArgs {
     /// Path guiding and adaptive roulette/splitting (CPU only).
     pub guiding: bool,
     pub splitting: bool,
+    pub restir: RestirSettings,
 }
 
 impl Default for RenderArgs {
@@ -81,6 +88,7 @@ impl Default for RenderArgs {
             ground: true,
             guiding: false,
             splitting: false,
+            restir: RestirSettings::default(),
         }
     }
 }
@@ -141,7 +149,26 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         ground: !a.iter().any(|x| x == "--no-ground"),
         guiding: a.iter().any(|x| x == "--guiding"),
         splitting: a.iter().any(|x| x == "--splitting"),
+        restir: parse_restir(a)?,
     })
+}
+
+/// The `--restir`, `--restir-candidates` and `--restir-neighbors` options.
+pub fn parse_restir(a: &[String]) -> Result<RestirSettings, String> {
+    let mode = match value(a, "--restir") {
+        None | Some("off") => RestirMode::Off,
+        Some("unbiased") => RestirMode::Unbiased,
+        Some("viewport") => RestirMode::Viewport,
+        Some(other) => return Err(format!("--restir: expected off, unbiased or viewport, found {other:?}")),
+    };
+    let mut r = RestirSettings { mode, ..RestirSettings::default() };
+    if let Some(n) = number::<u32>(a, "--restir-candidates")? {
+        r.candidates = n.clamp(1, modelcraft_render::pathtrace::restir::MAX_CANDIDATES);
+    }
+    if let Some(n) = number::<u32>(a, "--restir-neighbors")? {
+        r.neighbors = n.min(modelcraft_render::pathtrace::restir::MAX_NEIGHBORS);
+    }
+    Ok(r)
 }
 
 /// A built-in scene by name.
@@ -190,7 +217,13 @@ pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
     let settings = RenderSettings {
         width: args.width,
         height: args.height,
-        integrator: IntegratorSettings { max_depth: args.depth, guiding: args.guiding, adaptive_splitting: args.splitting, ..IntegratorSettings::default() },
+        integrator: IntegratorSettings {
+            max_depth: args.depth,
+            guiding: args.guiding,
+            adaptive_splitting: args.splitting,
+            restir: args.restir,
+            ..IntegratorSettings::default()
+        },
         seed: args.seed,
         ..RenderSettings::default()
     };
@@ -312,6 +345,22 @@ mod tests {
         assert!(parse(&args(&["--sun", "high"])).is_err());
         assert!(load_panorama("/nonexistent/sky.hdr").is_err());
         assert!(builtin("teapot").is_err());
+    }
+
+    #[test]
+    fn parses_the_resampling_options() {
+        let a = parse(&args(&["--restir", "unbiased", "--restir-candidates", "100", "--restir-neighbors", "2"])).unwrap();
+        assert_eq!((a.restir.mode, a.restir.candidates, a.restir.neighbors), (RestirMode::Unbiased, modelcraft_render::pathtrace::restir::MAX_CANDIDATES, 2));
+        assert_eq!(parse(&args(&["--restir", "viewport"])).unwrap().restir.mode, RestirMode::Viewport);
+        assert_eq!(parse(&[]).unwrap().restir.mode, RestirMode::Off);
+        assert!(parse(&args(&["--restir", "always"])).is_err() && parse(&args(&["--restir-candidates", "many"])).is_err());
+        // A render with it on produces a lit picture and says so.
+        let dir = std::env::temp_dir().join(format!("modelcraft-restir-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = RenderArgs { width: 32, height: 24, samples: 4, device: Device::Cpu, restir: a.restir, ..RenderArgs::default() };
+        let report = run("builtin:night-street", dir.join("n.png").to_str().unwrap(), &small, |_| Err("no files".into())).unwrap();
+        assert_eq!(report["samples"], 4);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
