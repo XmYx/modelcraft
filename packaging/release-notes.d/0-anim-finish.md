@@ -1,0 +1,2 @@
+- Animation: box-select, copy and paste keys; zoom the Curve Editor's value axis; show ghosts around the current frame; solo, lock, reorder and fade animation layers over time.
+- Rigging: place joints by clicking in the viewport, pick joints by their bones, and paint skin weights with a brush.

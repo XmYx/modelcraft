@@ -36,6 +36,9 @@ mod prefs;
 mod prefs_ui;
 mod radial;
 mod render_view;
+mod rig_tools;
+#[cfg(test)]
+mod rig_tools_tests;
 mod rig_ui;
 #[cfg(test)]
 mod rig_ui_tests;
