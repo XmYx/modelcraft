@@ -132,11 +132,12 @@ pub enum UvAction {
     ProjectBox,
     ProjectCylindrical,
     ProjectSpherical,
+    ProjectCamera,
     ExportLayout,
 }
 
 impl UvAction {
-    pub const ALL: [UvAction; 17] = [
+    pub const ALL: [UvAction; 18] = [
         UvAction::Editor,
         UvAction::MarkSeam,
         UvAction::ClearSeam,
@@ -153,6 +154,7 @@ impl UvAction {
         UvAction::ProjectBox,
         UvAction::ProjectCylindrical,
         UvAction::ProjectSpherical,
+        UvAction::ProjectCamera,
         UvAction::ExportLayout,
     ];
 
@@ -174,6 +176,7 @@ impl UvAction {
             UvAction::ProjectBox => tl!("Project UVs: Box"),
             UvAction::ProjectCylindrical => tl!("Project UVs: Cylindrical"),
             UvAction::ProjectSpherical => tl!("Project UVs: Spherical"),
+            UvAction::ProjectCamera => tl!("Project UVs: From View"),
             UvAction::ExportLayout => tl!("Export UV Layout…"),
         }
     }
@@ -196,6 +199,7 @@ impl UvAction {
             UvAction::ProjectBox => "uv.project_box",
             UvAction::ProjectCylindrical => "uv.project_cylindrical",
             UvAction::ProjectSpherical => "uv.project_spherical",
+            UvAction::ProjectCamera => "uv.project_camera",
             UvAction::ExportLayout => "uv.export_layout",
         }
     }
@@ -271,6 +275,8 @@ pub struct UvUi {
     pub zoom: f32,
     pub fitted: bool,
     pub checker: bool,
+    /// Draw a checker from the UVs on the meshes in the 3D viewport.
+    pub viewport_checker: bool,
     pub heat: Heat,
     pub show_seams: bool,
     pub pivot: Pivot,
@@ -287,6 +293,15 @@ pub struct UvUi {
     /// Iterations and fit of `Relax UVs`.
     pub relax_iterations: u32,
     pub relax_mode: RelaxMode,
+    /// Pack options: gap between islands (fraction of a tile), rotation, density, and a texel
+    /// density (UV units per metre) that decides how many tiles are used.
+    pub pack_margin: f32,
+    pub pack_rotation: Rotation,
+    pub pack_density: Density,
+    pub pack_fixed_density: bool,
+    pub pack_texel_density: f32,
+    /// Width over height of the active 3D view, as last drawn (for a projection from the view).
+    pub view_aspect: f32,
     /// UDIM tiles `Pack UV Islands` spreads the islands over (1 is the unit square).
     pub pack_tiles: u32,
     /// `Stitch UV Islands` also resizes the moved island so the edges are as long as its neighbour's.
@@ -313,6 +328,7 @@ impl Default for UvUi {
             zoom: 400.0,
             fitted: false,
             checker: true,
+            viewport_checker: false,
             heat: Heat::Off,
             show_seams: true,
             pivot: Pivot::Selection,
@@ -326,6 +342,12 @@ impl Default for UvUi {
             relax_mode: RelaxMode::Rigid,
             stitch_scale: false,
             pack_tiles: 1,
+            pack_margin: 0.01,
+            pack_rotation: Rotation::Fit,
+            pack_density: Density::Uniform,
+            pack_fixed_density: false,
+            pack_texel_density: 1.0,
+            view_aspect: 16.0 / 9.0,
             cursor: 0,
             gesture: None,
             target: None,
@@ -426,6 +448,7 @@ pub fn act(app: &mut ModelApp, a: UvAction) {
         UvAction::ProjectBox => project(app, Projection::Box),
         UvAction::ProjectCylindrical => project(app, Projection::Cylindrical { axis: Axis::PosY }),
         UvAction::ProjectSpherical => project(app, Projection::Spherical { axis: Axis::PosY }),
+        UvAction::ProjectCamera => project_from_view(app),
         UvAction::ExportLayout => export_layout(app),
     }
 }
@@ -538,7 +561,14 @@ pub fn pack(app: &mut ModelApp) {
         app.status = tl!("This mesh has no UVs yet. Project or unwrap it to make some.");
         return;
     }
-    let op = StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform, tiles: app.uv.pack_tiles, texel_density: None };
+    let u = &app.uv;
+    let op = StepOp::PackUvs {
+        margin: u.pack_margin,
+        rotation: u.pack_rotation,
+        density: if u.pack_fixed_density { Density::Uniform } else { u.pack_density },
+        tiles: u.pack_tiles,
+        texel_density: u.pack_fixed_density.then_some(u.pack_texel_density),
+    };
     if app.run(Command::AddStep { id, op }) {
         app.selection = vec![id];
         app.uv.selection.clear();
@@ -561,6 +591,19 @@ pub fn project(app: &mut ModelApp, projection: Projection) {
         app.uv.pinned.clear();
         app.uv.fitted = false;
     }
+}
+
+/// Project UVs as the 3D view sees the mesh (the view's camera and the object's transform), so the
+/// texture lines up with what is on the screen.
+pub fn project_from_view(app: &mut ModelApp) {
+    let Some((id, _)) = subject(app) else {
+        app.status = tl!("Select a mesh first");
+        return;
+    };
+    let cam = app.views[app.active_view.min(3)].camera;
+    let aspect = if app.uv.view_aspect.is_finite() && app.uv.view_aspect > 0.0 { app.uv.view_aspect } else { 1.0 };
+    let view_proj = (cam.view_proj(aspect) * app.doc.scene.world_matrix(id)).to_cols_array();
+    project(app, Projection::Camera { view_proj });
 }
 
 /// Ask for a file and write the layout of the selected mesh as SVG or PNG.
@@ -953,12 +996,27 @@ fn window_body(app: &mut ModelApp, ui: &mut egui::Ui, focus_pending: bool) {
     let d = derived(app, &mesh);
 
     toolbar(app, ui);
+    warnings(app, ui, id);
     ui.separator();
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| canvas(app, ui, &d, focus_pending));
         ui.separator();
         ui.vertical(|ui| side_panel(app, ui, &d));
     });
+}
+
+/// What the history steps of the mesh report went less well than asked: an unwrap that fell back,
+/// a solve that did not converge. Shown under the toolbar, where the cause was.
+fn warnings(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
+    let e = app.doc.eval.evaluate(&app.doc.scene, id);
+    for w in e.warnings.iter().take(4) {
+        let text = crate::tlf!("Warning: {message}", message = w.message);
+        let r = ui.colored_label(Color32::from_rgb(240, 180, 60), text.clone());
+        name(ui, &r, text);
+    }
+    if e.warnings.len() > 4 {
+        ui.label(crate::tlf!("{count} more warnings in the build history", count = e.warnings.len() - 4));
+    }
 }
 
 fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
@@ -1042,21 +1100,82 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
         ui.label(tl!("UDIM tiles"));
         let r = ui.add(egui::DragValue::new(&mut app.uv.pack_tiles).speed(0.1).range(1..=100));
         name(ui, &r, tl!("UDIM tiles"));
-        for (label, a) in [
-            (tl!("Pack UV Islands"), UvAction::Pack),
-            (tl!("Planar"), UvAction::ProjectPlanar),
-            (tl!("Box"), UvAction::ProjectBox),
-            (tl!("Cylindrical"), UvAction::ProjectCylindrical),
-            (tl!("Spherical"), UvAction::ProjectSpherical),
-            (tl!("Export UV Layout…"), UvAction::ExportLayout),
+        // The visible label is the accessible name, so a voice-control user can say what they see.
+        for a in [
+            UvAction::Pack,
+            UvAction::ProjectPlanar,
+            UvAction::ProjectBox,
+            UvAction::ProjectCylindrical,
+            UvAction::ProjectSpherical,
+            UvAction::ProjectCamera,
+            UvAction::ExportLayout,
         ] {
+            let label = a.label();
             let r = ui.button(label.clone());
-            name(ui, &r, if a == UvAction::Pack || a == UvAction::ExportLayout { label } else { crate::tlf!("Project UVs: {kind}", kind = label) });
+            name(ui, &r, label);
             if r.clicked() {
                 act(app, a);
             }
         }
+        pack_options(app, ui);
     });
+}
+
+/// The Pack Options popover: margin, rotation, density and tiles for `Pack UV Islands`.
+fn pack_options(app: &mut ModelApp, ui: &mut egui::Ui) {
+    let r = ui.menu_button(tl!("Pack Options…"), |ui| {
+        ui.horizontal(|ui| {
+            ui.label(tl!("Margin"));
+            let r = ui.add(egui::DragValue::new(&mut app.uv.pack_margin).speed(0.0005).range(0.0..=0.1).max_decimals(4));
+            name(ui, &r, tl!("Pack margin"));
+        });
+        ui.horizontal(|ui| {
+            ui.label(tl!("Rotation"));
+            let rotations = [(Rotation::None, tl!("None")), (Rotation::Quarter, tl!("90 degrees")), (Rotation::Fit, tl!("Best fit"))];
+            let shown = rotations.iter().find(|(m, _)| *m == app.uv.pack_rotation).map(|(_, l)| l.clone()).unwrap_or_default();
+            let r = egui::ComboBox::from_id_salt("uv-pack-rotation").selected_text(shown).show_ui(ui, |ui| {
+                for (m, l) in &rotations {
+                    ui.selectable_value(&mut app.uv.pack_rotation, *m, l.clone());
+                }
+            });
+            name(ui, &r.response, tl!("Pack rotation"));
+        });
+        ui.horizontal(|ui| {
+            ui.label(tl!("Island sizes"));
+            let densities = [(Density::Uniform, tl!("Even texel density")), (Density::Keep, tl!("Keep sizes"))];
+            let shown = densities.iter().find(|(m, _)| *m == app.uv.pack_density).map(|(_, l)| l.clone()).unwrap_or_default();
+            let r = ui.add_enabled_ui(!app.uv.pack_fixed_density, |ui| {
+                egui::ComboBox::from_id_salt("uv-pack-density").selected_text(shown).show_ui(ui, |ui| {
+                    for (m, l) in &densities {
+                        ui.selectable_value(&mut app.uv.pack_density, *m, l.clone());
+                    }
+                })
+            });
+            name(ui, &r.inner.response, tl!("Pack island sizes"));
+        });
+        let r = ui.checkbox(&mut app.uv.pack_fixed_density, tl!("Fixed texel density (as many tiles as needed)"));
+        name(ui, &r, tl!("Fixed texel density"));
+        if app.uv.pack_fixed_density {
+            ui.horizontal(|ui| {
+                ui.label(tl!("Texel density (tiles per metre)"));
+                let r = ui.add(egui::DragValue::new(&mut app.uv.pack_texel_density).speed(0.01).range(0.001..=1000.0).max_decimals(3));
+                name(ui, &r, tl!("Texel density"));
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(tl!("UDIM tiles"));
+                let r = ui.add(egui::DragValue::new(&mut app.uv.pack_tiles).speed(0.1).range(1..=100));
+                name(ui, &r, tl!("Pack tiles"));
+            });
+        }
+        let b = ui.button(tl!("Pack Now"));
+        name(ui, &b, tl!("Pack Now"));
+        if b.clicked() {
+            pack(app);
+            ui.close();
+        }
+    });
+    name(ui, &r.response, tl!("Pack Options…"));
 }
 
 fn side_panel(app: &mut ModelApp, ui: &mut egui::Ui, d: &Derived) {
@@ -1126,6 +1245,8 @@ fn side_panel(app: &mut ModelApp, ui: &mut egui::Ui, d: &Derived) {
     }
     ui.separator();
     ui.label(egui::RichText::new(tl!("Display")).strong());
+    let r = ui.checkbox(&mut app.uv.viewport_checker, tl!("Checker in the 3D view"));
+    name(ui, &r, tl!("Checker in the 3D view"));
     let r = ui.checkbox(&mut app.uv.checker, tl!("Checker background"));
     name(ui, &r, tl!("Checker background"));
     let r = ui.checkbox(&mut app.uv.show_seams, tl!("Show seams"));

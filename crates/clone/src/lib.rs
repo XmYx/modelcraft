@@ -13,7 +13,9 @@
 #![forbid(unsafe_code)]
 
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
+pub mod modifier;
 pub use modelcraft_mesh::PolyMesh;
+pub use modifier::{Context, EASES, Ease, MODES, Mode, Modifier};
 use serde::{Deserialize, Serialize};
 
 /// The most clones one generator produces. The viewport draws every clone, so the cap is also the

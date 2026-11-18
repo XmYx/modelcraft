@@ -183,6 +183,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             for (name, help) in modelcraft_engine::rig::COMMANDS {
                 println!("rig op={name}\t{help}");
             }
+            for (name, help) in modelcraft_engine::organize::COMMANDS {
+                println!("organize op={name}\t{help}");
+            }
             for (name, help) in modelcraft_engine::hair::COMMANDS {
                 println!("hair op={name}\t{help}");
             }
@@ -308,6 +311,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
+        "hair-export" => hair_cmd::export(a, load),
         "sim-bench" => sim_cmd::bench(a),
         "uv-bench" => uv_bench(
             flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64),
@@ -896,10 +900,12 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                             selected: false,
                             show_mask: true,
                             patch_tint: false,
+                            uv_checker: false,
                             roughness: 0.5,
                         }],
                         lines: &[],
                         overlay: &[],
+                        hair: Vec::new(),
                     };
                     let t = Instant::now();
                     r.render(device, queue, target, &frame);

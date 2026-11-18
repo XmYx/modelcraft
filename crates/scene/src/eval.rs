@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use modelcraft_ops::{OpError, edit, subdivide};
 
 use crate::{CloneSet, ObjectId, ObjectKind, PolyMesh, Scene, Source, Step, StepOp};
@@ -22,6 +22,9 @@ pub struct StepError {
 pub struct Evaluated {
     pub mesh: Arc<PolyMesh>,
     pub errors: Vec<StepError>,
+    /// Things that went less well than asked but did not stop a step: an unwrap that fell back to
+    /// a plane or to another solver, a solve that did not converge, UVs left out of a relaxation.
+    pub warnings: Vec<StepError>,
     /// For a clone generator: the clones. The mesh is then empty; draw `instances.source` once per
     /// clone instead.
     pub instances: Option<Arc<Instances>>,
@@ -56,6 +59,7 @@ struct StepCache {
     /// Output after each step (index i = after step i).
     outputs: Vec<Arc<PolyMesh>>,
     errors: Vec<StepError>,
+    warnings: Vec<StepError>,
 }
 
 /// Evaluator with caches; one per document. See the module docs.
@@ -96,6 +100,7 @@ impl Evaluator {
             let keep = if same_source { cache.seen_steps.iter().zip(steps).take_while(|(a, b)| same_step(a, b)).count() } else { 0 };
             cache.outputs.truncate(keep);
             cache.errors.retain(|e| e.step < keep);
+            cache.warnings.retain(|e| e.step < keep);
             if !same_source {
                 cache.source = None;
                 cache.seen_source = Some(source.clone());
@@ -129,7 +134,10 @@ impl Evaluator {
                 prev
             } else if step.enabled {
                 self.runs += 1;
-                match run_step(&prev, &step.op) {
+                let mut warned = Vec::new();
+                let result = run_step_warn(&prev, &step.op, &mut warned);
+                cache.warnings.extend(warned.into_iter().map(|message| StepError { step: i, message }));
+                match result {
                     Ok(m) => Arc::new(m),
                     Err(e) => {
                         cache.errors.push(StepError { step: i, message: e.to_string() });
@@ -142,7 +150,12 @@ impl Evaluator {
             cache.outputs.push(out);
         }
         let mesh = if want == 0 { src } else { cache.outputs.get(want - 1).cloned().unwrap_or(src) };
-        Evaluated { mesh, errors: cache.errors.iter().filter(|e| e.step < want || e.step == usize::MAX).cloned().collect(), instances: None }
+        Evaluated {
+            mesh,
+            errors: cache.errors.iter().filter(|e| e.step < want || e.step == usize::MAX).cloned().collect(),
+            warnings: cache.warnings.iter().filter(|e| e.step < want).cloned().collect(),
+            instances: None,
+        }
     }
 
     /// The final mesh of an object in its own space: steps, then deformer children; for a smooth
@@ -172,7 +185,7 @@ impl Evaluator {
                     .filter_map(|c| scene.get(c))
                     .filter(|c| c.visible)
                     .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer, scene.field_stack(c.id))),
+                        ObjectKind::Deformer { deformer } => Some((c.local_matrix().inverse(), *deformer, scene.field_stack(c.id))),
                         _ => None,
                     })
                     .collect();
@@ -205,16 +218,16 @@ impl Evaluator {
                     None => Evaluated::default(),
                     Some(c) => {
                         let inner = self.evaluate_depth(scene, c, depth + 1);
-                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        let local = scene.get(c).map(|o| o.local_matrix()).unwrap_or(Mat4::IDENTITY);
                         let mut m = (*inner.mesh).clone();
                         m.map_positions(|_, p| local.transform_point3(p));
                         self.runs += 1;
                         match subdivide::catmull_clark(&m, *levels) {
-                            Ok(s) => Evaluated { mesh: Arc::new(s), errors: inner.errors, instances: None },
+                            Ok(s) => Evaluated { mesh: Arc::new(s), errors: inner.errors, warnings: inner.warnings, instances: None },
                             Err(e) => {
                                 let mut errors = inner.errors;
                                 errors.push(StepError { step: usize::MAX, message: e.to_string() });
-                                Evaluated { mesh: Arc::new(m), errors, instances: None }
+                                Evaluated { mesh: Arc::new(m), errors, warnings: inner.warnings, instances: None }
                             }
                         }
                     }
@@ -228,7 +241,7 @@ impl Evaluator {
                     Some(c) => {
                         let inner = self.evaluate_depth(scene, c, depth + 1);
                         errors.extend(inner.errors);
-                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        let local = scene.get(c).map(|o| o.local_matrix()).unwrap_or(Mat4::IDENTITY);
                         // The surface and vertices layouts sit on the target, seen from this generator.
                         let target_mesh = match target.filter(|t| *t != id && cloner.layout.needs_target()) {
                             Some(t) if scene.get(t).is_some() => {
@@ -240,6 +253,9 @@ impl Evaluator {
                         self.runs += 1;
                         match cloner.generate_in(target_mesh.as_ref().map(|(m, _)| m.as_ref()), target_mesh.as_ref().map_or(Mat4::IDENTITY, |(_, f)| *f)) {
                             Ok(mut set) => {
+                                errors.extend(
+                                    apply_modifiers(scene, id, cloner.seed, &mut set).into_iter().map(|message| StepError { step: usize::MAX, message }),
+                                );
                                 for i in &mut set.instances {
                                     i.matrix *= local;
                                 }
@@ -258,6 +274,8 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
+            // The master's result, shared: the same mesh allocation, so the GPU upload is shared too.
+            ObjectKind::Instance { of } if *of != id => self.evaluate_depth(scene, *of, depth + 1),
             ObjectKind::Sim { sim } => {
                 // A particle system is a generator: its pool, as instances of its source object
                 // (a mesh inside it) or of a small sphere. Other simulations drive their mesh.
@@ -278,9 +296,11 @@ impl Evaluator {
                 }
                 out
             }
-            ObjectKind::Group
+            ObjectKind::Instance { .. }
+            | ObjectKind::Group
             | ObjectKind::Deformer { .. }
             | ObjectKind::Field { .. }
+            | ObjectKind::CloneModifier { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }
@@ -301,6 +321,25 @@ fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
 /// target sits relative to it, which the subtree revision does not cover.
 fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
     let mut key = scene.deep_rev(id);
+    if matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
+        // A clone modifier also depends on its target object, and on the time when it is animated.
+        let mut h = key;
+        let mut mix = |bits: u64| h = (h ^ bits).wrapping_mul(0x0100_0000_01b3);
+        for m in scene.clone_modifiers(id) {
+            let Some(ObjectKind::CloneModifier { modifier, target }) = scene.get(m).map(|o| &o.kind) else { continue };
+            if modifier.is_time_dependent() {
+                mix(scene.anim.frame.to_bits());
+                mix(scene.anim.time.fps.to_bits());
+            }
+            if let Some(t) = target.filter(|t| scene.get(*t).is_some()) {
+                mix(scene.deep_rev(t).rotate_left(21));
+                for f in target_frame(scene, id, t).to_cols_array() {
+                    mix(u64::from(f.to_bits()));
+                }
+            }
+        }
+        key = h;
+    }
     if let Some(ObjectKind::Cloner { target: Some(t), .. }) = scene.get(id).map(|o| &o.kind)
         && scene.get(*t).is_some()
     {
@@ -310,7 +349,48 @@ fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
         }
         key = h;
     }
+    // An instance depends on its master (and on the master's master, when it is an instance too).
+    let mut c = id;
+    for _ in 0..crate::MAX_DEPTH {
+        let Some(ObjectKind::Instance { of }) = scene.get(c).map(|o| &o.kind) else { break };
+        if *of == id || scene.get(*of).is_none() {
+            break;
+        }
+        key = key.wrapping_mul(0x0100_0000_01b3) ^ scene.deep_rev(*of).rotate_left(13);
+        c = *of;
+    }
     key
+}
+
+/// Run the clone modifiers inside generator `id`, in order, on the freshly laid out clones (in the
+/// generator's space). Returns what went wrong, for the status line.
+fn apply_modifiers(scene: &Scene, id: ObjectId, seed: u32, set: &mut modelcraft_clone::CloneSet) -> Vec<String> {
+    let mut problems = Vec::new();
+    let seconds = (scene.anim.frame / scene.anim.time.fps.max(1e-6)) as f32;
+    let to_generator = scene.world_matrix(id).inverse();
+    for m in scene.clone_modifiers(id) {
+        let Some(o) = scene.get(m) else { continue };
+        let ObjectKind::CloneModifier { modifier, target } = &o.kind else { continue };
+        let point = target.filter(|t| *t != id && scene.get(*t).is_some()).map(|t| to_generator.transform_point3(scene.world_matrix(t).w_axis.truncate()));
+        if modifier.needs_target() && point.is_none() {
+            problems.push(format!("{} needs a target object: choose one in the Properties panel", o.name));
+            continue;
+        }
+        // The fields inside the modifier weigh each clone, seen in the generator's space.
+        let mut stack = modelcraft_field::FieldStack::new();
+        let to_modifier = o.transform.matrix().inverse();
+        for c in scene.children(m) {
+            if let Some(f) = scene.get(c)
+                && f.visible
+                && let ObjectKind::Field { field } = &f.kind
+            {
+                stack.push(f.transform.matrix().inverse() * to_modifier, field.clone());
+            }
+        }
+        let weight = |p: Vec3| stack.weight(p);
+        modifier.apply(set, &modelcraft_clone::Context { seed, time: seconds, target: point, weight: &weight });
+    }
+    problems
 }
 
 fn same_source(a: &Source, b: &Source) -> bool {
@@ -337,8 +417,9 @@ fn same_step(a: &Step, b: &Step) -> bool {
     }
 }
 
-/// Run one history step.
-pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
+/// Run one history step, collecting in `warnings` what went less well than asked (see
+/// [`Evaluated::warnings`]).
+fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Result<PolyMesh, OpError> {
     let (nv, ne, nf) = (m.vertex_count(), m.edge_count(), m.face_count());
     match op {
         StepOp::Extrude { faces, distance } => {
@@ -403,7 +484,9 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             }
             let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
             let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
-            modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+            let (mesh, result) = modelcraft_uv::unwrap_mesh(m, &set, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            warnings.extend(result.warnings());
+            Ok(mesh)
         }
         StepOp::Seams { .. } => Ok(m.clone()),
         StepOp::TransformUvs { corners, translate, rotate_deg, scale, pivot } => {
@@ -429,7 +512,11 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::RelaxUvs { corners, iterations, mode } => {
             let opts = modelcraft_uv::RelaxOptions { iterations: *iterations, mode: *mode };
-            modelcraft_uv::relax_corners(m, corners, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+            let (mesh, report) = modelcraft_uv::relax_corners(m, corners, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            if report.skipped > 0 {
+                warnings.push(format!("{} UV island(s) could not be relaxed and were left as they were", report.skipped));
+            }
+            Ok(mesh)
         }
         StepOp::StraightenUvs { corners, strength } => {
             modelcraft_uv::straighten_corners(m, corners, *strength).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))

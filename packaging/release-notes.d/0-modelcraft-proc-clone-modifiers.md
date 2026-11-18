@@ -1,0 +1,1 @@
+- Clone modifiers: Create > Add Plain, Random, Noise, Step, Delay or Target Clone Modifier (with a clone generator selected) changes where each clone sits, how it is turned and sized, and its tint. Delay and drifting noise follow the timeline; add a falloff field inside a modifier to limit where it acts.

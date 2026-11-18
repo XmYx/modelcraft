@@ -64,11 +64,12 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Falloff Field; Remap, Curve, Slow start, Slow finish, Combine with earlier fields | fields and field layers | Generic geometry and animation words; the reference's field and layer names are not used | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
+| Simulate (menu), Simulation (panel), Bake, Cancel, Play Cache | the simulation menu and panel | Generic words; the references' dynamics and cache menus are not used as labels | Use |
 | Particles, Emitter, Rate, Burst, Lifetime, Spread, Attractor, Vortex, Drag | particle systems | Generic words; no reference product's particle module, emitter or force names | Use |
 | Cloth, Pin, Stretch, Shear, Bend, Thickness, Self Collision, Wind, Turbulence | cloth simulation settings | Generic physical terms; no reference product's cloth module or setting names | Use |
 | Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
 | Hair, Guides, Strands, Density, Clump, Frizz, Comb, Cut, Length, Puff, Smooth (hair tools) | the references' curve-hair and fur systems, their guide and brush names | Plain English words; no reference product, module or brush name (with trademarks or prefixes) is used | Use |
-| Clone modifiers (planned) | effectors | "Effector" is the reference's term, so it is not used | Use |
+| Clone Modifier; modes Plain, Random, Noise, Step, Delay, Target; Move, Turn, Grow, Tint, Strength | effectors and their parameter tabs | "Effector" is the reference's term, so it is not used; "Shader" is called Noise because that is what the mode is, and "Time" is covered by Delay | Use |
 
 Names deliberately **not** used as labels: the reference products' names and their branded features
 (their remesher, sculpt-mesh, layer and brush product names, object/attribute manager names,

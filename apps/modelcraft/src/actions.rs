@@ -39,6 +39,7 @@ pub enum Action {
     AddDeformer(&'static str),
     AddField(&'static str),
     AddCloner(&'static str),
+    AddCloneModifier(&'static str),
     AddGroup,
     Extrude,
     Inset,
@@ -89,6 +90,7 @@ pub enum Action {
     ScriptRecord,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    Sim(crate::sim_ui::SimAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -96,6 +98,8 @@ pub enum Action {
     RadialMenu,
     Preferences,
     Objects(crate::object_manager::Op),
+    Snap(crate::snap_ui::Op),
+    Organize(crate::organize_ui::Op),
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -104,6 +108,8 @@ pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
 pub const FIELDS: &[&str] = modelcraft_engine::field::SHAPES;
 /// The clone layouts (`modelcraft_clone::KINDS`).
 pub const CLONERS: &[&str] = modelcraft_engine::clone::KINDS;
+/// The clone modifier modes (`modelcraft_clone::MODES`).
+pub const MODIFIERS: &[&str] = modelcraft_engine::clone::MODES;
 
 pub fn all() -> Vec<Action> {
     use Action::*;
@@ -144,9 +150,12 @@ pub fn all() -> Vec<Action> {
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
     v.extend(FIELDS.iter().map(|f| AddField(f)));
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
+    v.extend(MODIFIERS.iter().map(|m| AddCloneModifier(m)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
     v.extend(crate::object_manager::ALL.iter().map(|o| Objects(*o)));
+    v.extend(crate::snap_ui::all_ops().into_iter().map(Snap));
+    v.extend(crate::organize_ui::ALL.iter().map(|o| Organize(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -186,6 +195,7 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
+    v.extend(crate::sim_ui::SimAction::ALL.map(Sim));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -308,6 +318,7 @@ impl Action {
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
             AddField(f) => crate::tlf!("Add {shape} Falloff Field", shape = crate::field_ui::shape_label(f)),
             AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
+            AddCloneModifier(m) => crate::tlf!("Add {mode} Clone Modifier", mode = crate::modifier_ui::mode_label(m)),
             AddGroup => tl!("Add Group"),
             Extrude => tl!("Extrude"),
             Inset => tl!("Inset"),
@@ -355,6 +366,8 @@ impl Action {
             RadialMenu => tl!("Radial Menu"),
             Preferences => tl!("Preferences…"),
             Objects(o) => o.label(),
+            Snap(o) => o.label(),
+            Organize(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
@@ -372,6 +385,7 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
+            Sim(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -417,6 +431,7 @@ impl Action {
             AddDeformer(d) => return format!("create.deformer.{d}"),
             AddField(f) => return format!("create.field.{f}"),
             AddCloner(c) => return format!("create.clones.{c}"),
+            AddCloneModifier(m) => return format!("create.clone_modifier.{m}"),
             AddGroup => "create.group",
             Extrude => "mesh.extrude",
             Inset => "mesh.inset",
@@ -472,10 +487,13 @@ impl Action {
             RadialMenu => "view.radial_menu",
             Preferences => "edit.preferences",
             Objects(o) => o.id(),
+            Snap(o) => o.id(),
+            Organize(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
+            Sim(a) => a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
@@ -575,6 +593,7 @@ impl Action {
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
+            Sim(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
@@ -588,7 +607,8 @@ impl Action {
         match self {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddGroup => "Create",
+            Organize(_) => "Organize",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
@@ -598,6 +618,7 @@ impl Action {
             ScriptWindow | ScriptRun | ScriptRunSelection | ScriptRecord => "Scripts",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
+            Sim(_) => "Simulate",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",

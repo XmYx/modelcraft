@@ -227,10 +227,12 @@ impl Renderer {
         let camera = scene.camera.prepare(settings.width as f32 / settings.height as f32);
         let scratch = vec![PixelSums::default(); film.sum.len()];
         let previous = settings.previous_camera.map(|c| c.prepare(settings.width as f32 / settings.height as f32));
-        let restir =
-            settings.integrator.restir.active(&settings.integrator, film.sum.len()).then(|| crate::restir::RestirState::new(settings.width, settings.height));
+        // The guided and resampling estimators do not trace hair fibres, so a scene with hair uses the plain one.
+        let no_hair = scene.curves.is_empty();
+        let restir = (no_hair && settings.integrator.restir.active(&settings.integrator, film.sum.len()))
+            .then(|| crate::restir::RestirState::new(settings.width, settings.height));
         // Learned sampling and resampled direct lighting are separate estimators; the latter wins.
-        let learns = (settings.integrator.guiding || settings.integrator.adaptive_splitting) && restir.is_none();
+        let learns = (settings.integrator.guiding || settings.integrator.adaptive_splitting) && restir.is_none() && no_hair;
         let guide = learns.then(|| Guide::new(scene.bounds.min, scene.bounds.max, GuideConfig::default()));
         Ok(Renderer { scene, settings, camera, film, previous, scratch, guide, reference: Vec::new(), next_update: 1, restir })
     }

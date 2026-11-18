@@ -365,6 +365,12 @@ fn storage<T: Pod>(ctx: &GpuContext, label: &'static str, data: &[T], fallback: 
     Ok(ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage: wgpu::BufferUsages::STORAGE }))
 }
 
+/// The shader: the path tracer with the traversal of one of the two hierarchies.
+fn shader_source(wide: bool) -> String {
+    let traversal = if wide { include_str!("bvh_wide.wgsl") } else { include_str!("bvh_binary.wgsl") };
+    format!("{}\n{}", include_str!("pathtrace.wgsl"), traversal)
+}
+
 fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
     let scope = ctx.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let oom = ctx.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
@@ -380,6 +386,9 @@ fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
 impl GpuRenderer {
     /// Upload `scene` and prepare to render it at the size in `settings`.
     pub fn new(ctx: &GpuContext, scene: &Scene, settings: RenderSettings) -> Result<GpuRenderer, GpuError> {
+        if !scene.curves.is_empty() {
+            return Err(GpuError::Unsupported("hair curves"));
+        }
         let (w, h) = (settings.width, settings.height);
         let restir = settings.integrator.restir.active(&settings.integrator, w as usize * h as usize) && !scene.lights.is_empty();
         if (settings.integrator.guiding || settings.integrator.adaptive_splitting) && !restir {
@@ -515,7 +524,13 @@ impl GpuRenderer {
             words.extend(conditional.iter().map(|v| v.to_bits()));
         }
 
-        let nodes_buf = storage(ctx, "bvh nodes", &scene.accel.bvh.nodes, Zeroable::zeroed())?;
+        // The hierarchy the kernel walks: the compressed 8-wide one if the scene has it, else the binary one.
+        let wide = scene.accel.wide.as_ref();
+        let nodes_buf = match wide {
+            Some(w) => storage(ctx, "bvh nodes (8-wide)", bytemuck::cast_slice::<_, u32>(&w.nodes), 0u32)?,
+            None => storage(ctx, "bvh nodes", &scene.accel.bvh.nodes, Zeroable::zeroed())?,
+        };
+        let node_count = wide.map_or(scene.accel.bvh.nodes.len(), |w| w.nodes.len()) as u32;
         let tris_buf = storage(ctx, "triangles", &tris, Zeroable::zeroed())?;
         let attrs_buf = storage(ctx, "triangle attributes", &attrs, Zeroable::zeroed())?;
         let mats_buf = storage(ctx, "materials", &materials, Zeroable::zeroed())?;
@@ -556,7 +571,7 @@ impl GpuRenderer {
             roulette_start: i.roulette_start,
             light_count,
             ortho: u32::from(cam.orthographic),
-            node_count: scene.accel.bvh.nodes.len() as u32,
+            node_count,
             clamp_indirect: if i.clamp_indirect.is_finite() && i.clamp_indirect > 0.0 { i.clamp_indirect } else { 0.0 },
             strategy: match i.strategy {
                 Strategy::Mis => 0,
@@ -601,7 +616,7 @@ impl GpuRenderer {
             let device = &ctx.device;
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("craft path tracer"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("pathtrace.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(shader_source(wide.is_some()).into()),
             });
             let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("params"),
@@ -786,6 +801,9 @@ impl GpuRenderer {
 
 #[cfg(test)]
 mod denoise_tests;
+
+#[cfg(test)]
+mod wide_tests;
 
 #[cfg(test)]
 mod restir_tests;

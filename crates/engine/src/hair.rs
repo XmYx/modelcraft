@@ -8,9 +8,15 @@
 use std::sync::Arc;
 
 use glam::Vec3;
-use modelcraft_hair::{Amount, Brush, Dab, GrowSpec, InterpSpec, Limits, Stroke, Surface, SurfaceMaps, Symmetry, apply_stroke, grow_guides, paint_map};
+use std::path::Path;
+
+use modelcraft_hair::{
+    Amount, Brush, CurveExport, Dab, DynamicsSettings, GrowSpec, InterpSpec, Limits, Stroke, Surface, SurfaceMaps, Symmetry, apply_stroke, bake_guides,
+    grow_guides, paint_map, to_glb,
+};
 use modelcraft_scene::hair::HairData;
 use modelcraft_scene::{ObjectId, ObjectKind, SceneError};
+use modelcraft_sim::{Silent, SimTiming};
 use serde::{Deserialize, Serialize};
 
 use crate::command::Outcome;
@@ -101,6 +107,26 @@ pub enum HairCommand {
         map: MapKind,
         edit: MapEdit,
     },
+    /// Change how the guides move when baked (and the frames a bake covers). A bake made with other
+    /// settings is thrown away.
+    SetDynamics {
+        id: ObjectId,
+        #[serde(default)]
+        dynamics: Option<DynamicsSettings>,
+        #[serde(default)]
+        timing: Option<SimTiming>,
+        #[serde(default)]
+        seed: Option<u64>,
+    },
+    /// Simulate the guides over the frames and cache every frame: gravity, wind, damping, length
+    /// constraints and collision with the emitter. The timeline then plays the cache.
+    Bake {
+        id: ObjectId,
+    },
+    /// Throw the bake away; the hair shows its groomed shape again.
+    ClearBake {
+        id: ObjectId,
+    },
 }
 
 impl HairCommand {
@@ -112,6 +138,9 @@ impl HairCommand {
             HairCommand::SetRender { .. } => "Hair settings".into(),
             HairCommand::Stroke { stroke, .. } => format!("{} stroke", stroke.brush.kind.id()),
             HairCommand::Apply { brush, .. } => format!("{} all", brush.kind.id()),
+            HairCommand::SetDynamics { .. } => "Hair dynamics settings".into(),
+            HairCommand::Bake { .. } => "Bake hair dynamics".into(),
+            HairCommand::ClearBake { .. } => "Clear hair bake".into(),
             HairCommand::Map { map: MapKind::Mask, .. } => "Hair mask".into(),
             HairCommand::Map { map: MapKind::Density, .. } => "Hair density".into(),
         }
@@ -132,6 +161,12 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "A grooming stroke: id, stroke {brush {kind (comb, cut, length, puff, smooth, clump, frizz), radius, strength, falloff, invert, cut_length, frequency, seed}, symmetry {x, y, z}, dabs [{center, normal, delta, pressure}]}",
     ),
     ("apply", "One numeric brush dab, over the whole groom without a center: id, brush, symmetry?, center? [x,y,z], direction? [x,y,z] (comb)"),
+    (
+        "set_dynamics",
+        "Change how guides move when baked: id, dynamics? (gravity, wind, damping, stiffness, iterations, collide, clearance), timing? (start_frame, end_frame, fps, substeps), seed?",
+    ),
+    ("bake", "Simulate the guides over the frames and cache them (the timeline then plays the cache): id"),
+    ("clear_bake", "Throw the baked cache away: id"),
     (
         "map",
         "Edit the mask or the density on the emitter's vertices: id, map (mask, density), edit (fill + value | invert | clear | paint + center, radius, value, strength, falloff)",
@@ -182,7 +217,10 @@ pub fn apply(doc: &mut Document, cmd: &HairCommand, out: &mut Outcome) -> Result
             });
             let data = HairData::grow(&evaluated, grow, interp).map_err(err)?;
             let name = doc.scene.unique_name(name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Hair"));
-            out.created.push(doc.scene.add(name, ObjectKind::Hair { hair: Arc::new(data) }, Some(*mesh))?);
+            let id = doc.scene.add(name, ObjectKind::Hair { hair: Arc::new(data) }, Some(*mesh))?;
+            // A hair colour to start from (Properties edits the material like any object's).
+            doc.scene.edit(id)?.material.base_color = [0.45, 0.30, 0.18, 1.0];
+            out.created.push(id);
         }
         HairCommand::Remove { id } => {
             hair_data(doc, *id)?;
@@ -197,6 +235,7 @@ pub fn apply(doc: &mut Document, cmd: &HairCommand, out: &mut Outcome) -> Result
             }
             let maps = SurfaceMaps { density: data.density.as_deref(), length: None };
             data.guides = grow_guides(&surface, &data.grow, &maps, &Limits::default()).map_err(err)?;
+            data.baked = None;
             store(doc, *id, data)?;
         }
         HairCommand::SetRender { id, interp } => {
@@ -225,6 +264,7 @@ pub fn apply(doc: &mut Document, cmd: &HairCommand, out: &mut Outcome) -> Result
             let surface = emitter_surface(doc, emitter)?;
             let mut data = (*hair).clone();
             apply_stroke(&mut data.guides, &surface, data.mask.as_deref(), stroke).map_err(err)?;
+            data.baked = None;
             store(doc, *id, data)?;
         }
         HairCommand::Apply { id, brush, symmetry, center, direction } => {
@@ -244,6 +284,7 @@ pub fn apply(doc: &mut Document, cmd: &HairCommand, out: &mut Outcome) -> Result
             };
             let stroke = Stroke { brush, symmetry: *symmetry, dabs: vec![Dab { center: dab_center, normal: Vec3::Y, delta, pressure: 1.0 }] };
             apply_stroke(&mut data.guides, &surface, data.mask.as_deref(), &stroke).map_err(err)?;
+            data.baked = None;
             store(doc, *id, data)?;
         }
         HairCommand::Map { id, map, edit } => {
@@ -276,8 +317,129 @@ pub fn apply(doc: &mut Document, cmd: &HairCommand, out: &mut Outcome) -> Result
             }
             store(doc, *id, data)?;
         }
+        HairCommand::SetDynamics { id, dynamics, timing, seed } => {
+            let (hair, _) = hair_data(doc, *id)?;
+            let mut data = (*hair).clone();
+            if let Some(d) = dynamics {
+                d.validate().map_err(err)?;
+                data.dynamics = *d;
+            }
+            if let Some(t) = timing {
+                t.validate().map_err(|e| EngineError::Invalid(e.to_string()))?;
+                data.timing = *t;
+            }
+            if let Some(s) = seed {
+                data.seed = *s;
+            }
+            data.baked = None;
+            store(doc, *id, data)?;
+        }
+        HairCommand::Bake { id } => {
+            let (hair, emitter) = hair_data(doc, *id)?;
+            let surface = emitter_surface(doc, emitter)?;
+            let mut data = (*hair).clone();
+            // Gravity and wind are in the world; the bake runs in the emitter's space.
+            let to_local = doc.scene.world_matrix(emitter).inverse();
+            let mut local = data.dynamics;
+            local.gravity = to_local.transform_vector3(local.gravity);
+            local.wind = to_local.transform_vector3(local.wind);
+            let cache = bake_guides(&data.guides, &surface, &local, data.timing, data.seed, modelcraft_sim::DEFAULT_CACHE_BYTES, &mut Silent).map_err(err)?;
+            out.warnings.push(format!("{} frames of {} guides baked", cache.frames(), data.guides.len()));
+            data.baked = Some(Arc::new(cache));
+            store(doc, *id, data)?;
+        }
+        HairCommand::ClearBake { id } => {
+            let (hair, _) = hair_data(doc, *id)?;
+            if hair.baked.is_none() {
+                return invalid("there is no bake to clear");
+            }
+            let mut data = (*hair).clone();
+            data.baked = None;
+            store(doc, *id, data)?;
+        }
     }
     Ok(())
+}
+
+/// What an export writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HairExportFormat {
+    /// A glTF binary of line segments, with each point's width as `_WIDTH`.
+    Glb,
+    /// The point cache (`.mcpc`): every baked frame of the guides, or one frame without a bake.
+    Mcpc,
+}
+
+/// Which curves an export writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HairExportWhat {
+    Guides,
+    /// The render hairs (up to `max_strands`, a prefix of the groom).
+    Strands,
+}
+
+impl Document {
+    /// Write a hair object's curves to `path`, as they are at the scene's current frame. With `world`
+    /// the points are placed by the emitter's world matrix, otherwise they stay in its own space.
+    /// Returns a one-line summary.
+    pub fn export_hair(
+        &mut self,
+        id: ObjectId,
+        path: &Path,
+        format: HairExportFormat,
+        what: HairExportWhat,
+        max_strands: usize,
+        world: bool,
+    ) -> Result<String, EngineError> {
+        let (hair, emitter) = hair_data(self, id)?;
+        let frame = self.scene.anim.frame;
+        let at = hair.at_frame(frame);
+        let place = if world { self.scene.world_matrix(emitter) } else { glam::Mat4::IDENTITY };
+        let name = self.scene.get(id).map_or_else(|| "Hair".to_string(), |o| o.name.clone());
+        let width = &at.interp.width;
+        let taper = |t: f32| width.root + (width.tip - width.root) * t.powf(width.exponent);
+        let (points, pps, widths, label): (Vec<Vec3>, usize, Vec<f32>, &str) = match what {
+            HairExportWhat::Guides => {
+                let pps = at.guides.points_per_strand();
+                let w = (0..at.guides.all_points().len()).map(|i| taper((i % pps) as f32 / (pps - 1) as f32)).collect();
+                (at.guides.all_points().to_vec(), pps, w, "guides")
+            }
+            HairExportWhat::Strands => {
+                let mesh = self.eval.evaluate(&self.scene, emitter).mesh;
+                let wanted = at.strand_count(&mesh).min(max_strands.max(1));
+                let curves = at.strands_with_amount(&mesh, Amount::Count(wanted)).map_err(err)?;
+                let pps = curves.points_per_strand();
+                let w = (0..curves.strand_count())
+                    .flat_map(|i| (0..pps).map(move |k| (i, k)))
+                    .map(|(i, k)| curves.width_at(i, k as f32 / (pps - 1) as f32))
+                    .collect();
+                (curves.all_points().to_vec(), pps, w, "strands")
+            }
+        };
+        let bytes = match format {
+            HairExportFormat::Glb => to_glb(&CurveExport { points: &points, points_per_strand: pps, widths: Some(&widths) }, &name, place).map_err(err)?,
+            HairExportFormat::Mcpc => {
+                let place_all = |v: &[Vec3]| -> Vec<Vec3> { v.iter().map(|p| place.transform_point3(*p)).collect() };
+                let cache = match (&hair.baked, what) {
+                    (Some(b), HairExportWhat::Guides) if b.points() == points.len() => {
+                        let mut pc = modelcraft_formats::pointcache::PointCache::new(b.fps, b.start, b.step, b.points());
+                        for f in 0..b.frames() {
+                            pc.push(&place_all(b.frame(f).unwrap_or_default())).map_err(EngineError::Format)?;
+                        }
+                        pc
+                    }
+                    _ => {
+                        let mut pc = modelcraft_formats::pointcache::PointCache::new(hair.timing.fps, frame, 1.0, points.len());
+                        pc.push(&place_all(&points)).map_err(EngineError::Format)?;
+                        pc
+                    }
+                };
+                cache.to_bytes().map_err(EngineError::Format)?
+            }
+        };
+        craft_atomic::atomic_write(path, &bytes).map_err(|e| modelcraft_formats::FormatError::io(path, e))?;
+        Ok(format!("{} {label} of {pps} points written to {}", points.len() / pps, path.display()))
+    }
 }
 
 fn bounds(p: &[Vec3]) -> (Vec3, Vec3) {

@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project, uvlayout};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, Field, Modifier, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome};
@@ -144,7 +144,7 @@ impl Document {
             }
             project::HistoryRead::Found(h) => {
                 let steps = h.done.len();
-                match Document::rebuilt(h, &scene) {
+                match Document::rebuilt(*h, &scene) {
                     Ok(d) => {
                         let mut d = d;
                         d.history_note = (steps > 0).then(|| format!("Restored {steps} undo steps from the last session."));
@@ -866,9 +866,17 @@ impl Document {
         let ids: Vec<ObjectId> = match cmd {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
+            Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::SetTransform { id, transform } => {
+                if let Some(o) = self.scene.get(*id)
+                    && let Some(channel) = self.scene.protected_channel(*id, &o.transform, &transform.sanitized())
+                {
+                    return invalid(format!("{} is protected: its {channel} cannot change until the protection tag is removed", o.name));
+                }
+                vec![*id]
+            }
             Command::Rename { id, .. }
             | Command::Reparent { id, .. }
-            | Command::SetTransform { id, .. }
             | Command::SetMaterial { id, .. }
             | Command::SetPrimitive { id, .. }
             | Command::SetCageLevels { id, .. }
@@ -882,8 +890,9 @@ impl Document {
             _ => return Ok(()),
         };
         for id in ids {
-            if let Some(o) = self.scene.get(id).filter(|o| o.locked) {
-                return invalid(format!("{} is locked; unlock it first", o.name));
+            if self.scene.is_locked(id) {
+                let name = self.scene.get(id).map_or("an object", |o| o.name.as_str());
+                return invalid(format!("{name} is locked; unlock it first"));
             }
         }
         Ok(())
@@ -941,10 +950,20 @@ impl Document {
                 let name = self.scene.unique_name(&title(kind));
                 out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
             }
+            Command::AddCloneModifier { kind, cloner } => {
+                let modifier = Modifier::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone modifier {kind:?}")))?;
+                if !matches!(self.scene.get(*cloner).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
+                    return invalid("clone modifiers go inside a clone generator");
+                }
+                let name = self.scene.unique_name(&format!("{} modifier", title(kind)));
+                let id = self.scene.add(name, ObjectKind::CloneModifier { modifier, target: None }, Some(*cloner))?;
+                out.warnings.extend(self.eval.evaluate(&self.scene, *cloner).errors.iter().map(|e| e.message.clone()));
+                out.created.push(id);
+            }
             Command::AddField { kind, target } => {
                 let field = Field::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown field {kind:?}")))?;
-                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. })) {
-                    return invalid("falloff fields go inside a deformer");
+                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. })) {
+                    return invalid("falloff fields go inside a deformer or a clone modifier");
                 }
                 let name = self.scene.unique_name(&format!("{} field", title(kind)));
                 out.created.push(self.scene.add(name, ObjectKind::Field { field }, Some(*target))?);
@@ -954,6 +973,9 @@ impl Document {
                     if self.scene.get(*id).is_none() {
                         return Err(SceneError::NoObject(*id).into());
                     }
+                }
+                crate::organize::realize_instances_of(self, ids);
+                for id in ids {
                     self.scene.remove(*id);
                 }
             }
@@ -972,6 +994,10 @@ impl Document {
                     n.transform = o.transform;
                     n.material = o.material.clone();
                     n.visible = o.visible;
+                    n.pivot = o.pivot;
+                    n.layer = o.layer;
+                    n.user = o.user.clone();
+                    n.tags = o.tags.iter().filter(|t| !matches!(t, modelcraft_scene::Tag::LookAt { .. })).cloned().collect();
                     map.insert(old, nid);
                     out.created.push(nid);
                 }
@@ -1009,6 +1035,22 @@ impl Document {
                 ObjectKind::Field { field: f } => *f = field.sanitized(),
                 _ => return invalid("not a falloff field"),
             },
+            Command::SetCloneModifier { id, modifier, target } => {
+                let parent = self.scene.get(*id).and_then(|o| o.parent);
+                if target.is_some_and(|t| t == *id || Some(t) == parent || self.scene.get(t).is_none()) {
+                    return invalid("the target must be another object in the scene, not the clone generator");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::CloneModifier { modifier: m, target: t } => {
+                        *m = modifier.sanitized();
+                        *t = *target;
+                    }
+                    _ => return invalid("not a clone modifier"),
+                }
+                if let Some(p) = parent {
+                    out.warnings.extend(self.eval.evaluate(&self.scene, p).errors.iter().map(|e| e.message.clone()));
+                }
+            }
             Command::SetCloner { id, cloner, target } => {
                 if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
                     return invalid("the target must be another object in the scene");
@@ -1031,7 +1073,7 @@ impl Document {
                 let sid = self.scene.fresh_id();
                 self.mesh_steps(*id)?.push(Step { id: sid, enabled: true, op: op.clone() });
                 let e = self.eval.evaluate(&self.scene, *id);
-                out.warnings.extend(e.errors.iter().map(|e| e.message.clone()));
+                out.warnings.extend(e.errors.iter().chain(&e.warnings).map(|e| e.message.clone()));
             }
             Command::TransferUvs { id, source, max_distance, per_island } => {
                 let (id, source) = (*id, *source);
@@ -1165,6 +1207,7 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
@@ -1333,10 +1376,10 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
                 // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
                 || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
-                || !self.scene.visible(id)
+                || !self.scene.renders(id)
             {
                 continue;
             }
@@ -1352,7 +1395,7 @@ impl Document {
             let instances = evaluated.as_ref().and_then(|e| e.instances.clone());
             let mesh = if instances.is_some() { None } else { evaluated.map(|e| e.mesh) };
             let here = items.len();
-            items.push(Item { name: o.name.clone(), parent, transform: o.transform, mesh, material: o.material.clone() });
+            items.push(Item { name: o.name.clone(), parent, transform: o.effective_transform(), mesh, material: o.material.clone() });
             if let Some(inst) = instances {
                 let material = inst.source_object.and_then(|s| self.scene.get(s)).map(|s| s.material.clone()).unwrap_or_default();
                 let mut baked_vertices = 0usize;

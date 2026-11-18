@@ -115,6 +115,36 @@ pub struct UnwrapResult {
 }
 
 impl UnwrapResult {
+    /// What went less well than asked, in words: islands projected onto a plane, solves that did
+    /// not converge, ABF that fell back to LSCM, islands that are not discs.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, isl) in self.islands.iter().enumerate() {
+            let n = i + 1;
+            if isl.fallback {
+                out.push(format!("UV island {n} ({} faces) could not be solved and was projected onto a plane", isl.faces));
+            } else if !isl.converged {
+                out.push(format!(
+                    "UV island {n} ({} faces): the solve did not converge (residual {:.1e}); the layout may be distorted",
+                    isl.faces, isl.residual
+                ));
+            }
+            if let Some(a) = isl.abf
+                && !a.converged
+                && !isl.fallback
+            {
+                out.push(format!(
+                    "UV island {n}: angle-based flattening did not converge after {} iterations (constraint residual {:.1e}); the conformal solver was used instead",
+                    a.iterations, a.residual
+                ));
+            }
+            if !isl.disc && !isl.fallback {
+                out.push(format!("UV island {n} is not a disc; the flattening may overlap itself"));
+            }
+        }
+        out
+    }
+
     /// Islands that could not be solved and were projected onto a plane.
     pub fn fallbacks(&self) -> usize {
         self.islands.iter().filter(|i| i.fallback).count()

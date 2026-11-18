@@ -591,3 +591,47 @@ fn transfer_uvs_copies_the_first_selected_meshes_layout_onto_the_second() {
     // One undo takes it back.
     assert!(!app.doc.undo.is_empty());
 }
+
+#[test]
+fn pack_options_projection_from_the_view_and_warnings_are_reachable() {
+    let mut h = editor("Cube");
+    // Visible labels are the accessible names (so the name starts with what is on the button).
+    for name in ["Project UVs: Planar", "Project UVs: Box", "Project UVs: Cylindrical", "Project UVs: Spherical", "Project UVs: From View", "Pack Options…"] {
+        assert!(h.get_all_by_label(name).count() >= 1, "{name}");
+    }
+    // The popover holds the pack options and a Pack Now button.
+    h.get_by_label("Pack Options…").click();
+    h.run();
+    h.get_by_role_and_label(Role::SpinButton, "Pack margin").set_value_accesskit(0.03);
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Pack rotation");
+    h.get_by_role_and_label(Role::ComboBox, "Pack island sizes");
+    h.get_by_role_and_label(Role::CheckBox, "Fixed texel density");
+    h.get_by_role_and_label(Role::SpinButton, "Pack tiles");
+    h.get_by_label("Pack Now").click();
+    h.run();
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::PackUvs { margin, tiles: 1, texel_density: None, .. }) if (*margin - 0.03).abs() < 1e-6), "{s:?}");
+    // A fixed texel density turns into a step that picks the tile count.
+    h.state_mut().uv.pack_fixed_density = true;
+    h.state_mut().uv.pack_texel_density = 0.1;
+    crate::uv_ui::act(h.state_mut(), crate::uv_ui::UvAction::Pack);
+    h.run();
+    assert!(matches!(steps(&h).last(), Some(StepOp::PackUvs { texel_density: Some(d), .. }) if (*d - 0.1).abs() < 1e-6));
+    // Projecting from the view is a command, with the view's camera and the object's transform in it.
+    palette(&mut h, "Project UVs: From View");
+    let s = steps(&h);
+    assert!(
+        matches!(s.last(), Some(StepOp::ProjectUvs { projection: modelcraft_engine::scene::Projection::Camera { view_proj }, .. }) if view_proj.iter().all(|v| v.is_finite())),
+        "{s:?}"
+    );
+    // An unwrap that cannot make discs shows its warning under the toolbar.
+    let id = h.state().selection[0];
+    assert!(h.state_mut().run(Command::AddStep {
+        id,
+        op: StepOp::Unwrap { seams: vec![], angle: None, pins: vec![], auto_cut: false, margin: 0.01, method: Default::default(), from_patches: false },
+    }));
+    h.run();
+    h.run();
+    h.get_by_label_contains("Warning: UV island");
+}

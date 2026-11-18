@@ -1,0 +1,1 @@
+- Hair swings and settles: bake the guides under gravity and wind (with length constraints and collision with the mesh) and play the result on the timeline. Hair exports as glTF line segments and as a point cache, from the Hair menu and `modelcraft-cli hair-export`.
