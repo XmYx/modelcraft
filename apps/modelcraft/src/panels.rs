@@ -1115,6 +1115,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
     crate::script_ui::show(app, ctx);
+    crate::plugin_ui::show(app, ctx);
     crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);
