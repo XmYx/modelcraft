@@ -28,6 +28,8 @@ pub enum MaskOp {
     Hollows,
     /// Mask the ridges and bumps of the surface.
     Ridges,
+    /// Mask what the sky cannot reach: folds, holes and where parts meet.
+    Occlusion,
 }
 
 /// Step between detail levels (each level up subdivides once and keeps the sculpted detail).
@@ -224,6 +226,33 @@ pub enum Command {
         id: ObjectId,
         op: ShapeOp,
     },
+    /// Make patches on the mesh being sculpted.
+    SculptGroups {
+        id: ObjectId,
+        op: crate::groups::GroupOp,
+    },
+    /// Hide and show faces of the mesh being sculpted.
+    SculptVisibility {
+        id: ObjectId,
+        op: crate::groups::VisibilityOp,
+    },
+    /// Mask or hide what lies inside a rectangle or lasso drawn on the screen.
+    SculptRegion {
+        id: ObjectId,
+        region: modelcraft_sculpt::ScreenRegion,
+        action: crate::groups::RegionAction,
+    },
+    /// Move everything on the normal's side of a plane onto the plane (object space).
+    SculptClip {
+        id: ObjectId,
+        point: glam::Vec3,
+        normal: glam::Vec3,
+    },
+    /// Make a new object from the masked faces, thickened into a closed shell.
+    SculptExtract {
+        id: ObjectId,
+        thickness: f32,
+    },
     /// Add a mesh object from raw geometry: `positions` as [x, y, z] and `faces` as lists of
     /// vertex indices (counter-clockwise). Faces that do not fit the vertices are dropped and
     /// reported as a warning, like an import.
@@ -288,7 +317,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
-        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op",
+        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}): id, op",
     ),
     ("set_step", "Change a history step: id, index, op"),
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
@@ -302,7 +331,18 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
     ("sculpt_stroke", "Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs}"),
-    ("sculpt_mask", "Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, {patch: {triangle}})"),
+    ("sculpt_mask", "Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}})"),
+    ("sculpt_groups", "Make patches while sculpting: id, op ({by_normal: {angle}}, by_uv_island, by_part, from_mask)"),
+    (
+        "sculpt_visibility",
+        "Hide and show faces while sculpting: id, op (show_all, invert, hide_masked, hide_unmasked, {hide_patch: {triangle}}, {show_patch: {triangle}}, {isolate: {triangle}})",
+    ),
+    (
+        "sculpt_region",
+        "Mask or hide inside a screen outline: id, region {view_proj (16 numbers, object to clip space), points [[x, y]…] in −1..1, front_only?, eye?}, action (mask, unmask, hide, isolate)",
+    ),
+    ("sculpt_clip", "Move what lies on the normal's side of a plane onto it: id, point, normal"),
+    ("sculpt_extract", "New object from the masked faces as a closed shell: id, thickness"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
         "sculpt_shape",
@@ -365,6 +405,32 @@ impl Command {
                 ShapeOp::Rename { .. } => "Rename shape layer",
             }
             .into(),
+            Command::SculptGroups { op, .. } => match op {
+                crate::groups::GroupOp::ByNormal { .. } => "Patches by angle",
+                crate::groups::GroupOp::ByUvIsland => "Patches by UV island",
+                crate::groups::GroupOp::ByPart => "Patches by part",
+                crate::groups::GroupOp::FromMask => "Patch from mask",
+            }
+            .into(),
+            Command::SculptVisibility { op, .. } => match op {
+                crate::groups::VisibilityOp::ShowAll => "Show all",
+                crate::groups::VisibilityOp::Invert => "Invert visibility",
+                crate::groups::VisibilityOp::HidePatch { .. } => "Hide patch",
+                crate::groups::VisibilityOp::ShowPatch { .. } => "Show patch",
+                crate::groups::VisibilityOp::Isolate { .. } => "Isolate patch",
+                crate::groups::VisibilityOp::HideMasked => "Hide masked",
+                crate::groups::VisibilityOp::HideUnmasked => "Hide unmasked",
+            }
+            .into(),
+            Command::SculptRegion { action, .. } => match action {
+                crate::groups::RegionAction::Mask => "Mask region",
+                crate::groups::RegionAction::Unmask => "Unmask region",
+                crate::groups::RegionAction::Hide => "Hide region",
+                crate::groups::RegionAction::Isolate => "Isolate region",
+            }
+            .into(),
+            Command::SculptClip { .. } => "Clip to plane".into(),
+            Command::SculptExtract { .. } => "Extract shell".into(),
             Command::AddMesh { .. } => "Add mesh".into(),
             Command::SetPositions { .. } => "Set positions".into(),
             Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),

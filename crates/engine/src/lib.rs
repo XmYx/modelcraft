@@ -14,6 +14,7 @@ mod constraints;
 pub mod control;
 mod deformers;
 mod document;
+mod groups;
 mod layers;
 pub mod organize;
 pub mod rig;
@@ -23,6 +24,7 @@ mod undo;
 pub use anim::{AnimCommand, KeyRef};
 pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
+pub use groups::{GroupOp, RegionAction, VisibilityOp};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use organize::OrganizeCommand;
 pub use rig::{BindMethod, RigCommand, WeightOp};
@@ -48,6 +50,8 @@ mod constraint_tests;
 mod deformer_tests;
 #[cfg(test)]
 mod gltf_tests;
+#[cfg(test)]
+mod groups_tests;
 #[cfg(test)]
 mod organize_tests;
 #[cfg(test)]

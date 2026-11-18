@@ -439,3 +439,38 @@ mod properties {
         }
     }
 }
+
+// ---- bounds ----
+
+#[test]
+fn layers_presets_and_ids_are_capped_and_a_refused_command_leaves_the_scene_alone() {
+    use modelcraft_scene::organize::{MAX_LAYERS, MAX_PRESETS};
+    let mut d = Document::new();
+    let a = cube(&mut d, "A");
+    for i in 0..MAX_LAYERS {
+        d.execute(Command::Organize(crate::OrganizeCommand::AddLayer { name: format!("L{i}"), ids: vec![] })).unwrap();
+    }
+    assert_eq!(d.scene.layers.len(), MAX_LAYERS);
+    let e = refused(&mut d, r#"{"cmd":"organize","op":"add_layer","name":"one too many"}"#);
+    assert!(e.contains("too many layers"), "{e}");
+    for i in 0..MAX_PRESETS {
+        d.execute(Command::Organize(crate::OrganizeCommand::SavePreset { from: a, name: format!("P{i}"), parts: None })).unwrap();
+    }
+    let e = refused(&mut d, r#"{"cmd":"organize","op":"save_preset","from":1,"name":"one too many"}"#);
+    assert!(e.contains("too many presets"), "{e}");
+    // A command naming more objects than the cap is refused before any work is done.
+    let many: Vec<ObjectId> = (0..=crate::organize::MAX_IDS as u64).map(ObjectId).collect();
+    let cmd = Command::Organize(crate::OrganizeCommand::SetUserAttr { ids: many, name: "x".into(), value: UserValue::Switch(true) });
+    assert!(d.execute(cmd).unwrap_err().to_string().contains("too many objects"));
+    // A hostile file with too many layers or presets is cut to the caps when it is read.
+    let mut v: serde_json::Value = serde_json::to_value(&d.scene).unwrap();
+    let layer = v["layers"][0].clone();
+    let layers = v["layers"].as_array_mut().unwrap();
+    for i in 0..1000u32 {
+        let mut l = layer.clone();
+        l["id"] = serde_json::json!(10_000 + i);
+        layers.push(l);
+    }
+    let s: modelcraft_scene::Scene = serde_json::from_value(v).unwrap();
+    assert_eq!(s.repaired().unwrap().layers.len(), MAX_LAYERS);
+}

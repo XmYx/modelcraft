@@ -181,6 +181,24 @@ mod tests {
     }
 
     #[test]
+    fn a_mesh_over_the_edge_budget_draws_no_lines_instead_of_stalling_the_frame() {
+        // A 400 x 400 grid has 320 k edges and a 600 x 600 one 721 k: only the second is over.
+        let grid = |n: u32| modelcraft_engine::ops::primitives::Primitive::Plane { width: 4.0, depth: 4.0, segments: n }.build().unwrap();
+        let mut s = Scene::new();
+        let id = s.add("A", modelcraft_engine::scene::ObjectKind::Group, None).unwrap();
+        let count = |n: u32| {
+            let m = Arc::new(grid(n));
+            let edges = m.edge_count();
+            let e = plan(&s, DisplayMode::Wireframe, &|_| false, &[(id, Some(m), Mat4::IDENTITY, [1.0; 4])]);
+            (edges, e.lines.len())
+        };
+        let (edges, lines) = count(400);
+        assert!(edges <= MAX_EDGES && lines == edges * 2, "{edges} edges drawn as {lines} line vertices");
+        let (edges, lines) = count(600);
+        assert!(edges > MAX_EDGES && lines == 0, "{edges} edges are over the budget and draw nothing");
+    }
+
+    #[test]
     fn a_tag_beats_the_view_mode() {
         let mut s = Scene::new();
         let a = s.add("A", modelcraft_engine::scene::ObjectKind::Group, None).unwrap();

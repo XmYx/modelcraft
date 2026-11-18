@@ -255,6 +255,7 @@ mod tests {
             active_shape: None,
             anchor: p.clone().into(),
             topology: None,
+            ..Default::default()
         };
         assert_eq!(read_layer(&write_layer(&layer)).unwrap(), l);
         // A version 1 blob (positions and mask only) still reads.
