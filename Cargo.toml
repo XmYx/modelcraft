@@ -27,6 +27,7 @@ craft-render-core = { path = "crates/craft-render-core" }
 craft-render-gpu = { path = "crates/craft-render-gpu" }
 modelcraft-uv = { path = "crates/uv" }
 modelcraft-uvpack = { path = "crates/uvpack" }
+modelcraft-hair = { path = "crates/hair" }
 
 # shared Craft libraries (storytold/craft-libs), pinned by commit like the other Craft apps
 craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }

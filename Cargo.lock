@@ -2562,6 +2562,7 @@ dependencies = [
  "glam",
  "modelcraft-engine",
  "modelcraft-formats",
+ "modelcraft-hair",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-render",
@@ -2613,6 +2614,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "craft-atomic",
+ "craft-image-codecs",
  "craft-mesh",
  "craft-zip",
  "glam",
@@ -2620,6 +2622,20 @@ dependencies = [
  "modelcraft-ops",
  "modelcraft-scene",
  "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "modelcraft-hair"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "modelcraft-mesh",
+ "modelcraft-ops",
+ "proptest",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

@@ -8,6 +8,7 @@ modelcraft-cli run scene.modelcraft script.jsonl -o out.modelcraft
 modelcraft-cli info scene.modelcraft          # object tree with counts
 modelcraft-cli validate model.glb             # evaluate and check every mesh
 modelcraft-cli export scene.modelcraft out.glb
+modelcraft-cli export-uv scene.modelcraft layout.png --size 2048   # UV layout as SVG or PNG
 modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
