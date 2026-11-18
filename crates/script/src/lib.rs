@@ -15,10 +15,13 @@
 
 mod api;
 pub mod docs;
+pub mod draft;
 mod error;
 pub mod highlight;
 mod host;
 mod limits;
+pub mod macros;
+mod pacing;
 mod perm;
 mod session;
 
@@ -26,8 +29,9 @@ pub use api::events::{Event, EventKind, ToolInfo};
 pub use error::{ErrorKind, ScriptError};
 pub use host::{LineKind, OutLine, RunContext};
 pub use limits::Limits;
+pub use pacing::{EventPacer, PlaybackPolicy};
 pub use perm::{Access, Permissions};
-pub use session::{RunReport, Session};
+pub use session::{Fired, RunReport, Session};
 
 #[cfg(test)]
 mod tests;

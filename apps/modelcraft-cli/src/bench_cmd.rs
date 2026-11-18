@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use modelcraft_render::pathtrace::{Film, PixelOrder, RenderSettings, Renderer, Scene, relative_mse, scenes};
+use modelcraft_render::pathtrace::{DenoiseMode, Film, PixelOrder, RenderSettings, Renderer, RestirSettings, Scene, relative_mse, scenes};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
 
 pub const USAGE: &str = "  render-bench [options]            error against time on the benchmark scenes (JSON lines, then a table)
@@ -23,6 +23,9 @@ pub const USAGE: &str = "  render-bench [options]            error against time 
       --order z|independent         pixel order of the sample sequence (default z)
       --guiding                     learn where light comes from and sample that way (CPU)
       --splitting                   end or multiply paths by their expected contribution (CPU)
+      --restir unbiased|viewport    resampled direct light at the first surface (CPU and GPU)
+      --restir-candidates N --restir-neighbors N
+      --denoise [svgf|nfor]         also filter each image and report its error and the filter's time
                                     (the reference is always rendered without either)";
 
 pub struct BenchArgs {
@@ -35,6 +38,8 @@ pub struct BenchArgs {
     pub order: PixelOrder,
     pub guiding: bool,
     pub splitting: bool,
+    pub restir: RestirSettings,
+    pub denoise: DenoiseMode,
 }
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
@@ -69,6 +74,8 @@ pub fn parse(a: &[String]) -> Result<BenchArgs, String> {
         },
         guiding: a.iter().any(|x| x == "--guiding"),
         splitting: a.iter().any(|x| x == "--splitting"),
+        restir: crate::render_cmd::parse_restir(a)?,
+        denoise: crate::render_cmd::parse_denoise(a)?,
     })
 }
 
@@ -115,6 +122,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         let mut s = settings(seed);
         s.integrator.guiding = args.guiding;
         s.integrator.adaptive_splitting = args.splitting;
+        s.integrator.restir = args.restir;
         s
     };
     // The reference: two independent halves, compared and then averaged.
@@ -128,14 +136,25 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
     let mut rows = Vec::new();
     for spp in &args.budgets {
         let (mut errors, mut seconds) = (Vec::new(), Vec::new());
+        let (mut filtered_errors, mut filter_seconds) = (Vec::new(), Vec::new());
         for seed in 0..args.seeds {
             let (film, s) = run(&scene, gpu, tested(seed + 1), *spp)?;
             errors.push(relative_mse(&film.mean(), &reference));
             seconds.push(s);
+            if args.denoise != DenoiseMode::Off {
+                let t = Instant::now();
+                let image = film.denoise(args.denoise).map_err(|e| e.to_string())?;
+                filter_seconds.push(t.elapsed().as_secs_f64());
+                filtered_errors.push(relative_mse(&image, &reference));
+            }
         }
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
         let (e, s) = (mean(&errors), mean(&seconds));
+        let denoised = (!filtered_errors.is_empty()).then(|| (mean(&filtered_errors), median(&filtered_errors), mean(&filter_seconds)));
         rows.push(serde_json::json!({
+            "denoised_rel_mse": denoised.map(|d| d.0),
+            "denoised_rel_mse_median": denoised.map(|d| d.1),
+            "denoise_seconds": denoised.map(|d| d.2),
             "spp": spp,
             "seconds": s,
             "rel_mse": e,
@@ -151,6 +170,8 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         "size": args.size,
         "guiding": args.guiding,
         "splitting": args.splitting,
+        "restir": format!("{:?}", args.restir.mode),
+        "denoise": format!("{:?}", args.denoise),
         "triangles": scene.triangle_count(),
         "build_seconds": build_seconds,
         "reference_spp": half * 2,
@@ -179,10 +200,22 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
     let mut table = String::from(
         "| Scene | Triangles | spp | Seconds | relMSE mean (min–max) | relMSE median | Efficiency | Seconds to relMSE 0.01 |\n|---|---|---|---|---|---|---|---|\n",
     );
+    let mut filtered = String::from("| Scene | spp | relMSE before | relMSE after | Times lower | Filter ms per image |\n|---|---|---|---|---|---|\n");
     for name in &args.scenes {
         match bench_scene(name, args, gpu.as_ref()) {
             Ok(report) => {
                 println!("{report}");
+                for r in report["budgets"].as_array().into_iter().flatten() {
+                    if let (Some(after), Some(secs)) = (r["denoised_rel_mse"].as_f64(), r["denoise_seconds"].as_f64()) {
+                        let before = r["rel_mse"].as_f64().unwrap_or(0.0);
+                        filtered.push_str(&format!(
+                            "| {name} | {} | {before:.4} | {after:.4} | {:.1} | {:.1} |\n",
+                            r["spp"],
+                            before / after.max(1e-12),
+                            secs * 1000.0
+                        ));
+                    }
+                }
                 let rows = report["budgets"].as_array().cloned().unwrap_or_default();
                 let reach = time_to(&rows, 0.01).map_or_else(|| "not within these budgets".to_string(), |s| format!("{s:.2}"));
                 for (i, r) in rows.iter().enumerate() {
@@ -210,6 +243,9 @@ pub fn run_all(args: &BenchArgs) -> Result<(), String> {
         }
     }
     println!("\n{table}");
+    if args.denoise != DenoiseMode::Off {
+        println!("{:?} filter:\n\n{filtered}", args.denoise);
+    }
     Ok(())
 }
 

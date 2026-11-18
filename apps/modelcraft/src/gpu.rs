@@ -88,7 +88,26 @@ impl GpuState {
             e.2 = f;
             return key;
         }
+        // A mesh not seen before: triangles, normals and the upload. A deforming mesh comes
+        // through here every frame, so this is what playback of a skinned mesh pays.
+        let t0 = std::time::Instant::now();
         let g = GpuMesh::new(&self.rs.device, &buffers::mesh_data(m));
+        self.upload_ms = t0.elapsed().as_secs_f32() * 1000.0;
+        self.uploaded_vertices = m.vertex_count();
+        self.meshes.insert(key, (m.clone(), g, f));
+        key
+    }
+
+    /// Like [`GpuState::mesh`], with one normal per face (flat shading). The key is the mesh's
+    /// plus one: allocations are aligned, so the two never collide.
+    pub fn mesh_flat(&mut self, m: &Arc<PolyMesh>) -> usize {
+        let key = (Arc::as_ptr(m) as usize) | 1;
+        let f = self.frame;
+        if let Some(e) = self.meshes.get_mut(&key) {
+            e.2 = f;
+            return key;
+        }
+        let g = GpuMesh::new(&self.rs.device, &buffers::flat_data(m));
         self.meshes.insert(key, (m.clone(), g, f));
         key
     }

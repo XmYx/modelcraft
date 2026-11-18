@@ -166,20 +166,24 @@ impl Evaluator {
         let result = match &obj.kind {
             ObjectKind::Mesh { .. } => {
                 let mut e = self.steps_output(scene, id, usize::MAX);
-                let deformers: Vec<(Mat4, crate::Deformer)> = scene
+                let deformers: Vec<(Mat4, crate::Deformer, crate::FieldStack)> = scene
                     .children(id)
                     .into_iter()
                     .filter_map(|c| scene.get(c))
                     .filter(|c| c.visible)
                     .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.transform.matrix().inverse(), *deformer)),
+                        ObjectKind::Deformer { deformer } => Some((c.local_matrix().inverse(), *deformer, scene.field_stack(c.id))),
                         _ => None,
                     })
                     .collect();
                 if !deformers.is_empty() {
                     let mut m = (*e.mesh).clone();
-                    for (to_local, d) in deformers {
-                        d.apply(&mut m, to_local);
+                    for (to_local, d, fields) in deformers {
+                        if fields.is_empty() {
+                            d.apply(&mut m, to_local);
+                        } else {
+                            d.apply_weighted(&mut m, to_local, &|p| fields.weight(p));
+                        }
                     }
                     e.mesh = Arc::new(m);
                 }
@@ -201,7 +205,7 @@ impl Evaluator {
                     None => Evaluated::default(),
                     Some(c) => {
                         let inner = self.evaluate_depth(scene, c, depth + 1);
-                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        let local = scene.get(c).map(|o| o.local_matrix()).unwrap_or(Mat4::IDENTITY);
                         let mut m = (*inner.mesh).clone();
                         m.map_positions(|_, p| local.transform_point3(p));
                         self.runs += 1;
@@ -224,7 +228,7 @@ impl Evaluator {
                     Some(c) => {
                         let inner = self.evaluate_depth(scene, c, depth + 1);
                         errors.extend(inner.errors);
-                        let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+                        let local = scene.get(c).map(|o| o.local_matrix()).unwrap_or(Mat4::IDENTITY);
                         // The surface and vertices layouts sit on the target, seen from this generator.
                         let target_mesh = match target.filter(|t| *t != id && cloner.layout.needs_target()) {
                             Some(t) if scene.get(t).is_some() => {
@@ -254,12 +258,36 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
-            ObjectKind::Group
+            // The master's result, shared: the same mesh allocation, so the GPU upload is shared too.
+            ObjectKind::Instance { of } if *of != id => self.evaluate_depth(scene, *of, depth + 1),
+            ObjectKind::Sim { sim } => {
+                // A particle system is a generator: its pool, as instances of its source object
+                // (a mesh inside it) or of a small sphere. Other simulations drive their mesh.
+                let mut out = Evaluated::default();
+                if let (modelcraft_sim::SimKind::Particles(p), Some(cache)) = (&sim.kind, &sim.cache) {
+                    let (source, source_object) = match scene.generator_input(id) {
+                        Some(c) => (self.evaluate_depth(scene, c, depth + 1).mesh, Some(c)),
+                        None => (crate::sim::particle_sphere(), None),
+                    };
+                    let inst = crate::sim::particle_instances(scene, id, p, cache, source, source_object);
+                    if inst.clones.truncated {
+                        out.errors.push(StepError {
+                            step: usize::MAX,
+                            message: format!("more than {} particles are alive; the rest are not drawn", crate::MAX_CLONES),
+                        });
+                    }
+                    out.instances = Some(Arc::new(inst));
+                }
+                out
+            }
+            ObjectKind::Instance { .. }
+            | ObjectKind::Group
             | ObjectKind::Deformer { .. }
+            | ObjectKind::Field { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }
-            | ObjectKind::Sim { .. } => Evaluated::default(),
+            | ObjectKind::Hair { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result
@@ -284,6 +312,16 @@ fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
             h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
         key = h;
+    }
+    // An instance depends on its master (and on the master's master, when it is an instance too).
+    let mut c = id;
+    for _ in 0..crate::MAX_DEPTH {
+        let Some(ObjectKind::Instance { of }) = scene.get(c).map(|o| &o.kind) else { break };
+        if *of == id || scene.get(*of).is_none() {
+            break;
+        }
+        key = key.wrapping_mul(0x0100_0000_01b3) ^ scene.deep_rev(*of).rotate_left(13);
+        c = *of;
     }
     key
 }
@@ -366,15 +404,18 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
-        StepOp::Unwrap { seams, angle, pins, auto_cut, margin } => {
+        StepOp::Unwrap { seams, angle, pins, auto_cut, margin, method, from_patches } => {
             use modelcraft_uv::{Pin, SeamSet, UnwrapOptions};
             let mut set = SeamSet::from_vertex_pairs(seams);
             set.retain_existing(m);
             if let Some(a) = angle {
                 set.mark_by_angle(m, *a);
             }
+            if *from_patches {
+                set.mark_patch_borders(m);
+            }
             let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
-            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1) };
+            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
             modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
         StepOp::Seams { .. } => Ok(m.clone()),
@@ -387,15 +428,39 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             };
             modelcraft_uv::transform_corners(m, corners, &t).map_err(|e| OpError::Invalid(e.to_string()))
         }
-        StepOp::StitchUvs { edges } => {
+        StepOp::StitchUvs { edges, align, scale } => {
             edit::check_selection(edges, ne, "edge")?;
-            modelcraft_uv::stitch_edges(m, edges).map_err(|e| OpError::Invalid(e.to_string()))
+            modelcraft_uv::stitch_islands(m, edges, &modelcraft_uv::StitchOptions { align: *align, scale: *scale }).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::SetUvs { uvs } => {
+            if uvs.len() != m.corner_count() {
+                return Err(OpError::Invalid(format!("these UVs are for a mesh of {} corners, this one has {}", uvs.len(), m.corner_count())));
+            }
+            let mut out = m.clone();
+            out.set_uvs(&uvs.iter().map(|u| glam::Vec2::from(*u)).collect::<Vec<_>>())?;
+            Ok(out)
+        }
+        StepOp::RelaxUvs { corners, iterations, mode } => {
+            let opts = modelcraft_uv::RelaxOptions { iterations: *iterations, mode: *mode };
+            modelcraft_uv::relax_corners(m, corners, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+        }
+        StepOp::StraightenUvs { corners, strength } => {
+            modelcraft_uv::straighten_corners(m, corners, *strength).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
         StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
         StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
-        StepOp::PackUvs { margin, rotation, density } => {
-            let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
-            let (uvs, _) = modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+        StepOp::PackUvs { margin, rotation, density, tiles, texel_density } => {
+            let uvs = if *tiles > 1 || texel_density.is_some() {
+                let tiles = match texel_density {
+                    Some(d) => modelcraft_uvpack::UdimTiles::Density { texel_density: *d, max_tiles: modelcraft_uvpack::MAX_TILES },
+                    None => modelcraft_uvpack::UdimTiles::Count(*tiles),
+                };
+                let opts = modelcraft_uvpack::UdimOptions { margin: *margin, rotation: *rotation, density: *density, tiles };
+                modelcraft_uvpack::pack_udim_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?.0
+            } else {
+                let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
+                modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?.0
+            };
             let mut out = m.clone();
             out.set_uvs(&uvs)?;
             Ok(out)

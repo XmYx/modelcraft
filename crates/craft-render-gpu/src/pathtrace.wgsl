@@ -39,6 +39,14 @@ struct Params {
     texture_count: u32,
     has_cutouts: u32,
     has_env: u32,
+    restir_mode: u32,       // 0 off, 1 unbiased, 2 viewport
+    restir_candidates: u32,
+    restir_neighbors: u32,
+    restir_radius: f32,
+    restir_history: f32,
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
 }
 
 struct Node {
@@ -128,6 +136,7 @@ struct Pixel {
     albedo: vec4<f32>,   // w: distance to the first surface
     normal: vec4<f32>,   // w: squared luminance
     motion: vec4<f32>,   // xy: screen motion in pixels
+    odd: vec4<f32>,      // rgb: radiance of the samples with an odd index
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -141,6 +150,10 @@ struct Pixel {
 // Plain words: the light tree, the environment's sampling tables and the texture table.
 @group(0) @binding(7) var<storage, read> words: array<u32>;
 @group(0) @binding(8) var<storage, read_write> accum: array<Pixel>;
+// Resampled direct lighting (only the ReSTIR kernels use these): the first surface of every
+// pixel for two samples, and four planes of reservoirs.
+@group(0) @binding(9) var<storage, read_write> gbuf: array<GBuf>;
+@group(0) @binding(10) var<storage, read_write> resv: array<Resv>;
 
 const PI: f32 = 3.14159265358979;
 const INF: f32 = 3.0e38;
@@ -1173,8 +1186,13 @@ struct LightSample {
     delta: bool,
 }
 
-fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
-    var out = LightSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), 0.0, false);
+struct Pick {
+    entry: u32,
+    pmf: f32, // 0: nothing was chosen
+}
+
+// Choose a light for the shading point `p` (`Lights::pick`).
+fn pick_light(p: vec3<f32>, pick: f32) -> Pick {
     var entry = 0u;
     var pmf = 0.0;
     if params.light_tree != 0u && pick < params.positional_mass {
@@ -1196,8 +1214,29 @@ fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
         pmf = lights[entry].pmf;
     }
     if !(pmf > 0.0) {
-        return out;
+        return Pick(0u, 0.0);
     }
+    return Pick(entry, pmf);
+}
+
+// A point on a light as seen from one shading point (`LightPoint`): `contrib` is radiance
+// times the geometry term, `density` the density of the point on its light in its measure,
+// `to_solid` takes that density to solid angle.
+struct LPoint {
+    wi: vec3<f32>,
+    distance: f32,
+    contrib: vec3<f32>,
+    density: f32,
+    to_solid: f32,
+    delta: bool,
+    ok: bool,
+}
+
+fn no_point() -> LPoint {
+    return LPoint(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), 0.0, 1.0, false, false);
+}
+
+fn light_point(entry: u32, p: vec3<f32>, u: vec2<f32>) -> LPoint {
     let l = lights[entry];
     if l.kind <= 1u {
         let s = sqrt(max(u.x, 0.0));
@@ -1205,32 +1244,33 @@ fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
         let d = q - p;
         let dist2 = dot(d, d);
         if dist2 <= 0.0 {
-            return out;
+            return no_point();
         }
         let dist = sqrt(dist2);
         let wi = d / dist;
         let c = -dot(wi, normalize_or(cross(l.e1, l.e2), vec3<f32>(0.0)));
         if c == 0.0 || (c < 0.0 && l.kind == 0u) || l.area <= 0.0 {
-            return out;
+            return no_point();
         }
-        return LightSample(wi, dist, l.radiance, pmf * dist2 / (l.area * abs(c)), false);
+        let ac = abs(c);
+        return LPoint(wi, dist, l.radiance * (ac / dist2), 1.0 / l.area, dist2 / ac, false, true);
     }
     if l.kind == 2u {
         let d = l.p0 - p;
         let dist2 = dot(d, d);
         if dist2 <= 0.0 {
-            return out;
+            return no_point();
         }
-        return LightSample(d / sqrt(dist2), sqrt(dist2), l.radiance / dist2, pmf, true);
+        return LPoint(d / sqrt(dist2), sqrt(dist2), l.radiance / dist2, 1.0, 1.0, true, true);
     }
     if l.kind == 3u {
-        return LightSample(l.p0, INF, l.radiance, pmf, true);
+        return LPoint(l.p0, INF, l.radiance, 1.0, 1.0, true, true);
     }
     if l.kind == 5u {
         let d = l.p0 - p;
         let dist2 = dot(d, d);
         if dist2 <= 0.0 {
-            return out;
+            return no_point();
         }
         let wi = d / sqrt(dist2);
         let c = -dot(wi, l.e1);
@@ -1238,12 +1278,12 @@ fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
         let ci = l.e2.x;
         var falloff = 1.0;
         if c <= co {
-            return out;
+            return no_point();
         } else if c < ci && ci - co >= 1e-6 {
             let t = (c - co) / (ci - co);
             falloff = t * t * (3.0 - 2.0 * t);
         }
-        return LightSample(wi, sqrt(dist2), l.radiance * (falloff / dist2), pmf, true);
+        return LPoint(wi, sqrt(dist2), l.radiance * (falloff / dist2), 1.0, 1.0, true, true);
     }
     if l.kind == 6u {
         let disk = concentric_disk(u) * l.area;
@@ -1258,19 +1298,73 @@ fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
         if l.area > SUN_DISK_MIN {
             // A disk in the sky: radiance and a density over solid angle, whose ratio is the irradiance.
             let density = sun_density(l.area, local.z);
-            return LightSample(wi, INF, l.radiance * density, pmf * density, false);
+            return LPoint(wi, INF, l.radiance * density, density, 1.0, false, true);
         }
-        return LightSample(wi, INF, l.radiance, pmf, true);
+        return LPoint(wi, INF, l.radiance, 1.0, 1.0, true, true);
     }
     if params.env_w != 0u {
         let wi = env_map_sample(u);
         let pdf = env_map_pdf(wi);
         if !(pdf > 0.0) {
-            return out;
+            return no_point();
         }
-        return LightSample(wi, INF, env_radiance(wi), pmf * pdf, false);
+        return LPoint(wi, INF, env_radiance(wi), pdf, 1.0, false, true);
     }
-    return LightSample(uniform_sphere(u), INF, l.radiance, pmf / (4.0 * PI), false);
+    return LPoint(uniform_sphere(u), INF, l.radiance, 1.0 / (4.0 * PI), 1.0, false, true);
+}
+
+fn sample_light(p: vec3<f32>, pick: f32, u: vec2<f32>) -> LightSample {
+    let out = LightSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), 0.0, false);
+    let pk = pick_light(p, pick);
+    if !(pk.pmf > 0.0) {
+        return out;
+    }
+    let lp = light_point(pk.entry, p, u);
+    if !lp.ok {
+        return out;
+    }
+    return LightSample(lp.wi, lp.distance, lp.contrib * lp.to_solid, pk.pmf * lp.density * lp.to_solid, lp.delta);
+}
+
+
+// ---- resampled direct lighting (ReSTIR DI; craft-render-core::restir documents it) ---------
+
+const RS_NONE: u32 = 0xffffffffu;
+const SALT_CANDIDATES: u32 = 0x9e3779b1u;
+const SALT_SPATIAL: u32 = 0x7f4a7c15u;
+const SALT_TEMPORAL: u32 = 0x2545f491u;
+const DEPTH_TOLERANCE: f32 = 0.1;
+const NORMAL_COSINE: f32 = 0.9;
+const MAX_NEIGHBORS: u32 = 16u;
+
+// The first surface a camera sample sees (slot: its place in the triangle table).
+struct GBuf {
+    slot: u32,
+    u: f32,
+    v: f32,
+    t: f32,
+    dir: vec4<f32>,
+    n: vec4<f32>,
+}
+
+// A reservoir: the kept point of a light and its unbiased contribution weight.
+struct Resv {
+    entry: u32,
+    ux: f32,
+    uy: f32,
+    w: f32,
+    m: f32,
+    pa: u32,
+    pb: u32,
+    pc: u32,
+}
+
+fn gbuf_empty() -> GBuf {
+    return GBuf(RS_NONE, 0.0, 0.0, 0.0, vec4<f32>(0.0), vec4<f32>(0.0));
+}
+
+fn resv_empty() -> Resv {
+    return Resv(RS_NONE, 0.0, 0.0, 0.0, 0.0, 0u, 0u, 0u);
 }
 
 // ---- transport --------------------------------------------------------------------------
@@ -1354,6 +1448,11 @@ fn shading_frame(m: Mat, tri: Tri, at: Attr, uv: vec2<f32>, ng: vec3<f32>, frame
     }
     return Frame(t, cross(n, t), n);
 }
+
+// Resampled direct lighting at the first surface: set by the shading kernel before `radiance`.
+var<private> rs_active: bool;
+var<private> rs_resv: Resv;
+var<private> rs_killed: bool;
 
 fn radiance(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
     var o = origin;
@@ -1502,7 +1601,11 @@ fn radiance(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
         let bsdf = bsdf_new(surf, to_local(frame, -d), inside);
 
         // Direct light from one chosen light.
-        if params.strategy != 2u && params.light_count > 0u {
+        if depth == 0u && rs_active {
+            // The first surface's direct light comes from its resampled reservoir.
+            let c = restir_direct(p, ng, frame, bsdf, transmissive);
+            total += min(sanitize(throughput * c), vec3<f32>(clamp_to));
+        } else if params.strategy != 2u && params.light_count > 0u {
             let pick = next1();
             let u = next2();
             let ls = sample_light(p, pick, u);
@@ -1576,6 +1679,38 @@ fn project_previous(p: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(0.0);
 }
 
+
+struct CamRay {
+    o: vec3<f32>,
+    d: vec3<f32>,
+    ndc: vec2<f32>,
+}
+
+// The camera ray through a point of pixel (x, y) and a point of the lens.
+fn camera_ray(x: u32, y: u32, jitter: vec2<f32>, lens: vec2<f32>) -> CamRay {
+    let ndc = vec2<f32>(
+        (f32(x) + jitter.x) / f32(params.size.x) * 2.0 - 1.0,
+        1.0 - (f32(y) + jitter.y) / f32(params.size.y) * 2.0,
+    );
+    let sx = ndc.x * params.cam_origin.w;
+    let sy = ndc.y * params.cam_right.w;
+    var o = params.cam_origin.xyz;
+    var d = params.cam_forward.xyz;
+    if params.ortho != 0u {
+        o += params.cam_right.xyz * sx + params.cam_up.xyz * sy;
+    } else {
+        let dir = params.cam_forward.xyz + params.cam_right.xyz * sx + params.cam_up.xyz * sy;
+        d = normalize(dir);
+        if params.cam_up.w > 0.0 {
+            let focus = o + dir * params.cam_forward.w;
+            let l = concentric_disk(lens) * params.cam_up.w;
+            o += params.cam_right.xyz * l.x + params.cam_up.xyz * l.y;
+            d = normalize(focus - o);
+        }
+    }
+    return CamRay(o, d, ndc);
+}
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if gid.x >= params.size.x || gid.y >= params.size.y {
@@ -1588,6 +1723,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var depth = 0.0;
     var luminance_sq = 0.0;
     var motion = vec2<f32>(0.0);
+    var odd = vec3<f32>(0.0);
     for (var s = 0u; s < params.samples; s++) {
         s_index = params.first_sample + s;
         s_seed = seed;
@@ -1599,28 +1735,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         let jitter = next2();
         let lens = next2();
-        let ndc = vec2<f32>(
-            (f32(gid.x) + jitter.x) / f32(params.size.x) * 2.0 - 1.0,
-            1.0 - (f32(gid.y) + jitter.y) / f32(params.size.y) * 2.0,
-        );
-        let sx = ndc.x * params.cam_origin.w;
-        let sy = ndc.y * params.cam_right.w;
-        var o = params.cam_origin.xyz;
-        var d = params.cam_forward.xyz;
-        if params.ortho != 0u {
-            o += params.cam_right.xyz * sx + params.cam_up.xyz * sy;
-        } else {
-            let dir = params.cam_forward.xyz + params.cam_right.xyz * sx + params.cam_up.xyz * sy;
-            d = normalize(dir);
-            if params.cam_up.w > 0.0 {
-                let focus = o + dir * params.cam_forward.w;
-                let l = concentric_disk(lens) * params.cam_up.w;
-                o += params.cam_right.xyz * l.x + params.cam_up.xyz * l.y;
-                d = normalize(focus - o);
-            }
-        }
+        let cr = camera_ray(gid.x, gid.y, jitter, lens);
+        let ndc = cr.ndc;
+        let o = cr.o;
+        let d = cr.d;
         let l = radiance(o, d);
         acc += l;
+        if ((params.first_sample + s) & 1u) == 1u {
+            odd += l;
+        }
         let lum = luminance(l);
         luminance_sq += lum * lum;
         albedo += f_albedo;
@@ -1638,4 +1761,498 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     accum[pixel].albedo += vec4<f32>(albedo, depth);
     accum[pixel].normal += vec4<f32>(normal, luminance_sq);
     accum[pixel].motion += vec4<f32>(motion, 0.0, 0.0);
+    accum[pixel].odd += vec4<f32>(odd, 0.0);
+}
+
+// ---- resampled direct lighting kernels ----------------------------------------------------
+
+// The sampler of one phase of sample `s` of pixel (x, y) (the render's seed salted per phase).
+fn init_sampler(x: u32, y: u32, s: u32, salt: u32) {
+    let base = params.seed ^ salt;
+    s_index = s;
+    s_dim = 0u;
+    s_seed = hash_combine(hash_combine(base, x), y);
+    if params.z_bits < 32u && (params.z_bits == 0u || s < (1u << (32u - params.z_bits))) {
+        s_index = (s << params.z_bits) | spread_bits(x) | (spread_bits(y) << 1u);
+        s_seed = hash32(base ^ 0x5bd1e995u);
+    }
+}
+
+// A first surface ready to be lit.
+struct Shd {
+    ok: bool,
+    p: vec3<f32>,
+    ng: vec3<f32>,
+    frame: Frame,
+    bsdf: Bsdf,
+    transmissive: bool,
+}
+
+fn shade_gbuf(g: GBuf) -> Shd {
+    var sh: Shd;
+    sh.ok = false;
+    if g.slot == RS_NONE {
+        return sh;
+    }
+    let tri = tris[g.slot];
+    let at = attrs[g.slot];
+    let bw = 1.0 - g.u - g.v;
+    let d = g.dir.xyz;
+    let p = tri.p0 + tri.e1 * g.u + tri.e2 * g.v;
+    let gn = cross(tri.e1, tri.e2);
+    let gl = length(gn);
+    if !(gl > 0.0) {
+        return sh;
+    }
+    var ng = gn / gl;
+    let front = dot(ng, d) < 0.0;
+    if !front {
+        ng = -ng;
+    }
+    var ns = normalize_or(at.n0 * bw + at.n1 * g.u + at.n2 * g.v, ng);
+    if dot(ns, ng) < 0.0 {
+        ns = -ns;
+    }
+    let uv = at.uv0 * bw + at.uv1 * g.u + at.uv2 * g.v;
+    let m = materials[at.material];
+    var frame = frame_new(ns);
+    if (m.flags & FLAG_AXES) != 0u {
+        frame = shading_frame(m, tri, at, uv, ng, frame);
+    }
+    let transmissive = (m.flags & FLAG_TRANSMISSIVE) != 0u;
+    let inside = transmissive && !front;
+    let surf = surface_params(m, uv);
+    sh.bsdf = bsdf_new(surf, to_local(frame, -d), inside);
+    sh.p = p;
+    sh.ng = ng;
+    sh.frame = frame;
+    sh.transmissive = transmissive;
+    sh.ok = true;
+    return sh;
+}
+
+// The first surface of a camera sample, passing through cut-outs as `radiance` does.
+fn primary_surface(origin: vec3<f32>, d: vec3<f32>) -> GBuf {
+    var o = origin;
+    var passes = 0u;
+    for (var k = 0u; k < 1024u; k++) {
+        let hit = trace_closest(o, d);
+        if hit.slot == NO_HIT {
+            return gbuf_empty();
+        }
+        let tri = tris[hit.slot];
+        let at = attrs[hit.slot];
+        let bw = 1.0 - hit.u - hit.v;
+        let p = tri.p0 + tri.e1 * hit.u + tri.e2 * hit.v;
+        let gn = cross(tri.e1, tri.e2);
+        let gl = length(gn);
+        if !(gl > 0.0) {
+            return gbuf_empty();
+        }
+        var ng = gn / gl;
+        if dot(ng, d) >= 0.0 {
+            ng = -ng;
+        }
+        let uv = at.uv0 * bw + at.uv1 * hit.u + at.uv2 * hit.v;
+        let m = materials[at.material];
+        if (m.flags & FLAG_CUTOUTS) != 0u && passes < 256u {
+            let opacity = mat_opacity(m, uv);
+            if opacity < 1.0 && next1() >= opacity {
+                passes += 1u;
+                o = spawn_origin(p, ng, d);
+                continue;
+            }
+        }
+        return GBuf(hit.slot, hit.u, hit.v, hit.t, vec4<f32>(d, 0.0), vec4<f32>(0.0));
+    }
+    return gbuf_empty();
+}
+
+struct EvalR {
+    f: vec3<f32>,
+    pdf: f32,
+    ok: bool,
+}
+
+// What the surface sends back per unit of the point's measure, and the BSDF's density of the direction.
+fn rs_eval(s: ptr<function, Shd>, lp: LPoint) -> EvalR {
+    var r = EvalR(vec3<f32>(0.0), 0.0, false);
+    let wi = to_local((*s).frame, lp.wi);
+    let side = dot(lp.wi, (*s).ng);
+    if side * wi.z > 0.0 && (side > 0.0 || (*s).transmissive) {
+        let fe = bsdf_eval((*s).bsdf, wi);
+        if max3(fe.rgb) > 0.0 {
+            r = EvalR(fe.rgb, fe.w, true);
+        }
+    }
+    return r;
+}
+
+// The target function: luminance of the unshadowed contribution of a point.
+fn rs_target(s: ptr<function, Shd>, lp: LPoint) -> f32 {
+    let e = rs_eval(s, lp);
+    if !e.ok {
+        return 0.0;
+    }
+    let t = luminance(sanitize(e.f * lp.contrib));
+    if finite(t) {
+        return t;
+    }
+    return 0.0;
+}
+
+fn rs_visible(s: ptr<function, Shd>, lp: LPoint) -> bool {
+    return !occluded((*s).p, (*s).ng, lp.wi, lp.distance);
+}
+
+// `candidates` points drawn like next-event estimation draws them, one kept, checked for visibility.
+fn initial_reservoir(at: ptr<function, Shd>) -> Resv {
+    var w_sum = 0.0;
+    var entry = RS_NONE;
+    var keep_u = vec2<f32>(0.0);
+    var keep_target = 0.0;
+    for (var i = 0u; i < params.restir_candidates; i++) {
+        let pick = next1();
+        let u = next2();
+        let rand = next1();
+        let pk = pick_light((*at).p, pick);
+        if !(pk.pmf > 0.0) {
+            continue;
+        }
+        let lp = light_point(pk.entry, (*at).p, u);
+        if !lp.ok {
+            continue;
+        }
+        let t = rs_target(at, lp);
+        let src = pk.pmf * lp.density;
+        if !(t > 0.0 && src > 0.0) {
+            continue;
+        }
+        let w = t / src;
+        if !finite(w) {
+            continue;
+        }
+        w_sum += w;
+        if rand * w_sum < w {
+            entry = pk.entry;
+            keep_u = u;
+            keep_target = t;
+        }
+    }
+    var r = Resv(entry, keep_u.x, keep_u.y, 0.0, f32(params.restir_candidates), 0u, 0u, 0u);
+    if entry != RS_NONE && keep_target > 0.0 {
+        r.w = w_sum / (f32(params.restir_candidates) * keep_target);
+        let lp = light_point(entry, (*at).p, keep_u);
+        if !lp.ok || !rs_visible(at, lp) {
+            r.w = 0.0;
+        }
+    }
+    return r;
+}
+
+fn similar(g: GBuf, o: GBuf) -> bool {
+    return o.slot != RS_NONE && abs(o.t - g.t) <= DEPTH_TOLERANCE * max(g.t, o.t) && dot(g.n.xyz, o.n.xyz) >= NORMAL_COSINE;
+}
+
+// Streaming merge of reservoirs for one pixel.
+struct Merger {
+    w_sum: f32,
+    entry: u32,
+    u: vec2<f32>,
+    tgt: f32,
+    m: f32,
+    origin: u32,
+}
+
+fn merger_new() -> Merger {
+    return Merger(0.0, RS_NONE, vec2<f32>(0.0), 0.0, 0.0, 0u);
+}
+
+fn merger_add(mg: ptr<function, Merger>, at: ptr<function, Shd>, r: Resv, m: f32, rand: f32, id: u32) {
+    (*mg).m += m;
+    if r.entry == RS_NONE || !(r.w > 0.0) {
+        return;
+    }
+    let u = vec2<f32>(r.ux, r.uy);
+    let lp = light_point(r.entry, (*at).p, u);
+    if !lp.ok {
+        return;
+    }
+    let t = rs_target(at, lp);
+    if !(t > 0.0) {
+        return;
+    }
+    let w = t * r.w * m;
+    if !finite(w) || w <= 0.0 {
+        return;
+    }
+    (*mg).w_sum += w;
+    if rand * (*mg).w_sum < w {
+        (*mg).entry = r.entry;
+        (*mg).u = u;
+        (*mg).tgt = t;
+        (*mg).origin = id;
+    }
+}
+
+fn finish_biased(m: Merger) -> Resv {
+    if m.entry == RS_NONE || !(m.tgt > 0.0) || !(m.m > 0.0) {
+        return Resv(RS_NONE, 0.0, 0.0, 0.0, m.m, 0u, 0u, 0u);
+    }
+    return Resv(m.entry, m.u.x, m.u.y, m.w_sum / (m.m * m.tgt), m.m, 0u, 0u, 0u);
+}
+
+// 0: the pixel could not have produced the point; 1: it could; 2: it has a target for the point
+// but cannot see it.
+fn z_domain(sh: ptr<function, Shd>, entry: u32, u: vec2<f32>, known_visible: bool) -> u32 {
+    let lp = light_point(entry, (*sh).p, u);
+    if !lp.ok {
+        return 0u;
+    }
+    if !(rs_target(sh, lp) > 0.0) {
+        return 0u;
+    }
+    if known_visible || rs_visible(sh, lp) {
+        return 1u;
+    }
+    return 2u;
+}
+
+// The exact normalisation: Z counts the candidates of every merged pixel that could have produced
+// the kept point; the point must also be visible from this pixel.
+fn finish_unbiased(mg: ptr<function, Merger>, at: ptr<function, Shd>, used: ptr<function, array<i32, 17>>, count: u32, src_plane: u32, cur: u32, me: u32) -> Resv {
+    let n = params.size.x * params.size.y;
+    let empty = Resv(RS_NONE, 0.0, 0.0, 0.0, (*mg).m, 0u, 0u, 0u);
+    if (*mg).entry == RS_NONE || !((*mg).tgt > 0.0) {
+        return empty;
+    }
+    let origin = (*used)[(*mg).origin];
+    var z = 0.0;
+    for (var j = 0u; j < count; j++) {
+        let pi = (*used)[j];
+        var code = 0u;
+        if u32(pi) == me {
+            code = z_domain(at, (*mg).entry, (*mg).u, pi == origin);
+            if code == 2u {
+                // Not visible from this pixel: nothing to shade.
+                return empty;
+            }
+        } else {
+            var other = shade_gbuf(gbuf[cur * n + u32(pi)]);
+            if !other.ok {
+                continue;
+            }
+            code = z_domain(&other, (*mg).entry, (*mg).u, pi == origin);
+        }
+        if code == 1u {
+            z += resv[src_plane * n + u32(pi)].m;
+        }
+    }
+    if !(z > 0.0) {
+        return empty;
+    }
+    return Resv((*mg).entry, (*mg).u.x, (*mg).u.y, (*mg).w_sum / (z * (*mg).tgt), (*mg).m, 0u, 0u, 0u);
+}
+
+// Stage 1: the first surface and the initial reservoir of every pixel of sample `first_sample`.
+@compute @workgroup_size(8, 8)
+fn restir_initial(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= params.size.x || gid.y >= params.size.y {
+        return;
+    }
+    let s = params.first_sample;
+    let n = params.size.x * params.size.y;
+    let i = gid.y * params.size.x + gid.x;
+    init_sampler(gid.x, gid.y, s, 0u);
+    let jitter = next2();
+    let lens = next2();
+    let cr = camera_ray(gid.x, gid.y, jitter, lens);
+    var g = primary_surface(cr.o, cr.d);
+    var r = resv_empty();
+    var sh = shade_gbuf(g);
+    if sh.ok {
+        g.n = vec4<f32>(sh.frame.n, 0.0);
+        if params.light_count > 0u {
+            init_sampler(gid.x, gid.y, s, SALT_CANDIDATES);
+            r = initial_reservoir(&sh);
+        }
+    } else {
+        g = gbuf_empty();
+    }
+    gbuf[(s & 1u) * n + i] = g;
+    resv[i] = r;
+}
+
+// Stage 2 (viewport only): merge the previous sample's final reservoir at the same pixel.
+@compute @workgroup_size(8, 8)
+fn restir_temporal(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= params.size.x || gid.y >= params.size.y {
+        return;
+    }
+    let s = params.first_sample;
+    let n = params.size.x * params.size.y;
+    let i = gid.y * params.size.x + gid.x;
+    let cur = s & 1u;
+    let prev = cur ^ 1u;
+    let g = gbuf[cur * n + i];
+    let own = resv[i];
+    var out = own;
+    init_sampler(gid.x, gid.y, s, SALT_TEMPORAL);
+    let r_own = next1();
+    let r_hist = next1();
+    if s > 0u && g.slot != RS_NONE {
+        var at = shade_gbuf(g);
+        if at.ok {
+            let past = resv[(2u + prev) * n + i];
+            var mg = merger_new();
+            merger_add(&mg, &at, own, own.m, r_own, 0u);
+            if similar(g, gbuf[prev * n + i]) {
+                let m = min(past.m, params.restir_history * f32(params.restir_candidates));
+                merger_add(&mg, &at, past, m, r_hist, 1u);
+            }
+            out = finish_biased(mg);
+        }
+    }
+    resv[n + i] = out;
+}
+
+// Stage 3: merge neighbours' reservoirs into each pixel's.
+@compute @workgroup_size(8, 8)
+fn restir_spatial(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= params.size.x || gid.y >= params.size.y {
+        return;
+    }
+    let s = params.first_sample;
+    let n = params.size.x * params.size.y;
+    let i = gid.y * params.size.x + gid.x;
+    let cur = s & 1u;
+    let src_plane = select(0u, 1u, params.restir_mode == 2u);
+    let g = gbuf[cur * n + i];
+    let own = resv[src_plane * n + i];
+    var out = own;
+    init_sampler(gid.x, gid.y, s, SALT_SPATIAL);
+    let k = min(params.restir_neighbors, MAX_NEIGHBORS);
+    var picks: array<i32, 16>;
+    for (var j = 0u; j < k; j++) {
+        let d = concentric_disk(next2()) * params.restir_radius;
+        let nx = floor(f32(gid.x) + d.x + 0.5);
+        let ny = floor(f32(gid.y) + d.y + 0.5);
+        picks[j] = -1;
+        if nx >= 0.0 && ny >= 0.0 && nx < f32(params.size.x) && ny < f32(params.size.y) && !(u32(nx) == gid.x && u32(ny) == gid.y) {
+            picks[j] = i32(u32(ny) * params.size.x + u32(nx));
+        }
+    }
+    var rands: array<f32, 17>;
+    for (var j = 0u; j <= k; j++) {
+        rands[j] = next1();
+    }
+    if g.slot != RS_NONE && k > 0u {
+        var at = shade_gbuf(g);
+        if at.ok {
+            var mg = merger_new();
+            merger_add(&mg, &at, own, own.m, rands[0], 0u);
+            var used: array<i32, 17>;
+            used[0] = i32(i);
+            var count = 1u;
+            for (var j = 0u; j < k; j++) {
+                let ni = picks[j];
+                if ni < 0 {
+                    continue;
+                }
+                if !similar(g, gbuf[cur * n + u32(ni)]) {
+                    continue;
+                }
+                let nr = resv[src_plane * n + u32(ni)];
+                merger_add(&mg, &at, nr, nr.m, rands[j + 1u], count);
+                used[count] = ni;
+                count += 1u;
+            }
+            if count > 1u {
+                if params.restir_mode == 1u {
+                    out = finish_unbiased(&mg, &at, &used, count, src_plane, cur, i);
+                } else {
+                    out = finish_biased(mg);
+                }
+            }
+        }
+    }
+    resv[(2u + cur) * n + i] = out;
+}
+
+// Probability of choosing light entry `entry` when shading `p`.
+fn selection_pdf(entry: u32, p: vec3<f32>) -> f32 {
+    if entry < params.positional {
+        return select_pdf(entry, p);
+    }
+    return lights[entry].pmf;
+}
+
+// The direct light of the first surface from its final reservoir (called by `radiance`).
+fn restir_direct(p: vec3<f32>, ng: vec3<f32>, frame: Frame, bsdf: Bsdf, transmissive: bool) -> vec3<f32> {
+    let r = rs_resv;
+    if r.entry == RS_NONE || !(r.w > 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let lp = light_point(r.entry, p, vec2<f32>(r.ux, r.uy));
+    if !lp.ok {
+        return vec3<f32>(0.0);
+    }
+    let wi = to_local(frame, lp.wi);
+    let side = dot(lp.wi, ng);
+    if !(side * wi.z > 0.0 && (side > 0.0 || transmissive)) {
+        return vec3<f32>(0.0);
+    }
+    let fe = bsdf_eval(bsdf, wi);
+    if !(max3(fe.rgb) > 0.0) {
+        return vec3<f32>(0.0);
+    }
+    if params.restir_mode != 1u && occluded(p, ng, lp.wi, lp.distance) {
+        rs_killed = true;
+        return vec3<f32>(0.0);
+    }
+    let source = selection_pdf(r.entry, p) * lp.density * lp.to_solid;
+    var weight = 1.0;
+    if !lp.delta && params.strategy != 1u {
+        weight = power_heuristic(source, fe.w);
+    }
+    return fe.rgb * lp.contrib * (r.w * weight);
+}
+
+// Stage 4: shade every pixel with its final reservoir and continue the path.
+@compute @workgroup_size(8, 8)
+fn restir_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= params.size.x || gid.y >= params.size.y {
+        return;
+    }
+    let s = params.first_sample;
+    let n = params.size.x * params.size.y;
+    let i = gid.y * params.size.x + gid.x;
+    let plane = 2u + (s & 1u);
+    init_sampler(gid.x, gid.y, s, 0u);
+    let jitter = next2();
+    let lens = next2();
+    let cr = camera_ray(gid.x, gid.y, jitter, lens);
+    rs_active = true;
+    rs_killed = false;
+    rs_resv = resv[plane * n + i];
+    let l = radiance(cr.o, cr.d);
+    if rs_killed {
+        // The kept point is hidden from this pixel: the history it would leave counts for nothing.
+        resv[plane * n + i] = resv_empty();
+    }
+    let lum = luminance(l);
+    var motion = vec2<f32>(0.0);
+    if f_has_position && params.prev_up.w != 0.0 {
+        let before = project_previous(f_position);
+        if before.z != 0.0 {
+            motion = vec2<f32>((cr.ndc.x - before.x) * 0.5 * f32(params.size.x), (before.y - cr.ndc.y) * 0.5 * f32(params.size.y));
+        }
+    }
+    accum[i].radiance += vec4<f32>(l, 1.0);
+    accum[i].albedo += vec4<f32>(f_albedo, f_depth);
+    accum[i].normal += vec4<f32>(f_normal, lum * lum);
+    accum[i].motion += vec4<f32>(motion, 0.0, 0.0);
+    if (s & 1u) == 1u {
+        accum[i].odd += vec4<f32>(l, 0.0);
+    }
 }

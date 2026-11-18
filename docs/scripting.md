@@ -98,6 +98,14 @@ on the UI thread and is bounded by the limits below, so a runaway script cannot 
 for more than the time limit; Undo reverts what it did. Unsaved edits are never discarded without
 a prompt (New, Open and choosing a file ask first).
 
+**Unsaved text.** The window keeps what you typed. A moment (1.5 s) after the text last changed,
+and when the app exits, an unsaved script is written to `<state folder>/modelcraft/recovery/scripts/script-draft.json`
+(one file replaced atomically, with the file it belongs to); saving, emptying or discarding the
+text removes it. At the next start the text comes back as unsaved changes, on its file when that
+still exists (the file itself is untouched until you save), and the window opens with a note.
+Texts over 4 MiB are not kept (the status line says so once). The file format and its checks are
+`modelcraft_script::draft`; damaged or foreign files are ignored.
+
 **Files.** The scripts folder is `<user data folder>/modelcraft/scripts`. Its `*.rhai` files and
 one level of subfolders become the Scripts menu (the first comment line is the tooltip); the
 `quick` subfolder becomes the Quick Scripts strip under the tool options; `startup.rhai` runs once
@@ -130,13 +138,66 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
   as one undoable change; the startup script and a script open in the editor can both register
   tools. The app reports events once per frame, never while a drag or a brush stroke is going on
   (the change is reported when it ends), and what a callback changes itself is not reported
-  again, so callbacks cannot trigger themselves. A scene change by the user, a script or an
+  again, so callbacks cannot trigger themselves. While the timeline plays, `frame_changed` and
+  `scene_changed` (which change every drawn frame) are coalesced instead of running per frame:
+  one batch per 50 ms carrying the newest frame (`event.skipped` says how many frames it
+  stands for), all callbacks of a batch share an 8 ms budget and each is stopped after 25 ms, the
+  next batch waits until the last one's cost divided by a 25 % duty has passed, and what was held
+  back is delivered once when playback stops. A callback cut short only because the others used
+  up the budget is skipped, not counted as a failure. The policy is `PlaybackPolicy` in
+  `modelcraft-script` (`EventPacer` is the UI-free part; `Session::fire_within` takes the
+  budget).
+- **Undo.** What callbacks change never adds undo steps of its own. A callback that answers a
+  user step (or an agent's or a script's) is merged into that step, which keeps its name, so one
+  Undo takes both back and one Redo returns both. A callback that runs for no step (a selection
+  or frame change) makes one "Script callbacks" step for everything the callbacks of that frame
+  did. The redo history is held aside while callbacks run, so reacting to an Undo does not make
+  Redo impossible. (`Document::fold_undo_since` in the engine does the merging; only scene
+  changes merge, a sculpt stroke stays a step of its own.) A scene change by the user, a script or an
   agent all count; a frame change poses the scene, so it also reports a scene change. A callback
   that prints or fails shows in the Output panel.
 - **Arguments.** `--arg name=value` on the command line becomes `arg("name", default)` and
   `args()`; `current_file()` is the open project's file.
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
   [cli.md](cli.md#scripts).
+
+## Recorded macros
+
+Scripts menu, "Record Macro" (also in the command palette, and the first button of the Scripts
+window): from then on the commands the user runs are recorded; stop with the same command and the
+macro opens in the Scripts window as an ordinary script. Ctrl+Enter replays it as one undo step.
+
+```rhai
+// Macro: Macro 1 (3 commands), recorded in ModelCraft. Edit it freely; it runs as one undo step.
+let sel = selection();
+undo_group("Macro: Macro 1", || {
+    let r1 = cmd::add_primitive(#{ kind: "cube", name: "Box" }).created;
+    cmd::set_transform(#{ id: r1[0], transform: #{ ... } });
+    cmd::rename(#{ id: r1[0], name: "Crate" });
+});
+```
+
+- **What is recorded.** Commands that made an undo step, one step each (an `undo_group` a script
+  ran is one step), a frame change before a command that follows it, and starting or ending a
+  sculpt session. An Undo while recording takes the last step off the record and a Redo puts it
+  back, so the macro holds what the user kept. Changes callbacks make are not recorded. At most
+  20,000 commands are kept (the window says when it cut), and a macro over 8 MiB is refused.
+- **Objects.** Objects the macro created are bound to variables and later commands use them
+  (`r1[0]`), so a macro works in any scene. Objects that existed and were selected when recording
+  started are `sel[i]`, the i-th object of the selection the macro runs with: the script stops
+  with "select N object(s) first" when fewer are selected. Any other object keeps its number and
+  the macro's first lines say so.
+- **Save as Tool.** The Scripts window's "Save as Tool" writes the editor's text, with the name
+  typed beside it, to `Macros/<name>.rhai` in the scripts folder (a Scripts submenu) or, with
+  "Quick Scripts strip" checked, to `quick/<name>.rhai`. A file that is not a macro written this
+  way is never replaced: the name gets a number.
+- **From a file.** `modelcraft-cli macro-script steps.jsonl --name Pair -o pair.rhai` writes a macro
+  from one JSON command per line (the format of `run`) or from a crash journal, by replaying the
+  commands on an empty scene to learn which objects each creates.
+- **Limits.** A `batch` command is written as one command, so ids created inside it stay numbers;
+  a very long sculpt stroke (more than 20,000 dabs) is more than a script array may hold and the
+  replay stops with a limit error. `modelcraft_script::macros` has the writer, and
+  `Document::start_recording` the recorder in the engine.
 
 ## The model
 

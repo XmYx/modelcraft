@@ -19,12 +19,14 @@
 
 pub mod bsdf;
 pub mod camera;
+pub mod denoise;
 pub mod guided;
 pub mod integrator;
 pub mod light;
 pub mod material;
 pub mod math;
 pub mod render;
+pub mod restir;
 pub mod sampler;
 pub mod scene;
 pub mod scenes;
@@ -33,14 +35,21 @@ pub mod sky;
 
 pub use camera::Camera;
 pub use craft_render_bvh as bvh;
+pub use craft_render_denoise as filters;
 pub use craft_render_guide as guide;
 pub use craft_texture as texture;
+pub use denoise::DenoiseMode;
 pub use integrator::{IntegratorSettings, Strategy};
 pub use light::{Light, LightSampling};
 pub use material::Material;
 pub use render::{Film, PixelOrder, RenderSettings, Renderer, mean_rgb, mse, relative_mse, render_image};
+pub use restir::{RestirMode, RestirSettings};
 pub use scene::{Scene, SceneBuilder, SceneError};
 pub use shapes::MeshData;
 
+#[cfg(test)]
+mod denoise_tests;
+#[cfg(test)]
+mod restir_tests;
 #[cfg(test)]
 mod tests;

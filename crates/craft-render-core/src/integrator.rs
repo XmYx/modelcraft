@@ -47,6 +47,8 @@ pub struct IntegratorSettings {
     /// End or multiply paths by what they are expected to add to their pixel, from a radiance
     /// cache filled while rendering, instead of by throughput alone (see [`crate::guided`]).
     pub adaptive_splitting: bool,
+    /// Resampled direct lighting at the first surface (see [`crate::restir`]).
+    pub restir: crate::restir::RestirSettings,
 }
 
 impl Default for IntegratorSettings {
@@ -59,6 +61,7 @@ impl Default for IntegratorSettings {
             light_sampling: LightSampling::Tree,
             guiding: false,
             adaptive_splitting: false,
+            restir: crate::restir::RestirSettings::default(),
         }
     }
 }
@@ -82,7 +85,18 @@ pub fn radiance(scene: &Scene, ray: Ray, sampler: &mut Sampler, cfg: &Integrator
 }
 
 /// [`radiance`] together with the features of the first surface the path met.
-pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> (Rgb, Features) {
+pub fn radiance_and_features(scene: &Scene, ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings) -> (Rgb, Features) {
+    radiance_with(scene, ray, sampler, cfg, None)
+}
+
+/// Direct light at the first surface, supplied by the caller instead of next-event estimation:
+/// it receives the surface, its BSDF and whether the object is transmissive, and returns the
+/// light the surface sends back (multiple importance weight included).
+pub type PrimaryDirect<'a> = &'a mut dyn FnMut(&Surface, &Bsdf, bool) -> Rgb;
+
+/// [`radiance_and_features`] with the direct light at the first surface taken from `primary`
+/// when there is one (indirect bounces always use next-event estimation).
+pub fn radiance_with(scene: &Scene, mut ray: Ray, sampler: &mut Sampler, cfg: &IntegratorSettings, mut primary: Option<PrimaryDirect<'_>>) -> (Rgb, Features) {
     let mut features = Features::default();
     let mut first = true;
     let mut total = Vec3A::ZERO;
@@ -176,7 +190,10 @@ pub fn radiance_and_features(scene: &Scene, mut ray: Ray, sampler: &mut Sampler,
         let bsdf = Bsdf::new(&params, sf.frame.to_local(-ray.dir), inside);
 
         // Direct light from one chosen light.
-        if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
+        if let (0, Some(direct)) = (depth, primary.as_mut()) {
+            let c = direct(&sf, &bsdf, transmissive);
+            add(throughput * c, depth + 1);
+        } else if cfg.strategy != Strategy::BsdfOnly && !scene.lights.is_empty() {
             let pick = sampler.next1();
             let u = sampler.next2();
             if let Some(ls) = scene.lights.sample(&scene.positions, sf.p, pick, u, cfg.light_sampling)

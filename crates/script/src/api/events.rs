@@ -58,6 +58,8 @@ pub enum Event {
     /// The current frame of the timeline changed.
     FrameChanged {
         frame: f64,
+        /// Frame changes folded into this one while the timeline played (0 when none were).
+        skipped: u64,
     },
 }
 
@@ -117,7 +119,10 @@ pub fn event_map(e: &Event, selection: &[modelcraft_engine::scene::ObjectId]) ->
     let mut pairs = vec![("event", Dynamic::from(e.kind().name().to_string()))];
     match e {
         Event::SelectionChanged => pairs.push(("selection", Dynamic::from_array(selection.iter().map(|i| id_dyn(*i)).collect()))),
-        Event::FrameChanged { frame } => pairs.push(("frame", Dynamic::from_float(*frame))),
+        Event::FrameChanged { frame, skipped } => {
+            pairs.push(("frame", Dynamic::from_float(*frame)));
+            pairs.push(("skipped", Dynamic::from_int(INT::try_from(*skipped).unwrap_or(INT::MAX))));
+        }
         _ => {}
     }
     map_of(pairs)

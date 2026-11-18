@@ -717,7 +717,7 @@ fn callbacks_receive_their_event_and_only_theirs() {
     let texts = |reports: Vec<RunReport>| reports.into_iter().flat_map(|r| r.lines.into_iter().map(|l| l.text)).collect::<Vec<_>>();
     assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::SelectionChanged)), vec!["selected 1 via selection_changed"]);
     assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::SceneLoaded)), vec!["loaded"]);
-    assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::FrameChanged { frame: 12.5 })), vec!["frame 12.5"]);
+    assert_eq!(texts(s.fire(&mut d, &mut ctx, &Event::FrameChanged { frame: 12.5, skipped: 0 })), vec!["frame 12.5"]);
     // A callback changes the scene through commands, as undoable steps.
     let reports = s.fire(&mut d, &mut ctx, &Event::SceneChanged);
     assert!(reports[0].ok() && reports[0].commands == 1);
@@ -772,7 +772,7 @@ fn a_failing_callback_is_switched_off_and_a_runaway_one_is_stopped() {
     // A callback that never returns is stopped by the shorter event limit.
     s.run(&mut d, &mut ctx, "spin.rhai", "on_frame_changed(|e| { loop { } });");
     let t = std::time::Instant::now();
-    let reports = s.fire(&mut d, &mut ctx, &Event::FrameChanged { frame: 1.0 });
+    let reports = s.fire(&mut d, &mut ctx, &Event::FrameChanged { frame: 1.0, skipped: 0 });
     assert_eq!(reports[0].error.as_ref().map(|e| e.kind), Some(ErrorKind::Limit));
     assert!(t.elapsed() < Duration::from_secs(3));
 }

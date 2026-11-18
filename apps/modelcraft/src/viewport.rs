@@ -8,7 +8,7 @@ use glam::{Mat4, Quat, Vec2 as GVec2, Vec3};
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::PolyMesh;
 use modelcraft_engine::scene::pick::{self, Ray};
-use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Scene, Step, StepOp};
+use modelcraft_engine::scene::{DisplayMode, Object, ObjectId, ObjectKind, Scene, Step, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Dab};
 use modelcraft_render::buffers::{self, LineVertex};
 use modelcraft_render::{Camera, ViewPreset};
@@ -50,12 +50,14 @@ pub struct Bench {
     pub sculpt_ms: Vec<f32>,
     pub dab_ms: Vec<f32>,
     pub upload_ms: Vec<f32>,
-    last: Option<std::time::Instant>,
+    /// Playing the skinned benchmark character instead of sculpting ([`crate::rig_tools`]).
+    pub skin: Option<crate::rig_tools::SkinBench>,
+    pub(crate) last: Option<std::time::Instant>,
 }
 
 impl Bench {
     pub fn new(total: u32) -> Self {
-        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), last: None }
+        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), skin: None, last: None }
     }
 }
 
@@ -82,14 +84,19 @@ pub(crate) fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
     Ray { origin, dir }
 }
 
-/// Objects drawn as surfaces: meshes and cages, not cage inputs, groups or deformers.
+/// Objects drawn as surfaces: meshes, cages, clone generators and particle systems, not cage inputs, groups or deformers.
 fn drawables(scene: &Scene) -> Vec<ObjectId> {
     scene
         .tree_order()
         .into_iter()
         .map(|(id, _)| id)
         .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. })))
+        .filter(|id| {
+            matches!(
+                scene.get(*id).map(|o| &o.kind),
+                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } | ObjectKind::Instance { .. })
+            ) || scene.is_particles(*id)
+        })
         .collect()
 }
 
@@ -117,6 +124,9 @@ pub fn show(app: &mut ModelApp, ui: &mut egui::Ui) {
 }
 
 fn bench_tick(app: &mut ModelApp) {
+    if app.bench.as_ref().is_some_and(|b| b.skin.is_some()) {
+        return crate::rig_tools::bench_tick(app);
+    }
     let Some(b) = &mut app.bench else { return };
     let now = std::time::Instant::now();
     let dt = b.last.map(|t| now.duration_since(t).as_secs_f32() * 1000.0);
@@ -209,14 +219,16 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
     }
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
-    match app.workspace {
-        Workspace::Sculpt => {
-            // The rectangle and lasso tools take the drag instead of the brush.
-            if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
-                sculpt_input(app, ui, &resp, i, rect);
+    if !crate::hair_ui::input(app, ui, &resp, i, rect) {
+        match app.workspace {
+            Workspace::Sculpt => {
+                // The rectangle and lasso tools take the drag instead of the brush.
+                if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
+                    sculpt_input(app, ui, &resp, i, rect);
+                }
             }
+            _ => model_input(app, ui, &resp, i, rect),
         }
-        _ => model_input(app, ui, &resp, i, rect),
     }
     render(app, ui, i, rect);
     overlays(app, ui, &resp, i, rect);
@@ -745,7 +757,7 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
                     let delta = w.inverse().transform_vector3(now - last);
                     st.grab = Some((origin, n, now));
                     let mut center = st.last.unwrap_or(Vec3::ZERO);
-                    if kind == Some(BrushKind::Pull) {
+                    if kind.is_some_and(BrushKind::travels) {
                         // A pull travels with what it moves, picking up new surface on the way.
                         center += delta;
                         st.last = Some(center);
@@ -793,8 +805,12 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             }
         }
     }
-    let lines = scene_lines(app, i);
-    let overlay = face_overlay(app);
+    let mut lines = scene_lines(app, i);
+    let mut overlay = face_overlay(app);
+    let extras = crate::display_modes::plan(&app.doc.scene, app.display_mode, &|id| app.selection.contains(&id), &items);
+    lines.extend(extras.lines);
+    overlay.extend(extras.overlay);
+    let modes = extras.modes;
     let Some(g) = &mut app.gpu else {
         cpu_view(app, ui, i, rect, &items, &lines);
         return;
@@ -802,9 +818,13 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
     let mut specs = Vec::new();
-    for (id, m, w, tint) in &items {
+    for (n, (id, m, w, tint)) in items.iter().enumerate() {
         let Some(o) = app.doc.scene.get(*id) else { continue };
-        let key = m.as_ref().map(|m| g.mesh(m));
+        let mode = modes.get(n).copied().unwrap_or_default();
+        if !crate::display_modes::is_solid(mode) {
+            continue;
+        }
+        let key = if mode == DisplayMode::Flat { m.as_ref().map(|m| g.mesh_flat(m)) } else { m.as_ref().map(|m| g.mesh(m)) };
         let base = material_source(&app.doc.scene, o).material.base_color;
         specs.push(crate::gpu::DrawSpec {
             key,
@@ -825,10 +845,11 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
 type Item = (ObjectId, Option<Arc<PolyMesh>>, Mat4, [f32; 4]);
 const WHITE: [f32; 4] = [1.0; 4];
 
-/// The object whose material colours `o`: a clone generator is coloured by its source.
+/// The object whose material colours `o`: a clone generator or particle system is coloured by its source.
 fn material_source<'a>(scene: &'a Scene, o: &'a Object) -> &'a Object {
     match &o.kind {
         ObjectKind::Cloner { .. } => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
+        ObjectKind::Sim { .. } if scene.is_particles(o.id) => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
         _ => o,
     }
 }
@@ -847,6 +868,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
         out.extend(line(a.into(), b.into(), color));
     }
     for (a, b, color) in crate::anim_ui::path_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
+    for (a, b, color) in crate::hair_ui::guide_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
     if app.workspace == Workspace::Sculpt {
@@ -872,6 +896,21 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
         for e in 0..m.edge_count() as u32 {
             let (a, b) = m.edge_vertices(e);
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), color));
+        }
+    }
+    // Outline of the selected falloff fields (and of every field of a selected deformer).
+    let sel_fields: Vec<ObjectId> = app
+        .doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| matches!(o.kind, ObjectKind::Field { .. }) && app.doc.scene.visible(o.id))
+        .filter(|o| app.selection.contains(&o.id) || o.parent.is_some_and(|p| app.selection.contains(&p)))
+        .map(|o| o.id)
+        .collect();
+    for f in sel_fields {
+        for (a, b) in crate::field_ui::outline(&app.doc.scene, f) {
+            out.extend(line(a, b, [0.45, 0.85, 0.8, 0.9]));
         }
     }
     if app.mode == SelectMode::Edge
@@ -944,6 +983,7 @@ fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[Item],
 }
 
 fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
+    crate::hair_ui::overlay(app, ui, rect);
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
     // View name and focus/active outline.

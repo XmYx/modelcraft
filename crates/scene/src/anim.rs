@@ -378,7 +378,7 @@ impl Scene {
         if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
             return self.constraints.set_weight_attr(id, path, value).ok_or_else(|| SceneError::Invalid(format!("no numeric attribute {path:?}")));
         }
-        let o = self.objects.iter_mut().find(|o| o.id == id).ok_or(SceneError::NoObject(id))?;
+        let o = self.object_mut(id).ok_or(SceneError::NoObject(id))?;
         let changed = attr::set(o, path, value)?;
         if changed {
             o.rev = crate::next_rev();
@@ -554,7 +554,8 @@ impl Scene {
         for _ in 0..crate::MAX_DEPTH {
             let Some(cur) = c else { break };
             let Some(t) = self.transform_at(cur, frame) else { break };
-            m = t.matrix() * m;
+            let pivot = self.get(cur).map_or(Vec3::ZERO, |o| o.pivot);
+            m = t.matrix() * glam::Mat4::from_translation(-pivot) * m;
             c = self.get(cur).and_then(|o| o.parent);
         }
         m

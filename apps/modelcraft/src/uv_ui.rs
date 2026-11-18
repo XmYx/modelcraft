@@ -19,7 +19,8 @@ use egui::{Color32, Key, Mesh, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use glam::Vec2;
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::{NONE, PolyMesh};
-use modelcraft_engine::scene::{Density, Fit, ObjectId, ObjectKind, Projection, Rotation, StepOp, UvPin};
+use modelcraft_engine::scene::{Density, Fit, ObjectId, ObjectKind, Projection, Rotation, StepOp, UnwrapMethod, UvPin};
+use modelcraft_engine::uv::RelaxMode;
 use modelcraft_engine::uv::{
     Charts, Distortion, SeamSet, TriangleMetric, UvTransform, expand_to_uv_vertices, face_triangles, island_corners, measure, per_face, uv_vertex_corners,
 };
@@ -120,6 +121,12 @@ pub enum UvAction {
     ClearSeam,
     SeamsByAngle,
     Unwrap,
+    UnwrapAbf,
+    UnwrapGroups,
+    Relax,
+    Straighten,
+    Stitch,
+    Transfer,
     Pack,
     ProjectPlanar,
     ProjectBox,
@@ -129,12 +136,18 @@ pub enum UvAction {
 }
 
 impl UvAction {
-    pub const ALL: [UvAction; 11] = [
+    pub const ALL: [UvAction; 17] = [
         UvAction::Editor,
         UvAction::MarkSeam,
         UvAction::ClearSeam,
         UvAction::SeamsByAngle,
         UvAction::Unwrap,
+        UvAction::UnwrapAbf,
+        UvAction::UnwrapGroups,
+        UvAction::Relax,
+        UvAction::Straighten,
+        UvAction::Stitch,
+        UvAction::Transfer,
         UvAction::Pack,
         UvAction::ProjectPlanar,
         UvAction::ProjectBox,
@@ -150,6 +163,12 @@ impl UvAction {
             UvAction::ClearSeam => tl!("Clear Seam"),
             UvAction::SeamsByAngle => tl!("Mark Seams by Angle"),
             UvAction::Unwrap => tl!("Unwrap UVs"),
+            UvAction::UnwrapAbf => tl!("Unwrap UVs (Angle-Based)"),
+            UvAction::UnwrapGroups => tl!("Unwrap UVs by Polygon Groups"),
+            UvAction::Relax => tl!("Relax UVs"),
+            UvAction::Straighten => tl!("Straighten UVs"),
+            UvAction::Stitch => tl!("Stitch UV Islands"),
+            UvAction::Transfer => tl!("Transfer UVs"),
             UvAction::Pack => tl!("Pack UV Islands"),
             UvAction::ProjectPlanar => tl!("Project UVs: Planar"),
             UvAction::ProjectBox => tl!("Project UVs: Box"),
@@ -166,6 +185,12 @@ impl UvAction {
             UvAction::ClearSeam => "uv.clear_seam",
             UvAction::SeamsByAngle => "uv.seams_by_angle",
             UvAction::Unwrap => "uv.unwrap",
+            UvAction::UnwrapAbf => "uv.unwrap_abf",
+            UvAction::UnwrapGroups => "uv.unwrap_groups",
+            UvAction::Relax => "uv.relax",
+            UvAction::Straighten => "uv.straighten",
+            UvAction::Stitch => "uv.stitch",
+            UvAction::Transfer => "uv.transfer",
             UvAction::Pack => "uv.pack",
             UvAction::ProjectPlanar => "uv.project_planar",
             UvAction::ProjectBox => "uv.project_box",
@@ -257,6 +282,15 @@ pub struct UvUi {
     pub nudge: f32,
     /// Angle for "mark seams by angle", in degrees.
     pub seam_angle: f32,
+    /// The solver `Unwrap UVs` uses.
+    pub unwrap_method: UnwrapMethod,
+    /// Iterations and fit of `Relax UVs`.
+    pub relax_iterations: u32,
+    pub relax_mode: RelaxMode,
+    /// UDIM tiles `Pack UV Islands` spreads the islands over (1 is the unit square).
+    pub pack_tiles: u32,
+    /// `Stitch UV Islands` also resizes the moved island so the edges are as long as its neighbour's.
+    pub stitch_scale: bool,
     /// Position of the keyboard element cursor (Page Up and Page Down walk the elements).
     cursor: usize,
     gesture: Option<Gesture>,
@@ -287,6 +321,11 @@ impl Default for UvUi {
             scale_by: Vec2::ONE,
             nudge: 0.01,
             seam_angle: 30.0,
+            unwrap_method: UnwrapMethod::Lscm,
+            relax_iterations: 10,
+            relax_mode: RelaxMode::Rigid,
+            stitch_scale: false,
+            pack_tiles: 1,
             cursor: 0,
             gesture: None,
             target: None,
@@ -310,7 +349,14 @@ pub(crate) fn subject(app: &mut ModelApp) -> Option<(ObjectId, Arc<PolyMesh>)> {
 fn keeps_vertex_numbers(op: &StepOp) -> bool {
     matches!(
         op,
-        StepOp::Seams { .. } | StepOp::TransformUvs { .. } | StepOp::StitchUvs { .. } | StepOp::Unwrap { .. } | StepOp::SetPatch { .. } | StepOp::Flip { .. }
+        StepOp::Seams { .. }
+            | StepOp::TransformUvs { .. }
+            | StepOp::StitchUvs { .. }
+            | StepOp::RelaxUvs { .. }
+            | StepOp::StraightenUvs { .. }
+            | StepOp::Unwrap { .. }
+            | StepOp::SetPatch { .. }
+            | StepOp::Flip { .. }
     )
 }
 
@@ -369,6 +415,12 @@ pub fn act(app: &mut ModelApp, a: UvAction) {
         UvAction::ClearSeam => mark_seams(app, false),
         UvAction::SeamsByAngle => seams_by_angle(app),
         UvAction::Unwrap => unwrap(app),
+        UvAction::UnwrapAbf => unwrap_with(app, UnwrapMethod::Abf),
+        UvAction::UnwrapGroups => unwrap_op(app, app.uv.unwrap_method, true),
+        UvAction::Relax => relax(app),
+        UvAction::Straighten => straighten(app),
+        UvAction::Stitch => stitch(app),
+        UvAction::Transfer => transfer(app),
         UvAction::Pack => pack(app),
         UvAction::ProjectPlanar => project(app, Projection::Planar { from: Axis::PosY }),
         UvAction::ProjectBox => project(app, Projection::Box),
@@ -444,8 +496,19 @@ pub fn seams_by_angle(app: &mut ModelApp) {
     write_seams(app, id, &seams);
 }
 
-/// Unwrap the mesh along its seams, keeping the pinned corners where they are.
+/// Unwrap the mesh along its seams with the chosen solver, keeping the pinned corners where they are.
 pub fn unwrap(app: &mut ModelApp) {
+    unwrap_with(app, app.uv.unwrap_method);
+}
+
+/// Unwrap with a given solver (see [`UnwrapMethod`]).
+pub fn unwrap_with(app: &mut ModelApp, method: UnwrapMethod) {
+    unwrap_op(app, method, false);
+}
+
+/// Unwrap, cutting along the borders between polygon groups too when `from_patches` is set, so
+/// that every group is an island.
+fn unwrap_op(app: &mut ModelApp, method: UnwrapMethod, from_patches: bool) {
     let Some((id, mesh)) = subject(app) else {
         app.status = tl!("Select a mesh first");
         return;
@@ -458,7 +521,7 @@ pub fn unwrap(app: &mut ModelApp) {
         .filter(|c| (**c as usize) < mesh.corner_count() && mesh.has_uvs())
         .map(|c| UvPin { corner: *c, uv: mesh.uv(*c).to_array() })
         .collect();
-    let op = StepOp::Unwrap { seams: seams.to_vertex_pairs(), angle: None, pins, auto_cut: true, margin: 0.01 };
+    let op = StepOp::Unwrap { seams: seams.to_vertex_pairs(), angle: None, pins, auto_cut: true, margin: 0.01, method, from_patches };
     if app.run(Command::AddStep { id, op }) {
         app.selection = vec![id];
         app.uv.selection.clear();
@@ -475,7 +538,7 @@ pub fn pack(app: &mut ModelApp) {
         app.status = tl!("This mesh has no UVs yet. Project or unwrap it to make some.");
         return;
     }
-    let op = StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform };
+    let op = StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform, tiles: app.uv.pack_tiles, texel_density: None };
     if app.run(Command::AddStep { id, op }) {
         app.selection = vec![id];
         app.uv.selection.clear();
@@ -502,11 +565,19 @@ pub fn project(app: &mut ModelApp, projection: Projection) {
 
 /// Ask for a file and write the layout of the selected mesh as SVG or PNG.
 pub fn export_layout(app: &mut ModelApp) {
-    let Some((id, _)) = subject(app) else {
+    let Some((id, mesh)) = subject(app) else {
         app.status = tl!("Select a mesh first");
         return;
     };
     let Some(path) = rfd::FileDialog::new().add_filter("SVG", &["svg"]).add_filter("PNG", &["png"]).set_file_name("uv-layout.svg").save_file() else { return };
+    // A layout over several UDIM tiles is one picture per tile, named name.1001.png and so on.
+    if modelcraft_engine::uvpack::udim_tiles(&mesh).len() > 1 {
+        app.status = match app.doc.export_uv_layout_udim(&path, Some(id), 2048) {
+            Ok(files) => crate::tlf!("Exported {count} UDIM tiles next to {file}", count = files.len(), file = path.display()),
+            Err(e) => crate::tlf!("Export failed: {error}", error = e),
+        };
+        return;
+    }
     app.status = match app.doc.export_uv_layout(&path, Some(id), 2048) {
         Ok(()) => crate::tlf!("Exported {file}", file = path.display()),
         Err(e) => crate::tlf!("Export failed: {error}", error = e),
@@ -579,9 +650,65 @@ fn weld(app: &mut ModelApp) {
         app.status = tl!("Select the UV edges to weld first");
         return;
     }
-    if app.run(Command::AddStep { id, op: StepOp::StitchUvs { edges } }) {
+    if app.run(Command::AddStep { id, op: StepOp::StitchUvs { edges, align: false, scale: false } }) {
         app.selection = vec![id];
         app.uv.selection.clear();
+    }
+}
+
+/// Sew the selected edges: move the island on one side onto the other, then weld.
+fn stitch(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else { return };
+    let edges = selected_edges(&mesh, &app.uv.selection);
+    if edges.is_empty() {
+        app.status = tl!("Select the UV edges to stitch first");
+        return;
+    }
+    let op = StepOp::StitchUvs { edges, align: true, scale: app.uv.stitch_scale };
+    if app.run(Command::AddStep { id, op }) {
+        app.selection = vec![id];
+        app.uv.selection.clear();
+    }
+}
+
+/// Copy the UVs of the first selected mesh onto the second, by closest point on the surface.
+fn transfer(app: &mut ModelApp) {
+    let ids = app.selection.clone();
+    let [source, id] = ids[..] else {
+        app.status = tl!("Select two meshes: the one with the UVs first, then the one to give them to");
+        return;
+    };
+    if app.run(Command::TransferUvs { id, source, max_distance: None, per_island: true }) {
+        app.selection = vec![id];
+        app.uv.selection.clear();
+        app.uv.fitted = false;
+    }
+}
+
+/// Relax the selected UVs (the whole layout when nothing is selected), the rest staying put.
+fn relax(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else { return };
+    if !mesh.has_uvs() {
+        app.status = tl!("This mesh has no UVs yet. Project or unwrap it to make some.");
+        return;
+    }
+    let corners: Vec<u32> = app.uv.selection.iter().copied().collect();
+    let op = StepOp::RelaxUvs { corners, iterations: app.uv.relax_iterations, mode: app.uv.relax_mode };
+    if app.run(Command::AddStep { id, op }) {
+        app.selection = vec![id];
+    }
+}
+
+/// Lay each selected chain of UV edges on the line between its ends.
+fn straighten(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else { return };
+    if selected_edges(&mesh, &app.uv.selection).is_empty() {
+        app.status = tl!("Select a chain of UV edges to straighten first");
+        return;
+    }
+    let corners: Vec<u32> = app.uv.selection.iter().copied().collect();
+    if app.run(Command::AddStep { id, op: StepOp::StraightenUvs { corners, strength: 1.0 } }) {
+        app.selection = vec![id];
     }
 }
 
@@ -855,6 +982,15 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
     });
     ui.horizontal_wrapped(|ui| {
+        ui.label(tl!("Unwrap solver"));
+        let methods = [(UnwrapMethod::Lscm, tl!("Conformal (LSCM)")), (UnwrapMethod::Abf, tl!("Angle-based (ABF)"))];
+        let shown = methods.iter().find(|(m, _)| *m == app.uv.unwrap_method).map(|(_, l)| l.clone()).unwrap_or_default();
+        let r = egui::ComboBox::from_id_salt("uv-unwrap-method").selected_text(shown).show_ui(ui, |ui| {
+            for (m, l) in &methods {
+                ui.selectable_value(&mut app.uv.unwrap_method, *m, l.clone());
+            }
+        });
+        name(ui, &r.response, tl!("Unwrap solver"));
         for (label, f) in
             [(tl!("Pin"), 0), (tl!("Unpin"), 1), (tl!("Weld"), 2), (tl!("Mark Seam"), 3), (tl!("Clear Seam"), 4), (tl!("Unwrap UVs"), 5), (tl!("Frame"), 6)]
         {
@@ -874,7 +1010,38 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
     });
     ui.horizontal_wrapped(|ui| {
+        ui.label(tl!("Tidy"));
+        for (label, a) in [
+            (tl!("Relax UVs"), UvAction::Relax),
+            (tl!("Straighten UVs"), UvAction::Straighten),
+            (tl!("Stitch UV Islands"), UvAction::Stitch),
+            (tl!("Transfer UVs"), UvAction::Transfer),
+        ] {
+            let r = ui.button(label.clone());
+            name(ui, &r, label);
+            if r.clicked() {
+                act(app, a);
+            }
+        }
+        ui.label(tl!("Relax iterations"));
+        let r = ui.add(egui::DragValue::new(&mut app.uv.relax_iterations).speed(0.2).range(1..=200));
+        name(ui, &r, tl!("Relax iterations"));
+        let modes = [(RelaxMode::Rigid, tl!("Keep lengths")), (RelaxMode::Conformal, tl!("Keep angles"))];
+        let shown = modes.iter().find(|(m, _)| *m == app.uv.relax_mode).map(|(_, l)| l.clone()).unwrap_or_default();
+        let r = egui::ComboBox::from_id_salt("uv-relax-mode").selected_text(shown).show_ui(ui, |ui| {
+            for (m, l) in &modes {
+                ui.selectable_value(&mut app.uv.relax_mode, *m, l.clone());
+            }
+        });
+        name(ui, &r.response, tl!("Relax fit"));
+        let r = ui.checkbox(&mut app.uv.stitch_scale, tl!("Match scale when stitching"));
+        name(ui, &r, tl!("Match scale when stitching"));
+    });
+    ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Layout"));
+        ui.label(tl!("UDIM tiles"));
+        let r = ui.add(egui::DragValue::new(&mut app.uv.pack_tiles).speed(0.1).range(1..=100));
+        name(ui, &r, tl!("UDIM tiles"));
         for (label, a) in [
             (tl!("Pack UV Islands"), UvAction::Pack),
             (tl!("Planar"), UvAction::ProjectPlanar),
@@ -1321,27 +1488,62 @@ fn input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, rect: Rect, d
     }
 }
 
+/// The UDIM tiles to draw: the unit square, and every tile the UVs reach (at most 100).
+fn visible_tiles(m: &PolyMesh) -> Vec<(i32, i32)> {
+    let (mut lo, mut hi) = (Vec2::ZERO, Vec2::ONE);
+    if m.face_count() <= MAX_DRAW_FACES {
+        for c in m.corner_uvs() {
+            if c.is_finite() {
+                lo = lo.min(*c);
+                hi = hi.max(*c);
+            }
+        }
+    }
+    let (first, last) = (modelcraft_engine::uvpack::tile_of(lo), modelcraft_engine::uvpack::tile_of(hi));
+    // v grows downwards, so the tile row of the lowest v is the highest row.
+    let (c0, c1) = (first.0.max(0), last.0.clamp(0, 9));
+    let (r0, r1) = (last.1.max(0), first.1.clamp(0, 9));
+    let mut out = vec![(0, 0)];
+    for row in r0..=r1 {
+        for col in c0..=c1 {
+            if (col, row) != (0, 0) && out.len() < 100 {
+                out.push((col, row));
+            }
+        }
+    }
+    out
+}
+
 fn draw(app: &mut ModelApp, ui: &egui::Ui, rect: Rect, d: &Derived, resp: &egui::Response) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::PANEL_DEEP);
     let u = &app.uv;
     let m = &d.mesh;
-    // The unit square, with a checker when asked.
-    let (a, b) = (to_screen(u, rect, Vec2::ZERO), to_screen(u, rect, Vec2::ONE));
-    if u.checker {
-        let cells = 16;
-        for j in 0..cells {
-            for i in 0..cells {
-                let (p, q) = (
-                    to_screen(u, rect, Vec2::new(i as f32, j as f32) / cells as f32),
-                    to_screen(u, rect, Vec2::new(i as f32 + 1.0, j as f32 + 1.0) / cells as f32),
-                );
-                let c = if (i + j) % 2 == 0 { Color32::from_rgb(0x4A, 0x4D, 0x53) } else { Color32::from_rgb(0x34, 0x37, 0x3C) };
-                painter.rect_filled(Rect::from_two_pos(p, q), 0.0, c);
+    // The unit square (and every other UDIM tile the UVs reach), with a checker when asked.
+    let tiles = visible_tiles(m);
+    for &(col, row) in &tiles {
+        let origin = Vec2::new(col as f32, -(row as f32));
+        if u.checker {
+            let cells = if tiles.len() > 4 { 8 } else { 16 };
+            for j in 0..cells {
+                for i in 0..cells {
+                    let (p, q) = (
+                        to_screen(u, rect, origin + Vec2::new(i as f32, j as f32) / cells as f32),
+                        to_screen(u, rect, origin + Vec2::new(i as f32 + 1.0, j as f32 + 1.0) / cells as f32),
+                    );
+                    let c = if (i + j) % 2 == 0 { Color32::from_rgb(0x4A, 0x4D, 0x53) } else { Color32::from_rgb(0x34, 0x37, 0x3C) };
+                    painter.rect_filled(Rect::from_two_pos(p, q), 0.0, c);
+                }
             }
         }
+        let (a, b) = (to_screen(u, rect, origin), to_screen(u, rect, origin + Vec2::ONE));
+        painter.rect_stroke(Rect::from_two_pos(a, b), 0.0, Stroke::new(1.0, theme::TEXT_DIM), egui::StrokeKind::Outside);
+        if tiles.len() > 1
+            && let Some(number) = modelcraft_engine::uvpack::udim_number(col, row)
+        {
+            painter.text(a + vec2(4.0, 3.0), egui::Align2::LEFT_TOP, number.to_string(), egui::FontId::proportional(12.0), theme::TEXT_DIM);
+        }
     }
-    painter.rect_stroke(Rect::from_two_pos(a, b), 0.0, Stroke::new(1.0, theme::TEXT_DIM), egui::StrokeKind::Outside);
     if m.face_count() > MAX_DRAW_FACES {
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Too many faces to draw"), egui::FontId::proportional(14.0), theme::TEXT);
         return;

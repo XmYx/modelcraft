@@ -165,7 +165,7 @@ pub const API: &[(&str, &str, &str)] = &[
     (
         "Tools and callbacks",
         "on_event(name, fn)",
-        "Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.",
+        "Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame, skipped} where it has them.",
     ),
     ("Tools and callbacks", "on_scene_loaded(fn)", "Call `fn(event)` when a project is opened, imported or started new."),
     ("Tools and callbacks", "on_selection_changed(fn)", "Call `fn(event)` when the selection changes; `event.selection` is the new selection."),
@@ -174,7 +174,11 @@ pub const API: &[(&str, &str, &str)] = &[
         "on_scene_changed(fn)",
         "Call `fn(event)` when anything in the scene changed, whoever changed it (callbacks do not trigger themselves).",
     ),
-    ("Tools and callbacks", "on_frame_changed(fn)", "Call `fn(event)` when the current frame changed; `event.frame` is the new frame."),
+    (
+        "Tools and callbacks",
+        "on_frame_changed(fn)",
+        "Call `fn(event)` when the current frame changed; `event.frame` is the new frame, and `event.skipped` how many frame changes were folded into it while the timeline played (0 otherwise).",
+    ),
     ("Tools and callbacks", "clear_callbacks()", "Remove the callbacks this script registered."),
     ("Arguments", "args() -> map", "The `--arg name=value` pairs of the run, with values read as true/false, whole numbers, numbers or text."),
     ("Arguments", "arg(name, default) -> value", "One argument, or the default when it was not given."),
