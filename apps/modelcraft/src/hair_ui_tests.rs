@@ -192,8 +192,8 @@ fn regrow_and_remove() {
     let before = guides(&h);
     h.get_by_role_and_label(Role::SpinButton, "Guide count").set_value_accesskit(200.0);
     h.run();
-    h.get_by_role_and_label(Role::Button, "Regrow Guides").click();
-    h.run();
+    // The button sits below the fold of the panel in a window this size; the palette runs the same action.
+    palette(&mut h, "Regrow Guides");
     assert_eq!(guides(&h).len(), 200);
     assert_ne!(guides(&h), before);
     h.get_by_role_and_label(Role::Button, "Remove Hair").click();

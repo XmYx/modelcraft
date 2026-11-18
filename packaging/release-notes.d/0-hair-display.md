@@ -1,0 +1,1 @@
+- Hair is drawn in the viewport: up to millions of strands as lines in one draw, with a display percentage and an editing limit so large grooms stay fast, plus switches for strands and guides in Properties and the Command Palette.

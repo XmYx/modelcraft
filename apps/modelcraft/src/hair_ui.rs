@@ -150,7 +150,8 @@ pub fn strands_to_draw(total: usize, d: &DisplaySettings) -> usize {
         return 0;
     }
     let share = if d.percent.is_finite() { f64::from(d.percent).clamp(0.1, 100.0) } else { 100.0 };
-    let mut n = (total as f64 * share / 100.0).ceil() as usize;
+    // The small subtraction keeps 0.1 % of 1,000 at one strand, not two (an f32 0.1 is a little over).
+    let mut n = (total as f64 * share / 100.0 - 1e-4).ceil() as usize;
     if d.limit {
         n = n.min(EDIT_STRAND_LIMIT);
     }
