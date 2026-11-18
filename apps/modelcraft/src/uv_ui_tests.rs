@@ -589,5 +589,5 @@ fn transfer_uvs_copies_the_first_selected_meshes_layout_onto_the_second() {
     assert!(out.errors.is_empty(), "{:?}", out.errors);
     assert!(out.mesh.corner_uvs().iter().all(|u| u.is_finite()));
     // One undo takes it back.
-    assert!(app.doc.undo.len() >= 1);
+    assert!(!app.doc.undo.is_empty());
 }
