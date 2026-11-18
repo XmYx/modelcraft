@@ -84,10 +84,10 @@ fn unwrapping_by_polygon_groups_makes_each_group_an_island() {
         assert!(isl.iter().all(|f| e.mesh.patch(*f) == first), "an island mixes patches");
     }
     // Without the option the cube is cut by the automatic cuts only and a patch is not an island.
-    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-        if let StepOp::Unwrap { from_patches, .. } = &mut steps[1].op {
-            *from_patches = false;
-        }
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind
+        && let StepOp::Unwrap { from_patches, .. } = &mut steps[1].op
+    {
+        *from_patches = false;
     }
     let plain = modelcraft_uvpack::uv_islands(&ev.evaluate(&s, id).mesh);
     assert!(plain.len() != islands.len() || plain.iter().any(|i| i.iter().any(|f| e.mesh.patch(*f) != e.mesh.patch(i[0]))));

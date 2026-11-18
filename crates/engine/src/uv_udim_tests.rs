@@ -1,7 +1,9 @@
 //! UDIM layout export from a document.
 
+use std::path::PathBuf;
+
 use super::*;
-use modelcraft_scene::StepOp;
+use modelcraft_scene::{ObjectId, StepOp};
 
 fn tmp(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("mc-engine-udim-{}-{name}", std::process::id()));
