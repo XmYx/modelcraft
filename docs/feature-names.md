@@ -18,6 +18,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shape layers | sculpt layers / 3D layers with an intensity | Generic words; the reference product's layer names avoided | Use |
 | Live detail | dynamic topology | No live software mark found | Use |
 | Even remesh | voxel remeshing products | Generic words; product names avoided | Use |
+| Decimate, Project Detail | polygon reduction and detail projection plug-ins and commands | Generic words; the reference products' names avoided | Use |
 | Rectangle Mask, Lasso Mask, Rectangle Hide, Lasso Hide (region tools); Clip, Trim by plane; Shell | selection-rectangle and lasso masking and visibility, clip and trim brushes, mesh extraction | Generic tool words; the reference product's tool names avoided | Use |
 | Pull, Plateau, Buildup, Surface grab, Gouge, Slide, Bulge (brushes) | the reference sculpting app's hook, layer, clay build-up, topological move, groove, nudge and blob brushes | Plain verbs and nouns; the reference brush names avoided | Use |
 | Trim, Fill, Polish (brushes) | planar trim, fill and polish brushes | Generic tool words | Use |

@@ -31,6 +31,8 @@ pub enum SculptAction {
     RegionDialog,
     PlaneDialog,
     ExtractShell,
+    Decimate,
+    ProjectDetail,
 }
 
 /// What a primary-button drag in the viewport does while sculpting.
@@ -69,7 +71,7 @@ impl RegionTool {
 }
 
 impl SculptAction {
-    pub const ALL: [SculptAction; 18] = [
+    pub const ALL: [SculptAction; 20] = [
         SculptAction::PatchesByAngle,
         SculptAction::PatchesByUv,
         SculptAction::PatchesByPart,
@@ -88,6 +90,8 @@ impl SculptAction {
         SculptAction::RegionDialog,
         SculptAction::PlaneDialog,
         SculptAction::ExtractShell,
+        SculptAction::Decimate,
+        SculptAction::ProjectDetail,
     ];
 
     pub fn label(self) -> String {
@@ -106,6 +110,8 @@ impl SculptAction {
             SculptAction::RegionDialog => tl!("Region by Numbers…"),
             SculptAction::PlaneDialog => tl!("Clip or Trim by Plane…"),
             SculptAction::ExtractShell => tl!("Extract Shell from Mask"),
+            SculptAction::Decimate => tl!("Decimate"),
+            SculptAction::ProjectDetail => tl!("Project Detail"),
         }
     }
 
@@ -129,6 +135,8 @@ impl SculptAction {
             SculptAction::RegionDialog => "sculpt.region_numbers",
             SculptAction::PlaneDialog => "sculpt.plane",
             SculptAction::ExtractShell => "sculpt.extract_shell",
+            SculptAction::Decimate => "sculpt.decimate",
+            SculptAction::ProjectDetail => "sculpt.project_detail",
         }
     }
 
@@ -215,6 +223,12 @@ pub struct State {
     pub front_only: bool,
     pub angle: f32,
     pub thickness: f32,
+    /// Share of the triangles Decimate keeps, in percent.
+    pub decimate_percent: f32,
+    /// The object Project Detail takes the shape from (none: the first other mesh), and how far
+    /// a vertex may move as a share of the object's size, in percent.
+    pub project_source: Option<modelcraft_engine::scene::ObjectId>,
+    pub project_reach: f32,
     pub region: Option<RegionDialog>,
     pub plane: Option<PlaneDialog>,
     outline: Option<Outline>,
@@ -232,6 +246,9 @@ impl Default for State {
             front_only: false,
             angle: 30.0,
             thickness: 0.05,
+            decimate_percent: 25.0,
+            project_source: None,
+            project_reach: 10.0,
             region: None,
             plane: None,
             outline: None,
@@ -339,7 +356,53 @@ pub fn act(app: &mut ModelApp, ctx: &egui::Context, a: SculptAction) {
                 app.selection = keep;
             }
         }
+        SculptAction::Decimate => decimate(app),
+        SculptAction::ProjectDetail => project(app),
         SculptAction::Tool(_) => {}
+    }
+}
+
+/// Decimate: a history step after the sculpt layer; sculpting carries on on the result.
+fn decimate(app: &mut ModelApp) {
+    let Some(id) = app.doc.sculpt.as_ref().map(|s| s.id) else { return };
+    let ratio = (app.sculpt_groups.decimate_percent / 100.0).clamp(0.001, 1.0);
+    app.doc.sync_sculpt();
+    let before = app.doc.eval.evaluate(&app.doc.scene, id).mesh.triangle_count();
+    let _ = app.doc.execute(Command::EndSculpt);
+    app.run(Command::AddStep { id, op: StepOp::Decimate { ratio } });
+    app.begin_sculpt();
+    let after = app.doc.eval.evaluate(&app.doc.scene, id).mesh.triangle_count();
+    app.status = crate::tlf!("Decimate: {after} of {before} triangles", after = after, before = before);
+}
+
+/// The other objects with a surface, for Project Detail.
+pub fn project_sources(app: &ModelApp) -> Vec<(modelcraft_engine::scene::ObjectId, String)> {
+    use modelcraft_engine::scene::ObjectKind;
+    let me = app.doc.sculpt.as_ref().map(|s| s.id);
+    app.doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| Some(o.id) != me && matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. }) && !app.doc.scene.is_cage_input(o.id))
+        .map(|o| (o.id, o.name.clone()))
+        .collect()
+}
+
+fn project(app: &mut ModelApp) {
+    let Some(id) = app.doc.sculpt.as_ref().map(|s| s.id) else { return };
+    let sources = project_sources(app);
+    let Some(source) = app.sculpt_groups.project_source.filter(|s| sources.iter().any(|(k, _)| k == s)).or_else(|| sources.first().map(|s| s.0)) else {
+        app.status = tl!("Project Detail needs another mesh in the scene to take the shape from");
+        return;
+    };
+    let size = app.doc.sculpt.as_ref().map(|s| {
+        let (lo, hi) = s.mesh.positions.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        (hi - lo).length()
+    });
+    let reach = size.map(|d| (d * app.sculpt_groups.project_reach / 100.0).max(1e-6));
+    let before = app.doc.undo.len();
+    if app.run(Command::SculptProject { id, source, reach }) && app.doc.undo.len() == before {
+        app.status = tl!("Nothing of the other surface is within reach");
     }
 }
 
@@ -478,6 +541,36 @@ pub fn panel(app: &mut ModelApp, ui: &mut egui::Ui) {
         name(ui, &r, tl!("Shell thickness"));
     });
     action_button(app, ui, SculptAction::MaskOcclusion, tl!("Mask folds, holes and places where parts meet"));
+
+    ui.add_space(8.0);
+    ui.label(RichText::new(tl!("Fewer triangles")).strong());
+    ui.horizontal(|ui| {
+        action_button(app, ui, SculptAction::Decimate, tl!("Keep this share of the triangles; the shape, UVs and patches stay"));
+        let r = ui.add(egui::DragValue::new(&mut app.sculpt_groups.decimate_percent).speed(0.5).range(0.1..=100.0).suffix(" %").max_decimals(1));
+        name(ui, &r, tl!("Triangles to keep"));
+    });
+    ui.add_space(8.0);
+    ui.label(RichText::new(tl!("Detail from another mesh")).strong());
+    let sources = project_sources(app);
+    if sources.is_empty() {
+        ui.label(RichText::new(tl!("Add or import the mesh that has the detail.")).color(theme::TEXT_DIM).small());
+    } else {
+        let current = app.sculpt_groups.project_source.filter(|s| sources.iter().any(|(k, _)| k == s)).or_else(|| sources.first().map(|s| s.0));
+        let shown = sources.iter().find(|(k, _)| Some(*k) == current).map(|(_, n)| n.clone()).unwrap_or_default();
+        let r = egui::ComboBox::from_id_salt("project-source").selected_text(shown).show_ui(ui, |ui| {
+            for (k, n) in &sources {
+                if ui.selectable_label(Some(*k) == current, n).clicked() {
+                    app.sculpt_groups.project_source = Some(*k);
+                }
+            }
+        });
+        name(ui, &r.response, tl!("Mesh with the detail"));
+        ui.horizontal(|ui| {
+            action_button(app, ui, SculptAction::ProjectDetail, tl!("Move this mesh onto the surface of the other one; the mask protects"));
+            let r = ui.add(egui::DragValue::new(&mut app.sculpt_groups.project_reach).speed(0.5).range(0.1..=100.0).suffix(" %").max_decimals(1));
+            name(ui, &r, tl!("Reach of the projection"));
+        });
+    }
 }
 
 fn region_for(app: &ModelApp, view: usize, rect: Rect, points: Vec<Vec2>) -> Option<(modelcraft_engine::scene::ObjectId, ScreenRegion)> {
