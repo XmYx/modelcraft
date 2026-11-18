@@ -703,6 +703,33 @@ frame (480 solver steps), box colliders as convex hulls, 8 points cached per bod
 The time per body grows from 1.6 µs per frame at 1,000 bodies to 5 µs at 4,000: the bodies of the
 4,000 case actually collide with each other (a denser pile), which the 1,000 case mostly does not.
 
+**Cloth** (`sim-bench cloth`, our own XPBD solver, one thread): a flat square sheet two metres
+across over a UV sphere of 2,304 triangles, 60 frames at 24 fps, the load average about 18 on the
+24 threads. Constraints are stretch on every edge, shear on the quad diagonals and a dihedral bend
+per interior edge (about six per vertex). "Stretch" is the relative change of an edge from its
+rest length at the last frame: mean, 99th percentile and largest.
+
+| Vertices | Setup | Substeps × iterations | Extras | Solve, 60 frames | Per frame | Per substep | Stretch mean / p99 / max |
+|---|---|---|---|---|---|---|---|
+| 1,089 | 0.4 ms | 8 × 2 | sphere | 1.10 s | 18.3 ms | 2.3 ms | 0.014 / 0.064 / 0.10 |
+| 10,201 | 5 ms | 8 × 2 | none (free fall) | 1.25 s | **20.8 ms** | 2.6 ms | 0 |
+| 10,201 | 4 ms | 8 × 2 | two corners pinned, hanging | 1.63 s | 27.1 ms | 3.4 ms | 0.052 / 0.37 / 6.2 |
+| 10,201 | 6 ms | 8 × 2 | sphere | 4.20 s | **70.0 ms** | 8.7 ms | 0.073 / 0.44 / 0.94 |
+| 10,201 | 6 ms | 8 × 2 | sphere and self collision | 6.87 s | 114.5 ms | 14.3 ms | 0.071 / 0.41 / 2.9 |
+| 10,201 | 4 ms | 16 × 4 | sphere | 11.49 s | 191.4 ms | 12.0 ms | 0.013 / 0.068 / 0.31 |
+| 40,401 | 16 ms | 8 × 2 | sphere | 8.62 s | 143.7 ms | 18.0 ms | 0.35 / 2.5 / 5.0 |
+
+A 10,000-vertex cloth costs about 21 ms a frame to simulate free, and 70 ms draped over a sphere
+at the default 8 substeps and 2 iterations; it does not run in real time, which is why simulations
+are baked. About 29 ns per constraint projection. The stretch columns are the honest limit of the
+method: with 16 iterations per frame, information crosses at most 16 edges, so a 100 × 100 sheet
+stretches where it is pulled (a quarter of its edges by more than 7 % over the sphere); 64
+iterations per frame bring the worst edge to 31 % and the 99th percentile to 6.8 %. A hanging
+sheet pinned only at two corners stretches most of all. The 40,401-vertex row shows the same
+effect worse; raising iterations or substeps is the lever, at proportional cost. Self collision adds
+about 5.6 ms per substep at 10,000 vertices. Collision cost is per vertex near a collider: the
+box test culls the rest.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have

@@ -4,6 +4,8 @@
 //! - [`Solver`] is what a simulation implements: reset to its rest state from a seed, step by a
 //!   fixed `dt`, and write its points (the vertices of a cloth, the corners of a rigid body, the
 //!   slots of a particle pool).
+//! - [`cloth`]: position-based cloth with stretch, shear and bend constraints, collisions, pins and wind.
+//! - [`field`] and [`hash`]: wind and turbulence, and the spatial hash the solvers share.
 //! - [`rigid`]: rigid bodies on Rapier (colliders, joints, sleeping, animated passive bodies).
 //! - [`bake`] runs a solver over a frame range: [`SimTiming`] gives the start and end frame, the
 //!   frame rate and the substeps per frame; frame `start` is the rest state and every later frame
@@ -22,6 +24,9 @@
 #![forbid(unsafe_code)]
 
 mod cache;
+pub mod cloth;
+pub mod field;
+pub mod hash;
 mod object;
 pub mod rigid;
 mod rng;
@@ -301,6 +306,8 @@ pub fn bake<S: Solver + ?Sized>(solver: &mut S, config: &BakeConfig, observer: &
     Ok(cache)
 }
 
+#[cfg(test)]
+mod cloth_tests;
 #[cfg(test)]
 mod rigid_tests;
 #[cfg(test)]
