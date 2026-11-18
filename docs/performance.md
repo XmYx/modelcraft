@@ -472,6 +472,55 @@ Read honestly:
   many lights (a long depth-1 render: CPU, 48×48, 10 seeds, 16 spp, relMSE 0.31 plain against 0.12
   with M=16); it needs the following passes to be cheap for the whole picture to gain.
 
+### Denoising (`--denoise svgf|nfor`)
+
+`craft-render-denoise` filters a render with its own feature images (albedo, normal, depth, variance;
+the film now also keeps the sum of its odd-numbered samples, so a second, independent half rendering
+is available on the CPU and the GPU). Both filters divide the picture by its albedo first (not where
+the albedo is nearly black, so emitters are left alone).
+
+- **SVGF** (Schied et al. 2017) for the interactive view: reprojection of the previous frame's
+  result through the motion image, variance tracking, five à-trous wavelet passes whose luminance
+  edge-stopping follows the variance (the variance is the median over 3×3, so the edge of a light does
+  not switch the stop off for its neighbours). It is the Render View's filter while passes arrive. A-SVGF's
+  gradient-based adaptive history is not implemented.
+- **NFOR-class regression** (Bitterli et al. 2016) for finals: first-order regression on normal, depth and
+  screen position over a 17×17 window, weighted by the variance-aware distance of 3×3 colour patches and a
+  soft same-surface test, each half rendering filtered with the weights of the other, the two averaged. It
+  is the Render View's filter on the finished picture. Without the paper's second stage; fireflies are not
+  treated separately.
+
+256×256, five seeds, `modelcraft-cli render-bench --device gpu --denoise svgf|nfor`, reference 4096 spp
+(mean relMSE, before; after). The CPU films are the same samples, so the errors are the same to the digits
+shown (checked on cornell and studio); the filters run on the CPU in both cases (24 threads, load average 16 to 40
+from other builds, so times are upper bounds).
+
+| Scene | relMSE raw, 1 / 4 / 16 / 64 spp | SVGF after | NFOR after |
+|---|---|---|---|
+| cornell | 0.2203 / 0.0543 / 0.0137 / 0.0035 | 0.0703 / 0.012 / 0.0016 / 0.0005 | 0.0703 / 0.0367 / 0.0015 / 0.0003 |
+| materials | 4.939 / 0.805 / 0.1275 / 0.0493 | 1.78 / 0.6877 / 0.0944 / 0.0406 | 1.78 / 0.0398 / 0.0157 / 0.0055 |
+| interior | 0.2459 / 0.0464 / 0.0185 / 0.2193 | 0.0842 / 0.0445 / 0.0154 / 0.2182 | 0.0842 / 0.0016 / 0.0007 / 0.0018 |
+| night-street | 6.793 / 1.009 / 0.2622 / 0.072 | 2.511 / 0.778 / 0.1955 / 0.0563 | 2.511 / 0.6951 / 0.0995 / 0.019 |
+| studio | 0.3259 / 0.0806 / 0.0205 / 0.0052 | 0.1157 / 0.0313 / 0.0058 / 0.0015 | 0.1157 / 0.0138 / 0.0042 / 0.0013 |
+| showcase | 2.452 / 0.6923 / 0.1657 / 0.0494 | 0.4998 / 0.5623 / 0.0559 / 0.0196 | 0.4998 / 0.0325 / 0.0123 / 0.0052 |
+
+Filter time per 256×256 image: SVGF 31 to 53 ms, NFOR 210 to 700 ms (it needs two samples; with one, `nfor`
+falls back to SVGF, which is why the 1 spp columns match).
+
+Read honestly:
+- NFOR lowers the error 2.6 to 125× from 4 spp up (cornell 1.5× at 4 spp, 9 to 14× from 16 spp; interior at
+  64 spp, where a few bright paths ruled the raw error, 0.219 → 0.0018). SVGF lowers it 3 to 9× at 1 spp and
+  1.0 to 3.5× from 4 spp up, least on materials, interior and night-street, whose noise is a few very bright samples
+  that a variance-guided filter keeps.
+- Both are biased, and measure against the unfiltered reference. The picture's mean brightness stays within 8 % (the test's bound) on three scenes at 16 spp; on the
+  Cornell box the SVGF mean differed from the raw one by 0.1 %.
+- Temporal reuse: a still camera, eight frames of 2 samples on the Cornell box, 0.060 filtered alone → 0.030 with the
+  history. With the camera moving 0.4 pixel per frame the history is found through the motion vectors but resampling it
+  blurs it: 0.052 alone against 0.078 with history (raw 0.102). Frame-to-frame reuse under motion therefore does not
+  pay yet; a sharper resampling filter is the next step.
+- No GPU filter yet: the filters run on the CPU, at 31 ms (SVGF) for 65 k pixels, which scales to about 0.5 s
+  at 1080p on this machine; a compute-shader à-trous pass is the way to a viewport frame budget.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
@@ -714,18 +763,22 @@ Before the work bound, 2,000 islands took 20 s with MaxRects alone (reported in 
 
 Guides grown on a 128×64 UV sphere (16,128 triangles, area 12.56), then render hairs blended from
 them by the nearest four guides (`knn`) or the three-guide barycentric rule (`bary`). All 24 cores,
-release build, `modelcraft-cli hair-bench --strands N [--blend bary --clump A --frizz A --points P]`.
-The machine was shared with other builds (load average 50–58 on 24 cores) when these were taken, so
-treat them as pessimistic.
+release build, `modelcraft-cli hair-bench --strands N [--blend bary --clump A --frizz A --points P] [--gpu]`.
+The machine is shared with other builds, so each table says how loaded it was (`uptime` load
+average on 24 cores) and the numbers move with it.
 
-| Strands × points | Guides | Blend, extras | Interpolation | Strands per second | Memory held |
-|---|---|---|---|---|---|
-| 100,000 × 8 | 5,000 | knn | 102 ms | 0.98 M | 12 MB |
-| 1,000,000 × 8 | 5,000 | knn | 467 ms | 2.14 M | 120 MB |
-| 1,000,000 × 8 | 5,000 | bary, clump 0.5, frizz 0.1 | 653 ms | 1.53 M | 120 MB |
-| 1,000,000 × 16 | 5,000 | knn | 614 ms | 1.63 M | 216 MB |
+### Making the hairs
 
-Growing 5,000 guides takes 20–30 ms. Memory is 12 bytes per point plus 24 bytes per strand (root and
+| Strands × points | Guides | Blend, extras | Interpolation | Strands per second | Memory held | Load average |
+|---|---|---|---|---|---|---|
+| 100,000 × 8 | 5,000 | knn | 102 ms | 0.98 M | 12 MB | 58 |
+| 1,000,000 × 8 | 5,000 | knn | 467 ms | 2.14 M | 120 MB | 58 |
+| 1,000,000 × 8 | 5,000 | bary, clump 0.5, frizz 0.1 | 653 ms | 1.53 M | 120 MB | 58 |
+| 1,000,000 × 16 | 5,000 | knn | 614 ms | 1.63 M | 216 MB | 58 |
+| 100,000 × 8 | 5,000 | knn | 12 ms | 8.07 M | 12 MB | 8 |
+| 1,000,000 × 8 | 5,000 | knn | 96 ms | 10.40 M | 120 MB | 8 |
+
+Growing 5,000 guides takes 2–30 ms. Memory is 12 bytes per point plus 24 bytes per strand (root and
 two widths); `modelcraft_hair::estimate_bytes` matches the measured size exactly. Hard caps (checked
 before allocating): 200,000 guides, 5,000,000 strands, 64 points per strand and 40 million points
 per operation by default; no caller can raise them past 1,000,000 guides, 20,000,000 strands, 256
@@ -797,6 +850,34 @@ it plays back from a cache, not live; the cache is the cost (137 MiB for 120 fra
 the byte budget exists. Collisions cost 135 ns a particle a substep; the noise field (three value
 noises per particle) is most of the "forces" row. Display is capped at 10,000 instances at a time
 (the clone limit), whatever the pool holds.
+
+### Drawing them (`--gpu`)
+
+The viewport pass (`modelcraft_render::hair_gpu`): positions in one vertex buffer, one index buffer of
+line strips with primitive restart, one draw call. Strands are in random order, so a display
+percentage draws a prefix of the index buffer: changing it costs nothing and re-uploads nothing.
+`hair-bench --gpu` draws the sphere and the hair at 1920×1080 with 4× MSAA, orbiting the camera, 60
+frames per row after 10 warm-up frames; a frame is render, submit and wait for the GPU (frames per
+second is 1000 / mean). Adapter: NVIDIA GeForce RTX 4090, load average 8. Lines are one pixel wide
+and alpha blended; there is no strand shading yet, so these numbers say how fast the lines go down,
+not what a shaded render costs.
+
+| Strands in the groom | Display | Strands drawn | Mean frame | Frames per second | 95th percentile | GPU memory |
+|---|---|---|---|---|---|---|
+| 100,000 | 100 % | 100,000 | 0.31 ms | 3,217 | 0.38 ms | 13 MB |
+| 100,000 | 50 % | 50,000 | 0.20 ms | 4,892 | 0.21 ms | |
+| 100,000 | 10 % | 10,001 | 0.10 ms | 9,715 | 0.11 ms | |
+| 100,000 | 1 % | 1,000 | 0.08 ms | 12,390 | 0.13 ms | |
+| 1,000,000 | 100 % | 1,000,000 | 1.22 ms | 821 | 1.25 ms | 132 MB |
+| 1,000,000 | 50 % | 500,000 | 0.76 ms | 1,309 | 0.81 ms | |
+| 1,000,000 | 10 % | 100,001 | 0.29 ms | 3,443 | 0.30 ms | |
+| 1,000,000 | 1 % | 10,000 | 0.10 ms | 9,686 | 0.11 ms | |
+
+Uploading 1,000,000 strands takes 55 ms. In the app the default display is capped at 100,000
+strands while editing ("Limit strands while editing", on by default) and the strands of a hair under
+the brush are replaced by its guides until the stroke ends. The app's own frame time was not
+measured (the window needs a display); the figures above are the hair pass alone, and the egui
+overhead is the same with or without hair. Without a GPU adapter the viewport shows guides only.
 
 ## How the numbers stay low
 

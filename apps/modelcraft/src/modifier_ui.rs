@@ -172,7 +172,9 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, modifier: Mod
             scene
                 .objects()
                 .iter()
-                .filter(|o| o.id != id && !excluded.contains(&o.id) && matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Group))
+                .filter(|o| {
+                    o.id != id && !excluded.contains(&o.id) && matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Group)
+                })
                 .map(|o| (o.id, o.name.clone()))
                 .collect()
         };
@@ -190,13 +192,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, modifier: Mod
     if changed && discrete {
         app.run(Command::SetCloneModifier { id, modifier: q, target: t });
     } else if let Some(r) = drags.iter().find(|r| r.changed() || r.drag_stopped()) {
-        commit_edit(
-            app,
-            r,
-            |o| o.kind = ObjectKind::CloneModifier { modifier: q, target: t },
-            || Command::SetCloneModifier { id, modifier: q, target: t },
-            id,
-        );
+        commit_edit(app, r, |o| o.kind = ObjectKind::CloneModifier { modifier: q, target: t }, || Command::SetCloneModifier { id, modifier: q, target: t }, id);
     }
 
     let fields = app.doc.scene.field_stack(id).len();

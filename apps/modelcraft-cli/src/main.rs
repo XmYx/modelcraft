@@ -181,6 +181,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             for (name, help) in modelcraft_engine::rig::COMMANDS {
                 println!("rig op={name}\t{help}");
             }
+            for (name, help) in modelcraft_engine::organize::COMMANDS {
+                println!("organize op={name}\t{help}");
+            }
             for (name, help) in modelcraft_engine::hair::COMMANDS {
                 println!("hair op={name}\t{help}");
             }
@@ -898,6 +901,7 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                         }],
                         lines: &[],
                         overlay: &[],
+                        hair: Vec::new(),
                     };
                     let t = Instant::now();
                     r.render(device, queue, target, &frame);

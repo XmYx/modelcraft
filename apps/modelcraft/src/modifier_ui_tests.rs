@@ -241,7 +241,9 @@ fn the_commands_validate_their_input() {
     assert!(doc.execute(Command::AddCloneModifier { kind: "shader".into(), cloner: gen_id }).is_err());
     assert!(doc.execute(Command::AddCloneModifier { kind: "plain".into(), cloner: cube }).is_err());
     assert!(doc.execute(Command::AddCloneModifier { kind: "plain".into(), cloner: ObjectId(777) }).is_err());
-    assert!(doc.execute(Command::SetCloneModifier { id: cube, modifier: modelcraft_engine::clone::Modifier::default_of("plain").unwrap(), target: None }).is_err());
+    assert!(
+        doc.execute(Command::SetCloneModifier { id: cube, modifier: modelcraft_engine::clone::Modifier::default_of("plain").unwrap(), target: None }).is_err()
+    );
     assert_eq!(doc.undo.len(), n, "failed commands leave no undo step");
     // The command names are in the registry for the CLI and scripts.
     let names: Vec<&str> = modelcraft_engine::COMMANDS.iter().map(|c| c.0).collect();

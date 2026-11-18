@@ -1,0 +1,1 @@
+| 2026-11-18 | Organizing objects: Display, Render, Protection and Look At tags, display and render layers (Layers window), instances that share the master mesh, user attributes (keyable numbers), attribute presets, object pivots, and viewport display modes (smooth, flat, wireframe, see-through, bounding box); the `organize` command |

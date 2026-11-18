@@ -110,3 +110,14 @@ fn vs_line(v: LIn) -> LOut {
 fn fs_line(i: LOut) -> @location(0) vec4<f32> {
     return vec4<f32>(pow(i.color.rgb, vec3<f32>(1.0 / 2.2)), i.color.a);
 }
+
+// Hair: positions only; the colour and model matrix come from the per-draw uniform.
+@vertex
+fn vs_hair(@location(0) pos: vec3<f32>) -> LOut {
+    var o: LOut;
+    var c = cam.view_proj * draw.model * vec4<f32>(pos, 1.0);
+    c.z = c.z - 0.00002 * c.w;
+    o.clip = c;
+    o.color = draw.color;
+    return o;
+}

@@ -24,8 +24,8 @@ modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
-modelcraft-cli hair-bench --strands 1000000   # grow guides and interpolate hairs: time and memory
 modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
+modelcraft-cli hair-bench --strands 1000000 [--gpu]   # grow guides, interpolate hairs, draw them: time, memory, frame times
 modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
 
@@ -287,6 +287,26 @@ playback range (curves, layers, constraints and IK all baked into it). What glTF
 printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
 builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
+### Organising objects
+
+One command, `organize`, with the operation in `op`: `{"cmd":"organize","op":"set_tag","ids":[1],"tag":{"type":"protection","position":true,"rotation":false,"scale":false}}`.
+`modelcraft-cli commands` lists the operations.
+
+| `op` | Fields |
+|---|---|
+| `set_tag`, `remove_tag` | `ids`, `tag` (`display` + `mode`: auto, smooth, flat, wireframe, see_through, bounding_box; `render` + `visible`; `protection` + `position`, `rotation`, `scale`; `look_at` + `target`) or `kind` |
+| `add_layer`, `edit_layer`, `remove_layer`, `assign_layer` | `name`, `ids`, `id`, `color`, `visible`, `render`, `locked`, `layer` |
+| `set_user_attr`, `remove_user_attr` | `ids`, `name`, `value` (`{"type":"number","value":2.5}`; types number, switch, text, colour, vector) |
+| `save_preset`, `apply_preset`, `remove_preset` | `from`, `name`, `parts`, `index`, `ids` |
+| `set_pivot`, `pivot_to_center` | `ids`, `pivot` (object space), `keep_in_place` (default true) |
+| `instance`, `make_unique` | `ids` |
+
+A look-at tag is an aim constraint (+Z at the target) that the tag keeps in step. A protection tag
+makes `set_transform` refuse a change of the channels it names. Hidden layers hide their objects
+in the viewport, in renders and in exports; a layer with Render off shows them only in the
+viewport; a locked layer refuses edits like a locked object. A number or switch user attribute is
+the attribute `user.<name>` (a vector part is `user.<name>.x`), so `anim set_key` keys it.
+
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
@@ -303,6 +323,7 @@ samples per second.
 | `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
 | `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
 | `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
+| `--denoise [svgf\|nfor]` | Filter the noise out: `nfor` (default; regression on the two half renderings, for finals) or `svgf` (the interactive filter). A `.exr` then holds the filtered image as R, G, B and the original as `noisy.R/G/B`. On `render-bench` it also reports the error after the filter and the filter's time ([performance.md](performance.md)) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |

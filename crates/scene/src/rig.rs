@@ -125,7 +125,7 @@ pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option
         let s = match &o.kind {
             ObjectKind::Skin { skin } => skin,
             ObjectKind::PointDeformer { deformer } => {
-                errors.extend(deformer.apply(&mut positions, o.transform.matrix()));
+                errors.extend(deformer.apply(&mut positions, o.local_matrix()));
                 changed = true;
                 continue;
             }
