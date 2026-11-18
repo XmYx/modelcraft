@@ -684,6 +684,25 @@ before allocating): 200,000 guides, 5,000,000 strands, 64 points per strand and 
 per operation by default; no caller can raise them past 1,000,000 guides, 20,000,000 strands, 256
 points per strand and 200 million points.
 
+## Simulation
+
+Measured 2026-11-18, release build, one thread (every solver here runs single-threaded and
+deterministically), on the same 24-thread machine while other workstreams built on it (load average
+about 40), so treat the times as pessimistic. Reproduce with `modelcraft-cli sim-bench <kind> …`.
+
+**Rigid bodies** (`sim-bench rigid`, Rapier 0.36 with `enhanced-determinism`): N unit boxes
+spread over a grid at several heights drop onto a ground plane, 120 frames at 24 fps, 4 substeps per
+frame (480 solver steps), box colliders as convex hulls, 8 points cached per body.
+
+| Bodies | Solve, 120 frames | Per frame | Per step | Asleep at the end | Cache |
+|---|---|---|---|---|---|
+| 100 | 19 ms | 0.16 ms | 0.040 ms | 100 | 1.1 MiB |
+| 1,000 | 198 ms | 1.65 ms | 0.41 ms | 1,000 | 11 MiB |
+| 4,000 (the most one world holds) | 2.45 s | 20.4 ms | 5.1 ms | 3,888 | 44 MiB |
+
+The time per body grows from 1.6 µs per frame at 1,000 bodies to 5 µs at 4,000: the bodies of the
+4,000 case actually collide with each other (a denser pile), which the 1,000 case mostly does not.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have

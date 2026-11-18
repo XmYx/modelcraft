@@ -10,7 +10,8 @@ use std::sync::Arc;
 use modelcraft_formats::FormatError;
 use modelcraft_formats::pointcache::PointCache;
 use modelcraft_scene::{ObjectId, ObjectKind, SceneError};
-use modelcraft_sim::{SimKind, SimObject};
+use modelcraft_sim::rigid::RigidSettings;
+use modelcraft_sim::{SimKind, SimObject, SimTiming};
 use serde::{Deserialize, Serialize};
 
 use crate::command::Outcome;
@@ -47,6 +48,17 @@ pub enum SimCommand {
     },
     /// Throw the cache away; the mesh shows its own shape again until the next bake.
     ClearCache { id: ObjectId },
+    /// Give a mesh a simulation. `kind`: `rigid_active` (falls and collides) or `rigid_passive`
+    /// (a collider that may be animated). Its timing starts as the scene's time range.
+    Add { mesh: ObjectId, kind: String },
+    /// Replace a simulation's settings (its `kind` with the fields of that kind, e.g.
+    /// `{"type":"rigid","role":"active","mass":2,…}`). A baked cache stays and is stale until the
+    /// next bake.
+    SetKind { id: ObjectId, kind: SimKind },
+    /// Run the simulation from its start frame and cache every frame to its end frame. Rigid
+    /// bodies share one world, so this bakes every rigid body of the scene, with the timing, seed,
+    /// gravity and ground of the one named here. The same seed gives the same cache.
+    Bake { id: ObjectId },
 }
 
 /// The `op` names of the `sim` command with one-line descriptions.
@@ -54,6 +66,12 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("attach_cache", "Play a .mcpc point cache on a mesh: mesh, path, start_frame? (the scene frame of the file's first sample)"),
     ("set", "Change a simulation: id, start_frame?, end_frame?, fps?, substeps? (1 to 64), seed?, max_cache_mib?"),
     ("clear_cache", "Throw a baked cache away: id"),
+    ("add", "Give a mesh a simulation: mesh, kind (rigid_active, rigid_passive)"),
+    (
+        "set_kind",
+        "Replace a simulation's settings: id, kind {type: rigid, role, shape, mass, friction, bounciness, velocity, spin, gravity, ground, joints, …}",
+    ),
+    ("bake", "Simulate from the start frame to the end frame and cache every frame (all rigid bodies together): id"),
 ];
 
 impl SimCommand {
@@ -62,6 +80,9 @@ impl SimCommand {
             SimCommand::AttachCache { .. } => "Attach cache",
             SimCommand::Set { .. } => "Simulation settings",
             SimCommand::ClearCache { .. } => "Clear cache",
+            SimCommand::Add { .. } => "Add simulation",
+            SimCommand::SetKind { .. } => "Simulation settings",
+            SimCommand::Bake { .. } => "Bake simulation",
         }
         .into()
     }
@@ -152,6 +173,43 @@ pub fn apply(doc: &mut Document, cmd: &SimCommand, out: &mut Outcome) -> Result<
             if let ObjectKind::Sim { sim } = &mut doc.scene.edit(*id)?.kind {
                 *sim = Arc::new(s);
             }
+        }
+        SimCommand::Add { mesh, kind } => {
+            if !matches!(doc.scene.get(*mesh).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
+                return invalid("a simulation drives a mesh object");
+            }
+            if sim_of(doc, *mesh).is_some() {
+                return invalid("the mesh already has a simulation: delete it first");
+            }
+            let (kind, label) = match kind.as_str() {
+                "rigid_active" => (SimKind::Rigid(RigidSettings::default()), "Rigid body"),
+                "rigid_passive" => (SimKind::Rigid(RigidSettings::passive()), "Collider"),
+                other => return invalid(format!("unknown simulation {other:?} (rigid_active, rigid_passive)")),
+            };
+            let mut sim = SimObject::new(kind);
+            let t = doc.scene.anim.time;
+            sim.timing = SimTiming { start_frame: t.start, end_frame: t.end, fps: t.fps, substeps: sim.timing.substeps }.sanitized();
+            let name = doc.scene.unique_name(label);
+            out.created.push(doc.scene.add(name, ObjectKind::Sim { sim: Arc::new(sim) }, Some(*mesh))?);
+        }
+        SimCommand::SetKind { id, kind } => {
+            let sim = sim_object(doc, *id)?;
+            if sim.kind == SimKind::Cache || *kind == SimKind::Cache {
+                return invalid("a cache from a file has no settings to change");
+            }
+            let mut s = (*sim).clone();
+            s.kind = kind.clone();
+            s.sanitize();
+            if let ObjectKind::Sim { sim } = &mut doc.scene.edit(*id)?.kind {
+                *sim = Arc::new(s);
+            }
+        }
+        SimCommand::Bake { id } => {
+            let result = match doc.sim_ready.take() {
+                Some(r) if r.target == *id => r,
+                _ => crate::sim_bake::prepare(doc, *id)?.run(&mut modelcraft_sim::Silent).map_err(|e| EngineError::Invalid(e.to_string()))?,
+            };
+            crate::sim_bake::store(doc, result, out)?;
         }
         SimCommand::ClearCache { id } => {
             let sim = sim_object(doc, *id)?;
