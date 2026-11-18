@@ -49,13 +49,6 @@ struct Params {
     pad2: u32,
 }
 
-struct Node {
-    lo: vec3<f32>,
-    a: u32,
-    hi: vec3<f32>,
-    count: u32,
-}
-
 struct Tri {
     p0: vec3<f32>,
     pad0: u32,
@@ -140,7 +133,6 @@ struct Pixel {
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> nodes: array<Node>;
 @group(0) @binding(2) var<storage, read> tris: array<Tri>;
 @group(0) @binding(3) var<storage, read> attrs: array<Attr>;
 @group(0) @binding(4) var<storage, read> materials: array<Mat>;
@@ -372,19 +364,6 @@ struct Hit {
     slot: u32,
 }
 
-fn box_entry(index: u32, o: vec3<f32>, inv: vec3<f32>, tmax: f32) -> f32 {
-    let t0 = (nodes[index].lo - o) * inv;
-    let t1 = (nodes[index].hi - o) * inv;
-    let lo = min(t0, t1);
-    let hi = max(t0, t1);
-    let near = max(max(lo.x, max(lo.y, lo.z)), 0.0);
-    let far = min(min(hi.x, min(hi.y, hi.z)), tmax);
-    if near <= far {
-        return near;
-    }
-    return INF;
-}
-
 // Whether the surface at a hit stops a shadow ray. Cut-outs block in proportion to their
 // opacity; a fixed pattern per point decides, so the answer is repeatable.
 fn blocks(slot: u32, u: f32, v: f32) -> bool {
@@ -402,93 +381,39 @@ fn blocks(slot: u32, u: f32, v: f32) -> bool {
     return opacity > 0.0 && f32(pattern >> 8u) / 16777216.0 < opacity;
 }
 
-// The closest hit (mode 0), any hit (mode 1) or any hit that blocks light (mode 2).
-fn intersect(o: vec3<f32>, d: vec3<f32>, limit: f32, mode: u32) -> Hit {
-    var best = Hit(limit, 0.0, 0.0, NO_HIT);
-    if params.node_count == 0u {
-        return best;
-    }
-    let inv = vec3<f32>(1.0) / d;
-    if box_entry(0u, o, inv, best.t) >= INF {
-        return best;
-    }
-    var stack_node: array<u32, 64>;
-    var stack_t: array<f32, 64>;
-    var sp = 0u;
-    var at = 0u;
-    loop {
-        let count = nodes[at].count;
-        let a = nodes[at].a;
-        var descend = false;
-        if count > 0u {
-            for (var slot = a; slot < a + count; slot++) {
-                let tri = tris[slot];
-                let p = cross(d, tri.e2);
-                let det = dot(tri.e1, p);
-                if det == 0.0 {
-                    continue;
-                }
-                let idet = 1.0 / det;
-                let s = o - tri.p0;
-                let u = dot(s, p) * idet;
-                if !(u >= 0.0 && u <= 1.0) {
-                    continue;
-                }
-                let q = cross(s, tri.e1);
-                let v = dot(d, q) * idet;
-                if !(v >= 0.0 && u + v <= 1.0) {
-                    continue;
-                }
-                let t = dot(tri.e2, q) * idet;
-                if t > 0.0 && t < best.t {
-                    if mode == 2u && !blocks(slot, u, v) {
-                        continue;
-                    }
-                    best = Hit(t, u, v, slot);
-                    if mode != 0u {
-                        return best;
-                    }
-                }
-            }
-        } else {
-            let l = at + 1u;
-            let r = at + a;
-            let tl = box_entry(l, o, inv, best.t);
-            let tr = box_entry(r, o, inv, best.t);
-            if min(tl, tr) < INF {
-                var near = l;
-                var far = r;
-                var tfar = tr;
-                if tr < tl {
-                    near = r;
-                    far = l;
-                    tfar = tl;
-                }
-                if tfar < INF && sp < 64u {
-                    stack_node[sp] = far;
-                    stack_t[sp] = tfar;
-                    sp += 1u;
-                }
-                at = near;
-                descend = true;
-            }
+// Test the triangles of a leaf against the ray; returns true when the query is answered
+// (any hit found). `best` is the closest hit so far.
+fn leaf_hit(first: u32, count: u32, o: vec3<f32>, d: vec3<f32>, mode: u32, best: ptr<function, Hit>) -> bool {
+    for (var slot = first; slot < first + count; slot++) {
+        let tri = tris[slot];
+        let p = cross(d, tri.e2);
+        let det = dot(tri.e1, p);
+        if det == 0.0 {
+            continue;
         }
-        if !descend {
-            var found = false;
-            while sp > 0u {
-                sp -= 1u;
-                if stack_t[sp] <= best.t {
-                    at = stack_node[sp];
-                    found = true;
-                    break;
-                }
+        let idet = 1.0 / det;
+        let s = o - tri.p0;
+        let u = dot(s, p) * idet;
+        if !(u >= 0.0 && u <= 1.0) {
+            continue;
+        }
+        let q = cross(s, tri.e1);
+        let v = dot(d, q) * idet;
+        if !(v >= 0.0 && u + v <= 1.0) {
+            continue;
+        }
+        let t = dot(tri.e2, q) * idet;
+        if t > 0.0 && t < (*best).t {
+            if mode == 2u && !blocks(slot, u, v) {
+                continue;
             }
-            if !found {
-                break;
+            *best = Hit(t, u, v, slot);
+            if mode != 0u {
+                return true;
             }
         }
     }
-    return best;
+    return false;
 }
 
 // The two ray queries the kernel makes. Everything above is one implementation of them (BVH

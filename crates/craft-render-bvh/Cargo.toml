@@ -1,6 +1,6 @@
 [package]
 name = "craft-render-bvh"
-description = "Bounding volume hierarchy for ray tracing: a binned surface-area-heuristic build (parallel), a flat GPU-ready node layout and closest-hit / any-hit triangle queries"
+description = "Bounding volume hierarchy for ray tracing: a binned surface-area-heuristic build (parallel) and a PLOC build, a flat GPU-ready node layout, a compressed 8-wide form and closest-hit / any-hit triangle queries"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

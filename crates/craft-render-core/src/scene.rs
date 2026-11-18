@@ -81,6 +81,12 @@ impl Scene {
         self.positions.len()
     }
 
+    /// Answer ray queries (and, on the GPU, trace) with the compressed 8-wide form of the
+    /// hierarchy. `false`, and nothing changes, when the tree does not fit that form.
+    pub fn enable_wide_bvh(&mut self) -> bool {
+        self.accel.enable_wide()
+    }
+
     /// Curve segments over all curve sets.
     pub fn curve_segment_count(&self) -> usize {
         self.curves.iter().map(|c| c.bvh.segment_count()).sum()

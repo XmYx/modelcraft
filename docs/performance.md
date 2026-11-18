@@ -521,6 +521,48 @@ Read honestly:
 - No GPU filter yet: the filters run on the CPU, at 31 ms (SVGF) for 65 k pixels, which scales to about 0.5 s
   at 1080p on this machine; a compute-shader à-trous pass is the way to a viewport frame budget.
 
+### Wide BVH and PLOC build (`--bvh wide`)
+
+`craft-render-bvh::wide` collapses the binary tree into compressed 8-wide nodes (Ylitie et al. 2017: child
+boxes as bytes relative to the node's, rounded outwards; 112 bytes a node, a ray tests eight boxes at once
+and visits the hit children nearest first), on the CPU and in the GPU kernel. The collapse opens the child
+with the largest surface area until a node has eight; the paper's dynamic-programming collapse is not
+implemented. `craft-render-bvh::ploc` builds the binary tree bottom-up by parallel locally-ordered clustering
+(Meister and Bittner 2018; radius 25, Morton order, small subtrees collapsed into leaves by the surface area
+heuristic). H-PLOC (a one-kernel GPU build) is not implemented; PLOC here runs on the CPU through rayon.
+
+Measured with `cargo test --release -p craft-render-bvh -- --ignored --nocapture bench_wide` (2,000,000-triangle
+height field, 1,000,000 incoherent rays on one thread; two runs, load average 41 to 54) and
+`cargo test --release -p craft-render-gpu -- --ignored --nocapture bench_wide` (the same field lit by sun and
+sky, 960×540, 16 samples, RTX 4090):
+
+| | Build | Nodes | Rays per second, one CPU thread | GPU, M paths/s |
+|---|---|---|---|---|
+| binned SAH, binary | 0.63 to 0.68 s | 2,138,233 | 0.46 to 0.52 M | 158 |
+| binned SAH, 8-wide | same + 0.12 to 0.17 s collapse | 323,155 | 0.65 to 0.82 M (1.25 to 1.8×) | 132 (0.84×) |
+| PLOC, binary | 1.02 to 1.04 s | 1,802,763 | 0.42 to 0.43 M | |
+| PLOC, 8-wide | same + 0.12 s | | 0.64 to 0.66 M | |
+
+Read honestly:
+- **On the CPU the wide tree traces 1.25 to 1.8× faster** on incoherent rays over a large scene, with a seventh of
+  the nodes (36 MB against 68 MB). The research note's 1.9 to 2.1× was measured on GPUs with a tuned traversal;
+  ours is lane-parallel scalar Rust that the compiler vectorises.
+- **On the GPU it is slower here (0.84×)**, so the binary tree stays the default. The compressed nodes halve the
+  memory the kernel reads, but WGSL has no way to load and sort eight children without extra registers
+  and local memory: the first version, which read the node a word at a time, ran at 0.66× and one that copied a
+  node into a local array at 0.26×; reading seven four-word rows got to 0.84×, and not sorting the hit children
+  (pushing them in slot order) at 0.19×. An octant-ordered traversal that avoids the sort (Ylitie's) is the next
+  step.
+- **Whole renders of the benchmark scenes (10 to 72 thousand triangles) do not change measurably** with the
+  wide tree on the CPU (within the noise of a machine at load 45 to 56): their trees fit in cache and shading
+  dominates. Images are identical to the binary tree's (tests: CPU wide against binary to 1e-9, GPU wide
+  against binary and against the CPU to 1e-4, measured 0 to 1e-5).
+- **PLOC is slower to build (1.5×) and gives a worse tree on the CPU**: on 20,000 random triangles its
+  expected traversal cost is 15 % above the binned build's (79 against 69), on a regular grid 2.8× above
+  (49 against 17: ordering by Morton code is poor there), and rays are 15 to 20 % slower through it. Its
+  point is that every round is one parallel loop and so maps to a GPU build for trees rebuilt each frame;
+  that kernel is not written.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
