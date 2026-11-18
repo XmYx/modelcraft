@@ -50,12 +50,14 @@ pub struct Bench {
     pub sculpt_ms: Vec<f32>,
     pub dab_ms: Vec<f32>,
     pub upload_ms: Vec<f32>,
-    last: Option<std::time::Instant>,
+    /// Playing the skinned benchmark character instead of sculpting ([`crate::rig_tools`]).
+    pub skin: Option<crate::rig_tools::SkinBench>,
+    pub(crate) last: Option<std::time::Instant>,
 }
 
 impl Bench {
     pub fn new(total: u32) -> Self {
-        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), last: None }
+        Bench { total: total.max(20), frame: 0, orbit_ms: Vec::new(), sculpt_ms: Vec::new(), dab_ms: Vec::new(), upload_ms: Vec::new(), skin: None, last: None }
     }
 }
 
@@ -68,7 +70,7 @@ pub fn save_png(path: &std::path::Path, img: &egui::ColorImage) -> Result<(), St
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-fn to_screen(cam: &Camera, rect: Rect, p: Vec3) -> Option<Pos2> {
+pub(crate) fn to_screen(cam: &Camera, rect: Rect, p: Vec3) -> Option<Pos2> {
     let n = cam.project(p, rect.aspect_ratio())?;
     Some(pos2(rect.left() + (n.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - n.y * 0.5) * rect.height()))
 }
@@ -117,6 +119,9 @@ pub fn show(app: &mut ModelApp, ui: &mut egui::Ui) {
 }
 
 fn bench_tick(app: &mut ModelApp) {
+    if app.bench.as_ref().is_some_and(|b| b.skin.is_some()) {
+        return crate::rig_tools::bench_tick(app);
+    }
     let Some(b) = &mut app.bench else { return };
     let now = std::time::Instant::now();
     let dt = b.last.map(|t| now.duration_since(t).as_secs_f32() * 1000.0);
@@ -458,6 +463,10 @@ fn apply_drag(app: &ModelApp, scene: &mut Scene, t: Vec3, r: Quat, s: Vec3, pivo
 }
 
 fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
+    // A rig tool (placing joints, painting weights) takes the pointer while it is on.
+    if !is_nav(app, ui) && crate::rig_tools::input(app, ui, resp, i, rect) {
+        return;
+    }
     let pointer = resp.interact_pointer_pos().or_else(|| resp.hover_pos());
     let shift = ui.input(|inp| inp.modifiers.shift);
     if resp.drag_started_by(egui::PointerButton::Primary)
@@ -545,6 +554,20 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
             Some(c) => app.components = [c].into_iter().collect(),
             None if !add => app.components.clear(),
             None => {}
+        }
+        return;
+    }
+    // Joints are picked first, by their bones on screen: they sit inside the meshes they move.
+    if let Some(joint) = crate::rig_tools::pick_joint(app, i, rect, at) {
+        if add {
+            match app.selection.iter().position(|s| *s == joint) {
+                Some(p) => {
+                    app.selection.remove(p);
+                }
+                None => app.selection.push(joint),
+            }
+        } else {
+            app.select_only(joint);
         }
         return;
     }

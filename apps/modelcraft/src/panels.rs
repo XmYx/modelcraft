@@ -11,7 +11,8 @@ use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
 use crate::actions::{self, Action, CLONERS, DEFORMERS, PRIMITIVES};
-use crate::app::{Dock, ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
+use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
+use crate::dock::Move;
 use crate::theme;
 
 pub(crate) fn set_name(ui: &egui::Ui, resp: &egui::Response, name: impl Into<String>) {
@@ -50,7 +51,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 ui.menu_button(tl!("Export"), |ui| {
-                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx] {
+                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx, Action::Export3mf, Action::ExportUsda] {
                         action_button(app, ui, a);
                     }
                 });
@@ -175,10 +176,16 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 });
                 ui.menu_button(tl!("Panels"), |ui| {
                     for p in PanelId::ALL {
-                        let mut shown = app.layout.dock(app.workspace, p) != Dock::Hidden;
+                        let mut shown = app.layouts.shown(app.workspace, p);
                         if ui.checkbox(&mut shown, p.label()).changed() {
-                            app.layout.set(app.workspace, p, if shown { if p == PanelId::Tree { Dock::Left } else { Dock::Right } } else { Dock::Hidden });
+                            crate::dock::move_panel(app, p, if shown { Move::Show } else { Move::Hide });
                         }
+                    }
+                    ui.separator();
+                    if ui.button(tl!("Reset Panels")).clicked() {
+                        app.layouts.reset(app.workspace);
+                        app.status = tl!("Panels reset");
+                        ui.close();
                     }
                 });
             });
@@ -424,17 +431,27 @@ pub fn dock_panel(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 44.0, 20.0), egui::Sense::hover());
         let resp = ui.interact(rect, header_id, egui::Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, p.label()));
-        ui.painter().text(
-            rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            p.label().to_uppercase(),
-            egui::FontId::proportional(11.0),
-            if resp.has_focus() { theme::ACCENT } else { theme::TEXT_DIM },
-        );
+        // The tab above names the panel; the header shows the name while it has keyboard focus
+        // (F6 lands here), so the focus is visible.
+        if resp.has_focus() {
+            ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, p.label().to_uppercase(), egui::FontId::proportional(11.0), theme::ACCENT);
+        }
         let menu = ui.menu_button("...", |ui| {
-            for (d, l) in [(Dock::Left, tl!("Dock Left")), (Dock::Right, tl!("Dock Right")), (Dock::Float, tl!("Float")), (Dock::Hidden, tl!("Hide"))] {
+            for (m, l) in [
+                (Move::Left, tl!("Dock Left")),
+                (Move::Right, tl!("Dock Right")),
+                (Move::Below, tl!("Dock Below the Viewport")),
+                (Move::Float, tl!("Float")),
+                (Move::Hide, tl!("Hide")),
+            ] {
                 if ui.button(l).clicked() {
-                    app.layout.set(app.workspace, p, d);
+                    crate::dock::move_panel(app, p, m);
+                    ui.close();
+                }
+            }
+            for other in app.layouts.shown_panels(app.workspace).into_iter().filter(|o| *o != p) {
+                if ui.button(crate::tlf!("Tab With {panel}", panel = other.label())).clicked() {
+                    crate::dock::move_panel(app, p, Move::TabWith(other));
                     ui.close();
                 }
             }
@@ -746,6 +763,7 @@ fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op
                 Some(r)
             }
             StepOp::EvenRemesh { cell } => Some(drag(ui, cell, 0.001, 0.0001..=1000.0, tl!("Cell size"))),
+            StepOp::Decimate { ratio } => Some(drag(ui, ratio, 0.005, 0.001..=1.0, tl!("Share of triangles kept"))),
             StepOp::Subdivide { levels } => {
                 ui.label(tl!("Levels"));
                 let r = ui.add(egui::DragValue::new(levels).range(1..=4));

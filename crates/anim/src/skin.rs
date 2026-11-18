@@ -223,18 +223,41 @@ pub fn skin_matrices(joint_world: &[Mat4], inverse_bind: &[Mat4]) -> Vec<Mat4> {
     joint_world.iter().zip(inverse_bind).map(|(w, ib)| if w.is_finite() && ib.is_finite() { *w * *ib } else { Mat4::IDENTITY }).collect()
 }
 
-/// Linear blend skinning. `out` gets one position per input point; a point without weights
-/// stays where it is.
-pub fn linear_blend(positions: &[Vec3], weights: &SkinWeights, matrices: &[Mat4], out: &mut Vec<Vec3>) {
+/// Points from which skinning runs on every core: below this the threads cost more than they
+/// save.
+pub const PARALLEL_FROM: usize = 8_192;
+/// Most pieces a mesh is cut into for skinning, and so the most cores it uses.
+pub const MAX_PIECES: usize = 8;
+
+/// Fill `out` with `one(index, point)` for every point, on every core for large meshes. The
+/// result is the same either way: each point is computed alone, in the same order of operations.
+fn for_each_point(positions: &[Vec3], out: &mut Vec<Vec3>, parallel: bool, one: impl Fn(usize, &Vec3) -> Vec3 + Sync) {
+    use rayon::prelude::*;
     out.clear();
-    out.reserve(positions.len());
+    if parallel && positions.len() >= PARALLEL_FROM {
+        // A handful of large pieces, not one per core: skinning is memory-bound, so more threads
+        // add little, and on a busy machine many small pieces cost more than they save (measured:
+        // docs/performance.md).
+        let piece = positions.len().div_ceil(MAX_PIECES).max(2_048);
+        positions.par_iter().enumerate().with_min_len(piece).map(|(v, p)| one(v, p)).collect_into_vec(out);
+    } else {
+        out.reserve(positions.len());
+        out.extend(positions.iter().enumerate().map(|(v, p)| one(v, p)));
+    }
+}
+
+/// Linear blend skinning. `out` gets one position per input point; a point without weights
+/// stays where it is. Large meshes are skinned on every core.
+pub fn linear_blend(positions: &[Vec3], weights: &SkinWeights, matrices: &[Mat4], out: &mut Vec<Vec3>) {
+    linear_blend_with(positions, weights, matrices, out, true);
+}
+
+/// [`linear_blend`] with the choice of running on one core (`parallel` false).
+pub fn linear_blend_with(positions: &[Vec3], weights: &SkinWeights, matrices: &[Mat4], out: &mut Vec<Vec3>, parallel: bool) {
     let k = weights.influences.max(1);
-    for (v, p) in positions.iter().enumerate() {
+    for_each_point(positions, out, parallel, |v, p| {
         let a = v * k;
-        let (Some(js), Some(ws)) = (weights.joints.get(a..a + k), weights.weights.get(a..a + k)) else {
-            out.push(*p);
-            continue;
-        };
+        let (Some(js), Some(ws)) = (weights.joints.get(a..a + k), weights.weights.get(a..a + k)) else { return *p };
         let mut sum = Vec3::ZERO;
         let mut total = 0.0;
         for (j, w) in js.iter().zip(ws) {
@@ -245,8 +268,8 @@ pub fn linear_blend(positions: &[Vec3], weights: &SkinWeights, matrices: &[Mat4]
                 total += *w;
             }
         }
-        out.push(if total > 0.0 { sum / total } else { *p });
-    }
+        if total > 0.0 { sum / total } else { *p }
+    });
 }
 
 /// A rigid motion as a unit dual quaternion: `real` is the rotation, `dual` = ½·t·real.
@@ -272,18 +295,19 @@ impl DualQuat {
 }
 
 /// Dual-quaternion skinning. The joints' rotations and translations are blended; any scale in
-/// the matrices is ignored. `out` gets one position per input point.
+/// the matrices is ignored. `out` gets one position per input point. Large meshes are skinned on
+/// every core.
 pub fn dual_quaternion(positions: &[Vec3], weights: &SkinWeights, matrices: &[Mat4], out: &mut Vec<Vec3>) {
-    out.clear();
-    out.reserve(positions.len());
+    dual_quaternion_with(positions, weights, matrices, out, true);
+}
+
+/// [`dual_quaternion`] with the choice of running on one core (`parallel` false).
+pub fn dual_quaternion_with(positions: &[Vec3], weights: &SkinWeights, matrices: &[Mat4], out: &mut Vec<Vec3>, parallel: bool) {
     let dqs: Vec<DualQuat> = matrices.iter().map(DualQuat::from_matrix).collect();
     let k = weights.influences.max(1);
-    for (v, p) in positions.iter().enumerate() {
+    for_each_point(positions, out, parallel, |v, p| {
         let a = v * k;
-        let (Some(js), Some(ws)) = (weights.joints.get(a..a + k), weights.weights.get(a..a + k)) else {
-            out.push(*p);
-            continue;
-        };
+        let (Some(js), Some(ws)) = (weights.joints.get(a..a + k), weights.weights.get(a..a + k)) else { return *p };
         let mut real = Quat::from_xyzw(0.0, 0.0, 0.0, 0.0);
         let mut dual = real;
         let mut pivot: Option<Quat> = None;
@@ -303,12 +327,10 @@ pub fn dual_quaternion(positions: &[Vec3], weights: &SkinWeights, matrices: &[Ma
         }
         let len = real.length();
         if len < 1e-8 || !len.is_finite() {
-            out.push(*p);
-            continue;
+            return *p;
         }
-        let blended = DualQuat { real: real * (1.0 / len), dual: dual * (1.0 / len) };
-        out.push(blended.transform(*p));
-    }
+        DualQuat { real: real * (1.0 / len), dual: dual * (1.0 / len) }.transform(*p)
+    });
 }
 
 /// Distance from `p` to the segment `a`–`b`.
@@ -500,6 +522,29 @@ pub fn heat_weights(positions: &[Vec3], edges: &[(u32, u32)], bones: &[(Vec3, Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skinning_on_every_core_gives_exactly_the_one_core_result() {
+        let n = PARALLEL_FROM * 3 + 17;
+        let positions: Vec<Vec3> = (0..n).map(|i| Vec3::new((i % 97) as f32 * 0.1, i as f32 / n as f32 * 8.0, (i % 13) as f32 * 0.3)).collect();
+        let bones: Vec<(Vec3, Vec3)> = (0..8).map(|i| (Vec3::Y * i as f32, Vec3::Y * (i + 1) as f32)).collect();
+        let weights = distance_weights(&positions, &bones, 4);
+        let matrices: Vec<Mat4> = (0..8)
+            .map(|i| Mat4::from_rotation_translation(Quat::from_rotation_z(0.2 * i as f32) * Quat::from_rotation_y(0.4), Vec3::new(i as f32 * 0.1, 0.0, 0.3)))
+            .collect();
+        let (mut one, mut many) = (Vec::new(), Vec::new());
+        linear_blend_with(&positions, &weights, &matrices, &mut one, false);
+        linear_blend_with(&positions, &weights, &matrices, &mut many, true);
+        assert_eq!(one.len(), n);
+        assert!(one == many, "linear blend: the same bits on one core and on all");
+        dual_quaternion_with(&positions, &weights, &matrices, &mut one, false);
+        dual_quaternion_with(&positions, &weights, &matrices, &mut many, true);
+        assert!(one == many, "dual quaternion: the same bits on one core and on all");
+        assert!(one.iter().all(|p| p.is_finite()) && one != positions);
+        // Short lists and reused buffers: no stale tail.
+        linear_blend(&positions[..5], &weights, &matrices, &mut many);
+        assert_eq!(many.len(), 5);
+    }
     use proptest::prelude::*;
 
     /// A tube along Y from 0 to `height`, `rings` + 1 rings of `sides` points, with its edges.

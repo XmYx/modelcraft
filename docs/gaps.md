@@ -164,7 +164,7 @@ The biggest single gap: two whole areas (weights 8 and 6) and the materials area
 
 ## Sculpting
 
-**S4** is in except for its edges: mask tools (hollows, ridges, occlusion, blur, sharpen, grow, shrink), patches made while sculpting (by angle, UV island, part, from the mask), hide, show, isolate and invert, rectangle and lasso tools for masking and hiding with a by-numbers dialog, clip and trim by a plane, and shells from the mask. Left of it: a slice that keeps both halves, planes at a free angle and drawn clip outlines, a smoothed shell rim, and cheap undo of a visibility change (it rebuilds the sculpt session, about a second at 2 M triangles). Patches made while sculpting live on the sculpt layer; the modeling stream's patch tools (**M14**) work on history steps, and the two do not yet share one patch list in the UI. Of **S9**, sculpting was measured at 12.6 M triangles (dabs under 10 ms in the engine) and stroke ends refit only what moved; 20 M, the app window at that size, session start (6–10 s at 12.6 M) and threads are open: a thread pool for dabs was measured slower on a busy machine and not kept. Brush depth (**S3**) is mostly in: ten more brushes, hardness, five stroke modes, eight built-in stamp pictures and presets. Left of it: rotate, elastic-move and scrape brushes, curve strokes, importing your own stamp images, radial symmetry and the pen-pressure check. Live detail and even remesh (**S2**) are in, live detail partly: it only splits (collapsing short edges and flipping edges are missing, so a region never gets coarser and slivers appear at the rim of a refined area), it works on the base detail level without shape layers, and every split re-uploads the whole mesh to the GPU. Even remesh needs a closed mesh and drops UVs and patches. Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
+**S4** is in except for its edges: mask tools (hollows, ridges, occlusion, blur, sharpen, grow, shrink), patches made while sculpting (by angle, UV island, part, from the mask), hide, show, isolate and invert, rectangle and lasso tools for masking and hiding with a by-numbers dialog, clip and trim by a plane, and shells from the mask. Left of it: a slice that keeps both halves, planes at a free angle and drawn clip outlines, a smoothed shell rim, and cheap undo of a visibility change (it rebuilds the sculpt session, about a second at 2 M triangles). Patches made while sculpting live on the sculpt layer; the modeling stream's patch tools (**M14**) work on history steps, and the two do not yet share one patch list in the UI. **S7** is in: Decimate (quadric error, a history step) and Project Detail; left of it are vertex colours through a decimation (there are none in ModelCraft yet), best-fit positions instead of end points, and decimation that is denser where painted. Of **S9**, sculpting was measured at 12.6 M triangles in the engine (dabs under 10 ms) and in the app window (16.8 ms a frame with a large brush, after a per-frame copy of the mesh was removed), and stroke ends refit only what moved; 20 M, session start (6–10 s at 12.6 M) and threads are open: a thread pool for dabs was measured slower on a busy machine and not kept. Brush depth (**S3**) is mostly in: ten more brushes, hardness, five stroke modes, eight built-in stamp pictures and presets. Left of it: rotate, elastic-move and scrape brushes, curve strokes, importing your own stamp images, radial symmetry and the pen-pressure check. Live detail and even remesh (**S2**) are in, live detail partly: it only splits (collapsing short edges and flipping edges are missing, so a region never gets coarser and slivers appear at the rim of a refined area), it works on the base detail level without shape layers, and every split re-uploads the whole mesh to the GPU. Even remesh needs a closed mesh and drops UVs and patches. Detail levels (the first row of **S1**) and shape layers (the first row of **S5**) are in; what is left of them: rebuilding lower levels from a dense mesh that has none, showing the top level while working on a lower one, a mask per shape layer, and stepping down while shape layers exist. **S1** detail levels and **S2** live detail with even remesh are the two features sculptors ask for most after retopology ([user-research.md](user-research.md)); both need crash-safe undo that keeps the stroke journal exact. Pen pressure arrives through egui touch force and is not verified on every Wayland, X11 and Windows tablet stack (the winit fork may need pen events); **S3** includes that check. Interactive counts above 2 M triangles have not been measured; **S9** starts by measuring.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -198,12 +198,12 @@ audio and the sculpt turntable. Everything else is not started. **A1** came firs
 Limits of what exists:
 - Rotation is keyed as XYZ Euler angles (keying one angle keys all three); there are no other
   rotation orders and no quaternion interpolation.
-- Rigging: joints are added by command and moved with the gizmo or by number (no click-to-place
-  tool, no viewport picking of joints); a joint's rest orientation lives in its rotation, not in a
-  separate channel. Skin weights are painted by a command dab, not by a viewport brush; heat
+- Rigging: a joint's rest orientation lives in its rotation, not in a separate channel. Heat
   weights skip the paper's visibility test, so two limbs that touch can share weights; weights
-  cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
-  `Scene::get` is a linear search, which shows with thousands of objects. A `.glb` export of a scene with
+  cannot be copied between meshes and are saved as JSON. Skinning runs on several cores and objects are found through an index, but playback of a
+  heavy skinned mesh is bound by the viewport rebuilding and re-uploading the whole mesh each
+  frame and by copying its unchanged topology (performance.md): about 26 frames per second for
+  100,000 vertices. `Scene::children` still walks the object list. A `.glb` export of a scene with
   skins, blend shapes, curves or constraints writes them (`craft-gltf-anim`, see
   architecture.md): one clip sampled every frame of the playback range from the solved scene,
   the four strongest joints per vertex, shapes at full weight. Not kept, and said in the export's
@@ -230,13 +230,16 @@ Limits of what exists:
   command, not picked or painted in the viewport; a lattice only moves points inside its box;
   blend-shape targets are made from another mesh and are not edited in place; shape offsets are
   saved as JSON, not as a blob.
-- Animation layers have weight, mute and two modes; there is no solo or lock, weights cannot
-  be keyed and layers cannot be reordered. The Key Sheet and Curve Editor show the active layer only.
-- Motion paths are drawn, not edited, and there are no ghosts. Point caches are written
-  (`modelcraft-cli bake`) but cannot be played back on a mesh yet.
-- No box selection or copy/paste of keys.
-- The Curve Editor fits its value axis to the shown curves; hide curves to see small ones next to
-  large ones.
+- Animation layers: the Key Sheet and Curve Editor show the active layer only; a layer's weight
+  curve is keyed and cleared from the panel but has no row in the editors.
+- Motion paths are drawn, not edited. Ghosts come from the curves (constraints do not show in
+  them) and draw joints as bones and other objects as axis crosses, not as meshes.
+- Pasting keys with one other object selected goes onto that object; there is no paste that
+  replaces a time range or ripples later keys.
+- The Curve Editor's value range is fitted to the shown curves or set by hand (numbers, zoom
+  buttons); there is no wheel zoom on the value axis and no normalised view.
+- The weight brush's ring on screen has a fixed size (the radius is in scene units in
+  Properties); weight marks are subsampled above 30,000 vertices; strokes are not mirrored.
 - Playback shows whole frames at the scene rate on the UI thread.
 - Duplicating an object does not copy its curves.
 - The app's shortcut handler gives every key to a focused widget, so with keyboard focus on a
@@ -302,7 +305,7 @@ The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs 
 
 ## Pipeline formats
 
-FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/formats/src/fbx_write.rs`, from public descriptions of the syntax and scene objects only; it belongs next to craft-mesh's reader once craft-libs takes writers. 3MF is read too; 3MF export (F5) remains. USD (**F3**) waits for a scene-level reader in craft-libs (craft-usd has wire primitives only). glTF stores triangles only, so our GLB round trip loses quads; quad hints in `extras` wait for craft-mesh to keep `extras`. craft-mesh writes GLB only; a `.gltf` JSON writer belongs there.
+FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/formats/src/fbx_write.rs`, from public descriptions of the syntax and scene objects only; it belongs next to craft-mesh's reader once craft-libs takes writers. 3MF is read and written (`threemf_write.rs`, with the file's unit and Z up). USD (**F3**) is partly in: text `.usda` is read and written by `crates/formats/src/usd.rs` (hierarchy, transforms, meshes with UVs, preview-surface materials); layers, references, variants, `.usdc` and `.usdz` remain (craft-usd has wire primitives only). glTF stores triangles only, so our GLB round trip loses quads; quad hints in `extras` wait for craft-mesh to keep `extras`. craft-mesh writes GLB only; a `.gltf` JSON writer belongs there.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -313,7 +316,7 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4**: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes are in; tags, layers, instances, user attributes, attribute presets and pivots remain.
+Undo history now survives save and open (X7, done). **X3**: docking with tabs, splits and saved layouts is in (craft-ui `docking`), and so are the radial menu, the Quick Bar and the full Preferences window; shipped translations (catalogs in craft-i18n) remain. **X4**: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes are in; tags, layers, instances, user attributes, attribute presets and pivots remain.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

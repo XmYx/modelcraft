@@ -754,7 +754,7 @@ impl Scene {
     }
 
     fn local_mut(&mut self, id: ObjectId) -> Option<&mut Transform> {
-        self.objects.iter_mut().find(|o| o.id == id).map(|o| &mut o.transform)
+        self.object_mut(id).map(|o| &mut o.transform)
     }
 
     /// Run one constraint. `Ok(true)` when it changed an attribute through [`Scene::set_attr`]

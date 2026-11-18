@@ -1,0 +1,1 @@
+| 2026-11-18 | Sculpt frames no longer copy the mesh into the scene every frame (64.7 ms to 17.0 ms a frame at 2 M triangles under a 60 Hz cap); the app window measured at 12.6 M triangles: 16.8 ms a sculpt frame, 161 fps orbiting |

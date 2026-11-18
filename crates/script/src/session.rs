@@ -35,6 +35,17 @@ pub struct RunReport {
     pub elapsed: Duration,
 }
 
+/// What [`Session::fire_within`] did.
+#[derive(Debug, Default)]
+pub struct Fired {
+    /// One report per callback that ran.
+    pub reports: Vec<RunReport>,
+    /// Time the callbacks took together.
+    pub elapsed: Duration,
+    /// Callbacks left out because the budget was spent.
+    pub skipped: usize,
+}
+
 impl RunReport {
     pub fn ok(&self) -> bool {
         self.error.is_none()
@@ -199,19 +210,45 @@ impl Session {
     /// event time limit; a callback that fails [`MAX_FAILURES`] times in a row is switched off
     /// (its last report says so).
     pub fn fire(&mut self, doc: &mut Document, ctx: &mut RunContext, event: &Event) -> Vec<RunReport> {
+        let each = self.shared.limits.max_event_time.min(self.shared.limits.max_time);
+        self.fire_within(doc, ctx, event, each, Duration::MAX).reports
+    }
+
+    /// Like [`Session::fire`] with a time budget, for events that come in quick succession (the
+    /// timeline playing): one callback gets at most `each`, and all callbacks of the event
+    /// together `total`. A callback that has not started when `total` is spent is skipped (and
+    /// counted), the one running when it ends is stopped by its deadline like any slow callback.
+    pub fn fire_within(&mut self, doc: &mut Document, ctx: &mut RunContext, event: &Event, each: Duration, total: Duration) -> Fired {
         let kind = event.kind();
         let calls: Vec<(usize, String, rhai::FnPtr, Rc<AST>)> = match self.shared.registry.try_borrow() {
             Ok(r) => r.handlers.iter().enumerate().filter(|(_, h)| h.kind == kind).map(|(i, h)| (i, h.owner.clone(), h.f.clone(), h.ast.clone())).collect(),
-            Err(_) => return Vec::new(),
+            Err(_) => return Fired::default(),
         };
-        let limit = self.shared.limits.max_event_time.min(self.shared.limits.max_time);
+        let usable = self.shared.limits.max_event_time.min(self.shared.limits.max_time);
+        let each = each.min(usable);
+        let started = Instant::now();
+        let mut skipped = 0;
         let mut reports = Vec::new();
         let mut off: Vec<usize> = Vec::new();
         for (i, owner, f, ast) in calls {
+            let left = total.saturating_sub(started.elapsed());
+            if left.is_zero() {
+                skipped += 1;
+                continue;
+            }
+            let limit = each.min(left);
+            // Cut short only by a budget the others had already used up (a millisecond of slack
+            // keeps a lone callback on a budget of its own size responsible for its overrun).
+            let excusable = left.saturating_add(Duration::from_millis(1)) < each;
             let selection = ctx.selection.clone();
             let arg = Dynamic::from_map(events::event_map(event, &selection));
             let mut report = self.drive(doc, ctx, &owner, limit, |engine, _| f.call::<Dynamic>(engine, &ast, (arg,)).map_err(Failure::Eval));
-            if let Ok(mut r) = self.shared.registry.try_borrow_mut()
+            // A callback stopped only because the shared budget ran out is not at fault: it is
+            // counted as skipped, not as a failure.
+            if excusable && total.saturating_sub(started.elapsed()).is_zero() && report.error.as_ref().is_some_and(|e| e.kind == ErrorKind::Limit) {
+                report.error = None;
+                skipped += 1;
+            } else if let Ok(mut r) = self.shared.registry.try_borrow_mut()
                 && let Some(h) = r.handlers.get_mut(i)
             {
                 if report.error.is_some() {
@@ -240,7 +277,7 @@ impl Session {
                 keep
             });
         }
-        reports
+        Fired { reports, elapsed: started.elapsed(), skipped }
     }
 
     /// The shared part of every run: limits, the document on loan, panics caught, the report.

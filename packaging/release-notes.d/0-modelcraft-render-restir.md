@@ -1,0 +1,1 @@
+- The Render View has a new option, "Resample direct light": in scenes with many lights each pixel borrows the best light samples of its neighbours and of the previous pass, which cleans up the first passes faster. It is a little darker near shadows; for final images the command line's `--restir unbiased` keeps the exact brightness. Works on the graphics card and the processor.
