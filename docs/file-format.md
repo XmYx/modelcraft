@@ -25,6 +25,12 @@ Schema 2 (this version) added detail levels and shape layers to sculpt layers: `
 `shapes` (name, strength) and `active_shape` in the JSON, and the finer-level displacements, the
 shape offsets and the anchor in the layer blob (version 2). Schema 1 files still open.
 
+A sculpt layer may also carry `patches` and `hidden` in the JSON, one value per face of the mesh
+it shows, both as run lengths: `patches` is `[value, count, value, count, …]`, `hidden` is the
+lengths of alternating runs starting with a shown one (`[3, 2]`: three faces shown, two hidden).
+Both are optional and left out when empty, so the schema number did not change; a reader refuses
+runs that would expand past the element limit.
+
 A newer `schema_version` is refused with a clear message; `0` is invalid. Scenes are repaired on
 load (unique ids, parents exist, no cycles, depth ≤ 64, finite transforms).
 

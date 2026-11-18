@@ -184,6 +184,11 @@ impl Shared {
             | Command::SculptMask { .. }
             | Command::SculptDetail { .. }
             | Command::SculptShape { .. }
+            | Command::SculptGroups { .. }
+            | Command::SculptVisibility { .. }
+            | Command::SculptRegion { .. }
+            | Command::SculptClip { .. }
+            | Command::SculptExtract { .. }
             | Command::AddMesh { .. }
             | Command::SetPositions { .. }
             | Command::Anim(_)
