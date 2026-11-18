@@ -421,7 +421,7 @@ fn memory_estimate_covers_what_is_held() {
         &Limits::default(),
     )
     .unwrap();
-    let held = h.all_points().len() * 12 + h.roots().len() * std::mem::size_of::<SurfacePoint>() + h.strand_count() * 8;
+    let held = h.all_points().len() * 12 + std::mem::size_of_val(h.roots()) + h.strand_count() * 8;
     assert_eq!(h.bytes(), held);
     assert_eq!(estimate_bytes(usize::MAX, usize::MAX), usize::MAX);
 }

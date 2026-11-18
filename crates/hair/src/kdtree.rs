@@ -35,10 +35,10 @@ impl Neighbors {
         let mut i = self.len.min(k - 1);
         // `i` is the slot being filled; shift larger entries down.
         while i > 0 && self.items.get(i - 1).is_some_and(|p| p.0 > d2) {
-            if let Some(prev) = self.items.get(i - 1).copied() {
-                if let Some(slot) = self.items.get_mut(i) {
-                    *slot = prev;
-                }
+            if let Some(prev) = self.items.get(i - 1).copied()
+                && let Some(slot) = self.items.get_mut(i)
+            {
+                *slot = prev;
             }
             i -= 1;
         }

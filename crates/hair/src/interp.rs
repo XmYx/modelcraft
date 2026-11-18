@@ -254,12 +254,12 @@ pub(crate) struct Weights {
 fn inverse_distance(found: &[(f32, u32)], scale2: f32) -> Weights {
     let mut w = Weights { items: [(0, 0.0); MAX_K], len: 0 };
     let eps = (scale2 * 1e-12).max(f32::MIN_POSITIVE);
-    if let Some(&(d2, idx)) = found.first() {
-        if d2 <= eps {
-            w.items[0] = (idx, 1.0);
-            w.len = 1;
-            return w;
-        }
+    if let Some(&(d2, idx)) = found.first()
+        && d2 <= eps
+    {
+        w.items[0] = (idx, 1.0);
+        w.len = 1;
+        return w;
     }
     let mut sum = 0.0;
     for (slot, &(d2, idx)) in w.items.iter_mut().zip(found) {
@@ -385,12 +385,12 @@ pub fn interpolate(surface: &Surface, guides: &Guides, spec: &InterpSpec, maps: 
                     offset += *r * (sample_curve(gs, t) - base) * wt;
                 }
                 let mut p = pos + offset * len_scale;
-                if clump_amount > 0.0 {
-                    if let Some(gi) = clump_target {
-                        let gs = gp.get(gi * gn..(gi + 1) * gn).unwrap_or_default();
-                        let target = sample_curve(gs, t);
-                        p = p.lerp(target, clump_amount * t.powf(spec.clump.tip_bias));
-                    }
+                if clump_amount > 0.0
+                    && let Some(gi) = clump_target
+                {
+                    let gs = gp.get(gi * gn..(gi + 1) * gn).unwrap_or_default();
+                    let target = sample_curve(gs, t);
+                    p = p.lerp(target, clump_amount * t.powf(spec.clump.tip_bias));
                 }
                 if frizz_len > 0.0 {
                     let x = t * spec.frizz.frequency + phase;

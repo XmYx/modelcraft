@@ -63,7 +63,7 @@ impl Surface {
             *v = v.try_normalize().unwrap_or(Vec3::Y);
         }
         let total: f64 = areas.iter().map(|a| f64::from(*a)).sum();
-        if tris.is_empty() || !(total > 0.0) || !total.is_finite() {
+        if tris.is_empty() || total <= 0.0 || !total.is_finite() {
             return Err(HairError::NoSurface);
         }
         Ok(Surface { positions, normals, tris, areas })
@@ -218,10 +218,10 @@ pub struct SurfaceMaps<'a> {
 impl SurfaceMaps<'_> {
     pub(crate) fn check(&self, surface: &Surface) -> Result<(), HairError> {
         for (what, m) in [("density map", self.density), ("length map", self.length)] {
-            if let Some(m) = m {
-                if m.len() != surface.vertex_count() {
-                    return Err(HairError::LengthMismatch { what, expected: surface.vertex_count(), found: m.len() });
-                }
+            if let Some(m) = m
+                && m.len() != surface.vertex_count()
+            {
+                return Err(HairError::LengthMismatch { what, expected: surface.vertex_count(), found: m.len() });
             }
         }
         Ok(())
