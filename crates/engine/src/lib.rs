@@ -21,7 +21,7 @@ pub mod rig;
 pub mod sim;
 mod undo;
 
-pub use anim::{AnimCommand, KeyRef};
+pub use anim::{AnimCommand, KeyRef, PastedKey};
 pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
 pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSession};
 pub use groups::{GroupOp, RegionAction, VisibilityOp};

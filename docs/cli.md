@@ -111,7 +111,11 @@ names (`levels`, `deformer.angle`, …). Whole-number attributes round; switches
 | `turntable` | `ids`, `axis` (x, y, z; default y), `turns` (default 1), `start?`, `end?`; replaces the rotation curves |
 | `add_layer` | `name?`, `mode?` (add, override); the new layer becomes active |
 | `remove_layer`, `set_active_layer` | `layer` (0 is the base layer) |
-| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?` |
+| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?`, `solo?` (only solo layers play over the base), `lock?` (its keys cannot be changed) |
+| `key_layer_weight` | `layer`, `frame?`, `value?` (its weight there without it), `clear?` (remove its weight keys): the layer's weight over time |
+| `move_layer` | `layer`, `delta` (1 up, −1 down) |
+| `paste_keys` | `keys`: `[{id, path, key: {t, v, interp?, tangent?, …}}]`, `offset?` (frames), `to?` (another object; attributes it lacks are skipped) |
+| `set_attr` | `id`, `path`, `value`: set any numeric attribute without keying it |
 | `flatten_layers` | `step` (default 1): bake every layer into the base curves |
 | `set_time` | `frame` (poses the scene; not an undo step) |
 | `set_time_range` | `start?`, `end?`, `fps?` |
