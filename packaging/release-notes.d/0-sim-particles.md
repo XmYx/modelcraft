@@ -1,1 +1,1 @@
-- Particles: emit from a point, a surface or a volume with forces, attractors and collisions, bake the pool, and see it as instances in the viewport and in renders (commands only; the panel follows).\n
+- Particles: emit from a point, a surface or a volume with forces, attractors and collisions, bake the pool, and see it as instances in the viewport and in renders (commands only; the panel follows).
