@@ -195,6 +195,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
+            crate::sim_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
@@ -475,6 +476,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
         PanelId::Brushes => brushes(app, ui),
         PanelId::Paint => paint(app, ui),
         PanelId::History => undo_history(app, ui),
+        PanelId::Simulation => crate::sim_ui::panel(app, ui),
     }
 }
 

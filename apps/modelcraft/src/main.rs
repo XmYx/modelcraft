@@ -62,6 +62,9 @@ mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;
 mod shelf;
+mod sim_ui;
+#[cfg(test)]
+mod sim_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

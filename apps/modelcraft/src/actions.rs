@@ -89,6 +89,7 @@ pub enum Action {
     ScriptRecord,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    Sim(crate::sim_ui::SimAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -186,6 +187,7 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
+    v.extend(crate::sim_ui::SimAction::ALL.map(Sim));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -372,6 +374,7 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
+            Sim(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -476,6 +479,7 @@ impl Action {
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
+            Sim(a) => a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
@@ -575,6 +579,7 @@ impl Action {
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
+            Sim(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
@@ -598,6 +603,7 @@ impl Action {
             ScriptWindow | ScriptRun | ScriptRunSelection | ScriptRecord => "Scripts",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
+            Sim(_) => "Simulate",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",

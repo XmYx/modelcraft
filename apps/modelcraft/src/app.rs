@@ -74,10 +74,11 @@ pub enum PanelId {
     Brushes,
     Paint,
     History,
+    Simulation,
 }
 
 impl PanelId {
-    pub const ALL: [PanelId; 5] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History];
+    pub const ALL: [PanelId; 6] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History, PanelId::Simulation];
     pub fn label(self) -> String {
         match self {
             PanelId::Tree => tl!("Scene"),
@@ -85,6 +86,7 @@ impl PanelId {
             PanelId::Brushes => tl!("Brushes"),
             PanelId::Paint => tl!("Paint"),
             PanelId::History => tl!("Undo History"),
+            PanelId::Simulation => tl!("Simulation"),
         }
     }
 }
@@ -213,6 +215,8 @@ pub struct ModelApp {
     pub recovery_dir: Option<PathBuf>,
     /// The Animation panel: playback, key selection, views.
     pub anim: crate::anim_ui::AnimUi,
+    /// The Simulation panel: the bake in progress.
+    pub sim: crate::sim_ui::SimUi,
     /// Hair grooming: brush, symmetry, the stroke in progress.
     pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
@@ -334,6 +338,7 @@ impl ModelApp {
             autosave_at: None,
             recovery_dir: None,
             anim: Default::default(),
+            sim: Default::default(),
             groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
@@ -697,6 +702,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Sim(a) => crate::sim_ui::act(self, a),
             Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
@@ -1245,6 +1251,8 @@ impl ModelApp {
         self.last_frame = Some(now);
         self.frames += 1;
         crate::agents::tick(self);
+        // Before the shortcuts, so Escape stops a running bake instead of clearing the selection.
+        crate::sim_ui::tick(self, &ctx);
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
         crate::script_ui::tick(self);
