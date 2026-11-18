@@ -212,7 +212,7 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::set_cage_levels` | Change a smooth cage's levels: id, levels |
 | `cmd::set_deformer` | Change a deformer's parameters: id, deformer |
 | `cmd::set_cloner` | Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target? |
-| `cmd::add_step` | Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op |
+| `cmd::add_step` | Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}): id, op |
 | `cmd::set_step` | Change a history step: id, index, op |
 | `cmd::enable_step` | Switch a history step on or off: id, index, enabled |
 | `cmd::remove_step` | Remove a history step: id, index |
@@ -225,7 +225,12 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::begin_sculpt` | Start sculpting a mesh object: id |
 | `cmd::end_sculpt` | Stop sculpting |
 | `cmd::sculpt_stroke` | Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs} |
-| `cmd::sculpt_mask` | Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, {patch: {triangle}}) |
+| `cmd::sculpt_mask` | Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}}) |
+| `cmd::sculpt_groups` | Make patches while sculpting: id, op ({by_normal: {angle}}, by_uv_island, by_part, from_mask) |
+| `cmd::sculpt_visibility` | Hide and show faces while sculpting: id, op (show_all, invert, hide_masked, hide_unmasked, {hide_patch: {triangle}}, {show_patch: {triangle}}, {isolate: {triangle}}) |
+| `cmd::sculpt_region` | Mask or hide inside a screen outline: id, region {view_proj (16 numbers, object to clip space), points [[x, y]…] in −1..1, front_only?, eye?}, action (mask, unmask, hide, isolate) |
+| `cmd::sculpt_clip` | Move what lies on the normal's side of a plane onto it: id, point, normal |
+| `cmd::sculpt_extract` | New object from the masked faces as a closed shell: id, thickness |
 | `cmd::sculpt_detail` | Step up or down a detail level, keeping the sculpted detail: id, op (up, down) |
 | `cmd::sculpt_shape` | Edit shape layers: id, op (add {name?}, remove {index}, merge {index}, strength {index, strength}, select {index or null}, rename {index, name}) |
 | `cmd::add_mesh` | Add a mesh from raw geometry: positions [[x,y,z]…], faces [[i,j,k…]…], name?, parent? |

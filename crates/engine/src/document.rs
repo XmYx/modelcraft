@@ -1083,7 +1083,8 @@ impl Document {
             return false;
         }
         let entries = self.undo.take_last(n);
-        if entries.len() == n && entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. }))
+        if entries.len() == n
+            && entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. }))
             && let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (entries.first(), entries.last())
         {
             let (before, after) = (before.clone(), after.clone());
