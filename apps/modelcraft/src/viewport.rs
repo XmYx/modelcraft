@@ -824,6 +824,9 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
 fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     let cam = app.views[i].camera;
     let aspect = rect.aspect_ratio();
+    if i == app.active_view && aspect.is_finite() && aspect > 0.0 {
+        app.uv.view_aspect = aspect;
+    }
     let ids = drawables(&app.doc.scene);
     let session = app.doc.sculpt.as_ref().map(|s| s.id);
     let sculpting = app.workspace == Workspace::Sculpt;
@@ -871,10 +874,12 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             selected: app.selection.contains(id) && !sculpting,
             show_mask: Some(*id) == session,
             patch_tint: app.show_patches || paint,
+            uv_checker: app.uv.viewport_checker && m.as_ref().is_some_and(|m| m.has_uvs()),
             roughness: o.material.roughness,
         });
     }
-    if let Some(tex) = g.draw(i, size, cam.view_proj(aspect), cam.eye(), theme::VIEWPORT_BG, &specs, &lines, &overlay) {
+    let hair = crate::hair_ui::hair_specs(&mut app.doc, &app.groom, &app.selection, g);
+    if let Some(tex) = g.draw(i, size, cam.view_proj(aspect), cam.eye(), theme::VIEWPORT_BG, &specs, &lines, &overlay, &hair) {
         ui.painter_at(rect).image(tex, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
 }

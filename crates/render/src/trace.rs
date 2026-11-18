@@ -280,6 +280,7 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
             b.add_mesh(&data, world * c.matrix, material)?;
         }
     }
+    crate::hair_trace::add_hair(&mut b, scene, eval)?;
     let (lo, hi) = scene_bounds(scene, eval).unwrap_or((Vec3::splat(-1.0), Vec3::splat(1.0)));
     let centre = (lo + hi) * 0.5;
     let radius = ((hi - lo).length() * 0.5).max(1e-3);

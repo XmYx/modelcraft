@@ -24,8 +24,8 @@ modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
-modelcraft-cli hair-bench --strands 1000000   # grow guides and interpolate hairs: time and memory
 modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
+modelcraft-cli hair-bench --strands 1000000 [--gpu]   # grow guides, interpolate hairs, draw them: time, memory, frame times
 modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
 
@@ -215,6 +215,19 @@ applications and map edits give the same result from the window, a script or the
 | `stroke` | `id`, `stroke`: `brush` {`kind` (comb, cut, length, puff, smooth, clump, frizz), `radius`, `strength`, `falloff`, `invert`, `cut_length`, `frequency`, `seed`}, `symmetry` {`x`, `y`, `z`}, `dabs` [{`center`, `normal`, `delta`, `pressure`}] in the emitter's space |
 | `apply` | `id`, `brush`, `symmetry?`, `center?` [x, y, z], `direction?` [x, y, z]: one dab, over the whole groom when `center` is left out; `direction` is the comb movement |
 | `map` | `id`, `map` (mask, density), `edit`: `fill` + `value` · `invert` · `clear` · `paint` + `center`, `radius`, `value`, `strength`, `falloff` |
+| `set_dynamics` | `id`, `dynamics?` (`gravity`, `wind` in world units per second squared, `damping`, `stiffness`, `iterations`, `collide`, `clearance`), `timing?` (`start_frame`, `end_frame`, `fps`, `substeps`), `seed?`; throws a bake away |
+| `bake` | `id`: simulate the guides over the frames (Verlet, length constraints, emitter collision) and cache them; the timeline, the viewport, renders and exports play the cache |
+| `clear_bake` | `id` |
+
+`modelcraft-cli render` and the Render View include hair: the object's base colour is the hair colour
+and its roughness the fibre roughness (CPU path tracer only; the GPU one declines hair).
+
+A bake is derived data: it is not saved in the project (the settings and seed are, so baking again gives
+the same bytes) and it is dropped when the guides or the settings change. Hair exports from the command
+line: `modelcraft-cli hair-export scene.modelcraft Hair out.glb [--strands N] [--guides] [--emitter]` writes
+glTF lines (one `LINES` primitive; the point width as the `_WIDTH` vertex attribute; `extras.modelcraft` holds
+the strand and point counts) and `hair-export … out.mcpc` the guides as a point cache (every baked frame, or
+one frame without a bake), in world space unless `--emitter` is given.
 
 The mask (1 where brushes act fully, 0 where they never touch a guide) and the density (where
 `regrow` puts guides) are values on the emitter's vertices. Limits (checked before allocating):

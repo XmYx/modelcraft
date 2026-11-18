@@ -763,18 +763,22 @@ Before the work bound, 2,000 islands took 20 s with MaxRects alone (reported in 
 
 Guides grown on a 128×64 UV sphere (16,128 triangles, area 12.56), then render hairs blended from
 them by the nearest four guides (`knn`) or the three-guide barycentric rule (`bary`). All 24 cores,
-release build, `modelcraft-cli hair-bench --strands N [--blend bary --clump A --frizz A --points P]`.
-The machine was shared with other builds (load average 50–58 on 24 cores) when these were taken, so
-treat them as pessimistic.
+release build, `modelcraft-cli hair-bench --strands N [--blend bary --clump A --frizz A --points P] [--gpu]`.
+The machine is shared with other builds, so each table says how loaded it was (`uptime` load
+average on 24 cores) and the numbers move with it.
 
-| Strands × points | Guides | Blend, extras | Interpolation | Strands per second | Memory held |
-|---|---|---|---|---|---|
-| 100,000 × 8 | 5,000 | knn | 102 ms | 0.98 M | 12 MB |
-| 1,000,000 × 8 | 5,000 | knn | 467 ms | 2.14 M | 120 MB |
-| 1,000,000 × 8 | 5,000 | bary, clump 0.5, frizz 0.1 | 653 ms | 1.53 M | 120 MB |
-| 1,000,000 × 16 | 5,000 | knn | 614 ms | 1.63 M | 216 MB |
+### Making the hairs
 
-Growing 5,000 guides takes 20–30 ms. Memory is 12 bytes per point plus 24 bytes per strand (root and
+| Strands × points | Guides | Blend, extras | Interpolation | Strands per second | Memory held | Load average |
+|---|---|---|---|---|---|---|
+| 100,000 × 8 | 5,000 | knn | 102 ms | 0.98 M | 12 MB | 58 |
+| 1,000,000 × 8 | 5,000 | knn | 467 ms | 2.14 M | 120 MB | 58 |
+| 1,000,000 × 8 | 5,000 | bary, clump 0.5, frizz 0.1 | 653 ms | 1.53 M | 120 MB | 58 |
+| 1,000,000 × 16 | 5,000 | knn | 614 ms | 1.63 M | 216 MB | 58 |
+| 100,000 × 8 | 5,000 | knn | 12 ms | 8.07 M | 12 MB | 8 |
+| 1,000,000 × 8 | 5,000 | knn | 96 ms | 10.40 M | 120 MB | 8 |
+
+Growing 5,000 guides takes 2–30 ms. Memory is 12 bytes per point plus 24 bytes per strand (root and
 two widths); `modelcraft_hair::estimate_bytes` matches the measured size exactly. Hard caps (checked
 before allocating): 200,000 guides, 5,000,000 strands, 64 points per strand and 40 million points
 per operation by default; no caller can raise them past 1,000,000 guides, 20,000,000 strands, 256
@@ -846,6 +850,73 @@ it plays back from a cache, not live; the cache is the cost (137 MiB for 120 fra
 the byte budget exists. Collisions cost 135 ns a particle a substep; the noise field (three value
 noises per particle) is most of the "forces" row. Display is capped at 10,000 instances at a time
 (the clone limit), whatever the pool holds.
+
+### Drawing them (`--gpu`)
+
+The viewport pass (`modelcraft_render::hair_gpu`): positions in one vertex buffer, one index buffer of
+line strips with primitive restart, one draw call. Strands are in random order, so a display
+percentage draws a prefix of the index buffer: changing it costs nothing and re-uploads nothing.
+`hair-bench --gpu` draws the sphere and the hair at 1920×1080 with 4× MSAA, orbiting the camera, 60
+frames per row after 10 warm-up frames; a frame is render, submit and wait for the GPU (frames per
+second is 1000 / mean). Adapter: NVIDIA GeForce RTX 4090, load average 8. Lines are one pixel wide
+and alpha blended; there is no strand shading yet, so these numbers say how fast the lines go down,
+not what a shaded render costs.
+
+| Strands in the groom | Display | Strands drawn | Mean frame | Frames per second | 95th percentile | GPU memory |
+|---|---|---|---|---|---|---|
+| 100,000 | 100 % | 100,000 | 0.31 ms | 3,217 | 0.38 ms | 13 MB |
+| 100,000 | 50 % | 50,000 | 0.20 ms | 4,892 | 0.21 ms | |
+| 100,000 | 10 % | 10,001 | 0.10 ms | 9,715 | 0.11 ms | |
+| 100,000 | 1 % | 1,000 | 0.08 ms | 12,390 | 0.13 ms | |
+| 1,000,000 | 100 % | 1,000,000 | 1.22 ms | 821 | 1.25 ms | 132 MB |
+| 1,000,000 | 50 % | 500,000 | 0.76 ms | 1,309 | 0.81 ms | |
+| 1,000,000 | 10 % | 100,001 | 0.29 ms | 3,443 | 0.30 ms | |
+| 1,000,000 | 1 % | 10,000 | 0.10 ms | 9,686 | 0.11 ms | |
+
+Uploading 1,000,000 strands takes 55 ms. In the app the default display is capped at 100,000
+strands while editing ("Limit strands while editing", on by default) and the strands of a hair under
+the brush are replaced by its guides until the stroke ends. The app's own frame time was not
+measured (the window needs a display); the figures above are the hair pass alone, and the egui
+overhead is the same with or without hair. Without a GPU adapter the viewport shows guides only.
+
+### Rendering them (`modelcraft-cli render`, CPU path tracer)
+
+Hair is traced as round-cone segments (`craft-render-bvh::curves`) in a BVH of their own, scattered
+by the fibre model of `craft-render-core::hair` (Chiang et al. 2016 lobes: R, TT, TRT and a residual
+tail). A sphere with 3,000 guides grown with a bend and clumped, 10 points per strand, the strands
+cut off by the default render settings: 640×480, 16 samples per pixel, 12 bounces, studio light and
+ground, `--device cpu` (the GPU path tracer declines hair and the CPU one is used), all 24 cores,
+load average about 25. "Seconds" are `scene_seconds` (building the curve BVH) and `render_seconds`
+from the command's report.
+
+| Strands | Segments | Scene build | Render | Million samples per second |
+|---|---|---|---|---|
+| none (the bare sphere) | 0 | 0.003 s | 0.52 s | 9.55 |
+| 10,000 | 90,000 | 0.09 s | 1.75 s | 2.81 |
+| 150,000 | 1,350,000 | 0.38 s | 4.00 s | 1.23 |
+| 1,000,000 | 9,000,000 | 3.35 s | 7.85 s | 0.63 |
+
+The same 150,000-strand picture at 64 samples per pixel takes 16.5 s. Hair costs about 8 to 15 times
+the bare sphere here, because most camera paths cross many fibres and every fibre hit spends a shadow
+ray and a bounce. A render of hair is capped at 1,000,000 strands per hair object (a prefix of the
+groom, an unbiased thinner copy).
+
+### Baking and exporting (`hair-bench --bake`, `hair-export`)
+
+Dynamics (`modelcraft_hair::StrandSolver` run by `modelcraft_sim::bake`): Verlet with gravity, damping, a
+weak shape spring, 8 length-constraint passes per step and collision with the sphere (a grid of its
+16,128 triangles), 4 substeps per frame, all 24 cores, strands independent of each other. Load average
+about 22.
+
+| Guides × points | Frames | Bake | Per frame | Cache |
+|---|---|---|---|---|
+| 5,000 × 8 | 60 | 431 ms | 7.2 ms | 28.8 MB |
+| 50,000 × 8 | 24 | 1,104 ms | 46 ms | 115.2 MB |
+
+A bake runs on the window's thread, so the app waits for it; scrubbing afterwards plays the cache (and a
+baked hair's strands are made again for each frame shown). Exports: 10,000 strands of 10 points as glTF
+lines is 2.3 MB (100,000 points, 90,000 segments); 3,000 guides of 10 points as one frame of point cache
+is 0.36 MB.
 
 ## How the numbers stay low
 
