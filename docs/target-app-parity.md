@@ -457,7 +457,7 @@ Weight: 6
 | OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
-| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference; no time limit or per-ray statistics |
+| Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference (relative MSE, and with `--flip` the FLIP perceptual difference, written from the paper and not checked against the reference implementation); no time limit or per-ray statistics |
 
 ## Rigging
 

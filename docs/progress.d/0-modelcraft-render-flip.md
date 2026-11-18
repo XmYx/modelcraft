@@ -1,0 +1,1 @@
+| 2026-11-18 | Render engine, slice 11: the FLIP perceptual metric in `craft-render-core::flip` (written from the paper, low-dynamic-range form) and `render-bench --flip`, also reported before and after the denoising filters (regression: 9 to 14× lower relMSE on cornell at 16 and 64 spp but 1.3 to 1.6× lower FLIP) |
