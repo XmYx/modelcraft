@@ -49,6 +49,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
+| Scripts (window and menu), Run Script, Run Selection, Output, Quick Scripts | script editors, script consoles and shelves of the references (their product names for them are avoided) | Generic words. A web search (2026-11-17) found no 3D software mark for "Quick Scripts"; the USPTO register itself was not queried, so treat this row as unconfirmed until a maintainer checks it | Use, pending that check |
 | Export UV Layout | UV snapshot / UV template export | Generic description; product terms avoided | Use |
 | Seams, Mark Seam, Clear Seam, Unwrap UVs, Pin | UV cutting and flattening tools | Generic modeling terms; no product-specific tool names used | Use |
 | Pack UV Islands, Project UVs, Planar, Box, Cylindrical, Spherical, Camera (projections) | UV layout and projection tools | Generic geometry terms; no product-specific tool names used | Use |

@@ -16,6 +16,7 @@
 mod api;
 pub mod docs;
 mod error;
+pub mod highlight;
 mod host;
 mod limits;
 mod perm;
