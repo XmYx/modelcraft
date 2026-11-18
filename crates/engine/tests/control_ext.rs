@@ -1,7 +1,7 @@
 //! A host can answer more control methods than the engine; `script.run` is announced by the engine.
 
-use modelcraft_engine::control::{METHODS, effect, handle, handle_with};
 use modelcraft_engine::Document;
+use modelcraft_engine::control::{METHODS, effect, handle, handle_with};
 use serde_json::{Value, json};
 
 #[test]

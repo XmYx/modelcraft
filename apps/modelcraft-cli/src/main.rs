@@ -9,9 +9,9 @@ mod macro_cmd;
 mod render_cmd;
 mod script_cmd;
 #[cfg(test)]
-mod script_run_mcp_tests;
-#[cfg(test)]
 mod script_library_tests;
+#[cfg(test)]
+mod script_run_mcp_tests;
 mod sim_cmd;
 
 use std::io::{BufRead, Write};

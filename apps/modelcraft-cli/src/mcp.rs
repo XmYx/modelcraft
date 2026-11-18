@@ -22,7 +22,7 @@ pub fn info() -> Info {
 /// Where tool calls are answered.
 pub enum Backend {
     /// A document of this process.
-    Local(Box<Document>, modelcraft_script::channel::ScriptChannel),
+    Local(Box<Document>, Box<modelcraft_script::channel::ScriptChannel>),
     /// The running app's control channel.
     App(Box<craft_control::client::Connection>),
 }
@@ -44,8 +44,14 @@ pub struct ModelTools {
 }
 
 /// The tool names and the control method each runs.
-const TOOLS: &[(&str, &str)] =
-    &[("info", "document.info"), ("commands", "engine.commands"), ("execute", "engine.execute"), ("save", "document.save"), ("export", "document.export"), ("script", "script.run")];
+const TOOLS: &[(&str, &str)] = &[
+    ("info", "document.info"),
+    ("commands", "engine.commands"),
+    ("execute", "engine.execute"),
+    ("save", "document.save"),
+    ("export", "document.export"),
+    ("script", "script.run"),
+];
 
 impl Tools for ModelTools {
     fn instructions(&self) -> String {
@@ -82,7 +88,10 @@ impl Tools for ModelTools {
                 "script",
                 "Run a script",
                 "Run a Rhai script on the scene (docs/scripting.md): `source` is the script text; `args` an optional object of strings, numbers and booleans read with arg(name, default). Every change is a command and undoable (wrap in undo_group(\"label\", || { ... }) for one step); no file access. Returns ok, value, output lines, command count and, on failure, the error with its line and column.",
-                object(json!({"source": string("The script text"), "name": string("A name for error messages (optional)"), "args": {"type": "object", "description": "Arguments for arg(name, default) (optional)"}}), &["source"]),
+                object(
+                    json!({"source": string("The script text"), "name": string("A name for error messages (optional)"), "args": {"type": "object", "description": "Arguments for arg(name, default) (optional)"}}),
+                    &["source"],
+                ),
                 Effect::Edits,
             ),
             tool(
@@ -131,7 +140,7 @@ pub fn local(project: Option<&str>) -> Result<Backend, String> {
         Some(p) if Path::new(p).exists() => crate::load(p)?,
         _ => Document::new(),
     };
-    Ok(Backend::Local(Box::new(d), modelcraft_script::channel::ScriptChannel::new()))
+    Ok(Backend::Local(Box::new(d), Box::new(modelcraft_script::channel::ScriptChannel::new())))
 }
 
 #[cfg(test)]

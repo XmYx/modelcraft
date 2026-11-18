@@ -40,7 +40,12 @@ fn arguments_name_and_selection_go_in_and_come_back() {
     let a = d.execute(Command::AddGroup { name: Some("a".into()) }).unwrap().created[0];
     let b = d.execute(Command::AddGroup { name: Some("b".into()) }).unwrap().created[0];
     let mut sel = vec![a];
-    let r = call(&mut ch, &mut d, &mut sel, json!({"source": "set_selection([2]); print(arg(\"who\", \"nobody\") + arg(\"n\", \"0\") + arg(\"flag\", \"x\")); selection().len()", "name": "pick.rhai", "args": {"who": "me", "n": 3, "flag": true}}));
+    let r = call(
+        &mut ch,
+        &mut d,
+        &mut sel,
+        json!({"source": "set_selection([2]); print(arg(\"who\", \"nobody\") + arg(\"n\", \"0\") + arg(\"flag\", \"x\")); selection().len()", "name": "pick.rhai", "args": {"who": "me", "n": 3, "flag": true}}),
+    );
     let res = &r["result"];
     assert_eq!(res["output"][0]["text"], "me3true", "{res}");
     assert_eq!(res["selection"], json!([b.0]), "the new selection is reported");
@@ -103,7 +108,12 @@ fn tools_and_callbacks_a_remote_script_registers_do_not_pile_up() {
     let mut d = Document::new();
     let mut sel = Vec::new();
     for i in 0..200 {
-        let r = call(&mut ch, &mut d, &mut sel, json!({"source": format!("register_tool(\"T{i}\", || {{ }}); on_scene_changed(|e| {{ }});"), "name": format!("run{i}.rhai")}));
+        let r = call(
+            &mut ch,
+            &mut d,
+            &mut sel,
+            json!({"source": format!("register_tool(\"T{i}\", || {{ }}); on_scene_changed(|e| {{ }});"), "name": format!("run{i}.rhai")}),
+        );
         assert_eq!(r["result"]["ok"], true, "run {i}: {r}");
     }
 }

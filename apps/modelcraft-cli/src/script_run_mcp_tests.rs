@@ -20,8 +20,14 @@ fn the_script_tool_runs_scripts_and_reports_failures_as_tool_errors() {
     let list = rpc(&mut s, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
     let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
     assert!(names.contains(&"script"), "{names:?}");
-    let call = |s: &mut Server<ModelTools>, id: u64, args: Value| rpc(s, json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": "script", "arguments": args}}));
-    let r = call(&mut s, 3, json!({"source": "for i in 0..3 { add_primitive(\"cube\", \"c\" + i); } print(\"done \" + arg(\"who\", \"?\")); object_count()", "args": {"who": "agent"}}));
+    let call = |s: &mut Server<ModelTools>, id: u64, args: Value| {
+        rpc(s, json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": "script", "arguments": args}}))
+    };
+    let r = call(
+        &mut s,
+        3,
+        json!({"source": "for i in 0..3 { add_primitive(\"cube\", \"c\" + i); } print(\"done \" + arg(\"who\", \"?\")); object_count()", "args": {"who": "agent"}}),
+    );
     assert_ne!(r["result"]["isError"], true, "{r}");
     let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("done agent") && text.contains("\"value\": \"3\""), "{text}");

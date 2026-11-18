@@ -17,7 +17,7 @@ use modelcraft_engine::Document;
 use modelcraft_engine::scene::ObjectId;
 use serde_json::{Value, json};
 
-use crate::{LineKind, Limits, Permissions, RunContext, RunReport, Session};
+use crate::{Limits, LineKind, Permissions, RunContext, RunReport, Session};
 
 /// The control method.
 pub const METHOD: &str = "script.run";
