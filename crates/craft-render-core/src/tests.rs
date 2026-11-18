@@ -511,3 +511,121 @@ fn benchmark_scenes_build_and_light_up() {
     assert_eq!((street.lights.emissive.len(), street.lights.analytic.len()), (10_000, 500));
     assert!(scenes::by_name("teapot").is_none());
 }
+
+/// A closed room whose only lamp shines up at the ceiling: every surface the camera sees is lit
+/// by the bright patch above the lamp, which light sampling cannot aim at.
+fn uplit_room() -> Scene {
+    let mut b = SceneBuilder::new();
+    let wall = b.add_material(Material::diffuse(Vec3::splat(0.7))).unwrap();
+    let lamp = b.add_material(Material::emitter(Vec3::splat(400.0))).unwrap();
+    let (lo, hi) = (Vec3::new(-2.0, 0.0, -2.0), Vec3::new(2.0, 3.0, 2.0));
+    let (x, y, z) = (Vec3::X * 4.0, Vec3::Y * 3.0, Vec3::Z * 4.0);
+    let id = Mat4::IDENTITY;
+    b.add_mesh(&quad(lo, z, x), id, wall).unwrap();
+    b.add_mesh(&quad(lo + y, x, z), id, wall).unwrap();
+    b.add_mesh(&quad(lo, x, y), id, wall).unwrap();
+    b.add_mesh(&quad(lo + z, y, x), id, wall).unwrap();
+    b.add_mesh(&quad(lo, y, z), id, wall).unwrap();
+    b.add_mesh(&quad(Vec3::new(hi.x, 0.0, lo.z), z, y), id, wall).unwrap();
+    // Front face up, 20 cm under the ceiling, in a corner away from the camera's view.
+    b.add_mesh(&quad(Vec3::new(1.2, 2.8, -1.6), Vec3::Z * 0.3, Vec3::X * 0.3), id, lamp).unwrap();
+    b.set_camera(Camera { eye: Vec3::new(-1.6, 1.5, 1.7), target: Vec3::new(0.3, 0.6, -0.5), fov_y: 60f32.to_radians(), ..Camera::default() });
+    b.build()
+}
+
+#[test]
+fn guiding_and_adaptive_splitting_keep_the_image_and_lower_its_noise() {
+    let scene = Arc::new(uplit_room());
+    let settings = |guiding, adaptive_splitting, max_depth, seed| RenderSettings {
+        width: 32,
+        height: 32,
+        integrator: IntegratorSettings { guiding, adaptive_splitting, max_depth, ..IntegratorSettings::default() },
+        seed,
+        ..RenderSettings::default()
+    };
+    let noise = |guiding, splitting, max_depth, reference: &[[f32; 3]]| -> f64 {
+        (10..13)
+            .map(|seed| {
+                crate::render::relative_mse(&render_image(scene.clone(), settings(guiding, splitting, max_depth, seed), 256).unwrap().mean(), reference)
+            })
+            .sum::<f64>()
+            / 3.0
+    };
+    let reference = render_image(scene.clone(), settings(false, false, 12, 1), 8192).unwrap().mean();
+    let rm = mean_rgb(&reference);
+    assert!(rm[0] > 0.05, "the room is lit: {rm:?}");
+    let mut errors = Vec::new();
+    for (guiding, splitting) in [(false, false), (true, false), (false, true), (true, true)] {
+        // Same expected image: the mean of a long render agrees with the plain estimator's.
+        let long = render_image(scene.clone(), settings(guiding, splitting, 12, 2), 2048).unwrap().mean();
+        let m = mean_rgb(&long);
+        assert!((m[0] - rm[0]).abs() < 0.02 * rm[0], "guiding {guiding}, splitting {splitting}: mean {m:?} against {rm:?}");
+        errors.push(noise(guiding, splitting, 12, &reference));
+    }
+    eprintln!("relative MSE at 256 spp: plain {:.4}, guided {:.4}, adaptive splitting {:.4}, both {:.4}", errors[0], errors[1], errors[2], errors[3]);
+    // Guiding makes long paths heavier (a mixture density may double a weight at every bounce);
+    // the adaptive roulette and splitting keeps them in check, and the two together win.
+    assert!(errors[3] * 1.3 < errors[0], "guiding with adaptive splitting lowers the error: {errors:?}");
+    assert!(errors[2] < errors[0], "adaptive splitting alone lowers the error: {errors:?}");
+    // Where paths are short, guiding alone finds the bright patch far more often.
+    let short = render_image(scene.clone(), settings(false, false, 2, 1), 8192).unwrap().mean();
+    let (plain, guided) = (noise(false, false, 2, &short), noise(true, false, 2, &short));
+    eprintln!("two bounces: plain {plain:.4}, guided {guided:.4}");
+    assert!(guided * 2.0 < plain, "guiding lowers the error of two-bounce light: {guided} against {plain}");
+}
+
+#[test]
+fn guided_rendering_is_deterministic_and_progressive() {
+    let scene = Arc::new(uplit_room());
+    let settings = RenderSettings {
+        width: 20,
+        height: 20,
+        integrator: IntegratorSettings { guiding: true, adaptive_splitting: true, ..IntegratorSettings::default() },
+        ..RenderSettings::default()
+    };
+    let once = render_image(scene.clone(), settings, 16).unwrap();
+    let again = render_image(scene.clone(), settings, 16).unwrap();
+    assert_eq!(once, again, "the same seed gives the same image, whatever the thread schedule");
+    // Passes of any length learn at the same sample counts, so 3 + 5 + 8 samples are 16 at once.
+    let mut r = Renderer::new(scene, settings).unwrap();
+    let go = AtomicBool::new(false);
+    assert!(r.render(3, &go) && r.render(5, &go) && r.render(8, &go));
+    assert!(r.film().samples == 16 && mse(&r.film().mean(), &once.mean()) < 1e-10);
+    assert!(r.guide().is_some_and(|g| g.trained_cells() > 10), "the guide learned something");
+    // The plain renderer carries no guide.
+    assert!(Renderer::new(Arc::new(scenes::cornell_box().unwrap()), RenderSettings::default()).unwrap().guide().is_none());
+}
+
+#[test]
+fn a_sun_in_a_mirror_is_found_by_the_path_and_weighted_against_aiming_at_it() {
+    // A nearly perfect mirror on the ground and a camera looking at the sun's reflection: aiming
+    // at the sun's disk from the mirror almost never lines up with the reflection, while the
+    // reflected path walks straight into the disk.
+    let build = || {
+        let mut b = SceneBuilder::new();
+        let mirror = b.add_material(Material::metal(Vec3::splat(0.9), 0.02)).unwrap();
+        b.add_mesh(&quad(Vec3::new(-20.0, 0.0, -20.0), Vec3::Z * 40.0, Vec3::X * 40.0), Mat4::IDENTITY, mirror).unwrap();
+        b.add_light(Light::Sun { direction: Vec3::new(0.0, 1.0, -1.0), irradiance: Vec3::splat(2.0), angular_radius: 0.05 }).unwrap();
+        b.set_camera(Camera { eye: Vec3::new(0.0, 2.0, 2.0), target: Vec3::ZERO, fov_y: 20f32.to_radians(), ..Camera::default() });
+        b.build()
+    };
+    let run = |strategy, spp, seed| {
+        let integrator = IntegratorSettings { strategy, max_depth: 2, ..IntegratorSettings::default() };
+        render_image(Arc::new(build()), RenderSettings { width: 24, height: 24, integrator, seed, ..RenderSettings::default() }, spp).unwrap().mean()
+    };
+    let reference = run(Strategy::Mis, 4096, 1);
+    let (m, l, s) = (mean_rgb(&reference), mean_rgb(&run(Strategy::LightOnly, 16384, 2)), mean_rgb(&run(Strategy::BsdfOnly, 4096, 3)));
+    assert!(m[0] > 0.1, "the reflection is bright: {m:?}");
+    assert!((m[0] - l[0]).abs() < 0.05 * m[0] && (m[0] - s[0]).abs() < 0.02 * m[0], "the three estimators agree: {m:?} {l:?} {s:?}");
+    let (mis, light) = (mse(&run(Strategy::Mis, 16, 4), &reference), mse(&run(Strategy::LightOnly, 16, 4), &reference));
+    assert!(mis * 10.0 < light, "weighting the two beats aiming alone: {mis} against {light}");
+    // The disk itself is in the picture when the camera looks at it: its radiance over its solid
+    // angle is the irradiance (2 here), so a pixel inside it is about 2 / (π · tan² 0.05) bright.
+    let mut b = SceneBuilder::new();
+    b.add_light(Light::Sun { direction: Vec3::Z, irradiance: Vec3::splat(2.0), angular_radius: 0.05 }).unwrap();
+    b.set_camera(Camera { eye: Vec3::ZERO, target: Vec3::Z, fov_y: 2f32.to_radians(), ..Camera::default() });
+    let f = render(b.build(), 8, 8, 4, IntegratorSettings::default());
+    let centre = centre_mean(&f, 2.0)[0];
+    let expected = f64::from(2.0 / (std::f32::consts::PI * 0.05f32.tan().powi(2)));
+    assert!((centre - expected).abs() < 0.01 * expected, "{centre} against {expected}");
+}

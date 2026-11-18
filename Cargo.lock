@@ -1018,6 +1018,7 @@ name = "craft-render-core"
 version = "0.1.0"
 dependencies = [
  "craft-render-bvh",
+ "craft-render-guide",
  "craft-texture",
  "glam",
  "proptest",
@@ -1036,6 +1037,15 @@ dependencies = [
  "pollster 0.4.0",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "craft-render-guide"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "proptest",
+ "rayon",
 ]
 
 [[package]]
