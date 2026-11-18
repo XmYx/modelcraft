@@ -1,0 +1,1 @@
+- The UV Editor can now pack islands, project UVs (planar, box, cylindrical, spherical) and export the layout as SVG or PNG.

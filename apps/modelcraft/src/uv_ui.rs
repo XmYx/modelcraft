@@ -19,10 +19,11 @@ use egui::{Color32, Key, Mesh, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use glam::Vec2;
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::{NONE, PolyMesh};
-use modelcraft_engine::scene::{ObjectId, ObjectKind, StepOp, UvPin};
+use modelcraft_engine::scene::{Density, Fit, ObjectId, ObjectKind, Projection, Rotation, StepOp, UvPin};
 use modelcraft_engine::uv::{
     Charts, Distortion, SeamSet, TriangleMetric, UvTransform, expand_to_uv_vertices, face_triangles, island_corners, measure, per_face, uv_vertex_corners,
 };
+use modelcraft_engine::uvpack::Axis;
 use modelcraft_render::buffers::LineVertex;
 
 use crate::app::ModelApp;
@@ -119,10 +120,28 @@ pub enum UvAction {
     ClearSeam,
     SeamsByAngle,
     Unwrap,
+    Pack,
+    ProjectPlanar,
+    ProjectBox,
+    ProjectCylindrical,
+    ProjectSpherical,
+    ExportLayout,
 }
 
 impl UvAction {
-    pub const ALL: [UvAction; 5] = [UvAction::Editor, UvAction::MarkSeam, UvAction::ClearSeam, UvAction::SeamsByAngle, UvAction::Unwrap];
+    pub const ALL: [UvAction; 11] = [
+        UvAction::Editor,
+        UvAction::MarkSeam,
+        UvAction::ClearSeam,
+        UvAction::SeamsByAngle,
+        UvAction::Unwrap,
+        UvAction::Pack,
+        UvAction::ProjectPlanar,
+        UvAction::ProjectBox,
+        UvAction::ProjectCylindrical,
+        UvAction::ProjectSpherical,
+        UvAction::ExportLayout,
+    ];
 
     pub fn label(self) -> String {
         match self {
@@ -131,6 +150,12 @@ impl UvAction {
             UvAction::ClearSeam => tl!("Clear Seam"),
             UvAction::SeamsByAngle => tl!("Mark Seams by Angle"),
             UvAction::Unwrap => tl!("Unwrap UVs"),
+            UvAction::Pack => tl!("Pack UV Islands"),
+            UvAction::ProjectPlanar => tl!("Project UVs: Planar"),
+            UvAction::ProjectBox => tl!("Project UVs: Box"),
+            UvAction::ProjectCylindrical => tl!("Project UVs: Cylindrical"),
+            UvAction::ProjectSpherical => tl!("Project UVs: Spherical"),
+            UvAction::ExportLayout => tl!("Export UV Layout…"),
         }
     }
 
@@ -141,6 +166,12 @@ impl UvAction {
             UvAction::ClearSeam => "uv.clear_seam",
             UvAction::SeamsByAngle => "uv.seams_by_angle",
             UvAction::Unwrap => "uv.unwrap",
+            UvAction::Pack => "uv.pack",
+            UvAction::ProjectPlanar => "uv.project_planar",
+            UvAction::ProjectBox => "uv.project_box",
+            UvAction::ProjectCylindrical => "uv.project_cylindrical",
+            UvAction::ProjectSpherical => "uv.project_spherical",
+            UvAction::ExportLayout => "uv.export_layout",
         }
     }
 
@@ -150,7 +181,8 @@ impl UvAction {
             UvAction::MarkSeam => "Model: Alt+M",
             UvAction::ClearSeam => "Model: Alt+Shift+M",
             UvAction::Unwrap => "Model: Alt+U",
-            UvAction::SeamsByAngle => return None,
+            UvAction::Pack => "Model: Alt+P",
+            _ => return None,
         })
     }
 }
@@ -337,6 +369,12 @@ pub fn act(app: &mut ModelApp, a: UvAction) {
         UvAction::ClearSeam => mark_seams(app, false),
         UvAction::SeamsByAngle => seams_by_angle(app),
         UvAction::Unwrap => unwrap(app),
+        UvAction::Pack => pack(app),
+        UvAction::ProjectPlanar => project(app, Projection::Planar { from: Axis::PosY }),
+        UvAction::ProjectBox => project(app, Projection::Box),
+        UvAction::ProjectCylindrical => project(app, Projection::Cylindrical { axis: Axis::PosY }),
+        UvAction::ProjectSpherical => project(app, Projection::Spherical { axis: Axis::PosY }),
+        UvAction::ExportLayout => export_layout(app),
     }
 }
 
@@ -425,6 +463,54 @@ pub fn unwrap(app: &mut ModelApp) {
         app.selection = vec![id];
         app.uv.selection.clear();
     }
+}
+
+/// Pack the islands the UVs form into the unit square (margin, best-fit rotation, even density).
+pub fn pack(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else {
+        app.status = tl!("Select a mesh first");
+        return;
+    };
+    if !mesh.has_uvs() {
+        app.status = tl!("This mesh has no UVs yet. Project or unwrap it to make some.");
+        return;
+    }
+    let op = StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform };
+    if app.run(Command::AddStep { id, op }) {
+        app.selection = vec![id];
+        app.uv.selection.clear();
+        app.uv.pinned.clear();
+        app.uv.fitted = false;
+    }
+}
+
+/// Project UVs onto the whole mesh, or onto the faces selected in the viewport (face mode).
+pub fn project(app: &mut ModelApp, projection: Projection) {
+    let Some((id, _)) = subject(app) else {
+        app.status = tl!("Select a mesh first");
+        return;
+    };
+    let faces: Vec<u32> = if app.mode == crate::app::SelectMode::Face { app.components.iter().copied().collect() } else { Vec::new() };
+    let op = StepOp::ProjectUvs { projection, fit: Fit::Uniform, faces };
+    if app.run(Command::AddStep { id, op }) {
+        app.selection = vec![id];
+        app.uv.selection.clear();
+        app.uv.pinned.clear();
+        app.uv.fitted = false;
+    }
+}
+
+/// Ask for a file and write the layout of the selected mesh as SVG or PNG.
+pub fn export_layout(app: &mut ModelApp) {
+    let Some((id, _)) = subject(app) else {
+        app.status = tl!("Select a mesh first");
+        return;
+    };
+    let Some(path) = rfd::FileDialog::new().add_filter("SVG", &["svg"]).add_filter("PNG", &["png"]).set_file_name("uv-layout.svg").save_file() else { return };
+    app.status = match app.doc.export_uv_layout(&path, Some(id), 2048) {
+        Ok(()) => crate::tlf!("Exported {file}", file = path.display()),
+        Err(e) => crate::tlf!("Export failed: {error}", error = e),
+    };
 }
 
 fn transform_selection(app: &mut ModelApp, t: UvTransform) {
@@ -572,6 +658,8 @@ pub fn keys(app: &mut ModelApp, ctx: &egui::Context) -> bool {
         mark_seams(app, true);
     } else if pressed(Key::U, plain) {
         unwrap(app);
+    } else if pressed(Key::K, plain) {
+        pack(app);
     } else if pressed(Key::PageDown, plain) || pressed(Key::PageDown, sh) {
         step_selection(app, true, shift);
     } else if pressed(Key::PageUp, plain) || pressed(Key::PageUp, sh) {
@@ -782,6 +870,23 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     5 => unwrap(app),
                     _ => app.uv.fitted = false,
                 }
+            }
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label(tl!("Layout"));
+        for (label, a) in [
+            (tl!("Pack UV Islands"), UvAction::Pack),
+            (tl!("Planar"), UvAction::ProjectPlanar),
+            (tl!("Box"), UvAction::ProjectBox),
+            (tl!("Cylindrical"), UvAction::ProjectCylindrical),
+            (tl!("Spherical"), UvAction::ProjectSpherical),
+            (tl!("Export UV Layout…"), UvAction::ExportLayout),
+        ] {
+            let r = ui.button(label.clone());
+            name(ui, &r, if a == UvAction::Pack || a == UvAction::ExportLayout { label } else { crate::tlf!("Project UVs: {kind}", kind = label) });
+            if r.clicked() {
+                act(app, a);
             }
         }
     });

@@ -123,8 +123,16 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
   `on_frame_changed` (or `on_event(name, fn)`) call `fn(event)`; the event is a map with `event`
   and, where it applies, `selection` or `frame`. The host reports an event with
   `Session::fire`. Callbacks run with a shorter time limit (2 s, `Limits::max_event_time`); one
-  that fails three times in a row is switched off and says so in its report. Nothing in this
-  crate calls `fire`: the application decides when events happen.
+  that fails three times in a row is switched off and says so in its report. Nothing in the
+  script crate calls `fire`: the application decides when events happen. In the app (below) the
+  Scripts window's session is the one that hears them.
+- **In the app.** Registered tools are listed in the Scripts menu under "Scripted Tools" and run
+  as one undoable change; the startup script and a script open in the editor can both register
+  tools. The app reports events once per frame, never while a drag or a brush stroke is going on
+  (the change is reported when it ends), and what a callback changes itself is not reported
+  again, so callbacks cannot trigger themselves. A scene change by the user, a script or an
+  agent all count; a frame change poses the scene, so it also reports a scene change. A callback
+  that prints or fails shows in the Output panel.
 - **Arguments.** `--arg name=value` on the command line becomes `arg("name", default)` and
   `args()`; `current_file()` is the open project's file.
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
