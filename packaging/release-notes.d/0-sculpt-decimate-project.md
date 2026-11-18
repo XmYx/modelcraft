@@ -1,0 +1,2 @@
+- Decimate reduces a model to a share of its triangles while keeping its shape, UV seams and patches; it is a history step, so the share stays editable.
+- Project Detail moves the model you are sculpting onto the surface of another one, so a clean or reduced mesh can take back the detail of the original.

@@ -430,3 +430,51 @@ fn the_panels_keep_their_width_from_frame_to_frame() {
         assert_eq!(h.get_by_label_contains("Viewport, Perspective").rect(), before, "workspace {workspace:?}");
     }
 }
+
+#[test]
+fn decimate_and_project_detail_from_the_panel_and_the_palette() {
+    // Two balls: the first keeps the detail, the second is sculpted.
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let id = h.state().doc.sculpt.as_ref().unwrap().id;
+    let tris = h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count();
+    h.get_by_label("Triangles to keep").scroll_to_me();
+    h.run();
+    h.get_by_label("Triangles to keep").set_value_accesskit(20.0);
+    h.run();
+    press(&mut h, Role::Button, "Decimate");
+    let now = h.state().doc.sculpt.as_ref().expect("still sculpting after decimating").mesh.triangle_count();
+    assert!(now <= tris / 4 && now > 0, "{now} of {tris}");
+    assert!(h.state().status.starts_with("Decimate:"), "{}", h.state().status);
+    let steps = h.state().doc.scene.get(id).unwrap().steps();
+    assert!(steps.iter().any(|s| matches!(s.op, modelcraft_engine::scene::StepOp::Decimate { .. })));
+    // Flatten the top, then bring the other ball's shape back.
+    h.state_mut().run(modelcraft_engine::Command::SculptClip { id, point: glam::Vec3::new(0.0, 0.3, 0.0), normal: glam::Vec3::Y });
+    h.run();
+    let top = |h: &Harness<'static, ModelApp>| h.state().doc.sculpt.as_ref().unwrap().mesh.positions.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+    assert!(top(&h) < 0.31);
+    h.get_by_label("Mesh with the detail").scroll_to_me();
+    h.run();
+    h.get_by_label("Reach of the projection").set_value_accesskit(60.0);
+    h.run();
+    palette(&mut h, "Project Detail");
+    assert_eq!(h.state().status, "Project detail");
+    assert!(top(&h) > 0.9, "the top is round again: {}", top(&h));
+    h.get_by_label_contains("Viewport, Perspective").focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!(top(&h) < 0.31);
+}
+
+#[test]
+fn project_detail_says_what_it_needs_when_alone() {
+    let mut h = sculpting("Add Quad sphere");
+    palette(&mut h, "Project Detail");
+    assert!(h.state().status.contains("needs another mesh"), "{}", h.state().status);
+    h.get_by_label("Add or import the mesh that has the detail.");
+}

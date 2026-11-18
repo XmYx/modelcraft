@@ -179,6 +179,22 @@ patches or visibility restores the scene and rebuilds the sculpt session (about 
 one does not rebuild it. In the app, a change of patches or visibility uploads the whole sculpt
 mesh again (not measured separately; the same upload as starting a session).
 
+## Decimate and Project Detail (`MODELCRAFT_BENCH_ONLY=decimate modelcraft-cli bench --groups --polys N`)
+
+Measured 2026-11-18, single-threaded, load average about 30 on 24 threads (other builds). The
+mesh is a quad sphere; the projection target is the same sphere and its source a copy with a
+bump pattern, so both have the same count.
+
+| Triangles | Decimate to 10 % | Largest gap between a face and the sphere after it | Project Detail (all vertices) | Worst distance left to the source |
+|---|---|---|---|---|
+| 202,800 | 2.8 s | 6.6e-4 of the radius | 0.67 s | 1.2e-7 |
+| 2,007,372 | 50.7 s | 8.2e-5 of the radius | 28.1 s | 1.2e-7 |
+
+Decimation spends its time re-checking each collapse (the link condition, UV carry-over, patch
+lines, triangle turning) when its turn comes; nothing in it runs in parallel yet. Every vertex of
+the result is a vertex of the input (within 1.2e-7 of the sphere here, the float error of the
+input itself). Project Detail casts two rays per vertex and falls back to a closest-point search.
+
 ## Render engine (path tracer)
 
 Measured 2026-11-17 on the same machine, release build. `modelcraft-cli render` prints one JSON
