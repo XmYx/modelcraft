@@ -73,6 +73,7 @@ mod shelf;
 mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
+mod snap_ui;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

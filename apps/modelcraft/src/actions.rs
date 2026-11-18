@@ -98,6 +98,7 @@ pub enum Action {
     RadialMenu,
     Preferences,
     Objects(crate::object_manager::Op),
+    Snap(crate::snap_ui::Op),
     Organize(crate::organize_ui::Op),
 }
 
@@ -153,6 +154,7 @@ pub fn all() -> Vec<Action> {
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
     v.extend(crate::object_manager::ALL.iter().map(|o| Objects(*o)));
+    v.extend(crate::snap_ui::all_ops().into_iter().map(Snap));
     v.extend(crate::organize_ui::ALL.iter().map(|o| Organize(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
@@ -364,6 +366,7 @@ impl Action {
             RadialMenu => tl!("Radial Menu"),
             Preferences => tl!("Preferences…"),
             Objects(o) => o.label(),
+            Snap(o) => o.label(),
             Organize(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
@@ -484,6 +487,7 @@ impl Action {
             RadialMenu => "view.radial_menu",
             Preferences => "edit.preferences",
             Objects(o) => o.id(),
+            Snap(o) => o.id(),
             Organize(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",

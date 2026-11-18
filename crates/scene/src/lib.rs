@@ -29,6 +29,7 @@ pub mod point_deform;
 pub mod rig;
 mod rle;
 pub mod sim;
+pub mod snap;
 
 use std::sync::Arc;
 

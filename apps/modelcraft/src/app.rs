@@ -192,6 +192,8 @@ pub struct ModelApp {
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
     pub objects: crate::object_manager::State,
+    /// Snapping to geometry, gizmo orientation and the measure tool.
+    pub snaps: crate::snap_ui::State,
     pub organize: crate::organize_ui::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
@@ -323,6 +325,7 @@ impl ModelApp {
             unit: Default::default(),
             language: None,
             objects: Default::default(),
+            snaps: Default::default(),
             organize: Default::default(),
             recovery: None,
             gpu: None,
@@ -915,6 +918,7 @@ impl ModelApp {
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
             Objects(op) => crate::object_manager::run(self, op),
+            Snap(op) => crate::snap_ui::run(self, op),
             Organize(op) => crate::organize_ui::run(self, op),
         }
     }

@@ -1,0 +1,1 @@
+- Snap a move to vertices, edges and surfaces, choose the gizmo orientation (world, local, parent, normal), and measure distances between points.
