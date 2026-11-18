@@ -28,6 +28,9 @@ pub enum Light {
     /// on a surface facing it.
     Directional { direction: Vec3, irradiance: Vec3 },
     /// A directional light with a disk of `angular_radius` radians, which softens its shadows.
+    /// With a radius above zero the disk is a light with a size in the sky: paths that leave the
+    /// scene towards it find it too, and the two ways of finding it are weighted against each
+    /// other (so a mirror shows the sun without the noise of aiming at it).
     Sun { direction: Vec3, irradiance: Vec3, angular_radius: f32 },
 }
 
@@ -363,6 +366,18 @@ pub struct Lights {
     /// How many entries of `cdf` have a position (and so are in the tree).
     positional: usize,
     tree: LightTree,
+    /// Suns with a disk: axis, tangent of the angular radius, irradiance, selection probability.
+    suns: Vec<(Vec3A, f32, Vec3A, f32)>,
+}
+
+/// Smallest tangent of a sun's angular radius that counts as a disk rather than a point.
+const SUN_DISK_MIN: f32 = 1e-6;
+
+/// Density over solid angle of a point of a sun's disk, `cos` away from its axis: the disk is
+/// sampled evenly on the plane one unit along the axis.
+#[inline]
+fn sun_density(tan_radius: f32, cos: f32) -> f32 {
+    1.0 / (PI * tan_radius * tan_radius * cos * cos * cos)
 }
 
 const NO_SLOT: u32 = u32::MAX;
@@ -416,16 +431,41 @@ impl Lights {
             // Lights that carry no measurable power are chosen uniformly.
             let n = power.len();
             self.cdf.extend((1..=n).map(|i| i as f32 / n as f32));
-            return;
+        } else {
+            let mut acc = 0.0f64;
+            for p in &power {
+                acc += f64::from(p.max(0.0));
+                self.cdf.push((acc / total) as f32);
+            }
+            if let Some(last) = self.cdf.last_mut() {
+                *last = 1.0;
+            }
         }
-        let mut acc = 0.0f64;
-        for p in &power {
-            acc += f64::from(p.max(0.0));
-            self.cdf.push((acc / total) as f32);
+        self.suns.clear();
+        for (j, l) in self.analytic.iter().enumerate() {
+            if let Light::Sun { direction, irradiance, angular_radius } = *l {
+                let (axis, tan) = (Vec3A::from(direction).normalize_or_zero(), angular_radius.clamp(0.0, 0.5).tan());
+                if axis != Vec3A::ZERO && tan > SUN_DISK_MIN {
+                    self.suns.push((axis, tan, irradiance.into(), self.pmf(self.emissive.len() + j)));
+                }
+            }
         }
-        if let Some(last) = self.cdf.last_mut() {
-            *last = 1.0;
+    }
+
+    /// Radiance of the sun disks around `dir` (a direction that leaves the scene), and the
+    /// density over solid angle with which [`Lights::sample`] picks `dir` on them.
+    #[inline]
+    pub fn sun_radiance(&self, dir: Vec3A) -> (Rgb, f32) {
+        let (mut radiance, mut pdf) = (Vec3A::ZERO, 0.0);
+        for (axis, tan, irradiance, pmf) in &self.suns {
+            let cos = dir.dot(*axis);
+            if cos > 0.0 && (1.0 - cos * cos).max(0.0) <= tan * tan * cos * cos {
+                let density = sun_density(*tan, cos);
+                radiance += *irradiance * density;
+                pdf += pmf * density;
+            }
         }
+        (radiance, pdf)
     }
 
     /// The running sum of selection probabilities by power, in the order emissive triangles,
@@ -592,9 +632,18 @@ impl Lights {
                         return None;
                     }
                     // A point on the sun's disk; the irradiance is spread evenly over it.
-                    let d = concentric_disk(u) * angular_radius.clamp(0.0, 0.5).tan();
-                    let wi = Frame::new(axis).to_world(Vec3A::new(d.x, d.y, 1.0).normalize());
-                    Some(LightSample { wi, distance: f32::INFINITY, radiance: irradiance.into(), pdf: pmf, delta: true })
+                    let tan = angular_radius.clamp(0.0, 0.5).tan();
+                    let d = concentric_disk(u) * tan;
+                    let local = Vec3A::new(d.x, d.y, 1.0).normalize();
+                    let wi = Frame::new(axis).to_world(local);
+                    if tan > SUN_DISK_MIN {
+                        // A disk in the sky: radiance and a density over solid angle, whose ratio
+                        // is the irradiance, so BSDF sampling can be weighted against it.
+                        let density = sun_density(tan, local.z);
+                        Some(LightSample { wi, distance: f32::INFINITY, radiance: Vec3A::from(irradiance) * density, pdf: pmf * density, delta: false })
+                    } else {
+                        Some(LightSample { wi, distance: f32::INFINITY, radiance: irradiance.into(), pdf: pmf, delta: true })
+                    }
                 }
             };
         }

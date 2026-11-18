@@ -438,3 +438,48 @@ fn seams_show_in_the_viewport_overlay() {
     assert_eq!(lines.len(), 2, "one seam is one line of two vertices");
     assert!(lines.iter().all(|v| v.color[0] > 0.8 && v.color[1] < 0.4), "seams are red");
 }
+
+#[test]
+fn projecting_packing_and_exporting_are_buttons_keys_and_menu_entries() {
+    let mut h = editor("Plane");
+    for name in ["Pack UV Islands", "Project UVs: Planar", "Project UVs: Box", "Project UVs: Cylindrical", "Project UVs: Spherical", "Export UV Layout…"] {
+        h.get_by_label(name);
+    }
+    h.get_by_label("Project UVs: Box").click();
+    h.run();
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::ProjectUvs { projection: modelcraft_engine::scene::Projection::Box, faces, .. }) if faces.is_empty()), "{s:?}");
+    // K packs from the canvas; the global shortcut and the palette reach the same command.
+    h.get_by_label_contains("UV canvas").focus();
+    h.run();
+    h.key_press(Key::K);
+    h.run();
+    assert!(matches!(steps(&h).last(), Some(StepOp::PackUvs { .. })));
+    palette(&mut h, "Project UVs: Spherical");
+    assert!(matches!(steps(&h).last(), Some(StepOp::ProjectUvs { projection: modelcraft_engine::scene::Projection::Spherical { .. }, .. })));
+    // The mesh really has a new layout, inside the unit square.
+    let id = h.state().selection[0];
+    let app = h.state_mut();
+    let scene = app.doc.scene.clone();
+    let m = app.doc.eval.steps_output(&scene, id, usize::MAX).mesh;
+    assert!(m.corner_uvs().iter().all(|u| u.is_finite() && u.min_element() >= -1e-4 && u.max_element() <= 1.0 + 1e-4));
+}
+
+#[test]
+fn a_mesh_without_uvs_gets_them_from_a_projection() {
+    let mut h = harness();
+    h.run();
+    let dir = std::env::temp_dir().join(format!("mc-uv-ui3-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let obj = dir.join("bare.obj");
+    std::fs::write(&obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nf 1 2 4 3\n").unwrap();
+    assert!(h.state_mut().run(Command::Import { path: obj.display().to_string(), up: Default::default(), scale: None }));
+    palette(&mut h, "UV Editor");
+    h.run();
+    h.run();
+    h.get_by_label_contains("no UVs yet");
+    palette(&mut h, "Project UVs: Planar");
+    h.run();
+    h.run();
+    h.get_by_label_contains("UV canvas, 1 faces");
+}

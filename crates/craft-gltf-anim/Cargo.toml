@@ -1,0 +1,18 @@
+[package]
+name = "craft-gltf-anim"
+description = "glTF 2.0 with skins, morph targets and animations: a plain document model, a GLB writer and a GLB / .gltf reader with limits, free of any app type (meant to move to craft-libs beside craft-mesh)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
