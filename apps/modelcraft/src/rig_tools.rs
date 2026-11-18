@@ -352,3 +352,104 @@ pub fn weight_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
     }
     out
 }
+
+// ---------------------------------------------------------------- playback benchmark
+
+/// The skinned-character playback benchmark (`--bench-skin`): what each frame cost.
+#[derive(Default)]
+pub struct SkinBench {
+    mesh: Option<ObjectId>,
+    vertices: usize,
+    joints: usize,
+    dual_quaternion: bool,
+    pose_ms: Vec<f32>,
+    eval_ms: Vec<f32>,
+}
+
+/// Build the benchmark character of `docs/performance.md` and start playing it.
+pub fn start_bench(app: &mut ModelApp, frames: u32, dual_quaternion: bool) {
+    let frames = frames.max(20);
+    let built = modelcraft_engine::rig::bench_character(&mut app.doc, 100_000, 60, 120, modelcraft_engine::BindMethod::Heat);
+    let Ok((mesh, _, joints)) = built else {
+        eprintln!("--bench-skin: the character could not be built");
+        return;
+    };
+    if dual_quaternion {
+        app.run(Command::Rig(RigCommand::SetSkin { mesh, dual_quaternion: true }));
+    }
+    app.selection.clear();
+    let vertices = app.doc.eval.evaluate(&app.doc.scene, mesh).mesh.vertex_count();
+    // Stand back far enough to see the whole tube.
+    if let Some(v) = app.views.get_mut(0) {
+        v.camera.target = Vec3::ZERO;
+        v.camera.distance = joints.len() as f32 * 1.6;
+    }
+    let mut bench = crate::viewport::Bench::new(frames);
+    bench.skin = Some(SkinBench { mesh: Some(mesh), vertices, joints: joints.len(), dual_quaternion, ..SkinBench::default() });
+    app.bench = Some(bench);
+}
+
+/// One frame of the benchmark: go to the next frame, evaluate the mesh (the viewport then draws
+/// and uploads that result), and at the end print the timings and leave.
+pub fn bench_tick(app: &mut ModelApp) {
+    let Some(b) = &mut app.bench else { return };
+    let now = std::time::Instant::now();
+    let dt = b.last.map(|t| now.duration_since(t).as_secs_f32() * 1000.0);
+    b.last = Some(now);
+    b.frame += 1;
+    let (frame, total) = (b.frame, b.total);
+    // The first frames build caches and pipelines.
+    if frame > 10
+        && let Some(dt) = dt
+    {
+        b.orbit_ms.push(dt);
+    }
+    let Some(mesh) = b.skin.as_ref().and_then(|s| s.mesh) else { return };
+    let span = app.doc.scene.anim.time.span().max(1.0);
+    let t0 = std::time::Instant::now();
+    app.doc.set_frame((frame as f64) % (span + 1.0));
+    let pose = t0.elapsed().as_secs_f32() * 1000.0;
+    let t1 = std::time::Instant::now();
+    let _ = app.doc.eval.evaluate(&app.doc.scene, mesh);
+    let eval = t1.elapsed().as_secs_f32() * 1000.0;
+    let upload = app.gpu.as_ref().map(|g| g.upload_ms);
+    let Some(b) = &mut app.bench else { return };
+    if frame > 10 {
+        if let Some(s) = &mut b.skin {
+            s.pose_ms.push(pose);
+            s.eval_ms.push(eval);
+        }
+        b.upload_ms.extend(upload);
+    }
+    if frame < total {
+        return;
+    }
+    let stats = |v: &mut Vec<f32>| {
+        v.sort_by(f32::total_cmp);
+        let mean = if v.is_empty() { 0.0 } else { v.iter().sum::<f32>() / v.len() as f32 };
+        let pct = |q: f32| v.get(((v.len() as f32 - 1.0) * q).round().max(0.0) as usize).copied().unwrap_or(0.0);
+        format!(
+            "{{\"mean_ms\":{mean:.3},\"p50_ms\":{:.3},\"p95_ms\":{:.3},\"fps_mean\":{:.1}}}",
+            pct(0.5),
+            pct(0.95),
+            if mean > 0.0 { 1000.0 / mean } else { 0.0 }
+        )
+    };
+    let adapter = app.gpu.as_ref().map(|g| g.rs.adapter.get_info().name).unwrap_or_else(|| "none".into());
+    let (mut f, mut u) = (b.orbit_ms.clone(), b.upload_ms.clone());
+    let s = b.skin.take().unwrap_or_default();
+    let (mut p, mut e) = (s.pose_ms, s.eval_ms);
+    println!(
+        "{{\"adapter\":{adapter:?},\"vertices\":{},\"joints\":{},\"skinning\":{:?},\"threads\":{},\"frame\":{},\"pose\":{},\"evaluate\":{},\"upload\":{}}}",
+        s.vertices,
+        s.joints,
+        if s.dual_quaternion { "dual quaternion" } else { "linear blend" },
+        std::thread::available_parallelism().map_or(1, |n| n.get()),
+        stats(&mut f),
+        stats(&mut p),
+        stats(&mut e),
+        stats(&mut u)
+    );
+    app.bench = None;
+    std::process::exit(0);
+}

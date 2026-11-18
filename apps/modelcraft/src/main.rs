@@ -75,7 +75,9 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
-    let Cli { screenshot, bench_frames, .. } = &cli;
+    let Cli { screenshot, bench_frames, bench_skin, .. } = &cli;
+    // Either benchmark: the same window size and no vsync.
+    let bench_frames = bench_frames.or(*bench_skin);
     let size = if screenshot.is_some() || bench_frames.is_some() { [1600.0, 1000.0] } else { [1500.0, 920.0] };
     let icon =
         eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.modelcraft.png")).unwrap_or_default();

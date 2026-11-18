@@ -378,7 +378,7 @@ impl Scene {
         if path.starts_with(crate::constraint::WEIGHT_PREFIX) {
             return self.constraints.set_weight_attr(id, path, value).ok_or_else(|| SceneError::Invalid(format!("no numeric attribute {path:?}")));
         }
-        let o = self.objects.iter_mut().find(|o| o.id == id).ok_or(SceneError::NoObject(id))?;
+        let o = self.object_mut(id).ok_or(SceneError::NoObject(id))?;
         let changed = attr::set(o, path, value)?;
         if changed {
             o.rev = crate::next_rev();
