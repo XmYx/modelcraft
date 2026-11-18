@@ -103,13 +103,29 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
 
 ## Scripts
 
-`modelcraft-cli run-script <project|new> <script.rhai> [-o <out>]` runs a [Rhai script](scripting.md)
-over a project (or an empty scene) and saves like `run` does. Scripts have no file access unless
-it is granted: they may read the script's folder and the project's folder, and write nowhere;
-`--allow-read DIR` and `--allow-write DIR` (repeatable) grant more, `--time-limit SECS` and
-`--max-ops N` change the limits, and `--no-save` runs without writing. Errors print as
-`file:line:column: message` and give a non-zero exit status. Commands the script ran before an
-error stay applied in memory but nothing is saved.
+```
+modelcraft-cli run-script <project|new> <script.rhai> [-o <out>] [options]
+modelcraft-cli run-script <project|new> -e '<script text>' [options]
+modelcraft-cli batch-script <script.rhai> <file>... --out-dir DIR [--format modelcraft|glb|obj|stl] [options]
+```
+
+`run-script` runs a [Rhai script](scripting.md) over a project (or an empty scene) and saves like
+`run` does. `batch-script` runs one script over many files (projects or any importable model),
+saves each result in `--out-dir` (named after the input; a second input with the same file name gets `_2`, `_3`, ... instead of overwriting the first), prints one line per file and exits with status 1 if any file
+failed (`--stop-on-error` stops at the first). Scripts have no file access unless it is granted:
+they may read the script's folder and the project's folder, and write nowhere (`batch-script`
+lets them write in `--out-dir`).
+
+| Option | Meaning |
+|---|---|
+| `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
+| `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
+| `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
+| `--no-save` | Run and report, write nothing |
+
+Errors print as `file:line:column: message` and give a non-zero exit status. Commands the script
+ran before an error stay applied in memory but nothing is saved.
 
 ### Rigging
 

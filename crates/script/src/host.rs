@@ -2,6 +2,7 @@
 //! duration of the run), the selection, the output, the limits and the permissions.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use modelcraft_engine::scene::ObjectId;
@@ -52,6 +53,10 @@ pub(crate) struct Shared {
     pub native_left: Cell<u64>,
     pub commands_run: Cell<u64>,
     pub operations: Cell<u64>,
+    /// `--arg name=value` pairs and the document file, for `args()` and `current_file()`.
+    pub args: RefCell<BTreeMap<String, String>>,
+    pub file: RefCell<Option<String>>,
+    pub registry: RefCell<crate::api::events::Registry>,
 }
 
 impl Shared {
@@ -67,6 +72,9 @@ impl Shared {
             deadline: Cell::new(None),
             commands_run: Cell::new(0),
             operations: Cell::new(0),
+            args: RefCell::new(BTreeMap::new()),
+            file: RefCell::new(None),
+            registry: RefCell::new(Default::default()),
         }
     }
 
@@ -138,7 +146,7 @@ impl Shared {
         // that gains a file path must be given a decision here before this compiles. (A material's
         // linked file and similar paths are read only by the renderer, which scripts cannot call.)
         match cmd {
-            Command::Import { path } => {
+            Command::Import { path, .. } => {
                 let full = self.path(path, Access::Read)?;
                 *path = full.to_string_lossy().into_owned();
             }
