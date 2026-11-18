@@ -258,13 +258,32 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
+            ObjectKind::Sim { sim } => {
+                // A particle system is a generator: its pool, as instances of its source object
+                // (a mesh inside it) or of a small sphere. Other simulations drive their mesh.
+                let mut out = Evaluated::default();
+                if let (modelcraft_sim::SimKind::Particles(p), Some(cache)) = (&sim.kind, &sim.cache) {
+                    let (source, source_object) = match scene.generator_input(id) {
+                        Some(c) => (self.evaluate_depth(scene, c, depth + 1).mesh, Some(c)),
+                        None => (crate::sim::particle_sphere(), None),
+                    };
+                    let inst = crate::sim::particle_instances(scene, id, p, cache, source, source_object);
+                    if inst.clones.truncated {
+                        out.errors.push(StepError {
+                            step: usize::MAX,
+                            message: format!("more than {} particles are alive; the rest are not drawn", crate::MAX_CLONES),
+                        });
+                    }
+                    out.instances = Some(Arc::new(inst));
+                }
+                out
+            }
             ObjectKind::Group
             | ObjectKind::Deformer { .. }
             | ObjectKind::Field { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
-            | ObjectKind::PointDeformer { .. }
-            | ObjectKind::Sim { .. } => Evaluated::default(),
+            | ObjectKind::PointDeformer { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result

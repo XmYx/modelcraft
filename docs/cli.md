@@ -111,8 +111,23 @@ frame, so moving objects, deformed meshes and baked rigid bodies all work; a clo
 its colliders back. A cloth is baked on its own (`bake` on it), and a cloth baked earlier is a
 collider for the next. Edits to the colliders do not mark a cloth's cache stale.
 
-`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`
-and `sim-bench cloth` measure a bake.
+`particles` (`add` with `kind: "particles"`, under the emitter object) is a particle system shown as
+instances. Its settings (`kind` with `type: "particles"`): `emitter` (`point` at the object's
+origin, `surface` of the parent mesh, `volume` inside it), `rate` per second and `burst` at the start
+frame, `lifetime` and `speed` with their `_variation`, `direction` (`normal`, `fixed` with
+`fixed_direction`, `random`) and a `spread` cone in degrees, `inherit` (the emitter's own speed),
+`gravity`, `drag` (against the air, or the `wind` with its `turbulence`), a `noise_*` acceleration
+field, `attractors` (`attract` or `vortex`, `position`, `strength`, `radius`, `axis`), `collide`
+with `bounciness` and `friction` (against every other visible mesh, or `collide_with`),
+`capacity` (the slots of the pool: the most alive at once), and the drawn `size` with
+`size_variation`. A pool slot is one point of the cache and a dead slot is stored as NaN. The cache is
+in world space, so moving the system's own object does not move the particles. The system shows its
+pool as instances of the first mesh inside it, or of a small sphere; the system object's own
+material colours them. The viewport and the path-traced render draw the instances; up to 10,000
+are drawn at once.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`,
+`sim-bench cloth` and `sim-bench particles` measure a bake.
 
 ### Animation
 

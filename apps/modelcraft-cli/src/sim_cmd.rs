@@ -5,10 +5,17 @@ use std::time::Instant;
 
 use glam::Vec3;
 use modelcraft_engine::simulation::cloth::{ClothDesc, ClothSettings, ClothSolver, ColliderMesh, ColliderProvider};
+use modelcraft_engine::simulation::particles::{Attractor, EmitterGeometry, EmitterKind, ParticleDesc, ParticleSettings, ParticleSolver};
 use modelcraft_engine::simulation::rigid::{BodyDesc, RigidSettings, RigidWorld, WorldDesc};
 use modelcraft_engine::simulation::{BakeConfig, Silent, SimTiming, Solver, bake};
 
-pub const USAGE: &str = "  sim-bench cloth [--vertices N] [--frames N] [--substeps N] [--iterations N] [--self] [--sphere] [--pin]
+pub const USAGE: &str = "  sim-bench particles [--particles N] [--frames N] [--substeps N] [--collide] [--forces]
+                                    a surface emitter of 2,000 triangles filling a pool of N slots
+                                    (born at N per second over the run): solve time per frame and per
+                                    substep; --collide adds a floor and a sphere (2,304 triangles),
+                                    --forces adds wind, noise and an attractor (defaults: 100000
+                                    particles, 120 frames at 24 fps, 2 substeps)
+  sim-bench cloth [--vertices N] [--frames N] [--substeps N] [--iterations N] [--self] [--sphere] [--pin]
                                     drop a square cloth (about N vertices)
                                     onto a sphere: solve time per frame and per substep; --self adds
                                     self collision, --sphere the collider, --pin holds two corners
@@ -35,8 +42,9 @@ pub fn bench(a: &[String]) -> Result<(), String> {
     match a.first().map(String::as_str) {
         Some("rigid") => rigid(a),
         Some("cloth") => cloth(a),
-        Some(other) => Err(format!("sim-bench: unknown simulation {other:?} (rigid, cloth)")),
-        None => Err("sim-bench: which simulation? (rigid, cloth)".into()),
+        Some("particles") => particles(a),
+        Some(other) => Err(format!("sim-bench: unknown simulation {other:?} (rigid, cloth, particles)")),
+        None => Err("sim-bench: which simulation? (rigid, cloth, particles)".into()),
     }
 }
 
@@ -156,6 +164,67 @@ fn cloth(a: &[String]) -> Result<(), String> {
         solver.stretch_stats().0,
         solver.stretch_stats().1,
         solver.stretch_stats().2,
+        cache.bytes() as f64 / (1 << 20) as f64
+    );
+    Ok(())
+}
+
+fn particles(a: &[String]) -> Result<(), String> {
+    let n: u32 = number::<u32>(a, "--particles", 100_000)?.clamp(10, 1_000_000);
+    let frames: u32 = number::<u32>(a, "--frames", 120)?.clamp(2, 10_000);
+    let substeps: u32 = number::<u32>(a, "--substeps", 2)?.clamp(1, 64);
+    let (collide, forces) = (a.iter().any(|x| x == "--collide"), a.iter().any(|x| x == "--forces"));
+    // A 32 × 32 grid of quads (2,048 triangles) a metre above the origin, facing up.
+    let side = 32u32;
+    let mut positions = Vec::new();
+    for j in 0..=side {
+        for i in 0..=side {
+            positions.push(Vec3::new(-1.0 + 2.0 * i as f32 / side as f32, 1.0, -1.0 + 2.0 * j as f32 / side as f32));
+        }
+    }
+    let at = |i: u32, j: u32| j * (side + 1) + i;
+    let triangles: Vec<[u32; 3]> = (0..side)
+        .flat_map(|j| (0..side).map(move |i| (i, j)))
+        .flat_map(|(i, j)| [[at(i, j), at(i, j + 1), at(i + 1, j)], [at(i + 1, j), at(i, j + 1), at(i + 1, j + 1)]])
+        .collect();
+    let seconds = f64::from(frames) / 24.0;
+    let settings = ParticleSettings {
+        emitter: EmitterKind::Surface,
+        rate: (f64::from(n) / seconds) as f32,
+        capacity: n,
+        lifetime: (seconds as f32) * 2.0,
+        speed: 3.0,
+        spread: 25.0,
+        collide,
+        wind: if forces { modelcraft_engine::simulation::field::Wind { strength: 3.0, turbulence: 0.5, ..Default::default() } } else { Default::default() },
+        noise_strength: if forces { 2.0 } else { 0.0 },
+        attractors: if forces { vec![Attractor { strength: 6.0, radius: 3.0, position: [0.0, 2.0, 0.0], ..Default::default() }] } else { vec![] },
+        ..ParticleSettings::default()
+    };
+    let colliders = vec![
+        {
+            let pos = vec![Vec3::new(-50.0, 0.0, -50.0), Vec3::new(50.0, 0.0, -50.0), Vec3::new(50.0, 0.0, 50.0), Vec3::new(-50.0, 0.0, 50.0)];
+            ColliderMesh { positions: std::sync::Arc::new(pos), triangles: std::sync::Arc::new(vec![[0, 2, 1], [0, 3, 2]]) }
+        },
+        sphere(Vec3::new(0.0, 0.45, 0.0), 0.45),
+    ];
+    let provider: Option<ColliderProvider> = collide.then(|| Box::new(move |_: f64| colliders.clone()) as ColliderProvider);
+    let desc =
+        ParticleDesc { settings, emitter: EmitterGeometry { origin: Vec3::ZERO, positions, triangles, motion: Vec::new() }, start_frame: 1.0, fps: 24.0 };
+    let t = Instant::now();
+    let mut solver = ParticleSolver::new(desc, provider).map_err(|e| e.to_string())?;
+    let setup = ms(t);
+    let cfg = BakeConfig { timing: SimTiming { start_frame: 1.0, end_frame: f64::from(frames), fps: 24.0, substeps }, seed: 1, ..BakeConfig::default() };
+    let t = Instant::now();
+    let cache = bake(&mut solver, &cfg, &mut Silent).map_err(|e| e.to_string())?;
+    let solve = ms(t);
+    let (born, died) = solver.counts();
+    println!(
+        "{{\"sim\":\"particles\",\"capacity\":{n},\"frames\":{},\"substeps\":{substeps},\"collide\":{collide},\"forces\":{forces},\"setup_ms\":{setup:.1},\"solve_ms\":{solve:.1},\"ms_per_frame\":{:.2},\"ms_per_substep\":{:.3},\"born\":{born},\"died\":{died},\"alive_at_end\":{},\"cache_mib\":{:.1}}}",
+        cache.frames(),
+        solve / f64::from(frames),
+        solve / (f64::from(frames) * f64::from(substeps)),
+        solver.alive(),
         cache.bytes() as f64 / (1 << 20) as f64
     );
     Ok(())

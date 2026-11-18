@@ -1030,6 +1030,7 @@ impl Scene {
         match self.get(parent).map(|p| &p.kind) {
             Some(ObjectKind::SmoothCage { .. }) => true,
             Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            Some(ObjectKind::Sim { .. }) => self.is_particles(parent) && self.generator_input(parent) == Some(id),
             _ => false,
         }
     }
