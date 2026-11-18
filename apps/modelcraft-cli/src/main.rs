@@ -901,6 +901,7 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                         }],
                         lines: &[],
                         overlay: &[],
+                        hair: Vec::new(),
                     };
                     let t = Instant::now();
                     r.render(device, queue, target, &frame);

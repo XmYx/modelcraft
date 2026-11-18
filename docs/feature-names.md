@@ -64,6 +64,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Falloff Field; Remap, Curve, Slow start, Slow finish, Combine with earlier fields | fields and field layers | Generic geometry and animation words; the reference's field and layer names are not used | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
+| Simulate (menu), Simulation (panel), Bake, Cancel, Play Cache | the simulation menu and panel | Generic words; the references' dynamics and cache menus are not used as labels | Use |
 | Particles, Emitter, Rate, Burst, Lifetime, Spread, Attractor, Vortex, Drag | particle systems | Generic words; no reference product's particle module, emitter or force names | Use |
 | Cloth, Pin, Stretch, Shear, Bend, Thickness, Self Collision, Wind, Turbulence | cloth simulation settings | Generic physical terms; no reference product's cloth module or setting names | Use |
 | Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
