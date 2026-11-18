@@ -258,6 +258,8 @@ pub struct ModelApp {
     pub frames: u64,
     pub frame_times: std::collections::VecDeque<f32>,
     pub bench: Option<crate::viewport::Bench>,
+    /// The rig tool that has the viewport's pointer (placing joints, painting weights).
+    pub rig_tool: crate::rig_tools::RigTool,
     pub focus_panel: usize,
     pub last_frame: Option<std::time::Instant>,
     pub autosave_at: Option<std::time::Instant>,
@@ -377,6 +379,7 @@ impl ModelApp {
             frames: 0,
             frame_times: Default::default(),
             bench: None,
+            rig_tool: crate::rig_tools::RigTool::default(),
             focus_panel: 0,
             last_frame: None,
             autosave_at: None,
