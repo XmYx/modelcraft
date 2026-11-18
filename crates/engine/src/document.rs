@@ -1047,7 +1047,7 @@ impl Document {
                 let sid = self.scene.fresh_id();
                 self.mesh_steps(*id)?.push(Step { id: sid, enabled: true, op: op.clone() });
                 let e = self.eval.evaluate(&self.scene, *id);
-                out.warnings.extend(e.errors.iter().map(|e| e.message.clone()));
+                out.warnings.extend(e.errors.iter().chain(&e.warnings).map(|e| e.message.clone()));
             }
             Command::TransferUvs { id, source, max_distance, per_island } => {
                 let (id, source) = (*id, *source);

@@ -23,8 +23,11 @@ pub struct GpuMesh {
 
 impl GpuMesh {
     pub fn new(device: &wgpu::Device, data: &MeshData) -> GpuMesh {
-        let verts: &[MeshVertex] =
-            if data.vertices.is_empty() { &[MeshVertex { pos: [0.0; 3], normal: [0.0, 1.0, 0.0], mask: 0.0, patch: 0.0 }] } else { &data.vertices };
+        let verts: &[MeshVertex] = if data.vertices.is_empty() {
+            &[MeshVertex { pos: [0.0; 3], normal: [0.0, 1.0, 0.0], mask: 0.0, patch: 0.0, uv: [0.0; 2] }]
+        } else {
+            &data.vertices
+        };
         let idx: &[u32] = if data.indices.is_empty() { &[0, 0, 0] } else { &data.indices };
         let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("modelcraft mesh vertices"),
@@ -101,6 +104,8 @@ pub struct DrawItem<'a> {
     pub selected: bool,
     pub show_mask: bool,
     pub patch_tint: bool,
+    /// Draw a checker from the UVs instead of the colour (needs UVs on the mesh).
+    pub uv_checker: bool,
     pub roughness: f32,
 }
 
@@ -186,7 +191,7 @@ impl Renderer {
             bias: wgpu::DepthBiasState::default(),
         };
         let ms = wgpu::MultisampleState { count: SAMPLES, mask: !0, alpha_to_coverage_enabled: false };
-        let mesh_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32, 3 => Float32];
+        let mesh_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32, 3 => Float32, 4 => Float32x2];
         let line_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
         let mesh_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mesh pipeline"),
@@ -337,7 +342,12 @@ impl Renderer {
             let uniforms = frame.draws.iter().map(|d| DrawU {
                 model: d.model.to_cols_array_2d(),
                 color: d.color,
-                flags: [f32::from(u8::from(d.selected)), f32::from(u8::from(d.show_mask)), f32::from(u8::from(d.patch_tint)), d.roughness],
+                flags: [
+                    f32::from(u8::from(d.selected)),
+                    f32::from(u8::from(d.show_mask)),
+                    if d.uv_checker { 2.0 } else { f32::from(u8::from(d.patch_tint)) },
+                    d.roughness,
+                ],
             });
             let hair_uniforms = frame.hair.iter().map(|h| DrawU { model: h.model.to_cols_array_2d(), color: h.color, flags: [0.0; 4] });
             for (i, u) in uniforms.chain(hair_uniforms).enumerate() {
@@ -479,6 +489,7 @@ mod tests {
                 selected: false,
                 show_mask: false,
                 patch_tint: false,
+                uv_checker: false,
                 roughness: 0.5,
             }],
             lines: &[],
@@ -490,5 +501,50 @@ mod tests {
         let centre = (32 * 64 + 32) * 4;
         assert!(px[centre] > 40, "centre pixel is background");
         assert_eq!(px[0], 0, "corner should be background");
+    }
+
+    #[test]
+    fn a_uv_checker_draws_two_tones_when_a_gpu_is_present() {
+        let Some((device, queue, _)) = headless() else { return };
+        let mut m = PolyMesh::build(
+            vec![Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-1.0, 1.0, 0.0)],
+            vec![Polygon::new(vec![0, 1, 2, 3])],
+        )
+        .unwrap()
+        .0;
+        m.set_uvs(&[glam::Vec2::new(0.0, 1.0), glam::Vec2::new(1.0, 1.0), glam::Vec2::new(1.0, 0.0), glam::Vec2::new(0.0, 0.0)]).unwrap();
+        let mesh = GpuMesh::new(&device, &crate::buffers::mesh_data(&m));
+        let target = Target::new(&device, [128, 128]);
+        let mut r = Renderer::new(&device);
+        let cam = Camera { yaw: 0.0, pitch: 0.0, distance: 3.0, ..Default::default() };
+        let mut shoot = |checker: bool| {
+            let frame = Frame {
+                view_proj: cam.view_proj(1.0),
+                eye: cam.eye(),
+                clear: [0.0, 0.0, 0.0, 1.0],
+                draws: vec![DrawItem {
+                    mesh: &mesh,
+                    model: Mat4::IDENTITY,
+                    color: [0.8, 0.8, 0.8, 1.0],
+                    selected: false,
+                    show_mask: false,
+                    patch_tint: false,
+                    uv_checker: checker,
+                    roughness: 0.5,
+                }],
+                lines: &[],
+                overlay: &[],
+                hair: Vec::new(),
+            };
+            r.render(&device, &queue, &target, &frame);
+            Renderer::readback(&device, &queue, &target).unwrap()
+        };
+        let flat = shoot(false);
+        let checked = shoot(true);
+        // Sample a row through the quad: without the checker it is one tone, with it two.
+        let row = |px: &[u8]| -> Vec<u8> { (40..90).map(|x| px[(64 * 128 + x) * 4]).collect() };
+        let spread = |v: &[u8]| v.iter().max().copied().unwrap_or(0) - v.iter().min().copied().unwrap_or(0);
+        assert!(spread(&row(&flat)) < 25, "{:?}", row(&flat));
+        assert!(spread(&row(&checked)) > 60, "{:?}", row(&checked));
     }
 }
