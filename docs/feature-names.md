@@ -21,6 +21,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Rectangle Mask, Lasso Mask, Rectangle Hide, Lasso Hide (region tools); Clip, Trim by plane; Shell | selection-rectangle and lasso masking and visibility, clip and trim brushes, mesh extraction | Generic tool words; the reference product's tool names avoided | Use |
 | Pull, Plateau, Buildup, Surface grab, Gouge, Slide, Bulge (brushes) | the reference sculpting app's hook, layer, clay build-up, topological move, groove, nudge and blob brushes | Plain verbs and nouns; the reference brush names avoided | Use |
 | Trim, Fill, Polish (brushes) | planar trim, fill and polish brushes | Generic tool words | Use |
+| Rotate, Elastic move, Scrape (brushes); Radial copies | twist, elastic deform and scrape brushes; radial symmetry | Generic words | Use |
 | Hardness | brush focal shift | Generic | Use |
 | Spaced, Dots, Spray, Trail, Drag out (stroke modes) | freehand, dots, spray, lazy-mouse and drag-rectangle strokes | Generic words; "lazy" naming avoided | Use |
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |

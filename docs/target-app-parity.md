@@ -338,12 +338,12 @@ Weight: 7
 |---|---|---|---|---|
 | Draw, clay, smooth, inflate, grab, pinch | C M Z | D | M | |
 | Flatten, crease | C M Z | D | S | |
-| Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | P | L | Ten more, nineteen in all: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge. No rotate, elastic move or scrape yet |
+| Broader brush set: snake hook, layer, clay build-up, trim, scrape, fill, blob, nudge, rotate, elastic move | C M Z | D | L | Thirteen more, twenty-two in all: Pull, Plateau, Trim, Fill, Polish, Buildup, Surface grab, Gouge, Slide, Bulge, Rotate, Elastic move (a regularized Kelvinlet; keeps the volume), Scrape |
 | Mask brush; clear, invert, fill; mask by patch | C M Z | D | S | |
 | Masks by cavity, curvature, occlusion; blur, sharpen, grow mask | C Z | D | M | Mask hollows, mask ridges, mask occlusion (4 to 24 rays per vertex), blur, sharpen, grow, shrink |
 | Lasso and rectangle masks; clip, trim and slice brushes | Z | P | M | Rectangle and lasso tools that mask or hide, with Region by Numbers as their keyboard path; clip to a plane and trim by a plane (a capped history step) across an object axis. No slice that keeps both halves, no plane at a free angle, no drawn clip outline |
 | X, Y, Z symmetry | C M Z | D | S | |
-| Radial and topological symmetry | C Z | M | M | |
+| Radial and topological symmetry | C Z | P | M | Radial copies: 2 to 64 around an object axis, together with the mirrors. No topological symmetry |
 | Pen pressure to strength and size | C M Z | P | S | Through egui touch force; not verified on every tablet driver |
 | Falloff curves and procedural stamps | C M Z | D | S | Seven curves and a hardness control; noise, rings, square stamps |
 | Image alphas and an alpha library | C M Z | P | M | Eight built-in pictures (drawn in code), with a turn angle; importing your own images is missing |

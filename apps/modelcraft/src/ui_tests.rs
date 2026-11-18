@@ -270,6 +270,9 @@ fn detail_levels_and_shape_layers_by_keyboard() {
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes[0].strength, 0.25);
     assert_eq!(h.state().doc.undo.len(), before + 1, "one undo step per edit");
+    // The Sculpt panel scrolls: bring the control into view before clicking it.
+    h.get_by_role_and_label(Role::RadioButton, "Base sculpt").scroll_to_me();
+    h.run();
     h.get_by_role_and_label(Role::RadioButton, "Base sculpt").click();
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().active_shape, None);
