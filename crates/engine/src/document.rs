@@ -59,6 +59,8 @@ pub struct Document {
     /// Changed since the last save.
     pub dirty: bool,
     pub sculpt: Option<SculptSession>,
+    /// What the user does, while a macro is being recorded.
+    recorder: Option<crate::record::Recorder>,
     journal: Option<journal::Journal>,
     replaying: bool,
     /// Open undo groups ([`Document::begin_group`]), innermost last.
@@ -98,6 +100,7 @@ impl Document {
             dirty: false,
             sculpt: None,
             journal: None,
+            recorder: None,
             replaying: false,
             groups: Vec::new(),
             pending_recovery: 0,
@@ -435,14 +438,100 @@ impl Document {
         let cmd = Command::SculptStroke { id, stroke };
         self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
         self.log(&cmd);
+        if let Some(rec) = self.recorder.as_mut().filter(|r| !r.paused) {
+            rec.push(crate::record::Recorded {
+                label: None,
+                commands: vec![crate::record::RecordedCommand { command: cmd.clone(), created: Vec::new() }],
+                undoable: true,
+            });
+        }
         self.dirty = true;
         self.revision += 1;
     }
 
     // ---- execution ----
 
-    /// Run a command: apply it, record undo, write the journal.
+    /// Run a command: apply it, record undo, write the journal (and the macro recording, if one
+    /// is running).
     pub fn execute(&mut self, cmd: Command) -> Result<Outcome, EngineError> {
+        if self.recorder.as_ref().is_none_or(|r| r.paused) {
+            return self.execute_command(cmd);
+        }
+        let before = self.undo_mark();
+        let in_group = !self.groups.is_empty();
+        let frame = self.scene.anim.frame;
+        let saved = cmd.clone();
+        let result = self.execute_command(cmd);
+        if let Ok(out) = &result {
+            self.record(saved, out.created.clone(), before, in_group, frame);
+        }
+        result
+    }
+
+    // ---- macro recording ----
+
+    /// Start recording what is executed from now on (see [`crate::record`]).
+    pub fn start_recording(&mut self) {
+        self.recorder = Some(crate::record::Recorder::new(self.scene.anim.frame));
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Steps recorded so far.
+    pub fn recording_steps(&self) -> usize {
+        self.recorder.as_ref().map_or(0, |r| r.len())
+    }
+
+    /// Stop recording and hand back the record.
+    pub fn stop_recording(&mut self) -> Option<crate::record::Recorder> {
+        self.recorder.take()
+    }
+
+    /// Record nothing while `paused` (for changes the user did not make, such as callbacks).
+    pub fn pause_recording(&mut self, paused: bool) {
+        if let Some(r) = &mut self.recorder {
+            r.paused = paused;
+        }
+    }
+
+    fn record(&mut self, cmd: Command, created: Vec<ObjectId>, before: usize, in_group: bool, frame: f64) {
+        use crate::record::{Recorded, RecordedCommand};
+        let made = self.undo_mark() > before;
+        let now = self.scene.anim.frame;
+        let Some(rec) = self.recorder.as_mut() else { return };
+        let single =
+            |command: Command, created: Vec<ObjectId>, undoable: bool| Recorded { label: None, commands: vec![RecordedCommand { command, created }], undoable };
+        match &cmd {
+            Command::Undo => rec.undo(),
+            Command::Redo => rec.redo(),
+            Command::Anim(crate::anim::AnimCommand::SetTime { .. }) => {
+                rec.note_frame(now);
+                if !in_group {
+                    rec.push(single(cmd, created, false));
+                }
+            }
+            _ => {
+                if in_group {
+                    rec.in_group(cmd, created);
+                    return;
+                }
+                // The frame is part of the state a command may depend on: note it first.
+                if rec.frame() != frame {
+                    rec.note_frame(frame);
+                    rec.push(single(Command::Anim(crate::anim::AnimCommand::SetTime { frame }), Vec::new(), false));
+                }
+                if made {
+                    rec.push(single(cmd, created, true));
+                } else if matches!(cmd, Command::BeginSculpt { .. } | Command::EndSculpt) {
+                    rec.push(single(cmd, created, false));
+                }
+            }
+        }
+    }
+
+    fn execute_command(&mut self, cmd: Command) -> Result<Outcome, EngineError> {
         // Scrubbing is not journaled; record the frame before a command that may depend on it.
         if !self.replaying && self.scene.anim.frame != self.journal_frame && !matches!(cmd, Command::Anim(crate::anim::AnimCommand::SetTime { .. })) {
             self.journal_frame = self.scene.anim.frame;
@@ -1151,10 +1240,20 @@ impl Document {
                 self.undo_once();
             }
             self.undo.clear_redo();
+            if self.groups.is_empty()
+                && let Some(rec) = self.recorder.as_mut()
+            {
+                rec.close_group(&g.label, false, false);
+            }
             return made;
         }
         if made > 1 && self.groups.is_empty() {
             self.fold_last(made, &g.label);
+        }
+        if self.groups.is_empty()
+            && let Some(rec) = self.recorder.as_mut()
+        {
+            rec.close_group(&g.label, true, made > 0);
         }
         made
     }

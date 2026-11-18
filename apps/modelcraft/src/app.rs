@@ -878,6 +878,7 @@ impl ModelApp {
             ScriptWindow => crate::script_ui::toggle(self),
             ScriptRun => crate::script_ui::run_editor(self, false),
             ScriptRunSelection => crate::script_ui::run_editor(self, true),
+            ScriptRecord => crate::script_macro::toggle(self),
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
