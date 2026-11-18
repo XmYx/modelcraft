@@ -22,6 +22,9 @@ pub struct StepError {
 pub struct Evaluated {
     pub mesh: Arc<PolyMesh>,
     pub errors: Vec<StepError>,
+    /// Things that went less well than asked but did not stop a step: an unwrap that fell back to
+    /// a plane or to another solver, a solve that did not converge, UVs left out of a relaxation.
+    pub warnings: Vec<StepError>,
     /// For a clone generator: the clones. The mesh is then empty; draw `instances.source` once per
     /// clone instead.
     pub instances: Option<Arc<Instances>>,
@@ -56,6 +59,7 @@ struct StepCache {
     /// Output after each step (index i = after step i).
     outputs: Vec<Arc<PolyMesh>>,
     errors: Vec<StepError>,
+    warnings: Vec<StepError>,
 }
 
 /// Evaluator with caches; one per document. See the module docs.
@@ -96,6 +100,7 @@ impl Evaluator {
             let keep = if same_source { cache.seen_steps.iter().zip(steps).take_while(|(a, b)| same_step(a, b)).count() } else { 0 };
             cache.outputs.truncate(keep);
             cache.errors.retain(|e| e.step < keep);
+            cache.warnings.retain(|e| e.step < keep);
             if !same_source {
                 cache.source = None;
                 cache.seen_source = Some(source.clone());
@@ -129,7 +134,10 @@ impl Evaluator {
                 prev
             } else if step.enabled {
                 self.runs += 1;
-                match run_step(&prev, &step.op) {
+                let mut warned = Vec::new();
+                let result = run_step_warn(&prev, &step.op, &mut warned);
+                cache.warnings.extend(warned.into_iter().map(|message| StepError { step: i, message }));
+                match result {
                     Ok(m) => Arc::new(m),
                     Err(e) => {
                         cache.errors.push(StepError { step: i, message: e.to_string() });
@@ -142,7 +150,12 @@ impl Evaluator {
             cache.outputs.push(out);
         }
         let mesh = if want == 0 { src } else { cache.outputs.get(want - 1).cloned().unwrap_or(src) };
-        Evaluated { mesh, errors: cache.errors.iter().filter(|e| e.step < want || e.step == usize::MAX).cloned().collect(), instances: None }
+        Evaluated {
+            mesh,
+            errors: cache.errors.iter().filter(|e| e.step < want || e.step == usize::MAX).cloned().collect(),
+            warnings: cache.warnings.iter().filter(|e| e.step < want).cloned().collect(),
+            instances: None,
+        }
     }
 
     /// The final mesh of an object in its own space: steps, then deformer children; for a smooth
@@ -210,11 +223,11 @@ impl Evaluator {
                         m.map_positions(|_, p| local.transform_point3(p));
                         self.runs += 1;
                         match subdivide::catmull_clark(&m, *levels) {
-                            Ok(s) => Evaluated { mesh: Arc::new(s), errors: inner.errors, instances: None },
+                            Ok(s) => Evaluated { mesh: Arc::new(s), errors: inner.errors, warnings: inner.warnings, instances: None },
                             Err(e) => {
                                 let mut errors = inner.errors;
                                 errors.push(StepError { step: usize::MAX, message: e.to_string() });
-                                Evaluated { mesh: Arc::new(m), errors, instances: None }
+                                Evaluated { mesh: Arc::new(m), errors, warnings: inner.warnings, instances: None }
                             }
                         }
                     }
@@ -350,8 +363,9 @@ fn same_step(a: &Step, b: &Step) -> bool {
     }
 }
 
-/// Run one history step.
-pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
+/// Run one history step, collecting in `warnings` what went less well than asked (see
+/// [`Evaluated::warnings`]).
+fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Result<PolyMesh, OpError> {
     let (nv, ne, nf) = (m.vertex_count(), m.edge_count(), m.face_count());
     match op {
         StepOp::Extrude { faces, distance } => {
@@ -416,7 +430,9 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             }
             let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
             let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
-            modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+            let (mesh, result) = modelcraft_uv::unwrap_mesh(m, &set, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            warnings.extend(result.warnings());
+            Ok(mesh)
         }
         StepOp::Seams { .. } => Ok(m.clone()),
         StepOp::TransformUvs { corners, translate, rotate_deg, scale, pivot } => {
@@ -442,7 +458,11 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::RelaxUvs { corners, iterations, mode } => {
             let opts = modelcraft_uv::RelaxOptions { iterations: *iterations, mode: *mode };
-            modelcraft_uv::relax_corners(m, corners, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
+            let (mesh, report) = modelcraft_uv::relax_corners(m, corners, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            if report.skipped > 0 {
+                warnings.push(format!("{} UV island(s) could not be relaxed and were left as they were", report.skipped));
+            }
+            Ok(mesh)
         }
         StepOp::StraightenUvs { corners, strength } => {
             modelcraft_uv::straighten_corners(m, corners, *strength).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))

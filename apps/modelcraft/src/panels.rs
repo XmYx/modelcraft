@@ -735,7 +735,8 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
 fn history(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
     let ctx = ui.ctx().clone();
     let Some(obj) = app.doc.scene.get(id).cloned() else { return };
-    let errors = app.doc.eval.evaluate(&app.doc.scene, id).errors;
+    let evaluated = app.doc.eval.evaluate(&app.doc.scene, id);
+    let errors: Vec<_> = evaluated.errors.into_iter().chain(evaluated.warnings).collect();
     egui::CollapsingHeader::new(tl!("Build History")).default_open(true).show(ui, |ui| {
         let base = match &obj.kind {
             ObjectKind::Mesh { source: Source::Primitive { primitive }, .. } => crate::tlf!("Source: {shape}", shape = primitive.kind().replace('_', " ")),

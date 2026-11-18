@@ -19,6 +19,7 @@ pub struct DrawSpec {
     pub selected: bool,
     pub show_mask: bool,
     pub patch_tint: bool,
+    pub uv_checker: bool,
     pub roughness: f32,
 }
 
@@ -179,6 +180,7 @@ impl GpuState {
                     selected: s.selected,
                     show_mask: s.show_mask,
                     patch_tint: s.patch_tint,
+                    uv_checker: s.uv_checker,
                     roughness: s.roughness,
                 })
             })

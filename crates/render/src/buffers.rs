@@ -4,7 +4,8 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
 
-/// A shaded vertex: position, normal, mask (sculpt) and patch index.
+/// A shaded vertex: position, normal, mask (sculpt), patch index and the UV of its corner (zero
+/// for meshes without UVs and for shared-vertex data).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct MeshVertex {
@@ -12,6 +13,7 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     pub mask: f32,
     pub patch: f32,
+    pub uv: [f32; 2],
 }
 
 /// A coloured line or overlay vertex.
@@ -80,7 +82,8 @@ pub fn mesh_data_in(m: &PolyMesh, max_runs: usize) -> MeshData {
                     }
                 }
                 let normal = sum.normalize_or(nf);
-                out.vertices.push(MeshVertex { pos: m.position(v).to_array(), normal: normal.to_array(), mask: 0.0, patch: m.patch(f) as f32 });
+                let uv = if m.has_uvs() { m.uv(h).to_array() } else { [0.0; 2] };
+                out.vertices.push(MeshVertex { pos: m.position(v).to_array(), normal: normal.to_array(), mask: 0.0, patch: m.patch(f) as f32, uv });
                 n += 1;
             }
             for i in 1..n.saturating_sub(1) {
@@ -112,7 +115,8 @@ pub fn flat_data(m: &PolyMesh) -> MeshData {
         let first = out.vertices.len() as u32;
         let mut count = 0u32;
         for h in m.face_half_edges(f) {
-            out.vertices.push(MeshVertex { pos: m.position(m.origin(h)).to_array(), normal: n, mask: 0.0, patch: m.patch(f) as f32 });
+            let uv = if m.has_uvs() { m.uv(h).to_array() } else { [0.0; 2] };
+            out.vertices.push(MeshVertex { pos: m.position(m.origin(h)).to_array(), normal: n, mask: 0.0, patch: m.patch(f) as f32, uv });
             count += 1;
         }
         for i in 1..count.saturating_sub(1) {
@@ -134,6 +138,7 @@ pub fn vertex_at(positions: &[Vec3], normals: &[Vec3], mask: Option<&[f32]>, i: 
         normal: normals.get(i).copied().unwrap_or(Vec3::Y).to_array(),
         mask: mask.and_then(|m| m.get(i)).copied().unwrap_or(0.0),
         patch: 0.0,
+        uv: [0.0; 2],
     }
 }
 
@@ -219,6 +224,21 @@ mod tests {
     fn grid_has_axes() {
         let g = grid(10, 1.0, [0.5; 4], [0.7; 4]);
         assert_eq!(g.len(), 20 * 4 + 4);
-        assert_eq!(std::mem::size_of::<MeshVertex>(), 32);
+        assert_eq!(std::mem::size_of::<MeshVertex>(), 40);
+    }
+
+    #[test]
+    fn corners_carry_their_uvs() {
+        // A cube with UVs: every drawn corner has the UV of its face corner; without UVs they are zero.
+        let mut m = cube();
+        let corner_uvs: Vec<glam::Vec2> = (0..m.corner_count()).map(|c| glam::Vec2::new(c as f32 * 0.01, 0.5)).collect();
+        m.set_uvs(&corner_uvs).unwrap();
+        let d = mesh_data(&m);
+        let uvs: Vec<[f32; 2]> = m.face_half_edges(0).map(|h| m.uv(h).to_array()).collect();
+        assert!(m.has_uvs());
+        assert_eq!(d.vertices.iter().take(uvs.len()).map(|v| v.uv).collect::<Vec<_>>(), uvs);
+        let mut bare = m.clone();
+        bare.clear_uvs();
+        assert!(mesh_data(&bare).vertices.iter().all(|v| v.uv == [0.0; 2]));
     }
 }
