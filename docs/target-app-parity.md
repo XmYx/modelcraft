@@ -103,7 +103,7 @@ full 3D suite stays in the denominator, however large.
 | Professional modeler | No | Missing knife, booleans, vertex snapping, UV tools, normals editing, splines |
 | Motion designer | No | No cloners, effectors, fields or animation |
 | Animator keying objects and parameters | Preview | Keys on any number, curves, timeline, auto-key, Key Sheet and Curve Editor; no layers, clips or motion paths |
-| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending and constraints work; no blend shapes, weight brush or control shapes yet |
+| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending, constraints and blend shapes work; no weight brush or control shapes yet |
 | Simulation | No | Not started |
 | Look development and final rendering | No | Viewport shading only; no offline renderer |
 
@@ -255,8 +255,8 @@ Weight: 9
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
 | Custom normals: harden, average, weighted by face area | C M | M | M | |
-| Polygon groups (patches) and grouping tools | C M Z | P | S | Stored per face, tinted, masked by patch; no grouping tools in the UI |
-| Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | P | S | `PolyMesh::build` repairs and reports; no cleanup tool in the UI |
+| Polygon groups (patches) and grouping tools | C M Z | D | S | Group by crease angle or by shell, new patch from selection, select patch; history steps (`crates/ops/src/patches.rs`) |
+| Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | D | S | `PolyMesh::build` repairs non-manifold and lamina faces on every result; Mesh ▸ Patches and Cleanup finds n-gons, triangles, open borders, faces with no area and poles, and Clean Up Mesh welds and removes no-area faces |
 | Transfer attributes between meshes (positions, UVs, normals) | M | M | M | |
 | Align, distribute and snap objects together | C M | M | S | |
 | Polygon pen: draw polygons point by point | C M | M | M | |
@@ -283,7 +283,7 @@ Weight: 4
 |---|---|---|---|---|
 | Bend, twist, taper | C M Z | D | S | In the deformer's own frame |
 | Ripple / wave, spherify | C M | D | S | Ripple, Round |
-| Lattice / free-form deformation | C M | M | M | |
+| Lattice / free-form deformation | C M | P | M | A lattice of up to 8 cells per axis around a mesh, as one Bézier volume (the 1986 paper) or cell by cell, with a deformer stack order shared with clusters, blend shapes and skins (reorder by command); control points are moved by number and are keyable; the cage is drawn but its points are not picked in the viewport; clusters (weighted points following an object, with a soft radius) live in the same stack |
 | Wrap, shrink-wrap and surface deformers | C M | M | M | |
 | Noise and texture displacement deformer | C M | M | S | |
 | Smooth, relax and delta-smoothing deformers | C M | M | M | |
@@ -470,7 +470,7 @@ Weight: 6
 | IK solvers: two-bone, multi-chain, spline IK | C M | P | L | Closed-form two-bone with a pole, FABRIK and CCD for longer chains (a pole turns the solved chain), solved in dependency order after the goal's own constraints; bone lengths kept (property tests); no spline IK, no joint limits, no stretch |
 | FK / IK switching and blending | C M | D | M | An IK constraint's weight blends from the joints' own rotations to the solved ones and is keyable (`constraint.<id>.weight`); Match FK to IK and Match IK to FK switch without a jump (tests) |
 | Constraints: parent, point, orient, aim, scale, pole vector | C M | D | M | Position, rotation, scale, as-child and look-at constraints with several weighted sources, kept offsets and a keyable weight; the pole is part of the IK constraint; evaluated in dependency order with cycles reported and skipped (tests); no per-axis skipping |
-| Blend shapes with in-betweens | C M Z | M | M | |
+| Blend shapes with in-betweens | C M Z | D | M | A blend-shape deformer under a mesh holds named targets made from another mesh with the same points (sparse offsets), each with in-between shapes at chosen weights and a keyable weight; runs first in the deformer stack, before skins (tests); targets are not edited in place and there are no per-target weight maps |
 | Corrective shapes driven by pose | C M | M | M | |
 | Control shapes and character sets | C M | M | M | |
 | Rig templates: biped, quadruped | C M | M | L | |
@@ -630,6 +630,7 @@ Weight: 3
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
+- Deformer stack: `crates/anim/src/deform.rs` (`ffd_is_a_convex_combination`, `frame_shares_are_continuous_and_exact_at_the_frames` proptests), `crates/engine/src/deformer_tests.rs` (`blend_shapes_with_in_betweens_and_keyed_weights`, `lattices_clusters_and_the_order_of_the_stack`, `shapes_run_before_the_skin_and_everything_survives_a_save`), `apps/modelcraft/src/deform_ui_tests.rs`.
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
@@ -656,6 +657,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | Deformation: blend shapes with in-betweens done; lattice partial |
 | 2026-11-18 | minor | IK and constraints: constraints and FK/IK blending done; IK solvers, baking constraints, expressions and driven keys partial |
 | 2026-11-17 | minor | Rigging: dual-quaternion skinning done; joints, linear-blend skinning and weight tools partial |
 | 2026-11-17 | minor | Animation tools: rotation cleanup done; animation layers, motion paths, point cache and turntable partial |

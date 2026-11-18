@@ -1,0 +1,1 @@
+- Deformation: turn a shaped copy of a mesh into a blend shape with in-betweens and animate its weight, bend a mesh with a lattice, move groups of points with a cluster, and reorder these with skins in the mesh's deformer stack.

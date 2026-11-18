@@ -193,7 +193,7 @@ fn toggled(h: &Harness<'static, ModelApp>, role: Role, label: &str) -> bool {
 #[test]
 fn patches_and_visibility_by_keyboard_and_the_patch_list() {
     let mut h = sculpting("Add Cube");
-    palette(&mut h, "Patches by Angle");
+    palette(&mut h, "Sculpt Patches by Angle");
     assert_eq!(h.state().status, "6 patches");
     assert!(h.state().show_patches, "making patches shows them");
     let tris = h.state().doc.sculpt.as_ref().unwrap().mesh.triangle_count();
@@ -234,12 +234,13 @@ fn patches_and_visibility_by_keyboard_and_the_patch_list() {
     palette(&mut h, "Show All");
     assert_eq!(hidden(&h), 0);
     // The other makers are there by name and say why when they cannot work.
-    for name in ["Patches by UV Island", "Patches by Part", "Patch from Mask", "Hide Masked", "Mask Occlusion", "Extract Shell from Mask"] {
+    for name in ["Sculpt Patches by UV Island", "Sculpt Patches by Part", "Sculpt Patch from Mask", "Hide Masked", "Mask Occlusion", "Extract Shell from Mask"]
+    {
         h.get_by_role_and_label(Role::Button, name);
     }
-    press(&mut h, Role::Button, "Patch from Mask");
+    press(&mut h, Role::Button, "Sculpt Patch from Mask");
     assert!(h.state().status.contains("nothing is masked"), "{}", h.state().status);
-    palette(&mut h, "Patches by Part");
+    palette(&mut h, "Sculpt Patches by Part");
     assert_eq!(h.state().status, "1 patches");
 }
 
@@ -392,7 +393,7 @@ fn the_panels_keep_their_width_from_frame_to_frame() {
         h.key_press_modifiers(Modifiers::COMMAND, workspace);
         h.run();
         if !tool.is_empty() {
-            palette(&mut h, "Patches by Angle");
+            palette(&mut h, "Sculpt Patches by Angle");
             palette(&mut h, tool);
         }
         let before = h.get_by_label_contains("Viewport, Perspective").rect();

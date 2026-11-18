@@ -55,6 +55,16 @@ first; `active_layer` is the layer keys go to. Defaults are left out. The attrib
 sorted and de-duplicated, counts are capped (2²⁰ keys per curve, 200 000 tracks) and tracks on
 missing objects are removed. Builds from before animation ignore the block.
 
+## Deformer stack
+
+An object of `type` `point_deformer` under a mesh holds `deformer`, with `kind` one of
+`blend_shapes` (`targets`: `[{name, weight, frames: [{at, indices, deltas}]}]`, the offsets of the
+listed points when the weight is `at`), `lattice` (`divisions` [x, y, z], `linear?`, `points`: the
+control points in the lattice's unit box, X fastest) and `cluster` (`points`, `weights`, `bind`:
+the inverse of the object's matrix when it was made). Offsets and points are JSON for now. On
+load, counts are capped (512 targets, 16 shapes each, 8 cells per axis), a lattice with the wrong
+number of points is reset and non-finite numbers are replaced.
+
 ## Constraints
 
 `scene.constraints` (left out when the scene has none) holds `list`: `{id, name, target, enabled?,

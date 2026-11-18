@@ -92,10 +92,10 @@ impl SculptAction {
 
     pub fn label(self) -> String {
         match self {
-            SculptAction::PatchesByAngle => tl!("Patches by Angle"),
-            SculptAction::PatchesByUv => tl!("Patches by UV Island"),
-            SculptAction::PatchesByPart => tl!("Patches by Part"),
-            SculptAction::PatchFromMask => tl!("Patch from Mask"),
+            SculptAction::PatchesByAngle => tl!("Sculpt Patches by Angle"),
+            SculptAction::PatchesByUv => tl!("Sculpt Patches by UV Island"),
+            SculptAction::PatchesByPart => tl!("Sculpt Patches by Part"),
+            SculptAction::PatchFromMask => tl!("Sculpt Patch from Mask"),
             SculptAction::HidePatch => tl!("Hide Patch Under Pointer"),
             SculptAction::IsolatePatch => tl!("Isolate Patch Under Pointer"),
             SculptAction::ShowAll => tl!("Show All"),

@@ -180,7 +180,7 @@ impl Evaluator {
                     }
                     e.mesh = Arc::new(m);
                 }
-                let (skinned, problems) = crate::rig::apply_skins(scene, id, &e.mesh);
+                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
                 if let Some(m) = skinned {
                     e.mesh = Arc::new(m);
                 }
@@ -246,7 +246,9 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } => Evaluated::default(),
+            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } => {
+                Evaluated::default()
+            }
         };
         self.finals.insert(id, (key, result.clone()));
         result
@@ -364,6 +366,8 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1) };
             modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
+        StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
+        StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
         StepOp::Sculpt { layer } => {
             let base = layer.topology.as_deref().unwrap_or(m);
             let mut out = if layer.level == 0 { base.clone() } else { subdivide::catmull_clark(base, u32::from(layer.level))? };
