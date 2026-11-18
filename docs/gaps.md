@@ -281,7 +281,7 @@ Every action is already a serializable command, so **G1** binds a language to an
 
 ## Simulation
 
-The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs a solver on fixed substeps from a seed, caches every frame within bounds and plays it back through the timeline. The solvers come next, one slice each: rigid bodies, cloth, particles, then the panel and soft bodies. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
+The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs a solver on fixed substeps from a seed, caches every frame within bounds and plays it back through the timeline. Rigid bodies (D1) are in on Rapier: active and passive bodies, box, sphere, hull and mesh colliders, friction, bounciness, sleeping and fixed, hinge and point joints, through the `sim` command (no panel yet). Next, one slice each: cloth, particles, then the panel and soft bodies. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

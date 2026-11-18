@@ -7,6 +7,7 @@ mod bench_cmd;
 mod hair_cmd;
 mod render_cmd;
 mod script_cmd;
+mod sim_cmd;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -60,11 +61,12 @@ Commands:
 
 fn usage() -> String {
     format!(
-        "{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n",
+        "{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n\nSimulation:\n{}\n",
         script_cmd::USAGE,
         render_cmd::USAGE,
         bench_cmd::USAGE,
-        hair_cmd::USAGE
+        hair_cmd::USAGE,
+        sim_cmd::USAGE
     )
 }
 
@@ -277,6 +279,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         }
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
+        "sim-bench" => sim_cmd::bench(a),
         "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),

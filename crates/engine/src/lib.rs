@@ -17,6 +17,7 @@ mod document;
 mod layers;
 pub mod rig;
 pub mod sim;
+pub mod sim_bake;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef};
@@ -25,6 +26,7 @@ pub use document::{DEFAULT_HISTORY_MAX_BYTES, Document, EngineError, SculptSessi
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
+pub use sim_bake::{BakeJob, BakeResult};
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
@@ -45,5 +47,7 @@ mod constraint_tests;
 mod deformer_tests;
 #[cfg(test)]
 mod rig_tests;
+#[cfg(test)]
+mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;
