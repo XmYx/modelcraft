@@ -122,8 +122,8 @@ Weight: 6
 | Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | D | M | Organize ▸ Display Mode for the view, a Display tag per object; each mode drawn and read back on a real GPU adapter in a test |
 | Move, rotate, scale gizmos | C M Z | D | M | Axis and free handles; numeric alternative |
 | Gizmo step snapping (grid, angle, scale) | C M | D | S | Shift+S; Ctrl inverts per drag |
-| Vertex, edge, face and surface snapping | C M Z | M | M | |
-| Gizmo orientation (world, local, normal, custom) and pivot editing | C M Z | M | M | World axes only |
+| Vertex, edge, face and surface snapping | C M Z | D | M | View ▸ Snapping and Axes: snap a gizmo move onto vertices, edge points and surface points of the other objects (vertex over edge over surface, marker shown, axis handles keep their axis); work is capped by a sampling budget |
+| Gizmo orientation (world, local, normal, custom) and pivot editing | C M Z | P | M | World, local, parent and component-normal axes for move and rotate, and the gizmo sits on the object's pivot (typed or Pivot to Center in Properties); no custom orientation and no dragging of the pivot in the viewport |
 | Isolate selection, hide and unhide | C M Z | P | S | Per-object visibility only |
 | Camera bookmarks and saved views | C M | M | S | |
 | Reference images and image planes | C M Z | M | M | |
@@ -134,7 +134,7 @@ Weight: 6
 | Heads-up statistics (polygons, frame rate) | C M Z | P | S | Frame rate in the status bar; no polygon counts |
 | Headless viewport renders for thumbnails and CI | M | P | S | GPU readback works in `modelcraft-cli bench` and tests; no render command |
 | Large-scene drawing: culling, level of detail, proxies | C M | P | L | 2.0 M triangles at ~290 fps; no culling or proxies |
-| Measure tool and scene units | C M | M | M | |
+| Measure tool and scene units | C M | D | M | Measure (View ▸ Snapping and Axes, palette): two clicks on vertices, edge points or surfaces give the distance and its x, y, z parts in the preference's length unit, drawn in the view and announced in the status bar |
 | Camera objects: create, look through, focal length, clipping | C M | M | M | One editor camera |
 | Safe frames and resolution gate | C M | M | S | |
 | Colour-managed viewport (view transform from a colour config) | C M R | M | M | |
@@ -302,8 +302,8 @@ Weight: 5
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Cloner: linear, radial, grid, honeycomb, on-object modes | C M | P | L | Clones object: linear, radial, grid, scatter, surface and vertex layouts, seeded; no honeycomb or per-clone selections |
-| Effectors: plain, random, shader, step, delay, time, target, formula | C M | M | L | |
-| Fields drive effectors | C | M | M | |
+| Effectors: plain, random, shader, step, delay, time, target, formula | C M | P | L | Clone modifiers: plain, random, noise (shader), step, delay (time based, follows the timeline) and target, each acting on position, rotation, scale and tint, stacked in order; no formula or mesh-sampled shader |
+| Fields drive effectors | C | D | M | Falloff fields placed inside a clone modifier weigh each clone; several combine as in deformers |
 | Clone selections and weight maps | C | M | M | |
 | Instancing at scale (millions of points, render instances) | C M | P | M | Clones share one GPU mesh and one evaluated mesh; capped at 10,000 per generator, one draw call each |
 | Voronoi fracture | C M | M | L | |
@@ -323,9 +323,9 @@ Weight: 4
 | Angle-based unwrap (ABF) | C M Z | D | M | `modelcraft-uv`: ABF with the reduced Newton system of ABF++ (Sheffer et al. 2001, 2005) as a second solver beside LSCM; chosen with the Unwrap solver box in the UV Editor, `Unwrap UVs (Angle-Based)` in the UV menu and the palette, `method` on the Unwrap step, or `uv-bench --method abf`; an island that does not converge falls back to LSCM and the report says so. Compared with LSCM in `docs/performance.md` |
 | Packing | C M | D | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density (a work bound and a shelf fallback above 500 islands); Pack UV Islands in the UV Editor and menu, history step, CLI |
 | UDIM tiles | C M Z | D | M | `modelcraft-uvpack`: tiles numbered 1001 to 1100 (ten columns, rows going up; stored v is down), packing into N tiles or as many as a texel density needs, with one density across tiles, as the Pack UV Islands step (`tiles`, `texel_density`) and the UDIM tiles box in the UV Editor; the editor draws every tile the UVs reach with its number; layout pictures export one file per tile (`name.1001.png`, `export-uv --udim`); `udim_tiles` lists the tiles a mesh uses. Materials do not sample UDIM sets of images yet |
-| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode); camera projection through the history step and CLI only |
+| Projections: planar, box, cylindrical, spherical, camera | C M Z | D | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode), and Project UVs: From View, which projects as the active 3D view sees the mesh (its camera and the object's transform); all as history steps and through the CLI; the Pack Options popover holds margin, rotation, island sizes, a texel density and the tile count |
 | Relax, straighten, align and stitch tools | C M | D | M | `modelcraft-uv`: Relax UVs (local/global flattening of Liu et al. 2008, keep lengths or keep angles, on the selection with the rest held), Straighten UVs (selected chains of UV edges on the line between their ends, keeping edge-length ratios), Stitch UV Islands (moves one island onto its neighbour along the shared edges with a least-squares similarity, optionally matching scale, then welds), Weld, flip and numeric align; history steps, the UV Editor, menu and palette, `add_step` |
-| Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
+| Checker display, texel density, distortion heat map | C M Z | D | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; `Checker in the 3D view` draws the checker from the UVs on every mesh that has them (the viewport vertex carries a UV per corner; sculpt meshes have none yet) |
 | Automatic UVs from polygon groups | Z | D | M | `Unwrap UVs by Polygon Groups`: the Unwrap step cuts along every border between two patches (polygon groups) so each group is an island, solved with LSCM or ABF, then Pack UV Islands (with tiles) lays them out; step field `from_patches`, UV menu and palette |
 | Transfer UVs between meshes | M Z | D | S | `modelcraft-uv` `transfer_uvs`: each corner takes the UV at the closest point of the other mesh's surface (grid search; per island, so a face never straddles a source seam, and a seam vertex keeps the side its face is on); the `transfer_uvs` command (world space, distance limit, one undo step as a `Set UVs` step) with Transfer UVs in the UV Editor, menu and palette (select the source, then the target) |
 | UV layout export as an image | C M Z | D | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines from the UV Editor, the UV menu and `modelcraft-cli export-uv`. UVs round-trip exactly through GLB and OBJ (tested) |

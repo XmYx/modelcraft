@@ -94,3 +94,27 @@ fn unwrapping_by_polygon_groups_makes_each_group_an_island() {
     let back: Step = serde_json::from_str(r#"{"id":1,"op":"unwrap"}"#).unwrap();
     assert!(matches!(back.op, StepOp::Unwrap { from_patches: false, .. }));
 }
+
+#[test]
+fn an_unwrap_that_cannot_make_discs_reports_a_warning_without_failing() {
+    let (mut s, mut ev, id) = cube();
+    // A closed cube with no cuts is not a disc: the flattening is attempted and the step says so.
+    push(
+        &mut s,
+        id,
+        vec![StepOp::Unwrap { seams: vec![], angle: None, pins: vec![], auto_cut: false, margin: 0.01, method: Default::default(), from_patches: false }],
+    );
+    let e = ev.evaluate(&s, id);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    assert!(e.mesh.has_uvs());
+    assert!(e.warnings.iter().any(|w| w.step == 0 && w.message.contains("not a disc")), "{:?}", e.warnings);
+    // The warnings are cached with the step and repeat on every evaluation.
+    assert_eq!(ev.evaluate(&s, id).warnings, e.warnings);
+    // With the automatic cuts there is nothing to warn about.
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind
+        && let StepOp::Unwrap { auto_cut, .. } = &mut steps[0].op
+    {
+        *auto_cut = true;
+    }
+    assert!(ev.evaluate(&s, id).warnings.is_empty());
+}

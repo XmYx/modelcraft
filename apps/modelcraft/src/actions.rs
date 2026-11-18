@@ -41,6 +41,7 @@ pub enum Action {
     AddSymmetry,
     AddField(&'static str),
     AddCloner(&'static str),
+    AddCloneModifier(&'static str),
     AddGroup,
     Extrude,
     Inset,
@@ -99,6 +100,7 @@ pub enum Action {
     RadialMenu,
     Preferences,
     Objects(crate::object_manager::Op),
+    Snap(crate::snap_ui::Op),
     Organize(crate::organize_ui::Op),
 }
 
@@ -110,6 +112,8 @@ pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 pub const FIELDS: &[&str] = modelcraft_engine::field::SHAPES;
 /// The clone layouts (`modelcraft_clone::KINDS`).
 pub const CLONERS: &[&str] = modelcraft_engine::clone::KINDS;
+/// The clone modifier modes (`modelcraft_clone::MODES`).
+pub const MODIFIERS: &[&str] = modelcraft_engine::clone::MODES;
 
 pub fn all() -> Vec<Action> {
     use Action::*;
@@ -152,9 +156,11 @@ pub fn all() -> Vec<Action> {
     v.push(AddSymmetry);
     v.extend(FIELDS.iter().map(|f| AddField(f)));
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
+    v.extend(MODIFIERS.iter().map(|m| AddCloneModifier(m)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
     v.extend(crate::object_manager::ALL.iter().map(|o| Objects(*o)));
+    v.extend(crate::snap_ui::all_ops().into_iter().map(Snap));
     v.extend(crate::organize_ui::ALL.iter().map(|o| Organize(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
@@ -321,6 +327,7 @@ impl Action {
             AddSymmetry => tl!("Add Symmetry"),
             AddField(f) => crate::tlf!("Add {shape} Falloff Field", shape = crate::field_ui::shape_label(f)),
             AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
+            AddCloneModifier(m) => crate::tlf!("Add {mode} Clone Modifier", mode = crate::modifier_ui::mode_label(m)),
             AddGroup => tl!("Add Group"),
             Extrude => tl!("Extrude"),
             Inset => tl!("Inset"),
@@ -368,6 +375,7 @@ impl Action {
             RadialMenu => tl!("Radial Menu"),
             Preferences => tl!("Preferences…"),
             Objects(o) => o.label(),
+            Snap(o) => o.label(),
             Organize(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
@@ -434,6 +442,7 @@ impl Action {
             AddSymmetry => "create.symmetry",
             AddField(f) => return format!("create.field.{f}"),
             AddCloner(c) => return format!("create.clones.{c}"),
+            AddCloneModifier(m) => return format!("create.clone_modifier.{m}"),
             AddGroup => "create.group",
             Extrude => "mesh.extrude",
             Inset => "mesh.inset",
@@ -489,6 +498,7 @@ impl Action {
             RadialMenu => "view.radial_menu",
             Preferences => "edit.preferences",
             Objects(o) => o.id(),
+            Snap(o) => o.id(),
             Organize(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
@@ -609,7 +619,7 @@ impl Action {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             Organize(_) => "Organize",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddArray(_) | AddSymmetry | AddGroup => "Create",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd

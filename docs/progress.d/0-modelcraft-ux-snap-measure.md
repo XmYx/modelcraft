@@ -1,0 +1,1 @@
+| 2026-11-18 | Snapping to vertices, edges and surfaces while moving, gizmo orientations (world, local, parent, normal), the gizmo on the object pivot, and a measure tool with the length unit of the preferences |

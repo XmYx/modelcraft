@@ -195,3 +195,22 @@ fn abf_on_random_soup_never_panics_and_stays_finite() {
         )
         .unwrap();
 }
+
+#[test]
+fn a_report_says_in_words_what_went_less_well() {
+    let ok = IslandReport { faces: 10, disc: true, iterations: 0, direct: true, residual: 1e-14, converged: true, fallback: false, pinned: false, abf: None };
+    let result = |islands: Vec<IslandReport>| UnwrapResult { corner_uvs: Vec::new(), seams: SeamSet::new(), cut: CutReport::default(), islands };
+    assert!(result(vec![ok.clone()]).warnings().is_empty());
+    let w = result(vec![
+        IslandReport { fallback: true, converged: false, ..ok.clone() },
+        IslandReport { converged: false, residual: 3e-4, ..ok.clone() },
+        IslandReport { abf: Some(AbfReport { iterations: 40, converged: false, residual: 0.2, ..AbfReport::default() }), ..ok.clone() },
+        IslandReport { disc: false, ..ok },
+    ])
+    .warnings();
+    assert_eq!(w.len(), 4, "{w:?}");
+    assert!(w[0].contains("island 1") && w[0].contains("plane"));
+    assert!(w[1].contains("island 2") && w[1].contains("did not converge"));
+    assert!(w[2].contains("island 3") && w[2].contains("conformal solver was used"));
+    assert!(w[3].contains("island 4") && w[3].contains("not a disc"));
+}
