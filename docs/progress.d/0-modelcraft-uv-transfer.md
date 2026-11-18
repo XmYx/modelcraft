@@ -1,1 +1,0 @@
-| 2026-11-18 | UV transfer: `modelcraft-uv` `transfer_uvs` takes UVs from another mesh by closest point on its surface, per island so a seam is respected; `transfer_uvs` engine command in world space with a distance limit and a `Set UVs` history step, UV Editor, menu and palette entries; 280,000 corners in 1.2 s |

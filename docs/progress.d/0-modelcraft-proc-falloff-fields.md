@@ -1,1 +1,0 @@
-| 2026-11-17 | Falloff fields: sphere, box, linear and noise fields with remap curves (monotone, up to 16 points, presets) and blend modes, in a new `modelcraft-field` crate with property tests; a field inside a deformer weights how strongly the deformer acts at each point (`Deformer::apply_weighted`); `add_field` and `set_field` commands, Properties section, viewport outline |

@@ -150,23 +150,6 @@ impl SeamSet {
         n
     }
 
-    /// Mark every interior edge between two faces of different patches (polygon groups): the
-    /// seams that make each patch an island. Returns how many edges were newly marked.
-    pub fn mark_patch_borders(&mut self, mesh: &PolyMesh) -> usize {
-        let mut n = 0;
-        for e in 0..mesh.edge_count() as u32 {
-            let h = mesh.edge_half_edge(e);
-            let t = mesh.twin(h);
-            if mesh.face_of(h) == NONE || mesh.face_of(t) == NONE {
-                continue;
-            }
-            if mesh.patch(mesh.face_of(h)) != mesh.patch(mesh.face_of(t)) && self.mark(mesh, e) {
-                n += 1;
-            }
-        }
-        n
-    }
-
     /// The seams implied by the UVs a mesh already has: every interior edge whose two sides
     /// carry different UVs at either end. Empty for a mesh without UVs.
     pub fn from_uv_discontinuities(mesh: &PolyMesh) -> Self {

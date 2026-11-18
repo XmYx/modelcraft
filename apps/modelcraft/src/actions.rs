@@ -37,7 +37,6 @@ pub enum Action {
     AddPrimitive(&'static str),
     AddCage,
     AddDeformer(&'static str),
-    AddField(&'static str),
     AddCloner(&'static str),
     AddGroup,
     Extrude,
@@ -86,10 +85,8 @@ pub enum Action {
     ScriptWindow,
     ScriptRun,
     ScriptRunSelection,
-    ScriptRecord,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
-    Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
     MeshTool(crate::mesh_tools::Tool),
@@ -100,8 +97,6 @@ pub enum Action {
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
 pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
-/// The falloff field shapes (`modelcraft_field::SHAPES`).
-pub const FIELDS: &[&str] = modelcraft_engine::field::SHAPES;
 /// The clone layouts (`modelcraft_clone::KINDS`).
 pub const CLONERS: &[&str] = modelcraft_engine::clone::KINDS;
 
@@ -142,7 +137,6 @@ pub fn all() -> Vec<Action> {
     v.extend(PRIMITIVES.iter().map(|p| AddPrimitive(p)));
     v.extend([AddCage, AddGroup]);
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
-    v.extend(FIELDS.iter().map(|f| AddField(f)));
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
     v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
@@ -175,7 +169,6 @@ pub fn all() -> Vec<Action> {
         ScriptWindow,
         ScriptRun,
         ScriptRunSelection,
-        ScriptRecord,
         RadialMenu,
         Preferences,
         TransformDialog,
@@ -186,7 +179,6 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
-    v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
     v
@@ -237,9 +229,6 @@ fn brush_label_id(k: BrushKind) -> &'static str {
         BrushKind::Gouge => "gouge",
         BrushKind::Slide => "slide",
         BrushKind::Bulge => "bulge",
-        BrushKind::Rotate => "rotate",
-        BrushKind::ElasticMove => "elastic_move",
-        BrushKind::Scrape => "scrape",
     }
 }
 
@@ -264,9 +253,6 @@ pub fn brush_label(k: BrushKind) -> String {
         BrushKind::Gouge => tl!("Gouge"),
         BrushKind::Slide => tl!("Slide"),
         BrushKind::Bulge => tl!("Bulge"),
-        BrushKind::Rotate => tl!("Rotate"),
-        BrushKind::ElasticMove => tl!("Elastic Move"),
-        BrushKind::Scrape => tl!("Scrape"),
     }
 }
 
@@ -306,7 +292,6 @@ impl Action {
             AddPrimitive(p) => crate::tlf!("Add {shape}", shape = prim_label(p)),
             AddCage => tl!("Add Smooth Cage"),
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
-            AddField(f) => crate::tlf!("Add {shape} Falloff Field", shape = crate::field_ui::shape_label(f)),
             AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
             AddGroup => tl!("Add Group"),
             Extrude => tl!("Extrude"),
@@ -350,7 +335,6 @@ impl Action {
             ScriptWindow => tl!("Scripts Window"),
             ScriptRun => tl!("Run Script"),
             ScriptRunSelection => tl!("Run Selection"),
-            ScriptRecord => tl!("Record Macro"),
             MeshTool(t) => t.label(),
             RadialMenu => tl!("Radial Menu"),
             Preferences => tl!("Preferences…"),
@@ -372,7 +356,6 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
-            Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
         }
@@ -415,7 +398,6 @@ impl Action {
             AddPrimitive(p) => return format!("create.{p}"),
             AddCage => "create.smooth_cage",
             AddDeformer(d) => return format!("create.deformer.{d}"),
-            AddField(f) => return format!("create.field.{f}"),
             AddCloner(c) => return format!("create.clones.{c}"),
             AddGroup => "create.group",
             Extrude => "mesh.extrude",
@@ -467,7 +449,6 @@ impl Action {
             ScriptWindow => "scripts.window",
             ScriptRun => "scripts.run",
             ScriptRunSelection => "scripts.run_selection",
-            ScriptRecord => "scripts.record_macro",
             MeshTool(t) => t.id(),
             RadialMenu => "view.radial_menu",
             Preferences => "edit.preferences",
@@ -476,7 +457,6 @@ impl Action {
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
-            Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
@@ -575,7 +555,6 @@ impl Action {
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
-            Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
             _ => return None,
@@ -588,17 +567,16 @@ impl Action {
         match self {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddGroup => "Create",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddCloner(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
             | LiveDetail | EvenRemesh | Sculpt(_) => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
-            ScriptWindow | ScriptRun | ScriptRunSelection | ScriptRecord => "Scripts",
+            ScriptWindow | ScriptRun | ScriptRunSelection => "Scripts",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
-            Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",
         }

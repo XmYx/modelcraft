@@ -27,4 +27,3 @@ pollster = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-modelcraft-sim = { workspace = true }

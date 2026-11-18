@@ -19,7 +19,6 @@ mod error;
 pub mod highlight;
 mod host;
 mod limits;
-pub mod macros;
 mod pacing;
 mod perm;
 mod session;

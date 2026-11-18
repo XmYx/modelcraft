@@ -584,7 +584,7 @@ fn shade_stage(
                 // history it would leave counts for nothing.
                 *resv = Resv::EMPTY;
             }
-            add_sample(px, l, &f, ndc, previous, w, h);
+            add_sample(px, s, l, &f, ndc, previous, w, h);
         }
     });
 }

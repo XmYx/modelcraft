@@ -164,7 +164,7 @@ fn settings_are_checked_and_a_file_cache_cannot_be_cleared() {
     let ObjectKind::Sim { sim: s } = &d.scene.get(sim).unwrap().kind else { panic!() };
     assert_eq!((s.timing.substeps, s.seed, s.max_cache_mib), (8, 77, 64));
     assert!(s.cache.is_some(), "settings do not drop the cache");
-    assert!(!d.sim_stale(sim), "a cache from a file is never stale");
+    assert!(!s.is_stale(), "a cache from a file is never stale");
     for bad in [
         (None, None, None, Some(0), None, None),
         (None, None, None, Some(1000), None, None),
