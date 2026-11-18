@@ -37,6 +37,8 @@ pub const STARTUP: &str = "startup.rhai";
 /// Scripts in this subfolder of the scripts folder become buttons in the Quick Scripts strip.
 pub const QUICK_DIR: &str = "quick";
 pub const EXT: &str = "rhai";
+/// The subfolder of the scripts folder that holds libraries (`import "lib/name" as m;`).
+pub const LIBRARY_DIR: &str = "lib";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConsoleKind {
@@ -256,7 +258,8 @@ pub fn scan(dir: &Path) -> (Vec<Entry>, Vec<Entry>) {
             entries.push(entry_of(p, None));
         } else if p.is_dir() {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            if name.starts_with('.') {
+            // Dot folders are hidden, and `lib` holds libraries for `import`, not scripts to run.
+            if name.starts_with('.') || name == LIBRARY_DIR {
                 continue;
             }
             for q in list(&p).into_iter().filter(|q| is_script(q)) {
@@ -338,6 +341,7 @@ pub fn execute(app: &mut ModelApp, name: &str, source: &str, script: Option<&Pat
     let file = app.doc.path.as_ref().map(|p| p.display().to_string());
     let session = app.script.session.get_or_insert_with(|| Session::new(Limits::default(), Permissions::none()));
     session.set_permissions(perms);
+    session.set_library(app.script.dir.clone());
     session.set_current_file(file);
     let mut ctx = RunContext { selection: app.selection.clone() };
     app.script.note(ConsoleKind::Note, crate::tlf!("Running {script}…", script = name), None);

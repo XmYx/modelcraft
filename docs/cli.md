@@ -193,6 +193,7 @@ lets them write in `--out-dir`).
 |---|---|
 | `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
 | `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--library DIR` | The folder `import "lib/name" as m;` reads [libraries](scripting.md#libraries) from (default: the script's own folder; none for `-e`) |
 | `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
 | `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
 | `--no-save` | Run and report, write nothing |
@@ -337,6 +338,7 @@ samples per second.
 | `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
 | `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
 | `--denoise [svgf\|nfor]` | Filter the noise out: `nfor` (default; regression on the two half renderings, for finals) or `svgf` (the interactive filter). A `.exr` then holds the filtered image as R, G, B and the original as `noisy.R/G/B`. On `render-bench` it also reports the error after the filter and the filter's time ([performance.md](performance.md)) |
+| `--bvh binary\|wide` | Trace through the binary tree (default) or its compressed 8-wide form: the same images, faster on the CPU for large scenes, slower on the GPU ([performance.md](performance.md)) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |

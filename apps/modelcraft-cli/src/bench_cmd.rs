@@ -25,6 +25,7 @@ pub const USAGE: &str = "  render-bench [options]            error against time 
       --splitting                   end or multiply paths by their expected contribution (CPU)
       --restir unbiased|viewport    resampled direct light at the first surface (CPU and GPU)
       --restir-candidates N --restir-neighbors N
+      --bvh binary|wide             trace through the binary tree or its 8-wide form
       --denoise [svgf|nfor]         also filter each image and report its error and the filter's time
                                     (the reference is always rendered without either)";
 
@@ -40,6 +41,7 @@ pub struct BenchArgs {
     pub splitting: bool,
     pub restir: RestirSettings,
     pub denoise: DenoiseMode,
+    pub wide_bvh: bool,
 }
 
 fn value<'a>(a: &'a [String], name: &str) -> Option<&'a str> {
@@ -76,6 +78,7 @@ pub fn parse(a: &[String]) -> Result<BenchArgs, String> {
         splitting: a.iter().any(|x| x == "--splitting"),
         restir: crate::render_cmd::parse_restir(a)?,
         denoise: crate::render_cmd::parse_denoise(a)?,
+        wide_bvh: crate::render_cmd::parse_bvh(a)?,
     })
 }
 
@@ -113,7 +116,11 @@ fn median(values: &[f64]) -> f64 {
 /// One scene's measurements as JSON.
 pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Result<serde_json::Value, String> {
     let t = Instant::now();
-    let scene = Arc::new(scenes::by_name(name).ok_or_else(|| format!("unknown scene {name:?}"))?.map_err(|e| e.to_string())?);
+    let mut scene = scenes::by_name(name).ok_or_else(|| format!("unknown scene {name:?}"))?.map_err(|e| e.to_string())?;
+    if args.wide_bvh && !scene.enable_wide_bvh() {
+        return Err("the tree does not fit the 8-wide form".into());
+    }
+    let scene = Arc::new(scene);
     let build_seconds = t.elapsed().as_secs_f64();
     let settings = |seed: u32| RenderSettings { width: args.size, height: args.size, seed, pixel_order: args.order, ..RenderSettings::default() };
     // The technique under test; the reference is always the plain estimator, so a technique that
@@ -172,6 +179,7 @@ pub fn bench_scene(name: &str, args: &BenchArgs, gpu: Option<&GpuContext>) -> Re
         "splitting": args.splitting,
         "restir": format!("{:?}", args.restir.mode),
         "denoise": format!("{:?}", args.denoise),
+        "bvh": if args.wide_bvh { "wide" } else { "binary" },
         "triangles": scene.triangle_count(),
         "build_seconds": build_seconds,
         "reference_spp": half * 2,

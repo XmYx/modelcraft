@@ -34,6 +34,8 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
                                     the two half renderings, for finals) or svgf (the interactive
                                     filter). A .exr then holds the filtered image as R, G, B and the
                                     original as noisy.R/G/B
+      --bvh binary|wide             traversal structure: the binary tree (default) or its compressed 8-wide
+                                    form (faster on the CPU, not on the GPU; see docs/performance.md)
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
@@ -70,6 +72,7 @@ pub struct RenderArgs {
     pub splitting: bool,
     pub restir: RestirSettings,
     pub denoise: DenoiseMode,
+    pub wide_bvh: bool,
 }
 
 impl Default for RenderArgs {
@@ -95,6 +98,7 @@ impl Default for RenderArgs {
             splitting: false,
             restir: RestirSettings::default(),
             denoise: DenoiseMode::Off,
+            wide_bvh: false,
         }
     }
 }
@@ -157,7 +161,17 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         splitting: a.iter().any(|x| x == "--splitting"),
         restir: parse_restir(a)?,
         denoise: parse_denoise(a)?,
+        wide_bvh: parse_bvh(a)?,
     })
+}
+
+/// `--bvh binary|wide`: whether to trace through the 8-wide hierarchy.
+pub fn parse_bvh(a: &[String]) -> Result<bool, String> {
+    match value(a, "--bvh") {
+        None | Some("binary") => Ok(false),
+        Some("wide") => Ok(true),
+        Some(other) => Err(format!("--bvh: expected binary or wide, found {other:?}")),
+    }
 }
 
 /// `--denoise` alone means `nfor`; a mode may follow it.
@@ -235,7 +249,10 @@ pub struct Report {
 }
 
 /// Render `scene` with the device the arguments ask for.
-pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
+pub fn render(mut scene: Scene, args: &RenderArgs) -> Result<Report, String> {
+    if args.wide_bvh && !scene.enable_wide_bvh() {
+        eprintln!("note: this scene's tree does not fit the 8-wide form; using the binary tree");
+    }
     let settings = RenderSettings {
         width: args.width,
         height: args.height,
@@ -412,6 +429,16 @@ mod tests {
         run("builtin:cornell", png.to_str().unwrap(), &small, |_| Err("no files".into())).unwrap();
         assert!(std::fs::metadata(&png).unwrap().len() > 0);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parses_the_bvh_option_and_renders_the_same_picture_either_way() {
+        assert!(!parse(&args(&[])).unwrap().wide_bvh && parse(&args(&["--bvh", "wide"])).unwrap().wide_bvh);
+        assert!(parse(&args(&["--bvh", "quad"])).is_err());
+        let small = RenderArgs { width: 24, height: 18, samples: 4, device: Device::Cpu, ..RenderArgs::default() };
+        let plain = render(builtin("showcase").unwrap(), &small).unwrap().film;
+        let wide = render(builtin("showcase").unwrap(), &RenderArgs { wide_bvh: true, ..small }).unwrap().film;
+        assert_eq!(plain.sum, wide.sum);
     }
 
     #[test]
