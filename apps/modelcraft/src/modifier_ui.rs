@@ -82,7 +82,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, modifier: Mod
     drags.push(drag(ui, &mut q.strength, 0.01, -10.0..=10.0, tl!("Strength")));
 
     let ease_names: Vec<String> = EASES.iter().map(|e| ease_label(e)).collect();
-    let mut ease_pick = |ui: &mut egui::Ui, ease: &mut Ease, salt: u64, discrete: &mut bool| {
+    let ease_pick = |ui: &mut egui::Ui, ease: &mut Ease, salt: u64, discrete: &mut bool| {
         let cur = EASES.iter().position(|e| *e == ease.name()).unwrap_or(0);
         if let Some(i) = pick(ui, ("modifier-ease", salt), tl!("Easing"), ease_names[cur].clone(), cur, &ease_names)
             && let Some(e) = EASES.get(i).and_then(|n| Ease::from_name(n))
