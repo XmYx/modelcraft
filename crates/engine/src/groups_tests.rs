@@ -251,3 +251,75 @@ fn the_commands_read_as_documented_json() {
         assert!(serde_json::from_str::<Command>(j).is_ok(), "{j}");
     }
 }
+
+#[test]
+fn decimate_is_a_history_step_and_projection_brings_the_detail_back() {
+    let mut d = Document::new();
+    // A detailed object: a dense ball with a ridge sculpted into it.
+    let detailed = d.execute(Command::AddPrimitive { kind: "round_cube".into(), name: None, parent: None }).unwrap().created[0];
+    d.execute(Command::BeginSculpt { id: detailed }).unwrap();
+    let mut brush = BrushSettings::new(BrushKind::Draw, 0.45);
+    brush.strength = 1.0;
+    let dabs: Vec<Dab> = (0..40)
+        .map(|k| {
+            let a = k as f32 * 0.08;
+            let c = Vec3::new(a.cos(), 0.3, a.sin()).normalize();
+            Dab { center: c, view_dir: -c, pressure: 1.0, grab_delta: Vec3::ZERO, scale: 1.0 }
+        })
+        .collect();
+    d.execute(Command::SculptStroke { id: detailed, stroke: Stroke { brush, dabs } }).unwrap();
+    d.execute(Command::EndSculpt).unwrap();
+    let full = d.eval.evaluate(&d.scene, detailed).mesh;
+    // A copy of it, decimated to a fifth: the low mesh.
+    let low = d.execute(Command::Duplicate { id: detailed }).unwrap().created[0];
+    d.execute(Command::AddStep { id: low, op: StepOp::Decimate { ratio: 0.2 } }).unwrap();
+    let e = d.eval.evaluate(&d.scene, low);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    assert!(e.mesh.face_count() <= full.triangle_count() / 4, "{} of {}", e.mesh.face_count(), full.triangle_count());
+    assert!((0..e.mesh.edge_count() as u32).all(|k| !e.mesh.is_boundary_edge(k)));
+    // Sculpt the low mesh flat (smooth it hard), then project the detailed one back onto it.
+    d.execute(Command::BeginSculpt { id: low }).unwrap();
+    d.execute(Command::SculptClip { id: low, point: Vec3::new(0.0, 0.25, 0.0), normal: Vec3::Y }).unwrap();
+    let source = modelcraft_sculpt::SculptMesh::new(&full, None, None);
+    let off = |d: &Document| {
+        d.sculpt.as_ref().unwrap().mesh.positions.iter().map(|p| source.closest_point(*p, 10.0).map(|q| q.distance(*p)).unwrap_or(10.0)).fold(0.0f32, f32::max)
+    };
+    assert!(off(&d) > 0.2, "the clip took the top off: {}", off(&d));
+    let undo = d.undo.len();
+    d.execute(Command::SculptProject { id: low, source: detailed, reach: Some(2.0) }).unwrap();
+    assert!(off(&d) < 1e-3, "every vertex is back on the detailed surface: {}", off(&d));
+    assert_eq!(d.undo.len(), undo + 1);
+    d.execute(Command::Undo).unwrap();
+    assert!(off(&d) > 0.2);
+    d.execute(Command::Redo).unwrap();
+    assert!(off(&d) < 1e-3);
+    // The default reach is a tenth of the object's size; refusals leave no undo step.
+    let undo = d.undo.len();
+    assert!(d.execute(Command::SculptProject { id: low, source: low, reach: None }).is_err());
+    assert!(d.execute(Command::SculptProject { id: low, source: ObjectId(9999), reach: None }).is_err());
+    assert!(d.execute(Command::SculptProject { id: low, source: detailed, reach: Some(-1.0) }).is_err());
+    assert_eq!(d.undo.len(), undo);
+    d.execute(Command::SculptProject { id: low, source: detailed, reach: None }).unwrap();
+    // The source moved aside is followed in the target's own space.
+    let mut t = d.scene.get(detailed).unwrap().transform;
+    t.translation = Vec3::new(0.0, 0.05, 0.0);
+    d.execute(Command::SetTransform { id: detailed, transform: t }).unwrap();
+    d.execute(Command::SculptProject { id: low, source: detailed, reach: Some(0.5) }).unwrap();
+    let lifted = d
+        .sculpt
+        .as_ref()
+        .unwrap()
+        .mesh
+        .positions
+        .iter()
+        .map(|p| source.closest_point(*p - Vec3::new(0.0, 0.05, 0.0), 10.0).map(|q| q.distance(*p - Vec3::new(0.0, 0.05, 0.0))).unwrap_or(10.0))
+        .fold(0.0f32, f32::max);
+    assert!(lifted < 1e-3, "{lifted}");
+    for j in [
+        r#"{"cmd":"sculpt_project","id":2,"source":1}"#,
+        r#"{"cmd":"sculpt_project","id":2,"source":1,"reach":0.3}"#,
+        r#"{"cmd":"add_step","id":1,"op":{"op":"decimate","ratio":0.25}}"#,
+    ] {
+        assert!(serde_json::from_str::<Command>(j).is_ok(), "{j}");
+    }
+}
