@@ -135,6 +135,20 @@ impl GpuState {
         key
     }
 
+    /// Like [`GpuState::mesh`], with one normal per face (flat shading). The key is the mesh's
+    /// plus one: allocations are aligned, so the two never collide.
+    pub fn mesh_flat(&mut self, m: &Arc<PolyMesh>) -> usize {
+        let key = (Arc::as_ptr(m) as usize) | 1;
+        let f = self.frame;
+        if let Some(e) = self.meshes.get_mut(&key) {
+            e.2 = f;
+            return key;
+        }
+        let g = GpuMesh::new(&self.rs.device, &buffers::flat_data(m));
+        self.meshes.insert(key, (m.clone(), g, f));
+        key
+    }
+
     /// Render a view into its target; returns the texture to show.
     pub fn draw(
         &mut self,

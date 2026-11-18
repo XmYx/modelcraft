@@ -15,6 +15,7 @@
 
 mod api;
 pub mod docs;
+pub mod draft;
 mod error;
 pub mod highlight;
 mod host;

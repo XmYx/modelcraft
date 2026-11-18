@@ -51,6 +51,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Render View, Update while editing | interactive / progressive render windows (the references use product-specific names for theirs) | Generic words; no live software mark found for the phrase in class 9; the references' own names avoided | Use |
 | Learn where light comes from (Render View) | path guiding, light cache or irradiance-map style options (the references use product-specific names) | A plain description of what it does; no product name used | Use |
 | Resample direct light (Render View) | reservoir-based many-light options (the references use product-specific names for theirs) | A plain description of what it does; "ReSTIR" appears only in engineering notes as the name of the published technique, not in the interface | Use |
+| Denoise (Render View, `--denoise`) | denoiser options (the references name theirs after vendors) | A plain verb; the filters are named after their published papers in engineering notes only | Use |
 | Studio, Daylight, Panorama image (Render View lighting) | dome lights, physical sun-and-sky systems, HDRI lighting | Generic words; the references' product names for their skies and domes avoided | Use |
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
@@ -63,6 +64,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Falloff Field; Remap, Curve, Slow start, Slow finish, Combine with earlier fields | fields and field layers | Generic geometry and animation words; the reference's field and layer names are not used | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
+| Simulate (menu), Simulation (panel), Bake, Cancel, Play Cache | the simulation menu and panel | Generic words; the references' dynamics and cache menus are not used as labels | Use |
 | Particles, Emitter, Rate, Burst, Lifetime, Spread, Attractor, Vortex, Drag | particle systems | Generic words; no reference product's particle module, emitter or force names | Use |
 | Cloth, Pin, Stretch, Shear, Bend, Thickness, Self Collision, Wind, Turbulence | cloth simulation settings | Generic physical terms; no reference product's cloth module or setting names | Use |
 | Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
