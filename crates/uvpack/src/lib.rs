@@ -3,6 +3,8 @@
 //!
 //! - [`pack`]: place islands in the unit square (MaxRects, margin, rotation, even texel density).
 //! - [`pack_mesh`], [`uv_islands`]: the same for the islands a mesh's UVs already form.
+//! - [`pack_udim`], [`pack_udim_mesh`]: the same into several tiles (UDIM numbers 1001 and up), with one
+//!   texel density across them.
 //! - [`project`]: planar, box, cylindrical, spherical and camera projections.
 //!
 //! UV space follows glTF: origin top left, v down. Only published papers were used (see each
@@ -13,12 +15,14 @@
 mod islands;
 mod pack;
 mod project;
+mod udim;
 
 pub use islands::{island_densities, pack_islands, pack_mesh, uv_islands};
 pub use pack::{
     Density, MAX_ISLANDS, MAX_POINTS, MAX_RECTS_ISLANDS, MAX_WORK, PackIsland, PackOptions, PackResult, Placement, Rotation, pack, pack_with_limit,
 };
 pub use project::{Axis, Fit, ProjectOptions, Projection, project, project_mesh};
+pub use udim::{MAX_TILES, TILE_COLUMNS, UdimOptions, UdimResult, UdimTiles, pack_udim, pack_udim_mesh, tile_of, tile_of_number, udim_number, udim_tiles};
 
 use modelcraft_mesh::MeshError;
 
@@ -35,6 +39,8 @@ pub enum PackError {
     NoUvs,
     #[error("a coordinate is not a finite number")]
     NonFinite,
+    #[error("{0}")]
+    Invalid(String),
     #[error("the islands do not fit at any scale with this margin")]
     NoRoom,
     #[error(transparent)]
@@ -43,3 +49,5 @@ pub enum PackError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod udim_tests;

@@ -7,10 +7,13 @@
 //! three, and an app that wants a progress bar runs the middle part itself and hands the result
 //! to [`Document::store_bake`].
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
-use modelcraft_scene::{Evaluator, ObjectId, ObjectKind};
+use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene, StepOp};
+use modelcraft_sim::cloth::{ClothDesc, ClothSettings, ClothSolver, ColliderMesh, ColliderProvider};
+use modelcraft_sim::particles::{EmitterGeometry, EmitterKind, ParticleDesc, ParticleSettings, ParticleSolver};
 use modelcraft_sim::rigid::{BodyDesc, BodyRole, RigidSettings, RigidWorld, WorldDesc};
 use modelcraft_sim::{BakeConfig, FrameCache, Observer, SimError, SimKind, SimObject, SimTiming, bake};
 
@@ -75,6 +78,8 @@ pub fn prepare(doc: &Document, target: ObjectId) -> Result<BakeJob, EngineError>
     match &sim.kind {
         SimKind::Cache => invalid("this cache came from a file: there is nothing to bake"),
         SimKind::Rigid(settings) => prepare_rigid(doc, target, &sim, settings),
+        SimKind::Cloth(settings) => prepare_cloth(doc, target, &sim, settings),
+        SimKind::Particles(settings) => prepare_particles(doc, target, &sim, settings),
     }
 }
 
@@ -178,11 +183,195 @@ fn prepare_rigid(doc: &Document, target: ObjectId, sim: &SimObject, world_settin
     Ok(BakeJob { target, timing, seed: sim.seed, sims: sim_ids, work, world: Some((world_settings.gravity, ground)) })
 }
 
+/// The scene at `frame` with the given simulations switched off, for reading rest shapes.
+fn rest_scene(doc: &Document, frame: f64, hide: impl Fn(ObjectId) -> bool) -> Result<Scene, EngineError> {
+    let mut scene = doc.scene.clone();
+    let sims: Vec<ObjectId> = scene.objects().iter().filter(|o| matches!(o.kind, ObjectKind::Sim { .. }) && hide(o.id)).map(|o| o.id).collect();
+    for id in sims {
+        scene.edit(id)?.visible = false;
+    }
+    scene.set_frame(frame);
+    Ok(scene)
+}
+
+/// The vertices whose sculpt mask is above one half, from the mesh object's last sculpt layer.
+fn masked_vertices(scene: &Scene, mesh: ObjectId, vertices: usize) -> Vec<u32> {
+    let Some(ObjectKind::Mesh { steps, .. }) = scene.get(mesh).map(|o| &o.kind) else { return Vec::new() };
+    let layer = steps.iter().rev().find_map(|s| match &s.op {
+        StepOp::Sculpt { layer } if layer.mask.len() == vertices => Some(layer.clone()),
+        _ => None,
+    });
+    layer.map_or_else(Vec::new, |l| l.mask.iter().enumerate().filter(|(_, m)| **m > 0.5).map(|(i, _)| i as u32).collect())
+}
+
+/// A source of collider shapes: evaluates the scene's meshes at any frame and reuses what did
+/// not change, so a still collider keeps one `Arc` and the solver keeps its hash.
+struct Colliders {
+    scene: Scene,
+    ev: Evaluator,
+    ids: Vec<ObjectId>,
+    cache: HashMap<ObjectId, (usize, [u32; 16], ColliderMesh)>,
+}
+
+impl Colliders {
+    fn at(&mut self, frame: f64) -> Vec<ColliderMesh> {
+        self.scene.set_frame(frame);
+        let mut out = Vec::with_capacity(self.ids.len());
+        for id in &self.ids {
+            let mesh = self.ev.evaluate(&self.scene, *id).mesh;
+            let m = self.scene.world_matrix(*id);
+            if mesh.vertex_count() == 0 || !m.is_finite() {
+                continue;
+            }
+            let bits = m.to_cols_array().map(f32::to_bits);
+            let ptr = Arc::as_ptr(&mesh) as usize;
+            if let Some((p, b, c)) = self.cache.get(id)
+                && *p == ptr
+                && *b == bits
+            {
+                out.push(c.clone());
+                continue;
+            }
+            let positions: Vec<Vec3> = mesh.positions().iter().map(|p| m.transform_point3(*p)).collect();
+            let c = ColliderMesh { positions: Arc::new(positions), triangles: Arc::new(mesh.triangulate().0) };
+            self.cache.insert(*id, (ptr, bits, c.clone()));
+            out.push(c);
+        }
+        out
+    }
+}
+
+fn prepare_cloth(doc: &Document, target: ObjectId, sim: &SimObject, settings: &ClothSettings) -> Result<BakeJob, EngineError> {
+    let timing = sim.timing;
+    let mesh_id = doc.scene.get(target).and_then(|o| o.parent).ok_or_else(|| EngineError::Invalid("the cloth has no mesh".into()))?;
+    if !matches!(doc.scene.get(mesh_id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
+        return invalid("a cloth drives a mesh object");
+    }
+    let mut scene = rest_scene(doc, timing.start_frame, |_| true)?;
+    let mut ev = Evaluator::new();
+    let mesh = ev.evaluate(&scene, mesh_id).mesh;
+    let m0 = scene.world_matrix(mesh_id);
+    let inv = m0.inverse();
+    if mesh.vertex_count() == 0 || !m0.is_finite() || !inv.is_finite() {
+        return invalid("the mesh has no points, or a transform that cannot be undone");
+    }
+    let points: Vec<Vec3> = mesh.positions().iter().map(|p| m0.transform_point3(*p)).collect();
+    let polygons: Vec<Vec<u32>> = mesh.to_polygons().into_iter().map(|p| p.verts).collect();
+    let mut s = settings.clone();
+    s.sanitize();
+    if s.pin_mask {
+        s.pinned.extend(masked_vertices(&scene, mesh_id, points.len()));
+        s.sanitize();
+    }
+    s.pinned.retain(|p| (*p as usize) < points.len());
+    // Pins that follow an object: its motion relative to where it started.
+    let mut pin_motion = Vec::new();
+    if let Some(follow) = s.pin_follow.map(ObjectId).filter(|f| doc.scene.get(*f).is_some()) {
+        let start = scene.world_matrix_at(follow, timing.start_frame);
+        let back = start.inverse();
+        if back.is_finite() {
+            pin_motion = (0..timing.frame_count()).map(|i| scene.world_matrix_at(follow, timing.frame_of(i)) * back).collect();
+        }
+    }
+    // The colliders: the listed meshes, or every other visible mesh.
+    let wanted: Vec<ObjectId> = s.collide_with.iter().map(|i| ObjectId(*i)).collect();
+    let ids: Vec<ObjectId> = doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| o.id != mesh_id && matches!(o.kind, ObjectKind::Mesh { .. }) && doc.scene.visible(o.id) && !doc.scene.is_cage_input(o.id))
+        .filter(|o| wanted.is_empty() || wanted.contains(&o.id))
+        .map(|o| o.id)
+        .collect();
+    // Colliders see the scene with this cloth's own cache off (it is what is being made), and
+    // every other simulation as baked, so cloth lands on baked rigid bodies.
+    if s.collide {
+        scene = rest_scene(doc, timing.start_frame, |id| id == target)?;
+    }
+    let provider_scene = scene;
+    let cfg = BakeConfig { timing, seed: sim.seed, max_cache_bytes: sim.cache_limit() };
+    let desc = ClothDesc { points, polygons, settings: s.clone(), pin_motion, start_frame: timing.start_frame };
+    let collide = s.collide;
+    let work: Work = Box::new(move |observer| {
+        let provider: Option<ColliderProvider> = if collide && !ids.is_empty() {
+            let mut c = Colliders { scene: provider_scene, ev: Evaluator::new(), ids, cache: HashMap::new() };
+            Some(Box::new(move |frame| c.at(frame)))
+        } else {
+            None
+        };
+        let mut solver = ClothSolver::new(desc, provider)?;
+        let whole = bake(&mut solver, &cfg, observer)?;
+        let mut cache = FrameCache::new(whole.fps, whole.start, whole.step, whole.points());
+        let mut local: Vec<Vec3> = Vec::with_capacity(whole.points());
+        for f in 0..whole.frames() {
+            local.clear();
+            local.extend(whole.frame(f).unwrap_or_default().iter().map(|p| inv.transform_point3(*p)));
+            cache.push(&local, usize::MAX)?;
+        }
+        Ok(vec![cache])
+    });
+    Ok(BakeJob { target, timing, seed: sim.seed, sims: vec![target], work, world: None })
+}
+
+fn prepare_particles(doc: &Document, target: ObjectId, sim: &SimObject, settings: &ParticleSettings) -> Result<BakeJob, EngineError> {
+    let timing = sim.timing;
+    let emitter_id = doc.scene.get(target).and_then(|o| o.parent).ok_or_else(|| EngineError::Invalid("the particle system has no emitter".into()))?;
+    let scene = rest_scene(doc, timing.start_frame, |_| true)?;
+    let mut ev = Evaluator::new();
+    let m0 = scene.world_matrix(emitter_id);
+    let inv = m0.inverse();
+    if !m0.is_finite() || !inv.is_finite() {
+        return invalid("the emitter has a transform that cannot be undone");
+    }
+    let mut s = settings.clone();
+    s.sanitize();
+    let is_mesh = matches!(doc.scene.get(emitter_id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }));
+    let (positions, triangles) = if is_mesh {
+        let mesh = ev.evaluate(&scene, emitter_id).mesh;
+        (mesh.positions().iter().map(|p| m0.transform_point3(*p)).collect(), mesh.triangulate().0)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    if s.emitter != EmitterKind::Point && triangles.is_empty() {
+        return invalid("a surface or volume emitter needs a mesh with faces: put the particles under one, or use a point emitter");
+    }
+    let motion = if scene.moves(emitter_id) {
+        (0..timing.frame_count()).map(|i| scene.world_matrix_at(emitter_id, timing.frame_of(i)) * inv).collect()
+    } else {
+        Vec::new()
+    };
+    let geometry = EmitterGeometry { origin: m0.transform_point3(Vec3::ZERO), positions, triangles, motion };
+    let ids: Vec<ObjectId> = doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| o.id != emitter_id && matches!(o.kind, ObjectKind::Mesh { .. }) && doc.scene.visible(o.id) && !doc.scene.is_cage_input(o.id))
+        .filter(|o| s.collide_with.is_empty() || s.collide_with.contains(&o.id.0))
+        .map(|o| o.id)
+        .collect();
+    // Colliders see every simulation as baked except this one.
+    let provider_scene = rest_scene(doc, timing.start_frame, |id| id == target)?;
+    let cfg = BakeConfig { timing, seed: sim.seed, max_cache_bytes: sim.cache_limit() };
+    let desc = ParticleDesc { settings: s.clone(), emitter: geometry, start_frame: timing.start_frame, fps: timing.fps };
+    let collide = s.collide;
+    let work: Work = Box::new(move |observer| {
+        let provider: Option<ColliderProvider> = if collide && !ids.is_empty() {
+            let mut c = Colliders { scene: provider_scene, ev: Evaluator::new(), ids, cache: HashMap::new() };
+            Some(Box::new(move |frame| c.at(frame)))
+        } else {
+            None
+        };
+        let mut solver = ParticleSolver::new(desc, provider)?;
+        Ok(vec![bake(&mut solver, &cfg, observer)?])
+    });
+    Ok(BakeJob { target, timing, seed: sim.seed, sims: vec![target], work, world: None })
+}
+
 /// Store a finished bake: every simulated object gets its cache, and the rigid world's shared
 /// settings (timing, seed, gravity, ground) are copied to all of its bodies.
 pub fn store(doc: &mut Document, r: BakeResult, out: &mut Outcome) -> Result<(), EngineError> {
     // Bodies of the same world share what the bake used.
-    let rigid: Vec<ObjectId> = rigid_sims(doc).into_iter().map(|(id, ..)| id).collect();
+    let rigid: Vec<ObjectId> = if r.world.is_some() { rigid_sims(doc).into_iter().map(|(id, ..)| id).collect() } else { Vec::new() };
     for id in &rigid {
         if let ObjectKind::Sim { sim } = &mut doc.scene.edit(*id)?.kind {
             let s = Arc::make_mut(sim);
@@ -195,6 +384,7 @@ pub fn store(doc: &mut Document, r: BakeResult, out: &mut Outcome) -> Result<(),
         }
     }
     let key = rigid_world_key(doc);
+    let rigid_bake = r.world.is_some();
     let n = r.sims.len();
     for (id, cache) in r.sims.into_iter().zip(r.caches) {
         match doc.scene.get(id).map(|o| &o.kind) {
@@ -204,7 +394,7 @@ pub fn store(doc: &mut Document, r: BakeResult, out: &mut Outcome) -> Result<(),
         if let ObjectKind::Sim { sim } = &mut doc.scene.edit(id)?.kind {
             let s = Arc::make_mut(sim);
             s.cache = Some(Arc::new(cache));
-            s.baked_with = key;
+            s.baked_with = if rigid_bake { key } else { s.settings_key() };
         }
     }
     out.warnings.push(format!("{n} object{} baked", if n == 1 { "" } else { "s" }));
@@ -219,7 +409,9 @@ impl Document {
     }
 
     /// Read a bake from the scene so it can run elsewhere ([`BakeJob::run`]).
-    pub fn prepare_bake(&self, id: ObjectId) -> Result<BakeJob, EngineError> {
+    pub fn prepare_bake(&mut self, id: ObjectId) -> Result<BakeJob, EngineError> {
+        // A sculpt mask that pins cloth vertices lives in the sculpt session until synced.
+        self.sync_sculpt();
         prepare(self, id)
     }
 
@@ -241,6 +433,7 @@ impl Document {
         match sim.kind {
             SimKind::Cache => false,
             SimKind::Rigid(_) => sim.baked_with != rigid_world_key(self),
+            SimKind::Cloth(_) | SimKind::Particles(_) => sim.baked_with != sim.settings_key(),
         }
     }
 }

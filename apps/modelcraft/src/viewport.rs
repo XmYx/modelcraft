@@ -84,14 +84,17 @@ pub(crate) fn world_ray(cam: &Camera, rect: Rect, p: Pos2) -> Ray {
     Ray { origin, dir }
 }
 
-/// Objects drawn as surfaces: meshes and cages, not cage inputs, groups or deformers.
+/// Objects drawn as surfaces: meshes, cages, clone generators and particle systems, not cage inputs, groups or deformers.
 fn drawables(scene: &Scene) -> Vec<ObjectId> {
     scene
         .tree_order()
         .into_iter()
         .map(|(id, _)| id)
         .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. })))
+        .filter(|id| {
+            matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. }))
+                || scene.is_particles(*id)
+        })
         .collect()
 }
 
@@ -830,10 +833,11 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
 type Item = (ObjectId, Option<Arc<PolyMesh>>, Mat4, [f32; 4]);
 const WHITE: [f32; 4] = [1.0; 4];
 
-/// The object whose material colours `o`: a clone generator is coloured by its source.
+/// The object whose material colours `o`: a clone generator or particle system is coloured by its source.
 fn material_source<'a>(scene: &'a Scene, o: &'a Object) -> &'a Object {
     match &o.kind {
         ObjectKind::Cloner { .. } => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
+        ObjectKind::Sim { .. } if scene.is_particles(o.id) => scene.generator_input(o.id).and_then(|c| scene.get(c)).map_or(o, |c| material_source(scene, c)),
         _ => o,
     }
 }
@@ -877,6 +881,21 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
         for e in 0..m.edge_count() as u32 {
             let (a, b) = m.edge_vertices(e);
             out.extend(line(w.transform_point3(m.position(a)), w.transform_point3(m.position(b)), color));
+        }
+    }
+    // Outline of the selected falloff fields (and of every field of a selected deformer).
+    let sel_fields: Vec<ObjectId> = app
+        .doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| matches!(o.kind, ObjectKind::Field { .. }) && app.doc.scene.visible(o.id))
+        .filter(|o| app.selection.contains(&o.id) || o.parent.is_some_and(|p| app.selection.contains(&p)))
+        .map(|o| o.id)
+        .collect();
+    for f in sel_fields {
+        for (a, b) in crate::field_ui::outline(&app.doc.scene, f) {
+            out.extend(line(a, b, [0.45, 0.85, 0.8, 0.9]));
         }
     }
     if app.mode == SelectMode::Edge

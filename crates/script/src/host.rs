@@ -190,6 +190,7 @@ impl Shared {
             | Command::SculptClip { .. }
             | Command::SculptExtract { .. }
             | Command::SculptProject { .. }
+            | Command::TransferUvs { .. }
             | Command::AddMesh { .. }
             | Command::SetPositions { .. }
             | Command::Anim(_)
@@ -197,6 +198,8 @@ impl Shared {
             | Command::Sim(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::AddField { .. }
+            | Command::SetField { .. }
             | Command::SetLocked { .. }
             | Command::SetTemplate { .. }
             | Command::AddSelectionSet { .. }

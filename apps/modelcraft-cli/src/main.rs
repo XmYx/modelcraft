@@ -5,6 +5,7 @@
 
 mod bench_cmd;
 mod hair_cmd;
+mod macro_cmd;
 mod render_cmd;
 mod script_cmd;
 mod sim_cmd;
@@ -33,7 +34,7 @@ Commands:
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
   export <project> <out.glb|obj|stl|fbx|3mf|usda> [--up y|z] [--scale M]
-  export-uv <project> <out.svg|png> [--size N] [--object ID]
+  export-uv <project> <out.svg|png> [--size N] [--object ID] [--udim]
                                     the UV layout of a mesh object as a picture
   convert <in> <out> [--up auto|y|z] [--scale M]
                                     any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
@@ -55,7 +56,9 @@ Commands:
   mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
   bench --groups [--polys N]        patch, visibility, region, shell, trim, occlusion, decimate and projection times
-  uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
+  uv-pack-bench [--islands N] [--tiles T]
+                                    pack N random island rectangles (into T UDIM tiles): time and utilisation
+  uv-transfer-bench [--segments N]  transfer the UVs of a sphere to one 1.5 times finer: time and distance
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
   uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian] [--relax N]
                                     unwrap a sphere (or tube, cone, torus, roundcube): time and distortion
@@ -64,8 +67,9 @@ Commands:
 
 fn usage() -> String {
     format!(
-        "{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n\nSimulation:\n{}\n",
+        "{USAGE}\nScripts (docs/scripting.md):\n{}\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n\nSimulation:\n{}\n",
         script_cmd::USAGE,
+        macro_cmd::USAGE,
         render_cmd::USAGE,
         bench_cmd::USAGE,
         hair_cmd::USAGE,
@@ -212,7 +216,15 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             let mut d = load(arg(a, 0, "project")?)?;
             let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
             let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
-            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+            if a.iter().any(|x| x == "--udim") {
+                let files = d.export_uv_layout_udim(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())?;
+                for f in files {
+                    println!("{}", f.display());
+                }
+                Ok(())
+            } else {
+                d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+            }
         }
         "convert" => {
             let c = convert_flags(a)?;
@@ -258,6 +270,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
         "run-script" => script_cmd::run(a, load, save),
+        "macro-script" => macro_cmd::run(a),
         "batch-script" => script_cmd::batch(a, load, save),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
@@ -298,7 +311,10 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             &flag(a, "--cut").unwrap_or_else(|| "auto".to_string()),
             flag(a, "--relax").and_then(|v| v.parse().ok()).unwrap_or(0),
         ),
-        "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
+        "uv-transfer-bench" => uv_transfer_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
+        "uv-pack-bench" => {
+            uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200), flag(a, "--tiles").and_then(|v| v.parse().ok()).unwrap_or(1))
+        }
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
@@ -652,8 +668,30 @@ fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str, relax: u32) -> 
     Ok(())
 }
 
+/// Unwrap a sphere of N×N/2 quads, then give a sphere of 1.5 N × 0.75 N quads its UVs by
+/// closest-point lookup, per island and plain.
+fn uv_transfer_bench(segments: u32) -> Result<(), String> {
+    use modelcraft_engine::ops::{edit, primitives::Primitive};
+    use modelcraft_engine::uv::{SeamSet, TransferOptions, UnwrapOptions, transfer_uvs, unwrap_mesh};
+    let segments = segments.clamp(4, 340);
+    let make = |n: u32| -> Result<_, String> {
+        let raw = Primitive::Sphere { radius: 1.0, segments: n, rings: (n / 2).max(2) }.build().map_err(|e| e.to_string())?;
+        edit::weld(&raw, 1e-5).map_err(|e| e.to_string())
+    };
+    let source = make(segments)?;
+    let (source, _) = unwrap_mesh(&source, &SeamSet::new(), &UnwrapOptions::default()).map_err(|e| e.to_string())?;
+    let target = make(segments * 3 / 2)?;
+    println!("source {} faces, target {} faces ({} corners)", source.face_count(), target.face_count(), target.corner_count());
+    for (label, per_island) in [("per island", true), ("plain", false)] {
+        let t = Instant::now();
+        let (_, rep) = transfer_uvs(&source, &target, &TransferOptions { max_distance: None, per_island }).map_err(|e| e.to_string())?;
+        println!("transfer {label}: {:.0} ms, {} corners mapped, mean distance {:.2e}, max {:.2e}", ms(t), rep.mapped, rep.mean_distance, rep.max_distance);
+    }
+    Ok(())
+}
+
 /// Pack N random rectangles (fixed seed) with the default options for each rotation mode.
-fn uv_pack_bench(n: usize) -> Result<(), String> {
+fn uv_pack_bench(n: usize, tiles: u32) -> Result<(), String> {
     use modelcraft_engine::uvpack::{Density, PackIsland, PackOptions, Rotation, pack};
     let n = n.clamp(1, 100_000);
     let mut state = 0x9E37_79B9_7F4A_7C15u64;
@@ -675,6 +713,24 @@ fn uv_pack_bench(n: usize) -> Result<(), String> {
         .collect();
     // The margin is per island on every side, so many islands need a thinner one to fit at all.
     let margin = if n <= 1000 { 0.004 } else { 0.0005 };
+    if tiles > 1 {
+        use modelcraft_engine::uvpack::{UdimOptions, UdimTiles, pack_udim};
+        for rotation in [Rotation::None, Rotation::Fit] {
+            let t = Instant::now();
+            let r =
+                pack_udim(&islands, &UdimOptions { margin, rotation, density: Density::Uniform, tiles: UdimTiles::Count(tiles) }).map_err(|e| e.to_string())?;
+            let (lo, hi) = r.utilisation.iter().fold((f32::MAX, f32::MIN), |(l, h), u| (l.min(*u), h.max(*u)));
+            println!(
+                "{n} islands over {tiles} tiles, rotation {rotation:?}: {:.0} ms, scale {:.4}, utilisation {:.1} to {:.1} % per tile, {} tiles used",
+                ms(t),
+                r.scale,
+                lo * 100.0,
+                hi * 100.0,
+                r.tiles_used.len()
+            );
+        }
+        return Ok(());
+    }
     for rotation in [Rotation::None, Rotation::Quarter, Rotation::Fit] {
         let t = Instant::now();
         let r = pack(&islands, &PackOptions { margin, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;
