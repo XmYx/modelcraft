@@ -327,6 +327,7 @@ Weight: 4
 | Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
+| UV layout export as an image | C M Z | P | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines, from the engine and `modelcraft-cli export-uv`; no menu entry yet. UVs round-trip exactly through GLB and OBJ (tested) |
 
 ## Sculpting: brushes, strokes and masks
 

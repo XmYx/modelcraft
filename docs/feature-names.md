@@ -49,6 +49,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
+| Export UV Layout | UV snapshot / UV template export | Generic description; product terms avoided | Use |
 | Seams, Mark Seam, Clear Seam, Unwrap UVs, Pin | UV cutting and flattening tools | Generic modeling terms; no product-specific tool names used | Use |
 | UV Editor, UV Vertex / Edge / Face / Island, Weld, Pin, Heat map | UV editor tools | Generic terms; product tool names avoided | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
