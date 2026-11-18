@@ -917,3 +917,30 @@ fn mirrored_sheared_clones_export_with_outward_faces() {
         }
     }
 }
+
+#[test]
+fn locked_generators_fields_and_modifiers_refuse_setting_changes() {
+    use modelcraft_scene::{Array, Cloner, Field, Modifier};
+    let mut d = Document::new();
+    let arr = d.execute(Command::AddArray { kind: "linear".into(), input: None }).unwrap().created[0];
+    let sym = d.execute(Command::AddSymmetry { input: None, axis: 0 }).unwrap().created[0];
+    let clones = d.execute(Command::AddCloner { kind: "linear".into(), input: None }).unwrap().created[0];
+    let modifier = d.execute(Command::AddCloneModifier { kind: "plain".into(), cloner: clones }).unwrap().created[0];
+    let field = d.execute(Command::AddField { kind: "sphere".into(), target: modifier }).unwrap().created[0];
+    let edits = |d: &mut Document| {
+        [
+            d.execute(Command::SetArray { id: arr, array: Array::default_of("radial").unwrap() }).is_ok(),
+            d.execute(Command::SetSymmetry { id: sym, axis: 1, weld: 0.0 }).is_ok(),
+            d.execute(Command::SetCloner { id: clones, cloner: Cloner::default_of("grid").unwrap(), target: None }).is_ok(),
+            d.execute(Command::SetCloneModifier { id: modifier, modifier: Modifier::default_of("random").unwrap(), target: None }).is_ok(),
+            d.execute(Command::SetField { id: field, field: Field::default_of("box").unwrap() }).is_ok(),
+        ]
+    };
+    d.execute(Command::SetLocked { ids: vec![arr, sym, clones, modifier, field], locked: true }).unwrap();
+    let n = d.undo.len();
+    assert_eq!(edits(&mut d), [false; 5], "every locked object refuses its settings change");
+    assert_eq!(d.undo.len(), n, "nothing was recorded");
+    assert_eq!(d.scene.get(arr).unwrap().kind, ObjectKind::Array { array: Array::default_of("linear").unwrap() });
+    d.execute(Command::SetLocked { ids: vec![arr, sym, clones, modifier, field], locked: false }).unwrap();
+    assert_eq!(edits(&mut d), [true; 5], "unlocked, the same changes apply");
+}
