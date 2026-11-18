@@ -243,6 +243,7 @@ pub struct ModelApp {
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
     pub objects: crate::object_manager::State,
+    pub organize: crate::organize_ui::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -363,6 +364,7 @@ impl ModelApp {
             unit: Default::default(),
             language: None,
             objects: Default::default(),
+            organize: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -906,6 +908,7 @@ impl ModelApp {
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
             Objects(op) => crate::object_manager::run(self, op),
+            Organize(op) => crate::organize_ui::run(self, op),
         }
     }
 
@@ -1302,6 +1305,7 @@ impl ModelApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL_DEEP)).show(ui, |ui| crate::viewport::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         crate::prefs_ui::show(self, &ctx);
+        crate::organize_ui::show(self, &ctx);
         crate::radial::show(self, &ctx);
         self.screenshot_tick(&ctx);
         if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {

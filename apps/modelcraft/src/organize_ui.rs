@@ -114,7 +114,8 @@ pub fn run(app: &mut ModelApp, op: Op) {
             org(app, O::Instance { ids: sel });
         }
         Op::MakeUnique => {
-            let ids: Vec<ObjectId> = sel.into_iter().filter(|id| matches!(app.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Instance { .. }))).collect();
+            let ids: Vec<ObjectId> =
+                sel.into_iter().filter(|id| matches!(app.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Instance { .. }))).collect();
             if ids.is_empty() {
                 app.status = tl!("Select an instance first");
             } else {
@@ -161,7 +162,7 @@ pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
 /// The Organize section of Properties for the active object `id`.
 pub fn properties(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
     let Some(obj) = app.doc.scene.get(id).cloned() else { return };
-    egui::CollapsingHeader::new(tl!("Organize")).default_open(false).show(ui, |ui| {
+    egui::CollapsingHeader::new(tl!("Organization")).default_open(false).show(ui, |ui| {
         layer_row(app, ui, id, &obj);
         tags(app, ui, id, &obj);
         pivot(app, ui, id, &obj);
@@ -214,7 +215,7 @@ fn tags(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, obj: &Object) {
     ui.separator();
     ui.label(RichText::new(tl!("Tags")).color(theme::TEXT_DIM));
     for tag in &obj.tags {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             match tag {
                 Tag::Display { mode } => {
                     ui.label(tag_label(TagKind::Display));
@@ -236,11 +237,7 @@ fn tags(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, obj: &Object) {
                 }
                 Tag::Protection { position, rotation, scale } => {
                     ui.label(tag_label(TagKind::Protection));
-                    for (name, value, set) in [
-                        (tl!("Position"), *position, 0),
-                        (tl!("Rotation"), *rotation, 1),
-                        (tl!("Scale"), *scale, 2),
-                    ] {
+                    for (name, value, set) in [(tl!("Position"), *position, 0), (tl!("Rotation"), *rotation, 1), (tl!("Scale"), *scale, 2)] {
                         let mut v = value;
                         let r = ui.checkbox(&mut v, name.clone());
                         set_name(ui, &r, crate::tlf!("Protect {channel}", channel = name.to_lowercase()));

@@ -23,6 +23,11 @@ pub fn mode_of(scene: &Scene, id: ObjectId, view: DisplayMode) -> DisplayMode {
     }
 }
 
+/// Whether the mode draws the surface itself (shaded), as against lines only.
+pub fn is_solid(mode: DisplayMode) -> bool {
+    matches!(mode, DisplayMode::Auto | DisplayMode::Smooth | DisplayMode::Flat)
+}
+
 /// Lines and faint surfaces for the objects not drawn solid, and which items are drawn solid.
 #[derive(Default)]
 pub struct Extras {
@@ -105,6 +110,74 @@ mod tests {
             let d = Vec3::from(p[1].pos) - Vec3::from(p[0].pos);
             assert!((d.length() - 2.0).abs() < 1e-6, "{d:?}");
         }
+    }
+
+    /// Render a unit cube (one quad per side) seen head on in `mode`, and read the picture back:
+    /// 64 x 64 RGBA, or `None` without a GPU adapter.
+    fn picture(mode: DisplayMode, mesh: PolyMesh) -> Option<Vec<u8>> {
+        use modelcraft_render::buffers;
+        use modelcraft_render::gpu::{DrawItem, Frame, GpuMesh, Renderer, Target};
+        let Some((device, queue, _)) = modelcraft_render::gpu::headless() else {
+            eprintln!("no GPU adapter: the display-mode picture test is skipped");
+            return None;
+        };
+        let m = Arc::new(mesh);
+        let mut scene = Scene::new();
+        let id = scene.add("A", modelcraft_engine::scene::ObjectKind::Group, None).ok()?;
+        let items = vec![(id, Some(m.clone()), Mat4::IDENTITY, [1.0; 4])];
+        let extras = plan(&scene, mode, &|_| false, &items);
+        let data = if extras.modes[0] == DisplayMode::Flat { buffers::flat_data(&m) } else { buffers::mesh_data(&m) };
+        let gpu_mesh = GpuMesh::new(&device, &data);
+        let target = Target::new(&device, [64, 64]);
+        let mut r = Renderer::new(&device);
+        let cam = modelcraft_render::Camera { yaw: 0.0, pitch: 0.0, distance: 4.0, ..Default::default() };
+        let draws = if is_solid(extras.modes[0]) {
+            vec![DrawItem {
+                mesh: &gpu_mesh,
+                model: Mat4::IDENTITY,
+                color: [0.8, 0.8, 0.8, 1.0],
+                selected: false,
+                show_mask: false,
+                patch_tint: false,
+                roughness: 0.5,
+            }]
+        } else {
+            Vec::new()
+        };
+        let frame = Frame { view_proj: cam.view_proj(1.0), eye: cam.eye(), clear: [0.0, 0.0, 0.0, 1.0], draws, lines: &extras.lines, overlay: &extras.overlay };
+        r.render(&device, &queue, &target, &frame);
+        Renderer::readback(&device, &queue, &target)
+    }
+
+    fn lit(px: &[u8], x: usize, y: usize) -> u32 {
+        let i = (y * 64 + x) * 4;
+        px[i] as u32 + px[i + 1] as u32 + px[i + 2] as u32
+    }
+
+    #[test]
+    fn each_mode_draws_what_it_says_on_a_real_adapter() {
+        let cube = || modelcraft_engine::ops::primitives::Primitive::Cube { size: Vec3::splat(1.0), segments: 1 }.build().unwrap();
+        let Some(smooth) = picture(DisplayMode::Smooth, cube()) else { return };
+        let flat = picture(DisplayMode::Flat, cube()).unwrap();
+        let wire = picture(DisplayMode::Wireframe, cube()).unwrap();
+        let see = picture(DisplayMode::SeeThrough, cube()).unwrap();
+        let bbox = picture(DisplayMode::BoundingBox, cube()).unwrap();
+        // The cube fills the middle of the picture; its outline is at about a quarter in.
+        let centre = (32, 32);
+        assert!(lit(&smooth, centre.0, centre.1) > 120, "smooth: a lit face in the middle");
+        assert!(lit(&flat, centre.0, centre.1) > 120, "flat: a lit face in the middle");
+        assert_eq!(lit(&wire, centre.0, centre.1), 0, "wireframe: nothing inside a face");
+        assert_eq!(lit(&bbox, centre.0, centre.1), 0, "bounding box: nothing inside");
+        let (s, w, b, t) = (lit_pixels(&smooth), lit_pixels(&wire), lit_pixels(&bbox), lit_pixels(&see));
+        assert!(w > 20 && w < s * 6 / 10, "wireframe draws edges only: {w} lit pixels against {s} for the solid");
+        assert!(b > 20 && b < s * 6 / 10, "the box draws edges only: {b}");
+        let c = lit(&see, centre.0, centre.1);
+        assert!(c > 0 && c < lit(&smooth, centre.0, centre.1) / 2, "see-through: a faint surface, {c}");
+        assert!(t > w, "see-through covers more than the edges alone");
+    }
+
+    fn lit_pixels(px: &[u8]) -> usize {
+        px.chunks(4).filter(|p| p[0] as u32 + p[1] as u32 + p[2] as u32 > 12).count()
     }
 
     #[test]

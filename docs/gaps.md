@@ -60,7 +60,7 @@ formats, UI/UX.
 | 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 4 | 0.18 | 4.6 |
 | 6 | ~~**M14** Patch grouping tools and mesh cleanup in the UI~~ (done) | Modeling | 3 | 0.13 | 4.3 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 65 | 2.71 | 4.2 |
-| 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 54 | 2.24 | 4.1 |
+| 8 | ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | UI/UX | 54 | 2.24 | 4.1 |
 | 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 11 | 0.44 | 4.0 |
 | 10 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | Scripting and node graph | 54.5 | 2.12 | 3.9 |
 
@@ -81,7 +81,7 @@ users and sit lower only because they are expensive.
 | 5 | ~~**G2** Control channel over a socket and an MCP server~~ (done) | Scripting and node graph | 1 | 4 | 0.18 | 4.6 | — | 19.0 % | 91 |
 | 6 | ~~**M14** Patch grouping tools and mesh cleanup in the UI~~ (done) | Modeling | 2 | 3 | 0.13 | 4.3 | — | 19.1 % | 94 |
 | 7 | **A6** Layers and clips: non-linear clips, animation layers, motion paths, cached playback, camera sequencer, point cache | Animation and rigging | 6 | 65 | 2.71 | 4.2 | A1 | 21.8 % | 159 |
-| 8 | **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
+| 8 | ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | UI/UX | 11 | 54 | 2.24 | 4.1 | — | 24.0 % | 213 |
 | 9 | ~~**F1** FBX import and export, up-axis and unit conversion~~ (done) | Pipeline formats | 2 | 11 | 0.44 | 4.0 | — | 24.5 % | 224 |
 | 10 | **G1** Embedded scripting: language, object-model API, headless API, editor, callbacks, user tools | Scripting and node graph | 6 | 54.5 | 2.12 | 3.9 | — | 26.6 % | 278.5 |
 | 11 | **F5** Live link with suite apps, EXR/HDR images, 3MF | Pipeline formats | 3 | 19 | 0.73 | 3.8 | — | 27.3 % | 297.5 |
@@ -305,14 +305,14 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4**: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes are in; tags, layers, instances, user attributes, attribute presets and pivots remain.
+Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4** is done: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing, copy/paste of attributes, tags, display and render layers, instances, user attributes, attribute presets and pivots (the `organize` command). Display modes (flat, smooth, wireframe, see-through, bounding box) came with it.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
 | **X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units | 3 | 24 | 0.68 | 23 | — |
 | **X2** Viewport aids: reference images, bookmarks, display modes, isolate, matcaps, stats, headless render command, safe frames, camera objects | 9 | 32 | 1.02 | 18 | — |
 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | 5 | 25.5 | 1.19 | 4 | — |
-| **X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots | 11 | 54 | 2.24 | 8 | — |
+| ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | 11 | 54 | 2.24 | 8 | — |
 | **X5** Scene overrides (takes) | 1 | 25 | 0.60 | 39 | — |
 | **X6** Large-scene drawing: culling, level of detail, proxies | 1 | 12.5 | 0.23 | 57 | — |
 

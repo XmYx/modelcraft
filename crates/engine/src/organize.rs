@@ -21,9 +21,15 @@ pub const MAX_IDS: usize = 100_000;
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum OrganizeCommand {
     /// Put a tag on objects, replacing their tag of the same kind.
-    SetTag { ids: Vec<ObjectId>, tag: Tag },
+    SetTag {
+        ids: Vec<ObjectId>,
+        tag: Tag,
+    },
     /// Take a tag off objects: `kind` is display, render, protection or look_at.
-    RemoveTag { ids: Vec<ObjectId>, kind: String },
+    RemoveTag {
+        ids: Vec<ObjectId>,
+        kind: String,
+    },
     /// Add a display layer, and put `ids` on it.
     AddLayer {
         name: String,
@@ -45,7 +51,9 @@ pub enum OrganizeCommand {
         locked: Option<bool>,
     },
     /// Delete a layer; its objects go back to no layer.
-    RemoveLayer { id: u32 },
+    RemoveLayer {
+        id: u32,
+    },
     /// Put objects on a layer (`None`: off any layer).
     AssignLayer {
         ids: Vec<ObjectId>,
@@ -53,8 +61,15 @@ pub enum OrganizeCommand {
         layer: Option<u32>,
     },
     /// Give objects a user attribute (or change its value).
-    SetUserAttr { ids: Vec<ObjectId>, name: String, value: UserValue },
-    RemoveUserAttr { ids: Vec<ObjectId>, name: String },
+    SetUserAttr {
+        ids: Vec<ObjectId>,
+        name: String,
+        value: UserValue,
+    },
+    RemoveUserAttr {
+        ids: Vec<ObjectId>,
+        name: String,
+    },
     /// Save parts of an object as a named preset (the default parts are the material, tags and
     /// user attributes).
     SavePreset {
@@ -63,8 +78,13 @@ pub enum OrganizeCommand {
         #[serde(default)]
         parts: Option<PresetParts>,
     },
-    ApplyPreset { index: usize, ids: Vec<ObjectId> },
-    RemovePreset { index: usize },
+    ApplyPreset {
+        index: usize,
+        ids: Vec<ObjectId>,
+    },
+    RemovePreset {
+        index: usize,
+    },
     /// Move an object's pivot to `pivot` (in the object's own space). With `keep_in_place` the
     /// object and its children stay where they are; otherwise they move with the pivot.
     SetPivot {
@@ -74,11 +94,17 @@ pub enum OrganizeCommand {
         keep_in_place: bool,
     },
     /// Move pivots to the centre of the objects' bounding boxes (the object stays in place).
-    PivotToCenter { ids: Vec<ObjectId> },
+    PivotToCenter {
+        ids: Vec<ObjectId>,
+    },
     /// Add an instance of each object: it shows the same mesh, shared, under its own transform.
-    Instance { ids: Vec<ObjectId> },
+    Instance {
+        ids: Vec<ObjectId>,
+    },
     /// Turn instances into real, independent meshes.
-    MakeUnique { ids: Vec<ObjectId> },
+    MakeUnique {
+        ids: Vec<ObjectId>,
+    },
 }
 
 fn yes() -> bool {

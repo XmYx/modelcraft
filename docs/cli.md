@@ -183,6 +183,26 @@ Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the targ
 
 A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
 
+### Organising objects
+
+One command, `organize`, with the operation in `op`: `{"cmd":"organize","op":"set_tag","ids":[1],"tag":{"type":"protection","position":true,"rotation":false,"scale":false}}`.
+`modelcraft-cli commands` lists the operations.
+
+| `op` | Fields |
+|---|---|
+| `set_tag`, `remove_tag` | `ids`, `tag` (`display` + `mode`: auto, smooth, flat, wireframe, see_through, bounding_box; `render` + `visible`; `protection` + `position`, `rotation`, `scale`; `look_at` + `target`) or `kind` |
+| `add_layer`, `edit_layer`, `remove_layer`, `assign_layer` | `name`, `ids`, `id`, `color`, `visible`, `render`, `locked`, `layer` |
+| `set_user_attr`, `remove_user_attr` | `ids`, `name`, `value` (`{"type":"number","value":2.5}`; types number, switch, text, colour, vector) |
+| `save_preset`, `apply_preset`, `remove_preset` | `from`, `name`, `parts`, `index`, `ids` |
+| `set_pivot`, `pivot_to_center` | `ids`, `pivot` (object space), `keep_in_place` (default true) |
+| `instance`, `make_unique` | `ids` |
+
+A look-at tag is an aim constraint (+Z at the target) that the tag keeps in step. A protection tag
+makes `set_transform` refuse a change of the channels it names. Hidden layers hide their objects
+in the viewport, in renders and in exports; a layer with Render off shows them only in the
+viewport; a locked layer refuses edits like a locked object. A number or switch user attribute is
+the attribute `user.<name>` (a vector part is `user.<name>.x`), so `anim set_key` keys it.
+
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable

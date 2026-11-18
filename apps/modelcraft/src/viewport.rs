@@ -89,7 +89,12 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
         .into_iter()
         .map(|(id, _)| id)
         .filter(|id| scene.visible(*id) && !scene.is_cage_input(*id))
-        .filter(|id| matches!(scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } | ObjectKind::Instance { .. })))
+        .filter(|id| {
+            matches!(
+                scene.get(*id).map(|o| &o.kind),
+                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } | ObjectKind::Instance { .. })
+            )
+        })
         .collect()
 }
 
@@ -786,7 +791,7 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
     for (n, (id, m, w, tint)) in items.iter().enumerate() {
         let Some(o) = app.doc.scene.get(*id) else { continue };
         let mode = modes.get(n).copied().unwrap_or_default();
-        if matches!(mode, DisplayMode::Wireframe | DisplayMode::SeeThrough | DisplayMode::BoundingBox) {
+        if !crate::display_modes::is_solid(mode) {
             continue;
         }
         let key = if mode == DisplayMode::Flat { m.as_ref().map(|m| g.mesh_flat(m)) } else { m.as_ref().map(|m| g.mesh(m)) };

@@ -34,7 +34,10 @@ fn verts(d: &mut Document, id: ObjectId) -> Vec<Vec3> {
 fn a_protection_tag_refuses_the_channels_it_names_and_lets_others_through() {
     let mut d = Document::new();
     let a = cube(&mut d, "A");
-    run(&mut d, &format!(r#"{{"cmd":"organize","op":"set_tag","ids":[{}],"tag":{{"type":"protection","position":true,"rotation":false,"scale":false}}}}"#, a.0));
+    run(
+        &mut d,
+        &format!(r#"{{"cmd":"organize","op":"set_tag","ids":[{}],"tag":{{"type":"protection","position":true,"rotation":false,"scale":false}}}}"#, a.0),
+    );
     let e = d.execute(Command::SetTransform { id: a, transform: Transform { translation: Vec3::X, ..Default::default() } }).unwrap_err().to_string();
     assert!(e.contains("position"), "{e}");
     assert_eq!(d.scene.get(a).unwrap().transform.translation, Vec3::ZERO);
@@ -183,7 +186,12 @@ fn user_attributes_are_named_values_that_numbers_can_be_keyed_through() {
     let mut d = Document::new();
     let a = cube(&mut d, "A");
     let b = cube(&mut d, "B");
-    for (name, value) in [("mass", r#"{"type":"number","value":3.0}"#), ("armed", r#"{"type":"switch","value":true}"#), ("label", r#"{"type":"text","value":"hello"}"#), ("offset", r#"{"type":"vector","value":[1.0,2.0,3.0]}"#)] {
+    for (name, value) in [
+        ("mass", r#"{"type":"number","value":3.0}"#),
+        ("armed", r#"{"type":"switch","value":true}"#),
+        ("label", r#"{"type":"text","value":"hello"}"#),
+        ("offset", r#"{"type":"vector","value":[1.0,2.0,3.0]}"#),
+    ] {
         run(&mut d, &format!(r#"{{"cmd":"organize","op":"set_user_attr","ids":[{},{}],"name":"{name}","value":{value}}}"#, a.0, b.0));
     }
     let o = d.scene.get(a).unwrap();
@@ -217,7 +225,8 @@ fn a_preset_carries_the_chosen_parts_to_other_objects() {
     let mut d = Document::new();
     let a = cube(&mut d, "A");
     let b = cube(&mut d, "B");
-    d.execute(Command::SetMaterial { id: a, material: modelcraft_scene::Material { base_color: [1.0, 0.0, 0.0, 1.0], metallic: 1.0, ..Default::default() } }).unwrap();
+    d.execute(Command::SetMaterial { id: a, material: modelcraft_scene::Material { base_color: [1.0, 0.0, 0.0, 1.0], metallic: 1.0, ..Default::default() } })
+        .unwrap();
     run(&mut d, &format!(r#"{{"cmd":"organize","op":"set_user_attr","ids":[{}],"name":"cost","value":{{"type":"number","value":9.0}}}}"#, a.0));
     run(&mut d, &format!(r#"{{"cmd":"organize","op":"set_tag","ids":[{}],"tag":{{"type":"render","visible":false}}}}"#, a.0));
     move_to(&mut d, a, Vec3::new(4.0, 0.0, 0.0));
@@ -231,7 +240,12 @@ fn a_preset_carries_the_chosen_parts_to_other_objects() {
     assert!(matches!(o.tags.first(), Some(Tag::Render { visible: false })));
     assert_eq!(o.transform.translation, Vec3::ZERO, "the placement stays");
     // Saving under the same name replaces it; with the transform part it moves objects.
-    d.execute(Command::Organize(crate::OrganizeCommand::SavePreset { from: a, name: "Red".into(), parts: Some(PresetParts { transform: true, ..Default::default() }) })).unwrap();
+    d.execute(Command::Organize(crate::OrganizeCommand::SavePreset {
+        from: a,
+        name: "Red".into(),
+        parts: Some(PresetParts { transform: true, ..Default::default() }),
+    }))
+    .unwrap();
     assert_eq!(d.scene.presets.len(), 1);
     run(&mut d, &format!(r#"{{"cmd":"organize","op":"apply_preset","index":0,"ids":[{}]}}"#, b.0));
     assert_eq!(d.scene.get(b).unwrap().transform.translation.x, 4.0);
@@ -248,7 +262,11 @@ fn moving_the_pivot_keeps_the_object_in_place_and_rotation_turns_about_it() {
     let a = cube(&mut d, "A");
     let before = verts(&mut d, a).iter().map(|p| d.scene.world_matrix(a).transform_point3(*p)).collect::<Vec<_>>();
     // A rotated, scaled, moved object: the keep-in-place compensation has to include all three.
-    d.execute(Command::SetTransform { id: a, transform: Transform { translation: Vec3::new(1.0, 2.0, 3.0), rotation: Quat::from_rotation_y(0.7), scale: Vec3::new(2.0, 1.0, 0.5) } }).unwrap();
+    d.execute(Command::SetTransform {
+        id: a,
+        transform: Transform { translation: Vec3::new(1.0, 2.0, 3.0), rotation: Quat::from_rotation_y(0.7), scale: Vec3::new(2.0, 1.0, 0.5) },
+    })
+    .unwrap();
     let world = |d: &mut Document| -> Vec<Vec3> {
         let m = d.scene.world_matrix(a);
         verts(d, a).iter().map(|p| m.transform_point3(*p)).collect()
@@ -282,7 +300,11 @@ fn the_pivot_goes_to_the_bounding_box_centre_and_exports_carry_it_in_the_transfo
     let a = cube(&mut d, "A");
     // Pull one face out so the centre is not the origin.
     let top: Vec<u32> = verts(&mut d, a).iter().enumerate().filter(|(_, p)| p.y > 0.0).map(|(i, _)| i as u32).collect();
-    d.execute(Command::AddStep { id: a, op: modelcraft_scene::StepOp::MoveVertices { verts: top, translate: Vec3::Y * 2.0, rotate: Quat::IDENTITY, scale: Vec3::ONE } }).unwrap();
+    d.execute(Command::AddStep {
+        id: a,
+        op: modelcraft_scene::StepOp::MoveVertices { verts: top, translate: Vec3::Y * 2.0, rotate: Quat::IDENTITY, scale: Vec3::ONE },
+    })
+    .unwrap();
     run(&mut d, &format!(r#"{{"cmd":"organize","op":"pivot_to_center","ids":[{}]}}"#, a.0));
     let o = d.scene.get(a).unwrap();
     assert!((o.pivot - Vec3::Y).length() < 1e-4, "{:?}", o.pivot);

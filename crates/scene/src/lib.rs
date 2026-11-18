@@ -38,8 +38,8 @@ pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
-pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
 pub use eval::{Evaluated, Evaluator, Instances, StepError};
+pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
 pub const MAX_DEPTH: usize = 64;
@@ -601,7 +601,11 @@ impl Object {
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
-        256 + self.name.len() + self.tags.len() * 48 + self.user.iter().map(|(k, v)| 48 + k.len() + if let UserValue::Text(t) = v { t.len() } else { 0 }).sum::<usize>() + src + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
+        256 + self.name.len()
+            + self.tags.len() * 48
+            + self.user.iter().map(|(k, v)| 48 + k.len() + if let UserValue::Text(t) = v { t.len() } else { 0 }).sum::<usize>()
+            + src
+            + self.steps().iter().map(|s| s.op.heap_bytes() + 32).sum::<usize>()
     }
 }
 
