@@ -7,6 +7,7 @@
 //! - [`unwrap`]: least-squares conformal maps (LSCM, Lévy et al. 2002) of every island, with
 //!   optional pinned vertices, then a simple layout in the unit square.
 //! - [`measure`]: angle, stretch and area distortion of a UV layout, per triangle and overall.
+//! - [`transform_corners`], [`stitch_edges`]: editing UVs by hand (move, rotate, scale, weld seams).
 //!
 //! UV space follows glTF: the origin is the top left corner of the image and v grows downwards, so
 //! a triangle that is not mirrored has a negative signed area in (u, v) (see [`measure`]).
@@ -21,6 +22,7 @@
 mod charts;
 mod cholesky;
 mod distortion;
+mod edit;
 mod layout;
 mod lscm;
 mod seams;
@@ -28,6 +30,7 @@ mod sparse;
 
 pub use charts::{Charts, CutReport, Island, cut_to_disks, face_triangles};
 pub use distortion::{Distortion, TriangleMetric, measure, per_face};
+pub use edit::{UvTransform, bounds, expand_to_uv_vertices, island_corners, stitch_edges, transform_corners, uv_vertex_corners};
 pub use layout::shelf;
 pub use lscm::{IslandReport, Pin};
 pub use seams::{MAX_SEAMS, SeamSet, shortest_path};
@@ -44,6 +47,10 @@ pub enum UvError {
     TooLarge(usize),
     #[error("the mesh has no faces")]
     NoFaces,
+    #[error("the mesh has no UVs")]
+    NoUvs,
+    #[error("{0}")]
+    Invalid(String),
     #[error(transparent)]
     Mesh(#[from] MeshError),
 }

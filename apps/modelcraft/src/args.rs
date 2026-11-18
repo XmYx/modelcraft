@@ -11,6 +11,8 @@ Options:
   --workspace model|sculpt|paint
                              start in this workspace
   --quad                     start with four views
+  --uv-editor none|angle|area|stretch
+                             open the UV Editor with this heat map
   --screenshot <PNG>         render the window once to PNG and quit
   --bench-viewport <FRAMES>  orbit around a 1M-polygon sculpt for FRAMES frames, print frame
                              times and quit
@@ -43,6 +45,8 @@ pub struct Cli {
     pub workspace: Option<StartWorkspace>,
     pub quad: bool,
     pub screenshot: Option<PathBuf>,
+    /// Open the UV Editor at start, with this heat map (`none`, `angle`, `area`, `stretch`).
+    pub uv_editor: Option<crate::uv_ui::Heat>,
     pub bench_frames: Option<u32>,
     pub bench_polys: Option<u32>,
     pub file: Option<PathBuf>,
@@ -90,6 +94,15 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Launch, String> {
                     "sculpt" => StartWorkspace::Sculpt,
                     "paint" => StartWorkspace::Paint,
                     other => return Err(format!("unknown workspace {other:?}")),
+                })
+            }
+            "--uv-editor" => {
+                cli.uv_editor = Some(match value("--uv-editor")?.as_str() {
+                    "none" => crate::uv_ui::Heat::Off,
+                    "angle" => crate::uv_ui::Heat::Angle,
+                    "area" => crate::uv_ui::Heat::Area,
+                    "stretch" => crate::uv_ui::Heat::Stretch,
+                    other => return Err(format!("unknown heat map {other:?}")),
                 })
             }
             "--quad" => cli.quad = true,

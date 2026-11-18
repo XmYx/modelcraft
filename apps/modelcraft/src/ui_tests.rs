@@ -526,3 +526,79 @@ fn patch_grouping_and_mesh_check_by_keyboard() {
     let last = h.state().doc.scene.get(id).unwrap().steps().last().map(|s| s.op.name());
     assert_eq!(last, Some("Clean up"));
 }
+
+#[test]
+fn radial_menu_by_number_and_by_name() {
+    let mut h = harness();
+    h.run();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.run();
+    assert!(h.state().radial.is_some());
+    assert!(h.query_by_role_and_label(Role::Menu, "Radial menu").is_some());
+    // The first slice has keyboard focus; its number picks it.
+    assert!(h.get_by_role_and_label(Role::MenuItem, "Add Cube").is_focused());
+    h.key_press(Key::Num2);
+    h.run();
+    assert!(h.state().radial.is_none(), "choosing closes it: {} {:?}", h.state().status, h.state().mode);
+    assert_eq!(h.state().doc.scene.len(), 1);
+    // Again, and pick a slice by name; Esc closes without acting.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.get_by_role_and_label(Role::MenuItem, "Add Torus").click();
+    h.run();
+    assert_eq!(h.state().doc.scene.len(), 2);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Q);
+    h.run();
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(h.state().radial.is_none());
+    assert_eq!(h.state().status, "Radial menu closed");
+    // In Sculpt the slices are brushes.
+    h.state_mut().set_workspace(Workspace::Sculpt);
+    assert!(crate::radial::items(h.state()).iter().all(|a| matches!(a, crate::actions::Action::Brush(_))));
+}
+
+#[test]
+fn preferences_shelf_units_and_display() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Cube");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    h.run();
+    h.run();
+    assert!(h.state().prefs_window.open);
+    assert!(h.get_by_role_and_label(Role::ComboBox, "Language").is_focused(), "focus moves into the window");
+    // Display: the grid turns off.
+    h.get_by_label("Display").click();
+    h.run();
+    h.get_by_label("Show the ground grid").click();
+    h.run();
+    assert!(!h.state().show_grid);
+    // Shelf: filter, tick Subdivide; its button appears on the shelf and works.
+    h.get_by_label("Display").click();
+    h.run();
+    h.get_by_label("Quick Bar").click();
+    h.run();
+    h.get_by_label("Filter commands").focus();
+    h.run();
+    h.event(egui::Event::Text("Subdiv".into()));
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Subdivide").click();
+    h.run();
+    assert_eq!(h.state().shelf, vec!["mesh.subdivide".to_string()]);
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.state().prefs_window.open, "Esc closes it");
+    h.get_by_role_and_label(Role::Button, "Subdivide, on the Quick Bar").click();
+    h.run();
+    let id = h.state().selection[0];
+    assert_eq!(h.state().doc.scene.get(id).unwrap().steps().len(), 1);
+    // Units: Position reads in centimetres and typed values convert back to metres.
+    h.state_mut().unit = crate::prefs_ui::Unit::Cm;
+    h.run();
+    h.get_by_label("Position X").set_value_accesskit(150.0);
+    h.run();
+    let x = h.state().doc.scene.get(id).unwrap().transform.translation.x;
+    assert!((x - 1.5).abs() < 1e-5, "{x}");
+}

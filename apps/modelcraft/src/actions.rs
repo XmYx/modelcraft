@@ -83,7 +83,10 @@ pub enum Action {
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
+    Uv(crate::uv_ui::UvAction),
     MeshTool(crate::mesh_tools::Tool),
+    RadialMenu,
+    Preferences,
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -154,6 +157,8 @@ pub fn all() -> Vec<Action> {
         ViewRight,
         ViewTop,
         RenderView,
+        RadialMenu,
+        Preferences,
         TransformDialog,
         Palette,
         KeyboardShortcuts,
@@ -163,6 +168,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
+    v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
     v
 }
 
@@ -313,6 +319,8 @@ impl Action {
             TransformDialog => tl!("Transform by Numbers…"),
             RenderView => tl!("Render View"),
             MeshTool(t) => t.label(),
+            RadialMenu => tl!("Radial Menu"),
+            Preferences => tl!("Preferences…"),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
@@ -331,6 +339,7 @@ impl Action {
             Anim(a) => a.label(),
             Rig(a) => a.label(),
             Sculpt(a) => a.label(),
+            Uv(a) => a.label(),
         }
     }
 
@@ -418,11 +427,14 @@ impl Action {
             TransformDialog => "edit.transform_numbers",
             RenderView => "view.render",
             MeshTool(t) => t.id(),
+            RadialMenu => "view.radial_menu",
+            Preferences => "edit.preferences",
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
             Sculpt(a) => a.id(),
+            Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
         };
@@ -509,12 +521,15 @@ impl Action {
             ViewTop => "Alt+4",
             TransformDialog => "Cmd+T",
             RenderView => "F9",
+            RadialMenu => "Shift+Q",
+            Preferences => "Cmd+,",
             Palette => "Cmd+K",
             KeyboardShortcuts => "Cmd+Alt+K",
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
+            Uv(a) => return a.default_binding(),
             _ => return None,
         })
     }
@@ -524,7 +539,7 @@ impl Action {
         use Action::*;
         match self {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
-            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
+            Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences => "Edit",
             AddPrimitive(_) | AddCage | AddDeformer(_) | AddCloner(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
@@ -534,6 +549,7 @@ impl Action {
             Palette | KeyboardShortcuts | About => "Help",
             Anim(_) => "Animate",
             Rig(_) => "Rig",
+            Uv(_) => "UV",
             _ => "View",
         }
     }

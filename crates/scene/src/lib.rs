@@ -341,6 +341,33 @@ pub enum StepOp {
         #[serde(default = "default_margin")]
         margin: f32,
     },
+    /// Records seams (pairs of vertices of the step's input mesh) and changes nothing; the UV
+    /// editor reads the latest one, and an unwrap step takes them.
+    Seams {
+        #[serde(default)]
+        edges: Vec<[u32; 2]>,
+    },
+    /// Move, rotate and scale the UVs of the listed face corners (scale, then rotate, then
+    /// translate, about `pivot`).
+    TransformUvs {
+        corners: Vec<u32>,
+        #[serde(default)]
+        translate: [f32; 2],
+        #[serde(default)]
+        rotate_deg: f32,
+        #[serde(default = "unit_scale")]
+        scale: [f32; 2],
+        #[serde(default)]
+        pivot: [f32; 2],
+    },
+    /// Weld the UVs on the two sides of the listed edges.
+    StitchUvs {
+        edges: Vec<u32>,
+    },
+}
+
+fn unit_scale() -> [f32; 2] {
+    [1.0, 1.0]
 }
 
 /// A face corner held at a UV position while unwrapping.
@@ -355,6 +382,11 @@ fn default_margin() -> f32 {
 }
 
 impl StepOp {
+    /// A step that only records information and leaves the mesh as it is.
+    pub fn is_marker(&self) -> bool {
+        matches!(self, StepOp::Seams { .. })
+    }
+
     /// Stable id of the operation (also the English label key).
     pub fn name(&self) -> &'static str {
         match self {
@@ -381,6 +413,9 @@ impl StepOp {
             StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::TrimPlane { .. } => "Trim by plane",
             StepOp::Unwrap { .. } => "Unwrap UVs",
+            StepOp::Seams { .. } => "Seams",
+            StepOp::TransformUvs { .. } => "Transform UVs",
+            StepOp::StitchUvs { .. } => "Weld UVs",
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -393,6 +428,9 @@ impl StepOp {
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
             StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
+            StepOp::Seams { edges } => edges.len() * 8,
+            StepOp::TransformUvs { corners, .. } => corners.len() * 4,
+            StepOp::StitchUvs { edges } => edges.len() * 4,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }

@@ -32,6 +32,8 @@ mod material_ui;
 mod mesh_tools;
 mod panels;
 mod prefs;
+mod prefs_ui;
+mod radial;
 mod render_view;
 mod rig_ui;
 #[cfg(test)]
@@ -40,9 +42,13 @@ mod sculpt_groups_ui;
 mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;
+mod shelf;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
+mod uv_ui;
+#[cfg(test)]
+mod uv_ui_tests;
 mod viewport;
 
 use args::{Cli, Launch};
