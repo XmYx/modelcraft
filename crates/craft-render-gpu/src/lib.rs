@@ -380,6 +380,9 @@ fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
 impl GpuRenderer {
     /// Upload `scene` and prepare to render it at the size in `settings`.
     pub fn new(ctx: &GpuContext, scene: &Scene, settings: RenderSettings) -> Result<GpuRenderer, GpuError> {
+        if !scene.curves.is_empty() {
+            return Err(GpuError::Unsupported("hair curves"));
+        }
         let (w, h) = (settings.width, settings.height);
         let restir = settings.integrator.restir.active(&settings.integrator, w as usize * h as usize) && !scene.lights.is_empty();
         if (settings.integrator.guiding || settings.integrator.adaptive_splitting) && !restir {
