@@ -1165,6 +1165,7 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {

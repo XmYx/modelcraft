@@ -217,14 +217,16 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
     }
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
-    match app.workspace {
-        Workspace::Sculpt => {
-            // The rectangle and lasso tools take the drag instead of the brush.
-            if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
-                sculpt_input(app, ui, &resp, i, rect);
+    if !crate::hair_ui::input(app, ui, &resp, i, rect) {
+        match app.workspace {
+            Workspace::Sculpt => {
+                // The rectangle and lasso tools take the drag instead of the brush.
+                if !crate::sculpt_groups_ui::viewport_input(app, ui, &resp, i, rect) {
+                    sculpt_input(app, ui, &resp, i, rect);
+                }
             }
+            _ => model_input(app, ui, &resp, i, rect),
         }
-        _ => model_input(app, ui, &resp, i, rect),
     }
     render(app, ui, i, rect);
     overlays(app, ui, &resp, i, rect);
@@ -858,6 +860,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     for (a, b, color) in crate::anim_ui::path_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
+    for (a, b, color) in crate::hair_ui::guide_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
     if app.workspace == Workspace::Sculpt {
         return out;
     }
@@ -968,6 +973,7 @@ fn cpu_view(app: &ModelApp, ui: &egui::Ui, i: usize, rect: Rect, items: &[Item],
 }
 
 fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
+    crate::hair_ui::overlay(app, ui, rect);
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
     // View name and focus/active outline.

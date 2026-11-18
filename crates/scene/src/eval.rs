@@ -283,7 +283,8 @@ impl Evaluator {
             | ObjectKind::Field { .. }
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
-            | ObjectKind::PointDeformer { .. } => Evaluated::default(),
+            | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Hair { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result
