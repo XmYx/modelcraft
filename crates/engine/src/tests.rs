@@ -166,6 +166,8 @@ fn commands_round_trip_as_json() {
         Command::SculptDetail { id: ObjectId(1), op: crate::DetailOp::Up },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Strength { index: 0, strength: 0.25 } },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Select { index: None } },
+        Command::AddField { kind: "noise".into(), target: ObjectId(3) },
+        Command::SetField { id: ObjectId(4), field: modelcraft_scene::Field::default_of("box").unwrap() },
         Command::AddCloner { kind: "radial".into(), input: Some(ObjectId(1)) },
         Command::SetCloner { id: ObjectId(2), cloner: Cloner::default_of("grid").unwrap(), target: Some(ObjectId(1)) },
         Command::Undo,
@@ -576,6 +578,41 @@ fn uv_layout_exports_as_svg_and_png() {
     let mut e = Document::new();
     e.execute(Command::Import { path: obj.display().to_string(), up: Default::default(), scale: None }).unwrap();
     assert!(e.export_uv_layout(&dir.join("t.svg"), None, 64).is_err());
+}
+
+#[test]
+fn falloff_field_commands_limit_a_deformer_and_undo() {
+    use modelcraft_field::{Curve, Shape};
+    let mut d = Document::new();
+    let cube = add(&mut d, "cube");
+    let twist = d.execute(Command::AddDeformer { kind: "twist".into(), target: cube }).unwrap().created[0];
+    let full = d.eval.evaluate(&d.scene, cube).mesh.positions().to_vec();
+    let field = d.execute(Command::AddField { kind: "sphere".into(), target: twist }).unwrap().created[0];
+    assert_eq!(d.scene.get(field).unwrap().parent, Some(twist));
+    let small = d.eval.evaluate(&d.scene, cube).mesh.positions().to_vec();
+    assert_ne!(small, full, "a unit sphere field at the origin weights the corners less");
+    // Settings change with a sanitized result and one undo step.
+    let before = d.undo.len();
+    let mut f = modelcraft_scene::Field::default_of("sphere").unwrap();
+    f.shape = Shape::Sphere { radius: f32::NAN, inner: 5.0 };
+    f.remap.curve = Curve { points: vec![[f32::NAN, 2.0]] };
+    d.execute(Command::SetField { id: field, field: f }).unwrap();
+    assert_eq!(d.undo.len(), before + 1);
+    if let ObjectKind::Field { field } = &d.scene.get(field).unwrap().kind {
+        assert_eq!(field.shape, Shape::Sphere { radius: 1.0, inner: 0.999 });
+        assert_eq!(field.remap.curve, Curve::linear());
+    } else {
+        panic!("not a field");
+    }
+    d.execute(Command::Undo).unwrap();
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.eval.evaluate(&d.scene, cube).mesh.positions(), &full[..], "without the field the deformer acts everywhere");
+    // Fields only go inside deformers; unknown kinds fail without a trace.
+    let n = d.undo.len();
+    assert!(d.execute(Command::AddField { kind: "sphere".into(), target: cube }).is_err());
+    assert!(d.execute(Command::AddField { kind: "cone".into(), target: twist }).is_err());
+    assert!(d.execute(Command::SetField { id: twist, field: modelcraft_scene::Field::default_of("box").unwrap() }).is_err());
+    assert_eq!(d.undo.len(), n);
 }
 
 #[test]

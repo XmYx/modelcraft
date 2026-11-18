@@ -293,7 +293,7 @@ impl GpuMaterial {
 }
 
 /// What one pixel accumulates on the GPU: radiance and samples, base colour and depth, normal and
-/// squared luminance, motion, the radiance of the odd samples.
+/// squared luminance, motion.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GpuPixel {
@@ -301,7 +301,6 @@ struct GpuPixel {
     albedo: [f32; 4],
     normal: [f32; 4],
     motion: [f32; 4],
-    odd: [f32; 4],
 }
 
 #[repr(C)]
@@ -777,15 +776,11 @@ impl GpuRenderer {
             film.depth[i] = src.albedo[3];
             film.luminance_sq[i] = src.normal[3];
             film.motion[i] = [src.motion[0], src.motion[1]];
-            film.odd[i] = [src.odd[0], src.odd[1], src.odd[2]];
         }
         film.samples = self.samples;
         Ok(film)
     }
 }
-
-#[cfg(test)]
-mod denoise_tests;
 
 #[cfg(test)]
 mod restir_tests;

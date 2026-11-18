@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 craft-render-bvh = { workspace = true }
-craft-render-denoise = { workspace = true }
 craft-render-guide = { workspace = true }
 craft-texture = { workspace = true }
 glam = { workspace = true }

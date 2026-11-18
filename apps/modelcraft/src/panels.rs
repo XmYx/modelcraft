@@ -10,7 +10,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, CLONERS, DEFORMERS, PRIMITIVES};
+use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, PRIMITIVES};
 use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::dock::Move;
 use crate::theme;
@@ -104,6 +104,9 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, Action::AddDeformer(d));
                 }
                 ui.separator();
+                for f in FIELDS {
+                    action_button(app, ui, Action::AddField(f));
+                }
                 for c in CLONERS {
                     action_button(app, ui, Action::AddCloner(c));
                 }
@@ -192,6 +195,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::uv_ui::menu(app, ui);
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
+            crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
                 action_button(app, ui, Action::KeyboardShortcuts);
@@ -499,6 +503,12 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.2, g));
             p.circle_filled(c, 2.0, g);
         }
+        ObjectKind::Field { .. } => {
+            // A soft disc: strong in the middle, fading out.
+            let t = Color32::from_rgb(110, 210, 200);
+            p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, t.gamma_multiply(0.5)));
+            p.circle_filled(c, 2.5, t);
+        }
         ObjectKind::Cloner { .. } => {
             // Three small squares: one source, many clones.
             let o = Color32::from_rgb(240, 170, 90);
@@ -516,6 +526,14 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             let j = Color32::from_rgb(115, 205, 240);
             p.circle_stroke(c + egui::vec2(-3.0, 3.0), 2.5, egui::Stroke::new(1.2, j));
             p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], egui::Stroke::new(1.4, j));
+        }
+        ObjectKind::Hair { .. } => {
+            // Hair: three curved strands.
+            let k = Color32::from_rgb(215, 170, 110);
+            for dx in [-4.0f32, 0.0, 4.0] {
+                let pts: Vec<egui::Pos2> = (0..=6).map(|j| c + egui::vec2(dx + (j as f32 * 0.6).sin() * 1.5, 5.0 - j as f32 * 1.6)).collect();
+                p.add(egui::Shape::line(pts, egui::Stroke::new(1.2, k)));
+            }
         }
         ObjectKind::PointDeformer { .. } => {
             // A stack deformer: a small grid.
@@ -631,6 +649,9 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ui.label(RichText::new(tl!("Shows its first mesh child subdivided. Edit the child; the cage follows.")).color(theme::TEXT_DIM).small());
             });
         }
+        ObjectKind::Field { field } => {
+            egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
+        }
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
@@ -682,6 +703,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     }
     crate::deform_ui::properties(app, ui, id);
     crate::constraint_ui::properties(app, ui, id);
+    crate::hair_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
         crate::mesh_tools::section(app, ui);

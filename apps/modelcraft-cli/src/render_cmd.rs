@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use modelcraft_engine::Document;
 use modelcraft_render::pathtrace::integrator::IntegratorSettings;
-use modelcraft_render::pathtrace::{DenoiseMode, RestirMode, RestirSettings};
 use modelcraft_render::pathtrace::{Film, RenderSettings, Renderer, Scene, scenes};
+use modelcraft_render::pathtrace::{RestirMode, RestirSettings};
 use modelcraft_render::pathtrace_gpu::{GpuContext, GpuRenderer};
 use modelcraft_render::trace::{ExportOptions, Lighting, export_scene, load_panorama, scene_bounds};
 use modelcraft_render::{Camera, Projection};
@@ -30,10 +30,6 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
                                     (adds temporal reuse, faster to clean, slightly biased)
       --restir-candidates N         light samples per pixel and pass (default 8)
       --restir-neighbors N          neighbouring pixels merged per pass (default 4)
-      --denoise [MODE]              remove the noise from the picture: nfor (the default; regression on
-                                    the two half renderings, for finals) or svgf (the interactive
-                                    filter). A .exr then holds the filtered image as R, G, B and the
-                                    original as noisy.R/G/B
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
@@ -69,7 +65,6 @@ pub struct RenderArgs {
     pub guiding: bool,
     pub splitting: bool,
     pub restir: RestirSettings,
-    pub denoise: DenoiseMode,
 }
 
 impl Default for RenderArgs {
@@ -94,7 +89,6 @@ impl Default for RenderArgs {
             guiding: false,
             splitting: false,
             restir: RestirSettings::default(),
-            denoise: DenoiseMode::Off,
         }
     }
 }
@@ -156,21 +150,7 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         guiding: a.iter().any(|x| x == "--guiding"),
         splitting: a.iter().any(|x| x == "--splitting"),
         restir: parse_restir(a)?,
-        denoise: parse_denoise(a)?,
     })
-}
-
-/// `--denoise` alone means `nfor`; a mode may follow it.
-pub fn parse_denoise(a: &[String]) -> Result<DenoiseMode, String> {
-    let Some(i) = a.iter().position(|x| x == "--denoise") else { return Ok(DenoiseMode::Off) };
-    match a.get(i + 1).map(String::as_str) {
-        None => Ok(DenoiseMode::Nfor),
-        Some(next) if next.starts_with('-') => Ok(DenoiseMode::Nfor),
-        Some("off") => Ok(DenoiseMode::Off),
-        Some("nfor") => Ok(DenoiseMode::Nfor),
-        Some("svgf") => Ok(DenoiseMode::Svgf),
-        Some(other) => Err(format!("--denoise: expected off, svgf or nfor, found {other:?}")),
-    }
 }
 
 /// The `--restir`, `--restir-candidates` and `--restir-neighbors` options.
@@ -230,8 +210,6 @@ pub struct Report {
     pub film: Film,
     pub device: String,
     pub seconds: f64,
-    /// The filtered image (mean radiance) and the seconds the filter took, when asked for.
-    pub denoised: Option<(Vec<[f32; 3]>, f64)>,
 }
 
 /// Render `scene` with the device the arguments ask for.
@@ -260,7 +238,7 @@ pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
             let t = Instant::now();
             r.render(&ctx, args.samples).map_err(|e| e.to_string())?;
             let film = r.film(&ctx).map_err(|e| e.to_string())?;
-            Ok(Report { film, device: format!("gpu: {} ({})", ctx.caps.adapter, ctx.caps.backend), seconds: t.elapsed().as_secs_f64(), denoised: None })
+            Ok(Report { film, device: format!("gpu: {} ({})", ctx.caps.adapter, ctx.caps.backend), seconds: t.elapsed().as_secs_f64() })
         })();
         match attempt {
             Ok(report) => return Ok(report),
@@ -273,21 +251,12 @@ pub fn render(scene: Scene, args: &RenderArgs) -> Result<Report, String> {
     let t = Instant::now();
     r.render(args.samples, &AtomicBool::new(false));
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    Ok(Report { film: r.film().clone(), device: format!("cpu: {threads} threads"), seconds: t.elapsed().as_secs_f64(), denoised: None })
+    Ok(Report { film: r.film().clone(), device: format!("cpu: {threads} threads"), seconds: t.elapsed().as_secs_f64() })
 }
 
-/// The film's image, or the filtered one when there is one, as 8-bit sRGB.
-fn display_pixels(film: &Film, denoised: Option<&[[f32; 3]]>, exposure: f32) -> Vec<u8> {
-    match denoised {
-        Some(image) => Film::image_to_srgb8(image, exposure),
-        None => film.to_srgb8(exposure),
-    }
-}
-
-pub fn write_png(path: &Path, film: &Film, denoised: Option<&[[f32; 3]]>, exposure: f32) -> Result<(), String> {
+pub fn write_png(path: &Path, film: &Film, exposure: f32) -> Result<(), String> {
     use craft_image_codecs::{ChannelLayout, EncodeOptions, Format, Image, SampleType};
-    let image =
-        Image::from_raw(film.width, film.height, ChannelLayout::Rgba, SampleType::U8, display_pixels(film, denoised, exposure)).map_err(|e| e.to_string())?;
+    let image = Image::from_raw(film.width, film.height, ChannelLayout::Rgba, SampleType::U8, film.to_srgb8(exposure)).map_err(|e| e.to_string())?;
     let bytes = craft_image_codecs::encode(&image, Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())?;
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -295,20 +264,14 @@ pub fn write_png(path: &Path, film: &Film, denoised: Option<&[[f32; 3]]>, exposu
 /// Write the film as one OpenEXR part of 32-bit float channels: `R G B` (linear radiance, not
 /// exposed or tone-mapped), then the feature images in the customary layer names
 /// (`albedo.R/G/B`, `N.X/Y/Z`, `Z`, `motion.X/Y`, `variance`).
-pub fn write_exr(path: &Path, film: &Film, denoised: Option<&[[f32; 3]]>) -> Result<(), String> {
+pub fn write_exr(path: &Path, film: &Film) -> Result<(), String> {
     use craft_exr::decode::{Channel, Compression, Samples};
     let k = if film.samples > 0 { 1.0 / film.samples as f32 } else { 0.0 };
     let plane = |name: &str, values: Vec<f32>| Channel { name: name.to_string(), samples: Samples::F32(values) };
     let of3 = |src: &[[f32; 3]], c: usize| src.iter().map(|p| p[c] * k).collect::<Vec<f32>>();
     let mut channels = Vec::new();
     for (c, name) in ["R", "G", "B"].into_iter().enumerate() {
-        match denoised {
-            Some(image) => {
-                channels.push(plane(name, image.iter().map(|p| p[c]).collect()));
-                channels.push(plane(&format!("noisy.{name}"), of3(&film.sum, c)));
-            }
-            None => channels.push(plane(name, of3(&film.sum, c))),
-        }
+        channels.push(plane(name, of3(&film.sum, c)));
         channels.push(plane(&format!("albedo.{name}"), of3(&film.albedo, c)));
     }
     for (c, name) in ["N.X", "N.Y", "N.Z"].into_iter().enumerate() {
@@ -335,17 +298,11 @@ pub fn run(source: &str, out: &str, args: &RenderArgs, load: impl FnOnce(&str) -
     };
     let build_seconds = t.elapsed().as_secs_f64();
     let triangles = scene.triangle_count();
-    let mut report = render(scene, args)?;
-    if args.denoise != DenoiseMode::Off {
-        let t = Instant::now();
-        let image = report.film.denoise(args.denoise).map_err(|e| e.to_string())?;
-        report.denoised = Some((image, t.elapsed().as_secs_f64()));
-    }
-    let filtered = report.denoised.as_ref().map(|(image, _)| image.as_slice());
+    let report = render(scene, args)?;
     if lower.ends_with(".exr") {
-        write_exr(Path::new(out), &report.film, filtered)?;
+        write_exr(Path::new(out), &report.film)?;
     } else {
-        write_png(Path::new(out), &report.film, filtered, args.exposure)?;
+        write_png(Path::new(out), &report.film, args.exposure)?;
     }
     let pixels = f64::from(report.film.width) * f64::from(report.film.height);
     Ok(serde_json::json!({
@@ -357,8 +314,6 @@ pub fn run(source: &str, out: &str, args: &RenderArgs, load: impl FnOnce(&str) -
         "triangles": triangles,
         "scene_seconds": (build_seconds * 1000.0).round() / 1000.0,
         "render_seconds": (report.seconds * 1000.0).round() / 1000.0,
-        "denoise": format!("{:?}", args.denoise).to_lowercase(),
-        "denoise_seconds": report.denoised.as_ref().map(|(_, s)| (s * 1000.0).round() / 1000.0),
         "million_samples_per_second": (pixels * f64::from(report.film.samples) / report.seconds.max(1e-9) / 1e6 * 100.0).round() / 100.0,
     }))
 }
@@ -390,28 +345,6 @@ mod tests {
         assert!(parse(&args(&["--sun", "high"])).is_err());
         assert!(load_panorama("/nonexistent/sky.hdr").is_err());
         assert!(builtin("teapot").is_err());
-    }
-
-    #[test]
-    fn parses_the_denoise_option_and_writes_the_filtered_picture() {
-        let one = |l: &[&str]| parse(&args(l)).unwrap().denoise;
-        assert_eq!(
-            (one(&[]), one(&["--denoise"]), one(&["--denoise", "svgf"]), one(&["--denoise", "--seed", "3"])),
-            (DenoiseMode::Off, DenoiseMode::Nfor, DenoiseMode::Svgf, DenoiseMode::Nfor)
-        );
-        assert!(parse(&args(&["--denoise", "blur"])).is_err());
-        let dir = std::env::temp_dir().join(format!("modelcraft-denoise-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let small = RenderArgs { width: 32, height: 24, samples: 4, device: Device::Cpu, denoise: DenoiseMode::Nfor, ..RenderArgs::default() };
-        let exr = dir.join("c.exr");
-        let report = run("builtin:cornell", exr.to_str().unwrap(), &small, |_| Err("no files".into())).unwrap();
-        assert_eq!(report["denoise"], "nfor");
-        assert!(report["denoise_seconds"].as_f64().is_some());
-        assert!(std::fs::metadata(&exr).unwrap().len() > 0);
-        let png = dir.join("c.png");
-        run("builtin:cornell", png.to_str().unwrap(), &small, |_| Err("no files".into())).unwrap();
-        assert!(std::fs::metadata(&png).unwrap().len() > 0);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

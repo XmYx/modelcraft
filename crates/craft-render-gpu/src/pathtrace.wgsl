@@ -136,7 +136,6 @@ struct Pixel {
     albedo: vec4<f32>,   // w: distance to the first surface
     normal: vec4<f32>,   // w: squared luminance
     motion: vec4<f32>,   // xy: screen motion in pixels
-    odd: vec4<f32>,      // rgb: radiance of the samples with an odd index
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -1723,7 +1722,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var depth = 0.0;
     var luminance_sq = 0.0;
     var motion = vec2<f32>(0.0);
-    var odd = vec3<f32>(0.0);
     for (var s = 0u; s < params.samples; s++) {
         s_index = params.first_sample + s;
         s_seed = seed;
@@ -1741,9 +1739,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let d = cr.d;
         let l = radiance(o, d);
         acc += l;
-        if ((params.first_sample + s) & 1u) == 1u {
-            odd += l;
-        }
         let lum = luminance(l);
         luminance_sq += lum * lum;
         albedo += f_albedo;
@@ -1761,7 +1756,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     accum[pixel].albedo += vec4<f32>(albedo, depth);
     accum[pixel].normal += vec4<f32>(normal, luminance_sq);
     accum[pixel].motion += vec4<f32>(motion, 0.0, 0.0);
-    accum[pixel].odd += vec4<f32>(odd, 0.0);
 }
 
 // ---- resampled direct lighting kernels ----------------------------------------------------
@@ -2252,7 +2246,4 @@ fn restir_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
     accum[i].albedo += vec4<f32>(f_albedo, f_depth);
     accum[i].normal += vec4<f32>(f_normal, lum * lum);
     accum[i].motion += vec4<f32>(motion, 0.0, 0.0);
-    if (s & 1u) == 1u {
-        accum[i].odd += vec4<f32>(l, 0.0);
-    }
 }
