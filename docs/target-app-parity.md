@@ -150,17 +150,17 @@ Weight: 5
 | Groups and nulls | C M | D | S | |
 | Attributes panel for the active object | C M Z | D | M | Transform, shape, cage, deformer, material, history |
 | Numeric entry for every transform | C M Z | D | S | Properties fields and Transform by Numbers (Ctrl+T) |
-| Multi-object editing in the attributes panel | C M | P | M | Selection list exists; Properties edits the active object only |
-| Drag-and-drop in the tree | C M | M | S | Menu alternative exists |
-| Search and filter in the tree | C M | M | S | |
+| Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
+| Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
+| Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
 | Tags: per-object behaviours (display, render, protection, look-at) | C | M | M | |
 | Display and render layers | C M | M | M | |
 | Instances that share a mesh | C M | M | M | |
-| Selection sets | C M | M | S | |
+| Selection sets | C M | D | S | Saved in the scene, follow deletes, selected by name |
 | Custom user attributes on objects | C M | M | M | |
 | Scene overrides (takes, render setups) | C M | M | L | |
-| Lock and template objects (visible, not selectable) | C M | M | S | |
-| Copy and paste attributes; attribute presets | C M | M | S | |
+| Lock and template objects (visible, not selectable) | C M | D | S | Locked objects refuse edits in the engine; reference-only objects are drawn but never picked |
+| Copy and paste attributes; attribute presets | C M | P | S | Copy and paste transform, material and visibility onto many objects; no presets |
 | Object pivot separate from the origin | C M Z | M | S | |
 
 ## Dependency graph, history and node editing

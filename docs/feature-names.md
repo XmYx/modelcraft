@@ -67,3 +67,8 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Radial Menu | pie / marking menus | Generic ("radial menu" is a common UI pattern name); the reference term avoided | Use |
 | Quick Bar | shelves / custom palettes | No live software mark found for this phrase in class 9; plain descriptive words | Use |
 | Preferences | settings dialogs | Generic | Use |
+| Lock, Unlock | protecting objects from edits | Generic | Use |
+| Reference Only | template objects | Generic words; the reference term avoided | Use |
+| Selection Sets | named selections / quick selection sets | Generic | Use |
+| Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
+| Search objects | outliner filters | Generic | Use |

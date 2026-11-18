@@ -186,6 +186,10 @@ impl Shared {
             | Command::Rig(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
+            | Command::SetLocked { .. }
+            | Command::SetTemplate { .. }
+            | Command::AddSelectionSet { .. }
+            | Command::RemoveSelectionSet { .. }
             | Command::Undo
             | Command::Redo => {}
         }

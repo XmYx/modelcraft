@@ -175,6 +175,24 @@ pub enum Command {
     Collapse {
         id: ObjectId,
     },
+    /// Protect objects from edits (or allow them again).
+    SetLocked {
+        ids: Vec<ObjectId>,
+        locked: bool,
+    },
+    /// Show objects for reference only: drawn, not picked in the viewport.
+    SetTemplate {
+        ids: Vec<ObjectId>,
+        template: bool,
+    },
+    /// Remember a selection under a name.
+    AddSelectionSet {
+        name: String,
+        ids: Vec<ObjectId>,
+    },
+    RemoveSelectionSet {
+        index: usize,
+    },
     /// Import a glTF/GLB/OBJ/STL/PLY file as new objects.
     Import {
         path: String,
@@ -271,6 +289,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
     ("remove_step", "Remove a history step: id, index"),
     ("collapse", "Bake an object's history into its mesh: id"),
+    ("set_locked", "Protect objects from edits or allow them again: ids, locked"),
+    ("set_template", "Show objects for reference only (not picked in the viewport): ids, template"),
+    ("add_selection_set", "Remember a selection: name, ids"),
+    ("remove_selection_set", "Forget a selection set: index"),
     ("import", "Import a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file: path, up? (auto, y, z), scale? (metres per file unit)"),
     ("begin_sculpt", "Start sculpting a mesh object: id"),
     ("end_sculpt", "Stop sculpting"),
@@ -317,6 +339,11 @@ impl Command {
             Command::EnableStep { .. } => "Toggle step".into(),
             Command::RemoveStep { .. } => "Remove step".into(),
             Command::Collapse { .. } => "Collapse history".into(),
+            Command::SetLocked { locked: true, .. } => "Lock".into(),
+            Command::SetLocked { .. } => "Unlock".into(),
+            Command::SetTemplate { .. } => "Reference only".into(),
+            Command::AddSelectionSet { .. } => "Add selection set".into(),
+            Command::RemoveSelectionSet { .. } => "Remove selection set".into(),
             Command::Import { .. } => "Import".into(),
             Command::BeginSculpt { .. } => "Start sculpting".into(),
             Command::EndSculpt => "Stop sculpting".into(),
