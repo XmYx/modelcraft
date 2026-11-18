@@ -313,7 +313,8 @@ What is measured, and what is not (Linux, test profile of this workspace):
   not measure a map when a key is assigned, only when it is built by a function): at the default
   limits it grew the process by about 67 MB (integer values) to 153 MB (an array per key) in about
   one second before the operation limit stopped it. That is the figure to read as the memory bound
-  of a hostile script; there is no allocator cap, so it is a measurement, not a guarantee.
+  of a hostile script; there is no allocator cap (see below), so it is a measurement, not a
+  guarantee. `crates/script/tests/memory.rs` repeats it.
 - Array growth by `push` is measured per call and rejected at 20,000 entries (Rhai re-measures the
   array on every call, so the cap is kept small; bulk geometry stays in mesh handles).
 - A single native command that is already running is not interrupted. Commands bound their own
@@ -321,6 +322,36 @@ What is measured, and what is not (Linux, test profile of this workspace):
   checked before the next one.
 - Scripts run on the thread that calls `Session::run` (the UI thread in the app). The time limit
   is what keeps the window responsive; a script cannot be stopped from outside while it runs.
+
+## Memory: why there is no allocator cap
+
+A hard cap on what a script may allocate was investigated and is **not built**; the limits above
+stay the bound. The findings:
+
+- *A counting allocator needs `unsafe`.* The only hook Rust gives for seeing allocations is
+  `#[global_allocator]`, and `GlobalAlloc` is an `unsafe trait` whose methods are `unsafe fn`. The
+  workspace is `#![forbid(unsafe_code)]`, so a wrapper cannot be written here, and pulling in a
+  crate that does it (it would carry its own `unsafe`) to cap the whole process would change a
+  house rule for little.
+- *It would not be a per-script cap anyway.* The allocator is process-wide: the window's renderer,
+  decoder and worker threads allocate through it too, and it cannot tell which thread is "the
+  script". Counting bytes around a run is noisy on a busy process and cannot stop a script half
+  way. A refused allocation (`null`) ends in Rust's out-of-memory handler, which aborts the whole
+  app: a hostile script would take the user's unsaved work with it, which is worse than the
+  growth it was meant to prevent.
+- *Rhai has no memory hook of its own.* What it offers is what is already set: string, array and
+  map size limits (nested containers count together), the operation limit, and call and
+  expression depth. ModelCraft adds the per-run budget for geometry built through mesh handles,
+  the command and output limits and the wall-clock deadline.
+- *A real cap would be a process boundary* (run scripts in a child process with an address-space
+  limit). That is a different architecture (documents would have to cross the boundary) and is not
+  planned.
+
+So the memory bound of a hostile script is a measurement, kept honest by a test:
+`crates/script/tests/memory.rs` runs seven hostile scripts under the default limits and fails if the
+process's peak resident size grows by 512 MiB or more for one of them (`docs/performance.md`,
+"Script memory", has the numbers). Revisit this if Rhai gains an allocation hook, or if the
+project allows a vetted `unsafe` allocator crate.
 
 ## Layering
 
