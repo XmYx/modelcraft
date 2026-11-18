@@ -83,6 +83,30 @@ folder and the scripts folder, and write nowhere unless "Allow writing files" is
 window lists the folders it grants: the project's folder (a `scripts-out` folder inside it when the
 project is saved straight into the user's home folder or a filesystem root) and the scripts folder.
 
+## Tools, callbacks and arguments
+
+```rhai
+register_tool("Add Row", "Adds a row of cubes", || {
+    undo_group("Add Row", || { for i in 0..5 { move_to(add_primitive("cube"), i * 3, 0, 0); } });
+});
+on_selection_changed(|e| print(`${e.selection.len()} selected`));
+```
+
+- **Tools.** `register_tool(label, fn)` registers a menu command; the `Session` lists them
+  (`Session::tools`) and runs one by label (`run_tool`). The closure keeps its variables between
+  runs. A script that runs again replaces the tools and callbacks it registered before (they
+  belong to the script by its name).
+- **Callbacks.** `on_selection_changed`, `on_scene_changed`, `on_scene_loaded` and
+  `on_frame_changed` (or `on_event(name, fn)`) call `fn(event)`; the event is a map with `event`
+  and, where it applies, `selection` or `frame`. The host reports an event with
+  `Session::fire`. Callbacks run with a shorter time limit (2 s, `Limits::max_event_time`); one
+  that fails three times in a row is switched off and says so in its report. Nothing in this
+  crate calls `fire`: the application decides when events happen.
+- **Arguments.** `--arg name=value` on the command line becomes `arg("name", default)` and
+  `args()`; `current_file()` is the open project's file.
+- **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
+  [cli.md](cli.md#scripts).
+
 ## The model
 
 - **Everything a script changes is a command.** Every entry of
@@ -124,6 +148,7 @@ path cannot leave them. A command that names a file is checked too, also inside 
 | Call depth / expression depth | 24 / 48 | runaway recursion, deeply nested source |
 | String bytes (all strings of one container together) | 256 KiB | string doubling |
 | Array / map entries (nested ones count) | 20,000 / 2,000 | array growth |
+| Time of one event callback | 2 s | slow callbacks |
 | Commands per run | 100,000 | command floods |
 | Geometry built or copied through mesh handles, per run | 4,000,000 vertices, faces and corners | memory from meshes |
 | Output lines | 5,000 | console floods |

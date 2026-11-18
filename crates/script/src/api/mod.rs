@@ -8,6 +8,7 @@ use rhai::Engine;
 use crate::host::Shared;
 
 mod commands;
+pub(crate) mod events;
 pub(crate) use commands::script_name;
 pub(crate) mod conv;
 mod files;
@@ -21,4 +22,5 @@ pub(crate) fn register_all(engine: &mut Engine, s: &Rc<Shared>) {
     mesh::register(engine, s);
     files::register(engine, s);
     util::register(engine, s);
+    events::register(engine, s);
 }

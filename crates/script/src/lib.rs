@@ -22,6 +22,7 @@ mod limits;
 mod perm;
 mod session;
 
+pub use api::events::{Event, EventKind, ToolInfo};
 pub use error::{ErrorKind, ScriptError};
 pub use host::{LineKind, OutLine, RunContext};
 pub use limits::Limits;
