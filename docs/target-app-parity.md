@@ -119,7 +119,7 @@ Weight: 6
 | Single and four-view layouts | C M | D | S | Space |
 | Ground grid and axis triad | C M Z | D | S | |
 | Shaded with wireframe on selection | C M Z | D | S | Auto-smoothed normals (40°) |
-| Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | P | M | Shaded and wireframe only |
+| Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | D | M | Organize ▸ Display Mode for the view, a Display tag per object; each mode drawn and read back on a real GPU adapter in a test |
 | Move, rotate, scale gizmos | C M Z | D | M | Axis and free handles; numeric alternative |
 | Gizmo step snapping (grid, angle, scale) | C M | D | S | Shift+S; Ctrl inverts per drag |
 | Vertex, edge, face and surface snapping | C M Z | M | M | |
@@ -153,15 +153,15 @@ Weight: 5
 | Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
 | Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
 | Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
-| Tags: per-object behaviours (display, render, protection, look-at) | C | M | M | |
-| Display and render layers | C M | M | M | |
-| Instances that share a mesh | C M | M | M | |
+| Tags: per-object behaviours (display, render, protection, look-at) | C | D | M | Display (own draw mode), Render (viewport only), Protection (per channel, refused in the engine), Look At (an aim constraint kept by the tag); `organize` command |
+| Display and render layers | C M | D | M | Layers window: show, render (viewport only) and lock per layer; hidden layers leave the viewport, renders and exports |
+| Instances that share a mesh | C M | D | M | Instance object shares the master's evaluated mesh (one allocation, one GPU upload); own transform and material; Make Unique; deleting a master keeps its instances as real meshes |
 | Selection sets | C M | D | S | Saved in the scene, follow deletes, selected by name |
-| Custom user attributes on objects | C M | M | M | |
+| Custom user attributes on objects | C M | D | M | Number, switch, text, colour, vector per object; numbers and vector parts are `user.<name>` attributes, so they key and script like any number |
 | Scene overrides (takes, render setups) | C M | M | L | |
 | Lock and template objects (visible, not selectable) | C M | D | S | Locked objects refuse edits in the engine; reference-only objects are drawn but never picked |
-| Copy and paste attributes; attribute presets | C M | P | S | Copy and paste transform, material and visibility onto many objects; no presets |
-| Object pivot separate from the origin | C M Z | M | S | |
+| Copy and paste attributes; attribute presets | C M | D | S | Copy and paste onto many objects; named presets saved in the scene (material, tags, user attributes, optionally the placement) |
+| Object pivot separate from the origin | C M Z | D | S | Pivot fields, Pivot to Center, Reset; objects and children stay in place; exports fold the pivot into the transform |
 
 ## Dependency graph, history and node editing
 

@@ -564,6 +564,9 @@ fn patch_grouping_and_mesh_check_by_keyboard() {
     h.get_by_label("Patches and Cleanup").click();
     h.run();
     assert!(h.query_by_label_contains("N-gons: 0").is_some());
+    // The docked Properties pane scrolls; ask for the button to be scrolled into view first.
+    h.get_by_label("Clean Up Mesh").scroll_to_me();
+    h.run();
     h.get_by_label("Clean Up Mesh").click();
     h.run();
     let last = h.state().doc.scene.get(id).unwrap().steps().last().map(|s| s.op.name());
