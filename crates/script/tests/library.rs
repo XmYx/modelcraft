@@ -77,7 +77,23 @@ fn imports_need_a_library_folder_and_say_so() {
 #[test]
 fn module_names_cannot_leave_the_folder_or_name_odd_things() {
     for bad in [
-        "", "../x", "lib/../../x", "/etc/passwd", "a\\b", "C:x", ".hidden", "lib/.hidden", "a//b", "a/", "x.", "a/../b", "na\0me", "a|b", "a*b", "a?b", &"n".repeat(121),
+        "",
+        "../x",
+        "lib/../../x",
+        "/etc/passwd",
+        "a\\b",
+        "C:x",
+        ".hidden",
+        "lib/.hidden",
+        "a//b",
+        "a/",
+        "x.",
+        "a/../b",
+        "na\0me",
+        "a|b",
+        "a*b",
+        "a?b",
+        &"n".repeat(121),
     ] {
         assert!(valid_name(bad).is_err(), "{bad:?}");
     }

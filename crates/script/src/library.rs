@@ -112,12 +112,19 @@ pub fn imports(source: &str) -> Vec<(String, String)> {
     let text = |t: &crate::highlight::Token| source.get(t.start..t.end).unwrap_or("");
     let mut out = Vec::new();
     for w in toks.windows(4) {
-        if w[0].kind == TokenKind::Keyword && text(&w[0]) == "import" && w[1].kind == TokenKind::Text && w[2].kind == TokenKind::Keyword && text(&w[2]) == "as" && w[3].kind == TokenKind::Ident {
+        if w[0].kind == TokenKind::Keyword
+            && text(&w[0]) == "import"
+            && w[1].kind == TokenKind::Text
+            && w[2].kind == TokenKind::Keyword
+            && text(&w[2]) == "as"
+            && w[3].kind == TokenKind::Ident
+        {
             let lit = text(&w[1]);
-            if let Some(name) = lit.strip_prefix('"').and_then(|l| l.strip_suffix('"')) {
-                if !name.contains('\\') && out.len() < MAX_MODULES {
-                    out.push((name.to_string(), text(&w[3]).to_string()));
-                }
+            if let Some(name) = lit.strip_prefix('"').and_then(|l| l.strip_suffix('"'))
+                && !name.contains('\\')
+                && out.len() < MAX_MODULES
+            {
+                out.push((name.to_string(), text(&w[3]).to_string()));
             }
         }
     }
@@ -150,7 +157,8 @@ impl ModuleResolver for Resolver {
         {
             let loading = lib.loading.try_borrow().map_err(|_| fail("the library loader is busy", path, pos))?;
             if let Some(i) = loading.iter().position(|p| *p == file) {
-                let chain: Vec<String> = loading[i..].iter().chain(std::iter::once(&file)).filter_map(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).collect();
+                let chain: Vec<String> =
+                    loading[i..].iter().chain(std::iter::once(&file)).filter_map(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).collect();
                 return Err(fail(format!("libraries import each other in a cycle: {}", chain.join(" -> ")), path, pos));
             }
             if loading.len() >= MAX_IMPORT_DEPTH {
