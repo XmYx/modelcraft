@@ -27,6 +27,9 @@ mod deform_ui_tests;
 mod demo;
 mod dock;
 mod exchange_ui;
+mod field_ui;
+#[cfg(test)]
+mod field_ui_tests;
 mod gpu;
 mod hair_ui;
 #[cfg(test)]

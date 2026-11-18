@@ -19,6 +19,7 @@ pub mod hair;
 mod layers;
 pub mod rig;
 pub mod sim;
+pub mod sim_bake;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef, PastedKey};
@@ -29,10 +30,12 @@ pub use hair::{HairCommand, MapEdit, MapKind};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
+pub use sim_bake::{BakeJob, BakeResult};
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
 pub use modelcraft_clone as clone;
+pub use modelcraft_field as field;
 pub use modelcraft_formats as formats;
 pub use modelcraft_mesh as mesh;
 pub use modelcraft_ops as ops;
@@ -58,5 +61,9 @@ mod groups_tests;
 mod hair_tests;
 #[cfg(test)]
 mod rig_tests;
+#[cfg(test)]
+mod sim_cloth_tests;
+#[cfg(test)]
+mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;

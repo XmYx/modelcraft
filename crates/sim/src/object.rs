@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cloth::ClothSettings;
+use crate::rigid::RigidSettings;
 use crate::{DEFAULT_CACHE_BYTES, FrameCache, MAX_CACHE_BYTES, SimTiming};
 
 /// Which simulation an object runs.
@@ -18,6 +20,11 @@ use crate::{DEFAULT_CACHE_BYTES, FrameCache, MAX_CACHE_BYTES, SimTiming};
 pub enum SimKind {
     /// No solver: plays a point cache that came from a file (or an earlier bake) on the mesh.
     Cache,
+    /// A rigid body: falls, collides and is constrained with the other bodies of the scene
+    /// ([`crate::rigid`]). Baking one bakes every body.
+    Rigid(RigidSettings),
+    /// Cloth: stretch, shear and bend constraints with collisions, pins and wind ([`crate::cloth`]).
+    Cloth(ClothSettings),
 }
 
 impl SimKind {
@@ -25,6 +32,8 @@ impl SimKind {
     pub fn name(&self) -> &'static str {
         match self {
             SimKind::Cache => "Cache",
+            SimKind::Rigid(_) => "Rigid body",
+            SimKind::Cloth(_) => "Cloth",
         }
     }
 
@@ -45,8 +54,9 @@ pub struct SimObject {
     /// The most MiB of positions a bake of this object may cache.
     #[serde(default = "default_cache_mib")]
     pub max_cache_mib: u32,
-    /// The settings the cache was baked with ([`SimObject::settings_key`]); a cache whose key no
-    /// longer matches is stale. Zero for a cache from a file.
+    /// What the cache was baked from, as a hash the engine computes (for a rigid body, every
+    /// rigid body of the scene with the timing and seed; otherwise [`SimObject::settings_key`]).
+    /// A cache whose hash no longer matches is stale. Zero for a cache from a file.
     #[serde(default)]
     pub baked_with: u64,
     /// The baked points. Saved as a blob, not in the project JSON.
@@ -77,11 +87,6 @@ impl SimObject {
         h | 1
     }
 
-    /// The baked cache no longer matches the settings (a solver's cache only).
-    pub fn is_stale(&self) -> bool {
-        self.kind.is_solver() && self.cache.is_some() && self.baked_with != self.settings_key()
-    }
-
     /// The cache byte budget in bytes.
     pub fn cache_limit(&self) -> usize {
         ((self.max_cache_mib as usize) << 20).clamp(1 << 20, MAX_CACHE_BYTES)
@@ -94,6 +99,11 @@ impl SimObject {
     /// Repair settings read from a file.
     pub fn sanitize(&mut self) {
         self.timing = self.timing.sanitized();
+        match &mut self.kind {
+            SimKind::Rigid(r) => r.sanitize(),
+            SimKind::Cloth(c) => c.sanitize(),
+            SimKind::Cache => {}
+        }
         self.max_cache_mib = self.max_cache_mib.clamp(1, (MAX_CACHE_BYTES >> 20) as u32);
     }
 }
@@ -113,14 +123,6 @@ mod tests {
         c.timing.substeps += 1;
         assert_ne!(a.settings_key(), c.settings_key());
         assert_ne!(a.settings_key(), 0);
-    }
-
-    #[test]
-    fn a_file_cache_is_never_stale() {
-        let mut s = SimObject::new(SimKind::Cache);
-        s.cache = Some(Arc::new(FrameCache::new(24.0, 1.0, 1.0, 1)));
-        s.timing.end_frame = 7.0;
-        assert!(!s.is_stale());
     }
 
     #[test]

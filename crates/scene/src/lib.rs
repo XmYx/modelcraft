@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
 pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
+pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
@@ -543,6 +544,11 @@ pub enum ObjectKind {
     Deformer {
         deformer: Deformer,
     },
+    /// A falloff field. Inside a deformer it sets how strongly the deformer acts at each point
+    /// (the field's own transform places it in the deformer's frame); several fields combine.
+    Field {
+        field: Field,
+    },
     /// A joint of a skeleton: a transform drawn as a bone to each child joint ([`rig`]).
     Joint {
         radius: f32,
@@ -581,6 +587,7 @@ impl ObjectKind {
             ObjectKind::Mesh { .. } => "Mesh",
             ObjectKind::SmoothCage { .. } => "Smooth cage",
             ObjectKind::Deformer { .. } => "Deformer",
+            ObjectKind::Field { .. } => "Falloff field",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
@@ -1028,6 +1035,19 @@ impl Scene {
             c = o.parent.and_then(|p| self.get(p));
         }
         true
+    }
+
+    /// The falloff fields inside `id` (a deformer), each with the matrix taking the deformer's
+    /// frame into its own. Hidden fields are off.
+    pub fn field_stack(&self, id: ObjectId) -> FieldStack {
+        let mut stack = FieldStack::new();
+        for c in self.children(id) {
+            let Some(o) = self.get(c) else { continue };
+            if let (true, ObjectKind::Field { field }) = (o.visible, &o.kind) {
+                stack.push(o.transform.matrix().inverse(), field.clone());
+            }
+        }
+        stack
     }
 
     /// Combined revision of an object and everything its output depends on (children for
