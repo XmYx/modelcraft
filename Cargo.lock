@@ -2782,6 +2782,7 @@ dependencies = [
  "glam 0.30.10",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-sim",
  "proptest",
  "rayon",
  "serde",
