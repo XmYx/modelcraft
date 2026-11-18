@@ -54,6 +54,7 @@ Commands:
                                     document.info, document.save, …)
   mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
+  bench --groups [--polys N]        patch, visibility, region, shell, trim and occlusion times
   uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
   uv-bench [--segments N]           unwrap a sphere of N×N/2 quads: time and distortion
@@ -285,6 +286,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             };
             mcp::serve(backend)
         }
+        "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
         "sim-bench" => sim_cmd::bench(a),
@@ -666,6 +668,55 @@ fn ms(t: Instant) -> f64 {
 
 /// Sculpt latency on a dense quad sphere: build times, per-dab time for each brush, and, when a
 /// GPU is present, the chunked upload and a full 1920×1080 draw of the mesh.
+/// Time the patch, visibility, region, occlusion, shell and trim operations on a quad sphere.
+fn bench_groups(polys: u32) -> Result<(), String> {
+    use modelcraft_engine::sculpt::groups;
+    let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1632);
+    let mesh = modelcraft_engine::ops::primitives::Primitive::RoundCube { radius: 1.0, segments: seg }.build().map_err(|e| e.to_string())?;
+    let mut s = SculptMesh::new(&mesh, None, None);
+    println!("mesh: {} quads, {} triangles, {} vertices", mesh.face_count(), s.triangle_count(), s.vertex_count());
+    let cam = modelcraft_render::Camera { distance: 3.2, ..Default::default() };
+    let region = modelcraft_engine::sculpt::ScreenRegion {
+        view_proj: cam.view_proj(1.0),
+        points: (0..64).map(|k| glam::Vec2::from_angle(k as f32 / 64.0 * std::f32::consts::TAU) * 0.3).collect(),
+        front_only: true,
+        eye: cam.eye(),
+    };
+    let t = Instant::now();
+    let (by_angle, count) = groups::patches_by_normal(&mesh, 30.0);
+    println!("patches by angle (30 degrees): {count} patches, {:.0} ms", ms(t));
+    let t = Instant::now();
+    let islands = groups::patches_by_uv_island(&mesh).map(|p| p.1);
+    println!("patches by UV island: {islands:?}, {:.0} ms", ms(t));
+    let t = Instant::now();
+    s.set_face_patches(&by_angle);
+    println!("patches into the session: {:.0} ms", ms(t));
+    let t = Instant::now();
+    let inside = groups::faces_in_region(&mesh, &region);
+    println!("faces inside a 64-corner lasso: {} faces, {:.0} ms", inside.iter().filter(|x| **x).count(), ms(t));
+    let t = Instant::now();
+    s.set_face_hidden(&inside);
+    println!("hide them in the session: {:.0} ms", ms(t));
+    s.set_face_hidden(&[]);
+    let t = Instant::now();
+    let masked = s.mask_region(&region, 1.0).indices.len();
+    println!("mask the same lasso: {masked} vertices, {:.0} ms", ms(t));
+    let t = Instant::now();
+    let shell = groups::extract_shell(&mesh, &s.mask, 0.02).map_err(|e| e.to_string())?;
+    println!("shell from that mask: {} faces, {:.0} ms", shell.face_count(), ms(t));
+    let t = Instant::now();
+    let moved = s.clip_plane(Vec3::new(0.0, 0.5, 0.0), Vec3::Y).indices.len();
+    println!("clip to a plane: {moved} vertices, {:.0} ms", ms(t));
+    let t = Instant::now();
+    let trimmed = modelcraft_engine::ops::trim::trim_plane(&mesh, Vec3::new(0.0, 0.3, 0.0), Vec3::new(0.2, 1.0, 0.1), true).map_err(|e| e.to_string())?;
+    println!("trim by a plane with a cap: {} faces left, {:.0} ms", trimmed.face_count(), ms(t));
+    let t = Instant::now();
+    let changed = s.mask_by_occlusion().indices.len();
+    let rays = (groups::OCCLUSION_RAY_BUDGET / s.vertex_count().max(1)).clamp(4, 24);
+    println!("occlusion mask ({rays} rays per vertex): {changed} vertices changed, {:.0} ms", ms(t));
+    Ok(())
+}
+
 fn bench(polys: u32, dabs: usize) -> Result<(), String> {
     let seg = ((polys as f64 / 6.0).sqrt().ceil() as u32).clamp(4, 1632);
     let t = Instant::now();
