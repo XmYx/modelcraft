@@ -101,7 +101,13 @@ the user can act on, never a crash and never lost work.
    no longer fits its mesh is skipped and flagged, never fatal (`modelcraft_scene::StepError`).
 2. No `unwrap`, `expect`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` outside tests. Every
    crate root carries the `#![deny(clippy::unwrap_used, …)]` line; `clippy.toml` allows them in tests.
-3. No `unsafe` (`unsafe_code = "forbid"` for the workspace).
+3. No `unsafe` (`unsafe_code = "forbid"` for the workspace). **One named exception:**
+   `crates/craft-render-gpu/src/hw.rs`, compiled only with the off-by-default cargo feature
+   `hw-ray-query`, calls `wgpu::ExperimentalFeatures::enabled()` (an `unsafe fn` whose contract is
+   that the caller accepts wgpu's experimental features may have bugs) behind one
+   `#[allow(unsafe_code)]` function with a `// SAFETY:` comment. It is the only `#[allow(unsafe_code)]`
+   in the crate; the default build, and CI, contain no `unsafe` (the crate forbids it unless the
+   feature is on). See `docs/architecture.md`.
 4. Every input is hostile: project JSON and blobs, glTF/OBJ/STL/PLY (read through `craft-mesh` with
    its `Limits`), selections in history steps, primitive parameters, pointer and pressure values.
    Clamp, validate and cap allocations (`MAX_ELEMENTS`, `MAX_RESULT_FACES`, `subdivide::MAX_LEVELS`,

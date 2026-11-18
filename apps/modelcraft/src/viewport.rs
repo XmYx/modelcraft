@@ -94,7 +94,14 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
         .filter(|id| {
             matches!(
                 scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } | ObjectKind::Instance { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::Cloner { .. }
+                        | ObjectKind::Instance { .. }
+                )
             ) || scene.is_particles(*id)
         })
         .collect()

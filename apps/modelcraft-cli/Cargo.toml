@@ -14,6 +14,10 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Hardware ray queries in the GPU path tracer (see crates/craft-render-gpu/src/hw.rs); off by default.
+hw-ray-query = ["modelcraft-render/hw-ray-query"]
+
 [dependencies]
 modelcraft-engine = { workspace = true }
 modelcraft-script = { workspace = true }

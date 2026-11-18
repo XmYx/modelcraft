@@ -564,6 +564,16 @@ impl ModelApp {
         }
     }
 
+    /// The selected object when it can be a generator's input (a mesh or another generator).
+    fn generator_input_candidate(&self) -> Option<ObjectId> {
+        self.active().filter(|id| {
+            matches!(
+                self.doc.scene.get(*id).map(|o| &o.kind),
+                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+            )
+        })
+    }
+
     pub fn active_mesh(&self) -> Option<ObjectId> {
         self.active().filter(|id| matches!(self.doc.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })))
     }
@@ -573,7 +583,7 @@ impl ModelApp {
         let a = self.active()?;
         match &self.doc.scene.get(a)?.kind {
             ObjectKind::Mesh { .. } => Some(a),
-            ObjectKind::SmoothCage { .. } | ObjectKind::Cloner { .. } => {
+            ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Cloner { .. } => {
                 self.doc.scene.children(a).into_iter().find(|c| matches!(self.doc.scene.get(*c).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })))
             }
             _ => None,
@@ -768,6 +778,14 @@ impl ModelApp {
                 }
                 None => self.status = tl!("Select a mesh to deform"),
             },
+            AddArray(kind) => {
+                let input = self.generator_input_candidate();
+                self.run(Command::AddArray { kind: kind.into(), input });
+            }
+            AddSymmetry => {
+                let input = self.generator_input_candidate();
+                self.run(Command::AddSymmetry { input, axis: 0 });
+            }
             AddField(kind) => {
                 // Into the selected deformer, or the deformer a selected field already sits in.
                 let scene = &self.doc.scene;

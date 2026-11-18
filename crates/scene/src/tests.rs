@@ -119,6 +119,63 @@ fn picking_hits_the_front_face() {
 }
 
 #[test]
+fn array_and_symmetry_generators_join_and_mirror_their_input() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let sym = s.add("Symmetry", ObjectKind::Symmetry { axis: 0, weld: 1e-4 }, None).unwrap();
+    assert!(ev.evaluate(&s, sym).errors.iter().any(|e| e.message.contains("needs a mesh")));
+    let cube = s.add("Cube", cube_kind(), Some(sym)).unwrap();
+    s.edit(cube).unwrap().transform.translation = Vec3::new(3.0, 0.0, 0.0);
+    // The input's own transform counts: two separate cubes, one each side of the plane.
+    let e = ev.evaluate(&s, sym);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    assert_eq!(e.mesh.face_count(), 12);
+    let (lo, hi) = e.mesh.bounds();
+    assert!((lo.x + 4.0).abs() < 1e-4 && (hi.x - 4.0).abs() < 1e-4, "{lo:?} {hi:?}");
+    assert!(s.is_cage_input(cube));
+    // An array around the symmetry: the generators chain, each hidden behind the next.
+    let arr = s.add("Array", ObjectKind::Array { array: Array::default_of("linear").unwrap() }, None).unwrap();
+    s.reparent(sym, Some(arr)).unwrap();
+    assert!(s.is_cage_input(sym));
+    assert_eq!(ev.evaluate(&s, arr).mesh.face_count(), 48);
+    // Editing the cube re-evaluates through both generators; the cache serves an unchanged scene.
+    let runs = ev.runs;
+    let _ = ev.evaluate(&s, arr);
+    assert_eq!(ev.runs, runs);
+    s.edit(cube).unwrap().transform.translation = Vec3::new(0.0, 0.0, 0.0);
+    let after = ev.evaluate(&s, arr);
+    assert!(after.mesh.face_count() > 0 && after.errors.iter().all(|e| !e.message.is_empty()));
+    // A hostile count is refused or capped, never an allocation: the array stays valid.
+    s.edit(arr).unwrap().kind = ObjectKind::Array { array: Array::Linear { count: u32::MAX, offset: Vec3::X, rotation: Vec3::ZERO, scale: Vec3::ZERO } };
+    let big = ev.evaluate(&s, arr);
+    assert!(big.mesh.face_count() <= modelcraft_ops::MAX_RESULT_FACES);
+    big.mesh.validate().unwrap();
+    // A second child that makes geometry is an ordinary object, not hidden.
+    let extra = s.add("Extra", cube_kind(), Some(arr)).unwrap();
+    assert!(!s.is_cage_input(extra));
+    // Save and load.
+    let back: Scene = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back.get(arr).unwrap().kind, s.get(arr).unwrap().kind);
+    assert_eq!(back.get(sym).unwrap().kind, s.get(sym).unwrap().kind);
+}
+
+#[test]
+fn a_mirrored_generator_input_keeps_its_faces_outward() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let arr = s.add("Array", ObjectKind::Array { array: Array::default_of("linear").unwrap() }, None).unwrap();
+    let cube = s.add("Cube", cube_kind(), Some(arr)).unwrap();
+    s.edit(cube).unwrap().transform.scale = Vec3::new(-1.0, 1.0, 1.0);
+    let m = ev.evaluate(&s, arr).mesh;
+    assert_eq!(m.face_count(), 24);
+    for f in 0..m.face_count() as u32 {
+        // Each copy is a convex cube whose six faces come in a row: faces point away from its own centre.
+        let centre = Vec3::new((f / 6) as f32 * 1.5, 0.0, 0.0);
+        assert!(m.face_normal(f).dot(m.face_center(f) - centre) > 0.0, "face {f} points inwards");
+    }
+}
+
+#[test]
 fn falloff_fields_limit_where_a_deformer_acts() {
     let mut s = Scene::new();
     let mut ev = Evaluator::new();

@@ -7,8 +7,23 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
-[lints]
-workspace = true
+# The workspace lints, except `unsafe_code`: it is denied here instead of forbidden, because the
+# optional hardware ray-query module (feature `hw-ray-query`) holds one documented `unsafe` call.
+# The default build still forbids it (the crate attribute in lib.rs).
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+type_complexity = "allow"
+
+[features]
+default = []
+# Hardware ray queries through wgpu's experimental ray-tracing support (needs one `unsafe` call).
+hw-ray-query = []
 
 [dependencies]
 craft-render-core = { workspace = true }

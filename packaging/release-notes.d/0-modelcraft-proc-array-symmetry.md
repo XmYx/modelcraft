@@ -1,0 +1,1 @@
+- Array and Symmetry: Create > Add Linear Array, Add Radial Array and Add Symmetry make live generators around the selected mesh (they can be stacked), and a new Shear deformer slides the top of a mesh sideways.
