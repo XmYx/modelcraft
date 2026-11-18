@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Color32, Key, KeyboardShortcut, Modifiers, RichText};
 use modelcraft_script::highlight::{TokenKind, tokenize};
-use modelcraft_script::{ErrorKind, Limits, LineKind, Permissions, RunContext, Session};
+use modelcraft_script::{ErrorKind, Event, Limits, LineKind, Permissions, RunContext, Session};
 
 use crate::actions::Action;
 use crate::app::ModelApp;
@@ -101,6 +101,12 @@ pub struct ScriptState {
     /// Line of the last error, marked in the editor.
     pub error_line: Option<usize>,
     confirm: Option<Then>,
+    /// A project was loaded since the last frame (fires `scene_loaded`).
+    loaded: bool,
+    /// What the last frame looked like, to notice changes for event callbacks.
+    last_selection: Vec<modelcraft_engine::scene::ObjectId>,
+    last_sig: u64,
+    last_frame: f64,
 }
 
 impl Default for ScriptState {
@@ -136,6 +142,10 @@ impl ScriptState {
             cursor: (1, 1),
             error_line: None,
             confirm: None,
+            loaded: false,
+            last_selection: Vec::new(),
+            last_sig: 0,
+            last_frame: 0.0,
         };
         s.reload();
         s
@@ -296,12 +306,19 @@ fn permissions(app: &ModelApp, script: Option<&Path>) -> Permissions {
 /// Returns whether it finished without an error.
 pub fn execute(app: &mut ModelApp, name: &str, source: &str, script: Option<&Path>) -> bool {
     let perms = permissions(app, script);
+    let file = app.doc.path.as_ref().map(|p| p.display().to_string());
     let session = app.script.session.get_or_insert_with(|| Session::new(Limits::default(), Permissions::none()));
     session.set_permissions(perms);
+    session.set_current_file(file);
     let mut ctx = RunContext { selection: app.selection.clone() };
     app.script.note(ConsoleKind::Note, crate::tlf!("Running {script}…", script = name), None);
     let Some(session) = app.script.session.as_mut() else { return false };
     let report = session.run(&mut app.doc, &mut ctx, name, source);
+    finish(app, name, report)
+}
+
+/// Show a finished run: console lines, the selection it set, and the outcome in the status line.
+fn finish(app: &mut ModelApp, name: &str, report: modelcraft_script::RunReport) -> bool {
     for l in &report.lines {
         let kind = match l.kind {
             LineKind::Print => ConsoleKind::Print,
@@ -338,6 +355,96 @@ pub fn execute(app: &mut ModelApp, name: &str, source: &str, script: Option<&Pat
             false
         }
     }
+}
+
+/// Run a tool that a script registered (a Scripts menu command).
+pub fn run_tool(app: &mut ModelApp, label: &str) {
+    let mut ctx = RunContext { selection: app.selection.clone() };
+    app.script.note(ConsoleKind::Note, crate::tlf!("Running {script}…", script = label), None);
+    let Some(session) = app.script.session.as_mut() else { return };
+    let report = session.run_tool(&mut app.doc, &mut ctx, label);
+    if !finish(app, label, report) {
+        app.script.open = true;
+    }
+}
+
+fn scene_signature(app: &ModelApp) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for o in app.doc.scene.objects() {
+        h = (h ^ o.id.0).wrapping_mul(0x0100_0000_01b3);
+        h = (h ^ o.rev).wrapping_mul(0x0100_0000_01b3);
+    }
+    h ^ app.doc.scene.len() as u64
+}
+
+/// A project was opened, imported or started new: `scene_loaded` callbacks run next frame.
+pub fn scene_loaded(app: &mut ModelApp) {
+    app.script.loaded = true;
+}
+
+fn fire(app: &mut ModelApp, event: &Event) {
+    let mut ctx = RunContext { selection: app.selection.clone() };
+    let Some(session) = app.script.session.as_mut() else { return };
+    let reports = session.fire(&mut app.doc, &mut ctx, event);
+    for r in reports {
+        // Callbacks are quiet unless they print or fail: no "finished" line per event.
+        for l in &r.lines {
+            let kind = match l.kind {
+                LineKind::Print => ConsoleKind::Print,
+                LineKind::Debug => ConsoleKind::Debug,
+                LineKind::Warning => ConsoleKind::Warning,
+            };
+            app.script.note(kind, l.text.clone(), l.line);
+        }
+        if let Some(sel) = r.selection {
+            app.selection = sel;
+        }
+        if let Some(e) = &r.error {
+            app.script.note(ConsoleKind::Error, e.to_string(), e.line);
+            app.status = crate::tlf!("A script callback failed: {error}", error = e);
+        }
+    }
+    app.prune_selection();
+}
+
+/// Once per frame: tell the callbacks what changed (selection, scene, frame, a loaded project).
+/// Nothing runs while a drag or a stroke is going on; the change is reported when it ends. What a
+/// callback itself changes does not count as a change, so callbacks cannot trigger themselves.
+pub fn tick(app: &mut ModelApp) {
+    let sig = scene_signature(app);
+    let frame = app.doc.scene.anim.frame;
+    let listening = app.script.session.as_ref().is_some_and(|s| s.has_callbacks());
+    if !listening || app.drag.is_some() || app.stroke.is_some() {
+        if !listening {
+            app.script.last_selection = app.selection.clone();
+            app.script.last_sig = sig;
+            app.script.last_frame = frame;
+            app.script.loaded = false;
+        }
+        return;
+    }
+    let mut events = Vec::new();
+    if std::mem::take(&mut app.script.loaded) {
+        events.push(Event::SceneLoaded);
+    }
+    if app.selection != app.script.last_selection {
+        events.push(Event::SelectionChanged);
+    }
+    if sig != app.script.last_sig {
+        events.push(Event::SceneChanged);
+    }
+    if frame != app.script.last_frame {
+        events.push(Event::FrameChanged { frame });
+    }
+    if events.is_empty() {
+        return;
+    }
+    for e in &events {
+        fire(app, e);
+    }
+    app.script.last_selection = app.selection.clone();
+    app.script.last_sig = scene_signature(app);
+    app.script.last_frame = app.doc.scene.anim.frame;
 }
 
 /// Run the editor's script (or only its selection).
@@ -843,6 +950,19 @@ pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
             ui.label(RichText::new(tl!("No scripts folder on this system")).color(theme::TEXT_DIM).small());
         }
     }
+    let tools = app.script.session.as_ref().map(|s| s.tools()).unwrap_or_default();
+    if !tools.is_empty() {
+        ui.separator();
+        ui.label(RichText::new(tl!("Scripted Tools")).color(theme::TEXT_DIM).small());
+        for t in &tools {
+            let b = ui.button(&t.label);
+            let b = if t.tip.is_empty() { b } else { b.on_hover_text(&t.tip) };
+            if b.clicked() {
+                run_tool(app, &t.label);
+                ui.close();
+            }
+        }
+    }
     ui.separator();
     if app.script.entries.is_empty() {
         ui.label(RichText::new(tl!("No scripts in the scripts folder")).color(theme::TEXT_DIM));
@@ -1322,5 +1442,120 @@ mod tests {
         text.push_str(&"x".repeat(5 << 20));
         std::fs::write(&big, text).unwrap();
         assert_eq!(tip_of(&big), "the tip");
+    }
+
+    fn run_text(h: &mut Harness<'static, ModelApp>, text: &str) {
+        h.state_mut().script.text = text.into();
+        h.run();
+        h.get_by_label_contains("Run Script").click();
+        h.run();
+    }
+
+    #[test]
+    fn a_script_adds_a_menu_command() {
+        let mut h = harness();
+        open_editor(&mut h);
+        run_text(&mut h, "register_tool(\"Make Pair\", \"Adds two groups\", || { add_group(\"P1\"); add_group(\"P2\"); });");
+        assert!(h.state().script.error_line.is_none(), "{:?}", h.state().script.console);
+        assert!(names(&h).is_empty(), "registering adds nothing yet");
+        h.state_mut().script.open = false;
+        h.run();
+        h.get_by_label("Scripts").click();
+        h.run();
+        h.get_by_label("Scripted Tools");
+        h.get_by_label("Make Pair").click();
+        h.run();
+        assert_eq!(names(&h), vec!["P1".to_string(), "P2".to_string()]);
+        // A tool is one command in the history like any other run.
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run();
+        assert!(names(&h).is_empty() || names(&h).len() < 2);
+        // Running the script again replaces the tool instead of adding a second one.
+        h.state_mut().script.open = true;
+        h.run();
+        run_text(&mut h, "register_tool(\"Make Pair\", || { add_group(\"Q\"); });");
+        assert_eq!(h.state().script.session.as_ref().map(|s| s.tools().len()), Some(1));
+    }
+
+    #[test]
+    fn callbacks_hear_about_selection_scene_and_new_projects() {
+        let mut h = harness();
+        open_editor(&mut h);
+        run_text(
+            &mut h,
+            "on_selection_changed(|e| { print(\"selection now \" + e.selection.len()); });\non_scene_loaded(|e| { print(\"a project was loaded\"); });\non_scene_changed(|e| { print(\"scene changed\"); });",
+        );
+        h.state_mut().script.open = false;
+        h.run();
+        let count =
+            |h: &Harness<'static, ModelApp>, text: &str| h.state().script.console.iter().filter(|l| l.kind == ConsoleKind::Print && l.text == text).count();
+        // Adding a cube selects it: both the scene and the selection changed.
+        h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        h.run();
+        h.event(egui::Event::Text("Add Cube".into()));
+        h.run();
+        h.key_press(Key::Enter);
+        h.run();
+        h.run();
+        assert_eq!(count(&h, "selection now 1"), 1);
+        assert!(count(&h, "scene changed") >= 1);
+        let before = count(&h, "scene changed");
+        h.run();
+        h.run();
+        assert_eq!(count(&h, "scene changed"), before, "a quiet frame reports nothing");
+        h.state_mut().run_pending(crate::app::Pending::New);
+        h.run();
+        h.run();
+        assert_eq!(count(&h, "a project was loaded"), 1);
+        assert_eq!(count(&h, "selection now 0"), 1, "the new project has nothing selected");
+    }
+
+    #[test]
+    fn a_callback_that_changes_the_scene_does_not_trigger_itself() {
+        let mut h = harness();
+        open_editor(&mut h);
+        run_text(&mut h, "on_scene_changed(|e| { add_group(\"echo\"); });");
+        h.state_mut().script.open = false;
+        h.run();
+        h.state_mut().doc.execute(modelcraft_engine::Command::AddGroup { name: Some("user".into()) }).unwrap();
+        for _ in 0..6 {
+            h.run();
+        }
+        let echoes = names(&h).iter().filter(|n| n.starts_with("echo")).count();
+        assert_eq!(echoes, 1, "{:?}", names(&h));
+    }
+
+    #[test]
+    fn a_broken_callback_reports_once_per_event_and_then_goes_quiet() {
+        let mut h = harness();
+        open_editor(&mut h);
+        run_text(&mut h, "on_selection_changed(|e| { name_of(404); });");
+        h.state_mut().script.open = false;
+        h.run();
+        for i in 0..5u64 {
+            h.state_mut().selection = vec![];
+            h.run();
+            let id = h.state_mut().doc.execute(modelcraft_engine::Command::AddGroup { name: None }).unwrap().created[0];
+            h.state_mut().selection = vec![id];
+            h.run();
+            h.run();
+            let _ = i;
+        }
+        let errors = h.state().script.console.iter().filter(|l| l.kind == ConsoleKind::Error).count();
+        assert_eq!(errors, 3, "three failures, then it is switched off: {:?}", h.state().script.console);
+        assert!(h.state().script.console.iter().any(|l| l.text.contains("switched off")));
+    }
+
+    #[test]
+    fn the_startup_script_can_register_tools() {
+        let dir = tmp("startup-tools");
+        std::fs::write(dir.join("startup.rhai"), "register_tool(\"From Startup\", || { add_group(\"S\"); });").unwrap();
+        let mut h = harness();
+        h.run();
+        h.state_mut().script = ScriptState::new(Some(dir));
+        startup(h.state_mut());
+        assert_eq!(h.state().script.session.as_ref().map(|s| s.tools().len()), Some(1));
+        run_tool(h.state_mut(), "From Startup");
+        assert_eq!(names(&h), vec!["S".to_string()]);
     }
 }

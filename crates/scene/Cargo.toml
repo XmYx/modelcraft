@@ -21,6 +21,7 @@ glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 modelcraft-anim = { workspace = true }
+modelcraft-sim = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

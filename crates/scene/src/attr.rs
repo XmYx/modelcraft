@@ -71,6 +71,8 @@ pub fn list(o: &Object) -> Vec<(String, f64)> {
         ObjectKind::Skin { skin } => out.push(("dual_quaternion".into(), if skin.dual_quaternion { 1.0 } else { 0.0 })),
         // Hair is data (guides, maps), not attributes.
         ObjectKind::Hair { .. } => {}
+        // A simulation's settings and cache are edited through commands, not keyed.
+        ObjectKind::Sim { .. } => {}
         // Shapes and control points are data; their weights and positions are named one by one.
         ObjectKind::PointDeformer { deformer } => crate::point_deform::attr_list(deformer, &mut out),
         kind => collect(kind, "", &mut out),
@@ -104,6 +106,7 @@ pub fn get(o: &Object, path: &str) -> Option<f64> {
             },
             ObjectKind::Skin { skin } => (path == "dual_quaternion").then_some(if skin.dual_quaternion { 1.0 } else { 0.0 }),
             ObjectKind::Hair { .. } => None,
+            ObjectKind::Sim { .. } => None,
             ObjectKind::PointDeformer { deformer } => crate::point_deform::attr_get(deformer, path),
             kind => read(kind, path),
         },
@@ -163,7 +166,7 @@ pub fn set(o: &mut Object, path: &str, value: f64) -> Result<bool, SceneError> {
                 }
                 Ok(changed)
             }
-            ObjectKind::Skin { .. } | ObjectKind::Hair { .. } => Err(invalid(path)),
+            ObjectKind::Skin { .. } | ObjectKind::Sim { .. } | ObjectKind::Hair { .. } => Err(invalid(path)),
             ObjectKind::PointDeformer { deformer } => crate::point_deform::attr_set(deformer, path, value).ok_or_else(|| invalid(path)),
             kind => write(kind, path, value).ok_or_else(|| invalid(path)),
         },

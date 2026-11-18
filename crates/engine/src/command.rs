@@ -255,6 +255,8 @@ pub enum Command {
     Rig(crate::rig::RigCommand),
     /// Hair and grooming: `{"cmd":"hair","op":"add","mesh":3}` ([`crate::hair::HairCommand`]).
     Hair(crate::hair::HairCommand),
+    /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
+    Sim(crate::sim::SimCommand),
 }
 
 /// Most commands one batch may hold, and how deep batches may nest.
@@ -370,6 +372,7 @@ impl Command {
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
             Command::Hair(h) => h.label(),
+            Command::Sim(c) => c.label(),
         }
     }
 }

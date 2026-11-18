@@ -521,6 +521,12 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c + egui::vec2(-2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
             p.circle_stroke(c + egui::vec2(2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
         }
+        ObjectKind::Sim { .. } => {
+            // A simulation: a falling dot over a small arc.
+            let t = Color32::from_rgb(120, 220, 200);
+            p.circle_filled(c + egui::vec2(0.0, -3.0), 2.0, t);
+            p.line_segment([c + egui::vec2(-5.0, 5.0), c + egui::vec2(5.0, 5.0)], egui::Stroke::new(1.2, t));
+        }
     }
 }
 

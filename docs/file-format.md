@@ -72,6 +72,17 @@ pose). On load, weights and solver settings are clamped, duplicate ids and const
 objects are dropped, and counts are capped (4096 constraints, 16 sources each). Builds from before
 constraints ignore the block.
 
+## Simulation caches in a project
+
+A simulation object's baked points are not in `project.json`. Each one is stored as
+`blobs/<object id>-cache.mcpc`, a complete point cache (below) listed in `blobs` under
+`<object id>/cache`; the object's JSON holds its kind, timing (`start_frame`, `end_frame`, `fps`,
+`substeps`), `seed`, `max_cache_mib` and `baked_with` (a hash of the settings the cache was baked
+with, so a changed setting marks the cache stale). A point that does not exist at a frame (an
+unborn or dead particle) is stored as NaN. On load the counts are checked against the bytes
+present, caches above 100,000 frames, 4,000,000 points per frame or 2 GiB are refused, and timing
+is repaired into its limits. Readers that do not know the `sim` object type cannot open the file.
+
 ## Point cache (`.mcpc`)
 
 `modelcraft-cli bake` writes the vertices of one object at a run of frames (little-endian):

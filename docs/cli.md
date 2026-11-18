@@ -67,6 +67,16 @@ Object ids are numbers (`info` prints them).
 | `batch` | `commands` [{cmd…}…], `label?` (scene commands as one undo step, all or none) |
 | `undo`, `redo` | — |
 
+### Simulation
+
+One command, `sim`, with the operation in `op`: `{"cmd":"sim","op":"attach_cache","mesh":3,"path":"fall.mcpc"}`.
+A simulation object sits under the mesh it drives and plays the points of its cache for the scene's
+current frame (linear between frames; the first or last frame holds outside the cache).
+`attach_cache` reads a `.mcpc` file whose point count is the mesh's vertex count, so any tool that
+writes the format (or `modelcraft-cli bake`) can drive a mesh. `set` changes `start_frame`,
+`end_frame`, `fps`, `substeps` (1 to 64), `seed` and `max_cache_mib`; `clear_cache` throws a baked
+cache away. `modelcraft-cli commands` lists them as `sim op=…`.
+
 ### Animation
 
 One command, `anim`, with the operation in `op`: `{"cmd":"anim","op":"set_key",…}`.
@@ -203,7 +213,13 @@ atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smo
 Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
 `@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
 
-A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
+A point cache (`modelcraft-cli bake`) holds a skinned mesh as it is posed frame by frame.
+Exporting to `.glb` keeps the rig instead: when the scene has skins, blend shapes, curves or
+constraints, the file holds the joints, each bound mesh in its rest shape with joints and
+weights, blend shapes as morph targets and one animation clip sampled at every frame of the
+playback range (curves, layers, constraints and IK all baked into it). What glTF cannot hold is
+printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
+builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
 ## Rendering
 
@@ -218,6 +234,7 @@ samples per second.
 | `--samples N` | Samples per pixel, default 64 |
 | `--depth N` | Bounces, default 12 |
 | `--device auto\|cpu\|gpu` | `auto` uses a hardware GPU when there is one and falls back to the CPU; `gpu` fails if it cannot |
+| `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
@@ -233,7 +250,7 @@ or compositor reads: `albedo.R/G/B`, `N.X/Y/Z` (world-space normal), `Z` (distan
 camera), `motion.X/Y` and `variance`, all 32-bit float. The feature images come from the CPU path.
 
 `modelcraft-cli render-bench [--scenes a,b] [--size N] [--spp 1,4,16] [--seeds N] [--reference N]
-[--device cpu|gpu] [--order z|independent]` measures error against samples and time on the
+[--device cpu|gpu] [--order z|independent] [--guiding] [--splitting]` measures error against samples and time on the
 benchmark scenes, each against its own converged reference, and prints one JSON line per scene and
 a table ([performance.md](performance.md) explains the protocol).
 
