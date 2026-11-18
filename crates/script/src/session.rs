@@ -15,6 +15,7 @@ use crate::api::events::{Event, EventKind, MAX_FAILURES, ToolInfo};
 use crate::api::{self, events};
 use crate::error::{ErrorKind, ScriptError, from_eval, from_parse};
 use crate::host::{LineKind, OutLine, RunContext, Shared};
+use crate::library::{Library, MAX_MODULES, Resolver};
 use crate::limits::Limits;
 use crate::perm::Permissions;
 
@@ -55,6 +56,7 @@ impl RunReport {
 pub struct Session {
     engine: Engine,
     shared: Rc<Shared>,
+    library: Rc<Library>,
 }
 
 /// Puts the document back even if the run unwinds.
@@ -93,14 +95,16 @@ impl Session {
         let shared = Rc::new(Shared::new(limits.clone(), perms));
         let mut engine = Engine::new_raw();
         engine.register_global_module(StandardPackage::new().as_shared_module());
-        engine.set_module_resolver(rhai::module_resolvers::DummyModuleResolver::new());
+        let library = Rc::new(Library::new(limits.max_file_bytes));
+        engine.set_module_resolver(Resolver(library.clone()));
         engine.set_max_operations(limits.max_operations);
         engine.set_max_call_levels(limits.max_call_depth);
         engine.set_max_expr_depths(limits.max_expr_depth, limits.max_expr_depth);
         engine.set_max_string_size(limits.max_string_bytes);
         engine.set_max_array_size(limits.max_array_len);
         engine.set_max_map_size(limits.max_map_len);
-        engine.set_max_modules(0);
+        // Rhai counts every import statement; the library loader enforces the real cap.
+        engine.set_max_modules(MAX_MODULES * 2);
         engine.set_strict_variables(true);
         engine.disable_symbol("eval");
         let sh = shared.clone();
@@ -119,11 +123,17 @@ impl Session {
             None
         });
         api::register_all(&mut engine, &shared);
-        Session { engine, shared }
+        Session { engine, shared, library }
     }
 
     pub fn limits(&self) -> &Limits {
         &self.shared.limits
+    }
+
+    /// The folder `import \"name\" as m;` reads libraries from (the scripts folder); none turns
+    /// imports off. See [`crate::library`].
+    pub fn set_library(&self, root: Option<std::path::PathBuf>) {
+        self.library.set_root(root);
     }
 
     /// Change what files the next runs may touch.
@@ -161,7 +171,9 @@ impl Session {
     /// script registered earlier under the same name are replaced by the ones it registers now.
     pub fn run(&mut self, doc: &mut Document, ctx: &mut RunContext, name: &str, source: &str) -> RunReport {
         let limit = self.shared.limits.max_time;
-        self.drive(doc, ctx, name, limit, |engine, shared| {
+        let library = self.library.clone();
+        let kept: std::cell::RefCell<Vec<(String, rhai::Shared<rhai::Module>)>> = Default::default();
+        let report = self.drive(doc, ctx, name, limit, |engine, shared| {
             let mut ast = engine.compile(source).map_err(Failure::Parse)?;
             ast.set_source(name);
             if let Ok(mut r) = shared.registry.try_borrow_mut() {
@@ -169,9 +181,25 @@ impl Session {
                 r.owner = name.to_string();
                 r.ast = Some(Rc::new(ast.clone_functions_only()));
             }
+            // Modules the script imports are loaded now (cached for the run, so its own `import`
+            // statements reuse them) and kept as namespaces afterwards for its tools and callbacks.
+            if let Ok(mut k) = kept.try_borrow_mut() {
+                for (path, alias) in crate::library::imports(source) {
+                    // `cmd` and `global` are the engine's own namespaces.
+                    if !matches!(alias.as_str(), "cmd" | "global")
+                        && let Some(m) = library.load(engine, &path)
+                    {
+                        k.push((alias, m));
+                    }
+                }
+            }
             let mut scope = Scope::new();
             engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast).map_err(Failure::Eval)
-        })
+        });
+        for (alias, module) in kept.take() {
+            self.engine.register_static_module(alias, module);
+        }
+        report
     }
 
     /// The tools scripts registered, in registration order.
@@ -298,6 +326,7 @@ impl Session {
         s.commands_run.set(0);
         s.operations.set(0);
         s.selection_changed.set(false);
+        self.library.reset();
         let started = Instant::now();
         let mut report = RunReport::default();
 

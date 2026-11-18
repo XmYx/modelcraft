@@ -19,6 +19,7 @@ pub mod draft;
 mod error;
 pub mod highlight;
 mod host;
+pub mod library;
 mod limits;
 pub mod macros;
 mod pacing;

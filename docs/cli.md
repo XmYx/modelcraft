@@ -193,6 +193,7 @@ lets them write in `--out-dir`).
 |---|---|
 | `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
 | `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--library DIR` | The folder `import "lib/name" as m;` reads [libraries](scripting.md#libraries) from (default: the script's own folder; none for `-e`) |
 | `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
 | `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
 | `--no-save` | Run and report, write nothing |
