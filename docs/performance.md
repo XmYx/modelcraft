@@ -339,6 +339,67 @@ images, error against a 4096-sample reference:
 The tree has no orientation cones and does not split, so lights that face away still take
 samples; the references' many-light samplers do both.
 
+### Many lights: resampled direct lighting (`--restir`)
+
+`craft-render-core::restir` resamples the direct light at the first surface (Bitterli et al. 2020,
+ReSTIR DI) with the light tree as the source of candidates; `craft-render-gpu` runs the same
+four stages as compute kernels. `unbiased` is for final frames: `M` candidates per pixel and pass,
+one kept, a shadow ray for the kept one, then one pass of merging with the reservoirs of up to four
+neighbours, normalised exactly (a shadow ray from each merged pixel finds how many could have
+produced the kept point). `viewport` adds temporal reuse (the previous pass's reservoir at the same
+pixel, its count capped at 20 passes' worth) and normalises by the sum of counts, which needs no
+extra rays but is biased and correlates consecutive passes. Indirect bounces still use the light
+tree, so only the first bounce changes.
+
+Tests: the unbiased mode's mean image equals the plain estimator's within 2–5 % on every benchmark
+scene (measured on the benchmark scenes at 512 spp: 0.996–1.004 of the plain mean); a viewport render
+stays within 8 % of it (measured 0.92–0.99; it is darker near shadow edges and in partly occluded
+lighting); GPU and CPU images of the same samples agree to a relative MSE of 0.000001 on night-street
+(both modes), studio and interior.
+
+Night-street, 256×256, 5 seeds, reference 4096 spp. Mean relMSE at 1 / 4 / 16 / 64 / 256 spp.
+`M` is candidates and `k` merged neighbours. (The M=4, k=0 row used a reference of 2048 spp, whose own
+error is about twice as large.)
+
+| Estimator | relMSE | Seconds at 64 spp (CPU) / 256 spp (GPU) |
+|---|---|---|
+| CPU, plain (light tree) | 6.79 / 1.009 / 0.262 / 0.072 / – | 0.58 |
+| CPU, unbiased, M=8, k=4 | 1.026 / 0.276 / 0.080 / 0.0195 / – | 2.03 |
+| CPU, unbiased, M=16, k=0 | 1.153 / 0.280 / 0.071 / 0.0186 / – | 3.26 |
+| CPU, viewport, M=8, k=4 | 1.001 / 0.343 / 0.101 / 0.050 / – | 2.66 |
+| GPU, plain | 6.79 / 1.009 / 0.262 / 0.072 / 0.0198 | 0.059 |
+| GPU, unbiased, M=4, k=0 | – / – / – / 0.0308 / 0.0094 | 0.106 |
+| GPU, unbiased, M=8, k=4 | 1.026 / 0.275 / 0.080 / 0.0195 / 0.0058 | 0.161 |
+| GPU, unbiased, M=16, k=4 | 1.138 / 0.276 / 0.069 / 0.0189 / 0.0055 | 0.207 |
+| GPU, viewport, M=8, k=4 | 1.001 / 0.343 / 0.101 / 0.051 / 0.0369 | 0.144 |
+
+The CPU rows ran at a load average of 36–48 and the GPU rows at 27–35 (other builds; the GPU itself
+was idle), so seconds are upper bounds; errors do not depend on load.
+
+Read honestly:
+- **At equal samples** the unbiased mode lowers the error 3.3–3.7× on both devices (0.0198 → 0.0058
+  at 256 spp on the GPU), and the benefit stops at about that: the error left at 0.0055–0.006 comes
+  from the bounces after the first, which this technique does not touch (more candidates or
+  neighbours do not lower it).
+- **At equal time it is roughly even, not a win, on this scene.** The extra work costs 2–3.5× the
+  time of a plain sample (a candidate is a tree descent, a light point and a full BSDF
+  evaluation), so efficiency 1 / (relMSE × seconds) is 1.0–1.25× the plain estimator's on the GPU
+  (M=4: 1.16×) and 1.0–1.6× on the CPU (best at 1–4 spp). The research note's 2–10× target was
+  not met: our baseline, the light tree, is far stronger than the power sampling of the paper, and
+  most of what is left is indirect.
+- **The viewport mode is not for converging.** It cleans a few passes fastest (0.101 against
+  0.262 at 16 spp) and then stops improving (0.050 at 64 spp, 0.037 at 256 spp on the GPU) because
+  consecutive passes share reservoirs; its mean image is 1–8 % darker than the plain estimator's
+  (night-street 0.92–0.94, interior 0.94–0.96, studio and Cornell box 0.99, materials 0.96,
+  showcase 0.94–0.99).
+- Throughput on the GPU at 1024×1024 (64 spp, night-street): plain 316 M samples/s; unbiased
+  M=8,k=4 120 M/s (2.6× the time), M=4 149 M/s. The plumbing alone (M=1, no neighbours) costs
+  26 % more than a plain sample, each further candidate about 14 %, and four neighbours with their
+  exact normalisation about 40–47 %.
+- Where it should pay most is a scene whose cost is almost all first-bounce direct light from very
+  many lights (a long depth-1 render: CPU, 48×48, 10 seeds, 16 spp, relMSE 0.31 plain against 0.12
+  with M=16); it needs the following passes to be cheap for the whole picture to gain.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
