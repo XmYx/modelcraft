@@ -1,0 +1,1 @@
+- Organize objects: tags (display, render, protection, look at), display and render layers, instances, user attributes, attribute presets and pivots, plus smooth, flat, wireframe, see-through and bounding-box display modes.

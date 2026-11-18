@@ -181,6 +181,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             for (name, help) in modelcraft_engine::rig::COMMANDS {
                 println!("rig op={name}\t{help}");
             }
+            for (name, help) in modelcraft_engine::organize::COMMANDS {
+                println!("organize op={name}\t{help}");
+            }
             for (name, help) in modelcraft_engine::hair::COMMANDS {
                 println!("hair op={name}\t{help}");
             }

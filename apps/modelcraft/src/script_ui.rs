@@ -119,6 +119,7 @@ pub struct ScriptState {
     /// user's (or an agent's), and callbacks that answer them join the newest one.
     last_mark: usize,
     pub macros: crate::script_macro::MacroState,
+    pub recovery: crate::script_recover::Recovery,
 }
 
 impl Default for ScriptState {
@@ -163,6 +164,7 @@ impl ScriptState {
             was_playing: false,
             last_mark: 0,
             macros: Default::default(),
+            recovery: Default::default(),
         };
         s.reload();
         s
@@ -170,6 +172,16 @@ impl ScriptState {
 
     pub fn modified(&self) -> bool {
         self.text != self.saved
+    }
+
+    /// What the text is compared with to tell whether it is modified (the recovered text of an
+    /// earlier session is compared with the file it came from).
+    pub(crate) fn set_saved(&mut self, saved: String) {
+        self.saved = saved;
+    }
+
+    pub(crate) fn note_line(&mut self, kind: ConsoleKind, text: String) {
+        self.note(kind, text, None);
     }
 
     /// The name shown for the script and used in error messages.
@@ -200,7 +212,7 @@ fn first_comment(text: &str) -> String {
     text.lines().map(str::trim).find(|l| !l.is_empty()).and_then(|l| l.strip_prefix("//")).map(|l| l.trim().to_string()).unwrap_or_default()
 }
 
-fn read_script(path: &Path) -> Result<String, String> {
+pub(crate) fn read_script(path: &Path) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     if meta.len() > MAX_FILE_BYTES {
         return Err(crate::tlf!("{file} is larger than {size} bytes", file = path.display(), size = MAX_FILE_BYTES));
@@ -587,7 +599,7 @@ pub fn startup(app: &mut ModelApp) {
 
 // ---------------------------------------------------------------- files
 
-fn load(app: &mut ModelApp, path: &Path) {
+pub(crate) fn load(app: &mut ModelApp, path: &Path) {
     match read_script(path) {
         Ok(t) => {
             app.script.saved = t.clone();

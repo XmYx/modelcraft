@@ -196,6 +196,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             crate::sim_ui::menu(app, ui);
+            crate::organize_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
                 action_button(app, ui, Action::Palette);
@@ -550,6 +551,11 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c + egui::vec2(-2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
             p.circle_stroke(c + egui::vec2(2.5, 0.0), 3.0, egui::Stroke::new(1.2, k));
         }
+        ObjectKind::Instance { .. } => {
+            // An instance: the mesh diamond drawn dashed, linked to its master.
+            let pts = [c + egui::vec2(0.0, -5.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-5.0, 0.0)];
+            p.add(egui::Shape::dashed_line(&[pts[0], pts[1], pts[2], pts[3], pts[0]], egui::Stroke::new(1.2, blue), 2.0, 2.0));
+        }
         ObjectKind::Sim { .. } => {
             // A simulation: a falling dot over a small arc.
             let t = Color32::from_rgb(120, 220, 200);
@@ -662,7 +668,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         _ => {}
     }
-    if matches!(obj.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. }) {
+    if matches!(obj.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Instance { .. }) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
             let mut m = obj.material.clone();
             let mut rgb = [m.base_color[0], m.base_color[1], m.base_color[2]];
@@ -705,6 +711,7 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
     }
     crate::deform_ui::properties(app, ui, id);
     crate::constraint_ui::properties(app, ui, id);
+    crate::organize_ui::properties(app, ui, id);
     crate::hair_ui::properties(app, ui, id);
     if let Some(target) = app.edit_target() {
         history(app, ui, target);

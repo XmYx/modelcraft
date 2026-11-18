@@ -192,6 +192,7 @@ pub struct ModelApp {
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
     pub objects: crate::object_manager::State,
+    pub organize: crate::organize_ui::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -199,6 +200,8 @@ pub struct ModelApp {
     pub stroke: Option<crate::viewport::StrokeInput>,
     pub show_wire: bool,
     pub show_patches: bool,
+    /// How the viewport draws surfaces (an object's Display tag overrides it).
+    pub display_mode: modelcraft_engine::scene::DisplayMode,
     /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub screenshot: Option<PathBuf>,
@@ -257,6 +260,8 @@ impl ModelApp {
             crate::agents::start(&mut app, &cc.egui_ctx);
         }
         app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
+        let drafts = app.recovery_dir.as_ref().map(|d| d.join("scripts"));
+        crate::script_recover::init(&mut app, drafts);
         crate::script_ui::startup(&mut app);
         app
     }
@@ -318,6 +323,7 @@ impl ModelApp {
             unit: Default::default(),
             language: None,
             objects: Default::default(),
+            organize: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -325,6 +331,7 @@ impl ModelApp {
             stroke: None,
             show_wire: true,
             show_patches: false,
+            display_mode: Default::default(),
             sculpt_groups: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
@@ -893,6 +900,7 @@ impl ModelApp {
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
             Objects(op) => crate::object_manager::run(self, op),
+            Organize(op) => crate::organize_ui::run(self, op),
         }
     }
 
@@ -1226,6 +1234,7 @@ impl eframe::App for ModelApp {
     }
 
     fn on_exit(&mut self) {
+        crate::script_recover::flush(self);
         self.store_prefs();
         if let Some(store) = &mut self.prefs {
             let _ = store.flush();
@@ -1256,6 +1265,7 @@ impl ModelApp {
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
         crate::script_ui::tick(self);
+        crate::script_recover::tick(self, &ctx);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
@@ -1266,6 +1276,7 @@ impl ModelApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL)).show(ui, |ui| crate::dock::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         crate::prefs_ui::show(self, &ctx);
+        crate::organize_ui::show(self, &ctx);
         crate::radial::show(self, &ctx);
         self.screenshot_tick(&ctx);
         if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {
