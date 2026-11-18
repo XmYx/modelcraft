@@ -524,6 +524,7 @@ impl ModelApp {
                 self.doc.keep_history = keep;
                 self.selection.clear();
                 self.components.clear();
+                crate::script_ui::scene_loaded(self);
                 self.start_autosave();
                 self.status = tl!("New scene");
             }
@@ -1049,6 +1050,7 @@ impl ModelApp {
                     self.doc = doc;
                     self.selection.clear();
                     self.components.clear();
+                    crate::script_ui::scene_loaded(self);
                     self.status = match note {
                         Some(n) => crate::tlf!("Opened {file}. {note}", file = path.display(), note = history_note(&n)),
                         None => crate::tlf!("Opened {file}", file = path.display()),
@@ -1062,6 +1064,7 @@ impl ModelApp {
             }
         } else {
             self.run(Command::Import { path: path.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
+            crate::script_ui::scene_loaded(self);
             self.frame_selection();
         }
     }
@@ -1255,6 +1258,7 @@ impl ModelApp {
         crate::agents::tick(self);
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
+        crate::script_ui::tick(self);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
