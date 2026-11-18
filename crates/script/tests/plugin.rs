@@ -244,7 +244,14 @@ fn grants_decide_whether_to_ask_and_only_ask_about_what_is_new() {
     assert_eq!(g.status(&m(&["edit_scene"])), Status::Ready(vec![Permission::EditScene]));
     g.forget("row.tools");
     assert!(g.get("row.tools").is_none());
-    for junk in [&b""[..], b"{", b"[1]", b"{\"plugins\": 5}", b"{\"plugins\": {\"../x\": {\"permissions\": [\"edit_scene\"]}}}", b"{\"plugins\": {\"ok.id\": {\"permissions\": [\"root\"]}}}"] {
+    for junk in [
+        &b""[..],
+        b"{",
+        b"[1]",
+        b"{\"plugins\": 5}",
+        b"{\"plugins\": {\"../x\": {\"permissions\": [\"edit_scene\"]}}}",
+        b"{\"plugins\": {\"ok.id\": {\"permissions\": [\"root\"]}}}",
+    ] {
         std::fs::write(dir.join("plugin-grants.json"), junk).unwrap();
         let loaded = Grants::load(&dir);
         assert!(loaded.get("../x").is_none(), "{:?}", String::from_utf8_lossy(junk));
@@ -335,7 +342,9 @@ fn writing_is_confined_to_plugin_out_in_the_project_folder() {
     assert!(r.ok(), "{:?}", r.error);
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "hello");
     // Anywhere else in the project, or one level up, is refused even with the permission.
-    for elsewhere in [project.join("elsewhere.txt"), project.join("plugin-out").join("other.plugin").join("x.txt"), project.parent().unwrap().join("escaped.txt")] {
+    for elsewhere in
+        [project.join("elsewhere.txt"), project.join("plugin-out").join("other.plugin").join("x.txt"), project.parent().unwrap().join("escaped.txt")]
+    {
         let src = format!("write_text({:?}, \"x\");", elsewhere.display().to_string());
         let (_, r, _) = start3(&src, &[Permission::WriteProjectFiles], Some(&project));
         assert!(r.error.is_some(), "{}", elsewhere.display());

@@ -150,7 +150,10 @@ impl Manifest {
         if self.name.trim().is_empty() || self.name.chars().count() > 60 || self.name.chars().any(char::is_control) {
             return Err("name must be 1 to 60 characters without control characters".into());
         }
-        if self.description.chars().count() > 400 || self.author.chars().count() > 80 || self.description.chars().chain(self.author.chars()).any(|c| c.is_control() && c != '\n') {
+        if self.description.chars().count() > 400
+            || self.author.chars().count() > 80
+            || self.description.chars().chain(self.author.chars()).any(|c| c.is_control() && c != '\n')
+        {
             return Err("description (400 characters) and author (80) are too long or have control characters".into());
         }
         Version::parse(&self.version)?;
@@ -480,7 +483,8 @@ impl Grants {
 /// The policy and file permissions a plugin runs with, from what it was granted.
 pub fn sandbox(id: &str, plugin_dir: &Path, project_dir: Option<&Path>, granted: &[Permission]) -> (Policy, Permissions) {
     let has = |p: Permission| granted.contains(&p);
-    let policy = Policy { edit_scene: has(Permission::EditScene), register_tools: has(Permission::RegisterTools), listen_events: has(Permission::ListenEvents) };
+    let policy =
+        Policy { edit_scene: has(Permission::EditScene), register_tools: has(Permission::RegisterTools), listen_events: has(Permission::ListenEvents) };
     let mut perms = Permissions::none().with_base(plugin_dir).allow_read(plugin_dir);
     if let Some(project) = project_dir {
         if has(Permission::ReadProjectFiles) {

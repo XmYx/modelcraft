@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use egui::RichText;
 use modelcraft_script::RunContext;
-use modelcraft_script::plugin::{self, Grants, Installed, Installation, LoadedPlugin, Permission, Status};
+use modelcraft_script::plugin::{self, Grants, Installation, Installed, LoadedPlugin, Permission, Status};
 
 use crate::app::ModelApp;
 use crate::script_ui::ConsoleKind;
@@ -161,7 +161,9 @@ pub fn install_from(app: &mut ModelApp, src: &std::path::Path) {
         return;
     };
     match plugin::install(src, &dir) {
-        Ok(Installation::New(i)) => app.script.plugins.message = crate::tlf!("Installed {name} {version}", name = i.manifest.name, version = i.manifest.version),
+        Ok(Installation::New(i)) => {
+            app.script.plugins.message = crate::tlf!("Installed {name} {version}", name = i.manifest.name, version = i.manifest.version)
+        }
         Ok(Installation::Updated(i, old)) => {
             app.script.plugins.loaded.retain(|l| l.manifest.id != i.manifest.id);
             app.script.plugins.message = crate::tlf!("Updated {name} from {old} to {version}", name = i.manifest.name, old = old, version = i.manifest.version);
@@ -242,7 +244,12 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new(tl!("Plugins")).id(egui::Id::unique("plugins-window")).open(&mut open).collapsible(false).default_size([560.0, 480.0]).show(ctx, |ui| body(app, ui));
+    egui::Window::new(tl!("Plugins"))
+        .id(egui::Id::unique("plugins-window"))
+        .open(&mut open)
+        .collapsible(false)
+        .default_size([560.0, 480.0])
+        .show(ctx, |ui| body(app, ui));
     app.script.plugins.open = open;
 }
 
@@ -251,7 +258,9 @@ fn permission_list(ui: &mut egui::Ui, perms: &[Permission]) {
         let text = tl!(p.describe());
         let color = if p.is_sensitive() { theme::SELECT } else { theme::TEXT };
         let l = ui.label(RichText::new(format!("• {text}")).color(color));
-        ui.ctx().accesskit_node_builder(l.id, |n| n.set_label(if p.is_sensitive() { crate::tlf!("Needs care: {permission}", permission = text) } else { text.clone() }));
+        ui.ctx().accesskit_node_builder(l.id, |n| {
+            n.set_label(if p.is_sensitive() { crate::tlf!("Needs care: {permission}", permission = text) } else { text.clone() })
+        });
     }
 }
 
@@ -290,7 +299,11 @@ fn body(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ui.label(tl!("It asks to:"));
                 permission_list(ui, &new);
             }
-            ui.label(RichText::new(tl!("A plugin is a script: it cannot run programs, use the network or reach files outside what is listed.")).color(theme::TEXT_DIM).small());
+            ui.label(
+                RichText::new(tl!("A plugin is a script: it cannot run programs, use the network or reach files outside what is listed."))
+                    .color(theme::TEXT_DIM)
+                    .small(),
+            );
             ui.horizontal(|ui| {
                 let deny = ui.button(tl!("Don't Allow"));
                 if std::mem::take(&mut app.script.plugins.focus_prompt) {
