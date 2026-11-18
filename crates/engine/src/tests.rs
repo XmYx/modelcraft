@@ -176,7 +176,7 @@ fn commands_round_trip_as_json() {
     }
     let c: Command = serde_json::from_str(r#"{"cmd":"add_primitive","kind":"cube"}"#).unwrap();
     assert!(matches!(c, Command::AddPrimitive { .. }));
-    assert_eq!(crate::COMMANDS.len(), 35);
+    assert_eq!(crate::COMMANDS.len(), 38);
 }
 
 fn sculpt_positions(d: &Document) -> Vec<glam::Vec3> {
@@ -429,6 +429,127 @@ fn strokes_and_presets_keep_their_json_form() {
     }
 }
 
+fn quad() -> Command {
+    Command::AddMesh {
+        name: Some("Quad".into()),
+        parent: None,
+        positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+        faces: vec![vec![0, 1, 2, 3]],
+    }
+}
+
+#[test]
+fn add_mesh_and_set_positions_round_trip_and_validate() {
+    let mut d = Document::new();
+    let id = d.execute(quad()).unwrap().created[0];
+    assert_eq!(d.eval.evaluate(&d.scene, id).mesh.face_count(), 1);
+    // Faces that do not fit are dropped with a warning; no face left is an error and leaves no trace.
+    let out = d
+        .execute(Command::AddMesh {
+            name: None,
+            parent: None,
+            positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            faces: vec![vec![0, 1, 2], vec![0, 1, 9]],
+        })
+        .unwrap();
+    assert_eq!(out.warnings.len(), 1);
+    let before = d.undo.len();
+    assert!(d.execute(Command::AddMesh { name: None, parent: None, positions: vec![[0.0; 3]], faces: vec![vec![0, 1, 2]] }).is_err());
+    assert!(d.execute(Command::AddMesh { name: None, parent: None, positions: vec![], faces: vec![] }).is_err());
+    assert_eq!(d.undo.len(), before);
+
+    d.execute(Command::SetPositions { id, positions: vec![[0.0, 0.0, 1.0], [2.0, 0.0, 1.0], [2.0, 2.0, 1.0], [0.0, 2.0, 1.0]] }).unwrap();
+    let (lo, hi) = d.eval.evaluate(&d.scene, id).mesh.bounds();
+    assert_eq!((lo.z, hi.x), (1.0, 2.0));
+    // Wrong count, non-finite values and objects without a stored mesh are errors.
+    assert!(d.execute(Command::SetPositions { id, positions: vec![[0.0; 3]] }).is_err());
+    assert!(d.execute(Command::SetPositions { id, positions: vec![[f32::NAN, 0.0, 0.0]; 4] }).is_err());
+    let cube = add(&mut d, "cube");
+    assert!(d.execute(Command::SetPositions { id: cube, positions: vec![] }).is_err());
+    d.execute(Command::Undo).unwrap();
+    d.execute(Command::Undo).unwrap();
+    assert!(d.scene.get(cube).is_none());
+    let j = serde_json::to_string(&quad()).unwrap();
+    assert_eq!(serde_json::from_str::<Command>(&j).unwrap(), quad());
+}
+
+#[test]
+fn a_batch_is_one_undo_step_and_all_or_nothing() {
+    let mut d = Document::new();
+    let cmds = vec![
+        Command::AddPrimitive { kind: "cube".into(), name: None, parent: None },
+        Command::AddPrimitive { kind: "sphere".into(), name: None, parent: None },
+        Command::Batch { label: None, commands: vec![Command::AddGroup { name: None }] },
+    ];
+    let out = d.execute(Command::Batch { label: Some("Three".into()), commands: cmds }).unwrap();
+    assert_eq!(out.created.len(), 3);
+    assert_eq!(d.undo.len(), 1);
+    assert_eq!(d.undo.labels(), vec!["Three".to_string()]);
+    d.execute(Command::Undo).unwrap();
+    assert!(d.scene.is_empty());
+    d.execute(Command::Redo).unwrap();
+    assert_eq!(d.scene.len(), 3);
+    // A failing member undoes the others and names itself.
+    let n = d.scene.len();
+    let bad = Command::Batch {
+        label: None,
+        commands: vec![Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }, Command::Delete { ids: vec![ObjectId(999)] }],
+    };
+    let e = d.execute(bad).unwrap_err().to_string();
+    assert!(e.contains("batch command 2"), "{e}");
+    assert_eq!(d.scene.len(), n);
+    assert_eq!(d.undo.len(), 1);
+    // Sculpting, undo and runaway nesting are refused.
+    assert!(d.execute(Command::Batch { label: None, commands: vec![Command::Undo] }).is_err());
+    let mut deep = Command::AddGroup { name: None };
+    for _ in 0..crate::MAX_BATCH_DEPTH + 1 {
+        deep = Command::Batch { label: None, commands: vec![deep] };
+    }
+    assert!(d.execute(deep).is_err());
+}
+
+#[test]
+fn undo_groups_merge_roll_back_and_nest() {
+    let mut d = Document::new();
+    add(&mut d, "cube");
+    d.begin_group("Scatter");
+    for _ in 0..5 {
+        add(&mut d, "sphere");
+    }
+    assert_eq!(d.undo.len(), 6);
+    assert_eq!(d.end_group(false), 5);
+    assert_eq!(d.undo.labels(), vec!["Add cube".to_string(), "Scatter".to_string()]);
+    assert_eq!(d.scene.len(), 6);
+    d.execute(Command::Undo).unwrap();
+    assert_eq!(d.scene.len(), 1, "one undo removes the whole group");
+    d.execute(Command::Redo).unwrap();
+    assert_eq!(d.scene.len(), 6);
+
+    // Rollback leaves the scene as it was and nothing to redo.
+    let steps = d.undo.len();
+    d.begin_group("Oops");
+    add(&mut d, "torus");
+    add(&mut d, "cone");
+    d.end_group(true);
+    assert_eq!(d.scene.len(), 6);
+    assert_eq!(d.undo.len(), steps);
+    assert!(!d.undo.can_redo());
+
+    // Nested groups make one step; undo and redo are refused while a group is open.
+    d.begin_group("Outer");
+    add(&mut d, "cube");
+    d.begin_group("Inner");
+    add(&mut d, "cube");
+    assert!(d.execute(Command::Undo).is_err());
+    assert_eq!(d.group_depth(), 2);
+    d.end_group(false);
+    add(&mut d, "cube");
+    d.end_group(false);
+    assert_eq!(d.undo.len(), steps + 1);
+    assert_eq!(d.undo.labels().last().map(String::as_str), Some("Outer"));
+    assert_eq!(d.end_group(false), 0, "no open group");
+}
+
 #[test]
 fn a_history_that_no_longer_replays_is_dropped_not_fatal() {
     let dir = tmp("history-bad");
@@ -502,6 +623,28 @@ fn fbx_export_and_import_with_axis_and_unit_conversion() {
     // The command keeps its old JSON form when no conversion is asked for.
     let j = serde_json::to_string(&Command::Import { path: "a.fbx".into(), up: Up::Auto, scale: None }).unwrap();
     assert_eq!(j, r#"{"cmd":"import","path":"a.fbx"}"#);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_merged_undo_group_is_saved_with_the_history_and_replays_as_one_step() {
+    let dir = tmp("history-group");
+    let p = dir.join("g.modelcraft");
+    let mut d = Document::new();
+    add(&mut d, "cube");
+    d.begin_group("Row");
+    add(&mut d, "sphere");
+    add(&mut d, "torus");
+    d.end_group(false);
+    assert_eq!(d.undo.labels(), vec!["Add cube".to_string(), "Row".to_string()]);
+    d.save_as(&p).unwrap();
+    let mut r = Document::open(&p).unwrap();
+    assert_eq!(r.scene.len(), 3);
+    assert_eq!(r.undo.labels(), vec!["Add cube".to_string(), "Row".to_string()], "the group is still one step");
+    r.execute(Command::Undo).unwrap();
+    assert_eq!(r.scene.len(), 1);
+    r.execute(Command::Redo).unwrap();
+    assert_eq!(r.scene.len(), 3);
     let _ = std::fs::remove_dir_all(dir);
 }
 

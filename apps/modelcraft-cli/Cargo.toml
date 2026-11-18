@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 modelcraft-engine = { workspace = true }
+modelcraft-script = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-ops = { workspace = true }
 modelcraft-sculpt = { workspace = true }

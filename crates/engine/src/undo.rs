@@ -123,6 +123,24 @@ impl UndoStack {
     pub fn redo_labels(&self) -> Vec<String> {
         self.undone.iter().rev().map(|e| e.label().to_string()).collect()
     }
+    /// Remove and return the newest `n` done entries, oldest of them first.
+    pub fn take_last(&mut self, n: usize) -> Vec<UndoEntry> {
+        let mut v = Vec::with_capacity(n);
+        for _ in 0..n {
+            match self.done.pop_back() {
+                Some(e) => v.push(e),
+                None => break,
+            }
+        }
+        v.reverse();
+        self.recount();
+        v
+    }
+    /// Forget everything that could be redone.
+    pub fn clear_redo(&mut self) {
+        self.undone.clear();
+        self.recount();
+    }
     pub fn clear(&mut self) {
         self.done.clear();
         self.undone.clear();

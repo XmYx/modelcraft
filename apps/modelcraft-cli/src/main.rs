@@ -5,6 +5,7 @@
 
 mod bench_cmd;
 mod render_cmd;
+mod script_cmd;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -50,11 +51,13 @@ Commands:
   mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
   bench --groups [--polys N]        patch, visibility, region, shell, trim and occlusion times
+  uv <file>                         UV islands and distortion of every mesh object (JSON lines)
+  uv-bench [--segments N]           unwrap a sphere of N×N/2 quads: time and distortion
   -h, --help | -V, --version
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nRendering:\n{}\n{}\n", render_cmd::USAGE, bench_cmd::USAGE)
+    format!("{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n", script_cmd::USAGE, render_cmd::USAGE, bench_cmd::USAGE)
 }
 
 fn main() -> ExitCode {
@@ -225,6 +228,8 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         }
         "control" => control(a.first().map(String::as_str)),
         "render-bench" => bench_cmd::run_all(&bench_cmd::parse(a)?),
+        "run-script" => script_cmd::run(a, load, save),
+        "batch-script" => script_cmd::batch(a, load, save),
         "render" => {
             let out = flag(a, "-o").ok_or_else(|| format!("missing -o <out.png>\n\n{}", render_cmd::USAGE))?;
             let report = render_cmd::run(arg(a, 0, "file or builtin:NAME")?, &out, &render_cmd::parse(a)?, load)?;
@@ -254,6 +259,8 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             mcp::serve(backend)
         }
         "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
+        "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
+        "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
@@ -523,6 +530,61 @@ fn serve(project: Option<&str>, port: Option<u16>) -> Result<(), String> {
             d.detach_journal();
         }
     }
+    Ok(())
+}
+
+fn distortion_json(d: &modelcraft_engine::uv::Distortion) -> serde_json::Value {
+    serde_json::json!({
+        "triangles": d.triangles, "flipped": d.flipped,
+        "mean_angle_error_deg": d.mean_angle_error_deg, "max_angle_error_deg": d.max_angle_error_deg,
+        "mean_stretch": d.mean_stretch, "max_stretch": d.max_stretch,
+        "area_rms_log": d.area_rms_log, "min_area_ratio": d.min_area_ratio, "max_area_ratio": d.max_area_ratio,
+    })
+}
+
+/// One JSON line per mesh object: its UV islands (cut along the UV discontinuities) and the
+/// distortion of its UVs. Objects without UVs report `"uvs":false`.
+fn uv_report(d: &mut Document) -> Result<(), String> {
+    use modelcraft_engine::uv::{Charts, SeamSet, measure};
+    let ids: Vec<_> = d.scene.objects().iter().filter(|o| matches!(o.kind, ObjectKind::Mesh { .. })).map(|o| o.id).collect();
+    for id in ids {
+        let m = d.eval.evaluate(&d.scene, id).mesh;
+        let name = d.scene.get(id).map(|o| o.name.clone()).unwrap_or_default();
+        if !m.has_uvs() {
+            println!("{}", serde_json::json!({ "id": id.0, "name": name, "uvs": false }));
+            continue;
+        }
+        let charts = Charts::build(&m, &SeamSet::from_uv_discontinuities(&m)).map_err(|e| e.to_string())?;
+        let (dist, _) = measure(&m);
+        println!("{}", serde_json::json!({ "id": id.0, "name": name, "uvs": true, "islands": charts.islands.len(), "distortion": distortion_json(&dist) }));
+    }
+    Ok(())
+}
+
+/// Unwrap a welded UV sphere (no seams: the automatic cut gives it a path) and report time and
+/// distortion. Reproduces the numbers in `docs/performance.md`.
+fn uv_bench(segments: u32) -> Result<(), String> {
+    use modelcraft_engine::ops::{edit, primitives::Primitive};
+    use modelcraft_engine::uv::{SeamSet, UnwrapOptions, measure, unwrap_mesh};
+    let segments = segments.clamp(4, 512);
+    let rings = (segments / 2).max(2);
+    let t = Instant::now();
+    let raw = Primitive::Sphere { radius: 1.0, segments, rings }.build().map_err(|e| e.to_string())?;
+    let mesh = edit::weld(&raw, 1e-5).map_err(|e| e.to_string())?;
+    println!("sphere {segments}x{rings}: {} quads, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
+    let t = Instant::now();
+    let (out, res) = unwrap_mesh(&mesh, &SeamSet::new(), &UnwrapOptions::default()).map_err(|e| e.to_string())?;
+    let solve = ms(t);
+    let isl = res.islands.first();
+    println!(
+        "unwrap (auto cut of {} edges, LSCM): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
+        res.cut.edges_added,
+        isl.map_or(0, |i| i.iterations),
+        isl.map_or(0.0, |i| i.residual),
+        isl.is_some_and(|i| i.converged)
+    );
+    let (dist, _) = measure(&out);
+    println!("{}", distortion_json(&dist));
     Ok(())
 }
 

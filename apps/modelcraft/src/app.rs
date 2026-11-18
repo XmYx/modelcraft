@@ -1196,6 +1196,7 @@ impl ModelApp {
         self.frames += 1;
         crate::agents::tick(self);
         self.shortcuts(&ctx);
+        crate::constraint_ui::tick(self);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);

@@ -55,6 +55,18 @@ first; `active_layer` is the layer keys go to. Defaults are left out. The attrib
 sorted and de-duplicated, counts are capped (2²⁰ keys per curve, 200 000 tracks) and tracks on
 missing objects are removed. Builds from before animation ignore the block.
 
+## Constraints
+
+`scene.constraints` (left out when the scene has none) holds `list`: `{id, name, target, enabled?,
+weight?, type, …}` with `type` one of `point`, `orient`, `scale`, `parent` (`sources`:
+`[{object, weight?, offset?}]`), `aim` (`sources`, `aim`, `up`, `up_object?`, `up_vector`,
+`offset`), `ik` (`goal`, `pole?`, `bones`, `solver`, `iterations`, `tolerance`), `driven` (`path`,
+`driver`, `driver_path`, `curve`) and `expression` (`path`, `expr`); and `authored`: per driven
+object id, the transform it has without its constraints (the objects themselves hold the solved
+pose). On load, weights and solver settings are clamped, duplicate ids and constraints on missing
+objects are dropped, and counts are capped (4096 constraints, 16 sources each). Builds from before
+constraints ignore the block.
+
 ## Point cache (`.mcpc`)
 
 `modelcraft-cli bake` writes the vertices of one object at a run of frames (little-endian):

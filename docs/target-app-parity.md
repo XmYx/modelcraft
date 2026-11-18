@@ -103,7 +103,7 @@ full 3D suite stays in the denominator, however large.
 | Professional modeler | No | Missing knife, booleans, vertex snapping, UV tools, normals editing, splines |
 | Motion designer | No | No cloners, effectors, fields or animation |
 | Animator keying objects and parameters | Preview | Keys on any number, curves, timeline, auto-key, Key Sheet and Curve Editor; no layers, clips or motion paths |
-| Rigging, character animation | No | Joints, automatic skin weights and both skinning methods work; no IK, constraints, blend shapes or weight brush yet |
+| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending and constraints work; no blend shapes, weight brush or control shapes yet |
 | Simulation | No | Not started |
 | Look development and final rendering | No | Viewport shading only; no offline renderer |
 
@@ -180,7 +180,7 @@ Weight: 5
 | Node view of the dependency graph | M | M | L | |
 | Connect any attribute to any other | M | M | M | |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
-| Expressions and driven keys | C M | M | M | |
+| Expressions and driven keys | C M | P | M | Formulas over the frame, time and any attribute of any object (a small safe language: arithmetic, comparisons, 24 functions; property-tested against hostile text) and driven keys through a curve, both ordered with the constraints; the driven curve has no editor yet, formulas give one number (no vectors or strings) |
 | Procedural geometry node graph (scene nodes, graph-based effects) | C M | M | XL | |
 | Parallel graph evaluation | C M | M | L | Single-threaded today |
 
@@ -319,7 +319,7 @@ Weight: 4
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | M | L | |
-| Seams and unwrap (conformal / angle-based) | C M Z | M | L | Waits for craft-mesh-ops `unwrap_uvs` (craft-libs #1233) |
+| Seams and unwrap (conformal / angle-based) | C M Z | P | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as a history step and CLI; no seam UI yet, no angle-based solver |
 | Packing | C M | M | M | |
 | UDIM tiles | C M Z | M | M | |
 | Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
@@ -467,9 +467,9 @@ Weight: 6
 | Skinning with linear blend and weight painting | C M | P | L | A skin under a mesh binds it to joints and evaluates through the graph (only the skin re-runs when a joint moves); weights are painted by a command dab with falloff, not yet by a viewport brush; weights are saved as JSON |
 | Dual-quaternion skinning | C M | D | S | Per skin switch (keyable); a half twist keeps the radius where linear blending collapses (tests) |
 | Weight tools: normalize, mirror, copy, prune, automatic binding | C M | P | M | Automatic binding by heat equilibrium over the surface (from the 2007 paper, without its visibility test) or by distance; normalize, prune, limit, mirror with joint renaming, set by number; no copying between meshes |
-| IK solvers: two-bone, multi-chain, spline IK | C M | M | L | |
-| FK / IK switching and blending | C M | M | M | |
-| Constraints: parent, point, orient, aim, scale, pole vector | C M | M | M | |
+| IK solvers: two-bone, multi-chain, spline IK | C M | P | L | Closed-form two-bone with a pole, FABRIK and CCD for longer chains (a pole turns the solved chain), solved in dependency order after the goal's own constraints; bone lengths kept (property tests); no spline IK, no joint limits, no stretch |
+| FK / IK switching and blending | C M | D | M | An IK constraint's weight blends from the joints' own rotations to the solved ones and is keyable (`constraint.<id>.weight`); Match FK to IK and Match IK to FK switch without a jump (tests) |
+| Constraints: parent, point, orient, aim, scale, pole vector | C M | D | M | Position, rotation, scale, as-child and look-at constraints with several weighted sources, kept offsets and a keyable weight; the pole is part of the IK constraint; evaluated in dependency order with cycles reported and skipped (tests); no per-axis skipping |
 | Blend shapes with in-betweens | C M Z | M | M | |
 | Corrective shapes driven by pose | C M | M | M | |
 | Control shapes and character sets | C M | M | M | |
@@ -493,7 +493,7 @@ Weight: 8
 | Animation layers | C M | P | M | Adding and replacing layers with weight and mute; keys go to the active layer and keying a pose solves for the layer's value; flatten to the base; no solo or lock, weights are not keyable, layers cannot be reordered |
 | Motion paths and ghosting | C M | P | M | Paths of selected moving objects in the viewport with a tick per frame and a mark per key, following animated parents; no ghosts, paths are not editable |
 | Viewport preview capture (playblast) | C M | M | S | |
-| Bake constraints and simulations to keys | C M | M | S | |
+| Bake constraints and simulations to keys | C M | P | S | Bake Constraints to Keys samples the solved transforms over a range into curves (angles kept continuous) and switches the constraints off, in one undo step; there are no simulations to bake |
 | Curve cleanup: Euler filter, simplify | C M | D | S | Smooth Rotation Keys removes whole-turn and flip jumps (property test: every rotation kept); simplify within a tolerance; bake to linear keys |
 | Follow a spline | C M | M | S | |
 | Audio in the timeline | C M | M | S | |
@@ -548,10 +548,10 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Embedded scripting language | C M Z | M | L | |
-| Object-model API over every command | C M Z | P | M | Every action is a serializable command; no language binds it |
+| Embedded scripting language | C M Z | P | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant ([scripting.md](scripting.md)); runs from `modelcraft-cli run-script`, no in-app way to run a script yet |
+| Object-model API over every command | C M Z | D | M | `cmd::<name>` for every registry command, scene queries, dependency graph, history-node evaluation, mesh handles, undo groups |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
-| Headless scene API (batch interpreter) | C M | P | S | `run` and `exec` take command files; no queries or control flow |
+| Headless scene API (batch interpreter) | C M | D | S | `modelcraft-cli run-script`: queries, control flow and commands over a project |
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | M | M | |
@@ -629,6 +629,7 @@ Weight: 3
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
@@ -655,6 +656,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | IK and constraints: constraints and FK/IK blending done; IK solvers, baking constraints, expressions and driven keys partial |
 | 2026-11-17 | minor | Rigging: dual-quaternion skinning done; joints, linear-blend skinning and weight tools partial |
 | 2026-11-17 | minor | Animation tools: rotation cleanup done; animation layers, motion paths, point cache and turntable partial |
 | 2026-11-17 | minor | Animation core: keys on any attribute, timeline, auto-key done; Curve Editor, Key Sheet and curve cleanup partial |

@@ -10,7 +10,7 @@ use modelcraft_ops::primitives::Primitive;
 use modelcraft_scene::{Cloner, Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
-use crate::command::{Command, MaskOp, Outcome};
+use crate::command::{Command, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome};
 use crate::undo::{UndoEntry, UndoStack};
 
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +43,14 @@ pub struct SculptSession {
     pub unsynced: bool,
 }
 
+/// Where an open undo group started.
+struct GroupStart {
+    label: String,
+    /// `undo.len() + undo.dropped` when the group began, so entries dropped for memory do not
+    /// shift the count.
+    mark: usize,
+}
+
 pub struct Document {
     pub scene: Scene,
     pub eval: Evaluator,
@@ -53,6 +61,8 @@ pub struct Document {
     pub sculpt: Option<SculptSession>,
     journal: Option<journal::Journal>,
     replaying: bool,
+    /// Open undo groups ([`Document::begin_group`]), innermost last.
+    groups: Vec<GroupStart>,
     /// Journal entries found next to an opened file, waiting for [`Document::recover`].
     pub pending_recovery: usize,
     /// The frame the journal last recorded (scrubbing is journaled lazily, see `execute`).
@@ -87,6 +97,7 @@ impl Document {
             sculpt: None,
             journal: None,
             replaying: false,
+            groups: Vec::new(),
             pending_recovery: 0,
             journal_frame: 0.0,
             keep_history: true,
@@ -434,6 +445,9 @@ impl Document {
             self.journal_frame = self.scene.anim.frame;
             self.log(&Command::Anim(crate::anim::AnimCommand::SetTime { frame: self.journal_frame }));
         }
+        if !self.groups.is_empty() && matches!(cmd, Command::Undo | Command::Redo) {
+            return invalid("undo and redo are not available inside an undo group");
+        }
         let out = match &cmd {
             Command::Anim(crate::anim::AnimCommand::SetTime { frame }) => {
                 if !frame.is_finite() {
@@ -600,6 +614,8 @@ impl Document {
                 if self.scene.anim.auto_key && !matches!(cmd, Command::Anim(_)) {
                     modelcraft_scene::anim::auto_key(&before, &mut self.scene);
                 }
+                // Constraints follow whatever the command moved.
+                self.scene.solve_constraints();
                 let after = self.scene.clone();
                 let bytes = 512 + self.scene.len() * 300 + self.scene.anim.heap_bytes();
                 self.undo.push(UndoEntry::Scene { label: cmd.label(), cmd: Box::new(cmd.clone()), before: Box::new(before), after: Box::new(after), bytes });
@@ -683,6 +699,32 @@ impl Document {
             ObjectKind::Mesh { steps, .. } => Ok(steps),
             _ => invalid("not a mesh object"),
         }
+    }
+
+    fn apply_batch(&mut self, commands: &[Command], depth: usize, out: &mut Outcome) -> Result<(), EngineError> {
+        if depth >= MAX_BATCH_DEPTH {
+            return invalid("batches are nested too deeply");
+        }
+        if commands.len() > MAX_BATCH {
+            return invalid(format!("a batch holds at most {MAX_BATCH} commands"));
+        }
+        for (i, c) in commands.iter().enumerate() {
+            let r = match c {
+                Command::Batch { commands, .. } => {
+                    let mut inner = Outcome::default();
+                    self.apply_batch(commands, depth + 1, &mut inner).map(|()| inner)
+                }
+                _ => self.apply_scene(c),
+            };
+            match r {
+                Ok(o) => {
+                    out.created.extend(o.created);
+                    out.warnings.extend(o.warnings);
+                }
+                Err(e) => return invalid(format!("batch command {} ({}): {e}", i + 1, c.label())),
+            }
+        }
+        Ok(())
     }
 
     fn apply_scene(&mut self, cmd: &Command) -> Result<Outcome, EngineError> {
@@ -875,6 +917,36 @@ impl Document {
                 out.created.extend(ids);
             }
             Command::Anim(a) => crate::anim::apply(&mut self.scene, a, &mut out)?,
+            Command::AddMesh { name, parent, positions, faces } => {
+                if faces.is_empty() {
+                    return invalid("a mesh needs at least one face");
+                }
+                let pos: Vec<glam::Vec3> = positions.iter().map(|p| glam::Vec3::from_array(*p)).collect();
+                let polys: Vec<modelcraft_mesh::Polygon> = faces.iter().map(|f| modelcraft_mesh::Polygon::new(f.clone())).collect();
+                let (mesh, report) = modelcraft_mesh::PolyMesh::build(pos, polys).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                if mesh.face_count() == 0 {
+                    return invalid("none of the faces fit the vertices");
+                }
+                if report.dropped > 0 {
+                    out.warnings.push(format!("{} faces were dropped (an index out of range, fewer than three corners or a repeated vertex)", report.dropped));
+                }
+                if report.fixed_positions > 0 {
+                    out.warnings.push(format!("{} non-finite positions were moved to the origin", report.fixed_positions));
+                }
+                let name = self.scene.unique_name(name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Mesh"));
+                let id = self.scene.add(name, ObjectKind::Mesh { source: Source::Mesh { mesh: Arc::new(mesh) }, steps: vec![] }, *parent)?;
+                out.created.push(id);
+            }
+            Command::SetPositions { id, positions } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => {
+                    let pos: Vec<glam::Vec3> = positions.iter().map(|p| glam::Vec3::from_array(*p)).collect();
+                    let mut m = (**mesh).clone();
+                    m.set_positions(&pos).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                    *mesh = Arc::new(m);
+                }
+                _ => return invalid("only objects that store their own mesh have positions to set (collapse a primitive first)"),
+            },
+            Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
             Command::Undo
             | Command::Redo
@@ -893,6 +965,57 @@ impl Document {
             }
         }
         Ok(out)
+    }
+
+    // ---- undo groups ----
+
+    /// Start an undo group: every change until the matching [`Document::end_group`] becomes one
+    /// undo step named `label`. Groups nest; only the outermost one makes a step.
+    pub fn begin_group(&mut self, label: &str) {
+        self.sync_sculpt();
+        let mark = self.undo.len() + self.undo.dropped;
+        self.groups.push(GroupStart { label: label.to_string(), mark });
+    }
+
+    /// Close the innermost group. With `rollback` its changes are undone and forgotten (no redo
+    /// step is left); otherwise the entries it made are merged into one. Sculpt strokes inside a
+    /// group stay separate entries (they store vertex deltas, not scenes). Returns how many
+    /// entries the group made.
+    pub fn end_group(&mut self, rollback: bool) -> usize {
+        let Some(g) = self.groups.pop() else { return 0 };
+        self.sync_sculpt();
+        let made = (self.undo.len() + self.undo.dropped).saturating_sub(g.mark).min(self.undo.len());
+        if rollback {
+            for _ in 0..made {
+                self.undo_once();
+            }
+            self.undo.clear_redo();
+            return made;
+        }
+        if made > 1 && self.groups.is_empty() {
+            let entries = self.undo.take_last(made);
+            if entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. })) {
+                let first = entries.first();
+                let last = entries.last();
+                if let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (first, last) {
+                    let (before, after) = (before.clone(), after.clone());
+                    let bytes = 512 + self.scene.len() * 300;
+                    // The merged step replays as one batch of what the group ran.
+                    let cmd = Command::Batch { label: Some(g.label.clone()), commands: entries.iter().map(|e| e.command().clone()).collect() };
+                    self.undo.push(UndoEntry::Scene { label: g.label, cmd: Box::new(cmd), before, after, bytes });
+                    return made;
+                }
+            }
+            for e in entries {
+                self.undo.push_done(e);
+            }
+        }
+        made
+    }
+
+    /// How many undo groups are open.
+    pub fn group_depth(&self) -> usize {
+        self.groups.len()
     }
 
     // ---- export ----

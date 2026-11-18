@@ -235,6 +235,29 @@ pub enum Command {
         id: ObjectId,
         thickness: f32,
     },
+    /// Add a mesh object from raw geometry: `positions` as [x, y, z] and `faces` as lists of
+    /// vertex indices (counter-clockwise). Faces that do not fit the vertices are dropped and
+    /// reported as a warning, like an import.
+    AddMesh {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        parent: Option<ObjectId>,
+        positions: Vec<[f32; 3]>,
+        faces: Vec<Vec<u32>>,
+    },
+    /// Replace the vertex positions of an object that stores its own mesh (an import, an
+    /// `add_mesh`, a collapsed object). One [x, y, z] per vertex.
+    SetPositions {
+        id: ObjectId,
+        positions: Vec<[f32; 3]>,
+    },
+    /// Run several scene commands as one undo step; all of them or none.
+    Batch {
+        #[serde(default)]
+        label: Option<String>,
+        commands: Vec<Command>,
+    },
     Undo,
     Redo,
     /// Keys, curves and time: `{"cmd":"anim","op":"set_key",…}` ([`crate::anim::AnimCommand`]).
@@ -242,6 +265,10 @@ pub enum Command {
     /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
     Rig(crate::rig::RigCommand),
 }
+
+/// Most commands one batch may hold, and how deep batches may nest.
+pub const MAX_BATCH: usize = 100_000;
+pub const MAX_BATCH_DEPTH: usize = 8;
 
 fn two() -> u32 {
     2
@@ -294,6 +321,9 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "sculpt_shape",
         "Edit shape layers: id, op (add {name?}, remove {index}, merge {index}, strength {index, strength}, select {index or null}, rename {index, name})",
     ),
+    ("add_mesh", "Add a mesh from raw geometry: positions [[x,y,z]…], faces [[i,j,k…]…], name?, parent?"),
+    ("set_positions", "Replace the vertex positions of a stored mesh: id, positions [[x,y,z]…]"),
+    ("batch", "Run several scene commands as one undo step, all or none: commands [{cmd…}…], label?"),
     ("undo", "Undo the last change"),
     ("redo", "Redo the last undone change"),
 ];
@@ -369,6 +399,9 @@ impl Command {
             .into(),
             Command::SculptClip { .. } => "Clip to plane".into(),
             Command::SculptExtract { .. } => "Extract shell".into(),
+            Command::AddMesh { .. } => "Add mesh".into(),
+            Command::SetPositions { .. } => "Set positions".into(),
+            Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),
             Command::Undo => "Undo".into(),
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),

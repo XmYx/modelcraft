@@ -14,11 +14,15 @@ modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdo
 modelcraft-cli bake scene.modelcraft Cube out.mcpc --start 0 --end 48 --step 1 --world
                                               # an object's vertices per frame (point cache)
 modelcraft-cli cache-info out.mcpc            # a point cache's header and bounds
+modelcraft-cli run-script scene.modelcraft tool.rhai -o out.modelcraft   # a script over a project
+
 modelcraft-cli bench-skin --verts 100000 --joints 60 --frames 120
                                               # bind, pose and skin a procedural tube
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
 modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell, trim and occlusion timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
+modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
+modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
 ```
 
 ## Commands
@@ -42,7 +46,7 @@ Object ids are numbers (`info` prints them).
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …} |
-| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) |
+| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
@@ -57,6 +61,9 @@ Object ids are numbers (`info` prints them).
 | `sculpt_extract` | `id`, `thickness`: a new object from the fully masked faces, as a closed shell |
 | `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
 | `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
+| `add_mesh` | `positions` [[x,y,z]…], `faces` [[i,j,k…]…], `name?`, `parent?` (a mesh from raw geometry; faces that do not fit are dropped with a warning) |
+| `set_positions` | `id`, `positions` [[x,y,z]…] (objects that store their own mesh; one per vertex) |
+| `batch` | `commands` [{cmd…}…], `label?` (scene commands as one undo step, all or none) |
 | `undo`, `redo` | — |
 
 ### Animation
@@ -99,6 +106,32 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
     '{"cmd":"anim","op":"set_time","frame":12}' | modelcraft-cli control
 ```
 
+## Scripts
+
+```
+modelcraft-cli run-script <project|new> <script.rhai> [-o <out>] [options]
+modelcraft-cli run-script <project|new> -e '<script text>' [options]
+modelcraft-cli batch-script <script.rhai> <file>... --out-dir DIR [--format modelcraft|glb|obj|stl] [options]
+```
+
+`run-script` runs a [Rhai script](scripting.md) over a project (or an empty scene) and saves like
+`run` does. `batch-script` runs one script over many files (projects or any importable model),
+saves each result in `--out-dir` (named after the input; a second input with the same file name gets `_2`, `_3`, ... instead of overwriting the first), prints one line per file and exits with status 1 if any file
+failed (`--stop-on-error` stops at the first). Scripts have no file access unless it is granted:
+they may read the script's folder and the project's folder, and write nowhere (`batch-script`
+lets them write in `--out-dir`).
+
+| Option | Meaning |
+|---|---|
+| `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
+| `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
+| `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
+| `--no-save` | Run and report, write nothing |
+
+Errors print as `file:line:column: message` and give a non-zero exit status. Commands the script
+ran before an error stay applied in memory but nothing is saved.
+
 ### Rigging
 
 One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","parent":3}`.
@@ -112,6 +145,26 @@ One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","
 | `unbind_skin` | `mesh` |
 | `set_skin` | `mesh`, `dual_quaternion` |
 | `edit_weights` | `mesh`, `weights`: `normalize` · `prune` + `threshold` · `limit` + `max` · `mirror` + `axis`, `find`, `replace`, `tolerance` · `set` + `points`, `joint`, `weight` · `paint` + `joint`, `center` [x, y, z] in the mesh's space, `radius`, `strength` (−1..1) |
+
+| `add_constraint` | `kind` (point, orient, scale, parent, aim), `target`, `sources`, `weights?` (one per source), `maintain_offset` (default true), `aim` (default y), `up` (default z), `up_object?`, `name?` |
+| `add_ik` | `end` (the chain's end joint), `goal?` (an object; a group is created at the end joint without it), `pole?`, `bones` (default 2), `solver` (auto, two_bone, fabrik, ccd), `name?` |
+| `set_driven_key` | `driver`, `driver_path`, `target`, `path`, `driver_value?`, `value?` (the attributes' current values without them): one key of the curve that maps the driver's value to the driven attribute |
+| `set_expression` | `target`, `path`, `expr` (empty removes it) |
+| `set_constraint` | `id`, `weight?` (0–1; the IK/FK blend of an IK constraint), `enabled?`, `name?`, `source_weights?`, `solver?`, `iterations?`, `pole?` (an object id, 0 for none) |
+| `remove_constraint` | `id` |
+| `match_ik` | `id`, `to`: `fk` (the joints keep the solved pose, blend 0) or `ik` (the goal and pole move onto the chain, blend 1) |
+| `bake_constraints` | `objects`, `start?`, `end?` (the playback range without them), `step` (default 1), `keep?`: key the solved transforms, then switch the constraints off |
+
+Constraints run after every command and frame change, in dependency order: a constraint that reads
+what another writes runs after it, and constraints that depend on themselves are skipped and named
+in the command's `warnings`. A constraint's weight is the attribute `constraint.<id>.weight` of its
+target, so `anim set_key` keys it (an IK/FK switch over time).
+
+An expression is one formula giving one number: `+ - * / % ^`, comparisons, `&&`, `||`, `!`,
+`cond ? a : b`, brackets, the constants `pi`, `tau`, `e`, and the functions `sin cos tan asin acos
+atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smoothstep deg rad`.
+Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
+`@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
 
 A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
 
