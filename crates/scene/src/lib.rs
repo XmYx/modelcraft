@@ -25,6 +25,7 @@ mod eval;
 pub mod pick;
 pub mod point_deform;
 pub mod rig;
+pub mod snap;
 mod rle;
 pub mod sim;
 
