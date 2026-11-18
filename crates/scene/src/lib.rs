@@ -22,6 +22,7 @@ pub mod anim;
 pub mod attr;
 pub mod constraint;
 mod eval;
+pub mod hair;
 pub mod pick;
 pub mod point_deform;
 pub mod rig;
@@ -32,6 +33,7 @@ use std::sync::Arc;
 
 use glam::{Mat4, Quat, Vec3};
 pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
+pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
@@ -352,6 +354,10 @@ pub enum StepOp {
         /// The solver for each island: least-squares conformal or angle-based flattening.
         #[serde(default)]
         method: UnwrapMethod,
+        /// Also cut along every border between two patches (polygon groups), so each patch
+        /// becomes an island.
+        #[serde(default)]
+        from_patches: bool,
     },
     /// Pack the islands the UVs already form into the unit square: `margin` between them as a
     /// fraction of the square, optional rotation, and an even texel density.
@@ -362,6 +368,13 @@ pub enum StepOp {
         rotation: Rotation,
         #[serde(default = "default_density")]
         density: Density,
+        /// Spread the islands over this many UDIM tiles (1 is the unit square).
+        #[serde(default = "default_tiles")]
+        tiles: u32,
+        /// Pack into as many tiles as this texel density needs (UV units per metre of surface),
+        /// at most 100; overrides `tiles`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        texel_density: Option<f32>,
     },
     /// Give the corners of `faces` (all faces when empty) UVs from a planar, box, cylindrical,
     /// spherical or camera projection of their positions.
@@ -410,6 +423,12 @@ pub enum StepOp {
         #[serde(default)]
         mode: modelcraft_uv::RelaxMode,
     },
+    /// Set the UV of every corner (in corner order), as computed by a UV transfer from another
+    /// mesh. A mesh with another number of corners (the history before this step changed) keeps
+    /// its own UVs and the step reports an error.
+    SetUvs {
+        uvs: Arc<Vec<[f32; 2]>>,
+    },
     /// Lay the selected chains of UV edges on the line between their ends.
     StraightenUvs {
         #[serde(default)]
@@ -440,6 +459,10 @@ pub struct UvPin {
 
 fn default_margin() -> f32 {
     0.01
+}
+
+fn default_tiles() -> u32 {
+    1
 }
 
 fn default_relax_iterations() -> u32 {
@@ -490,6 +513,7 @@ impl StepOp {
             StepOp::StitchUvs { align: true, .. } => "Stitch UV islands",
             StepOp::StitchUvs { .. } => "Weld UVs",
             StepOp::RelaxUvs { .. } => "Relax UVs",
+            StepOp::SetUvs { .. } => "Transfer UVs",
             StepOp::StraightenUvs { .. } => "Straighten UVs",
         }
     }
@@ -508,6 +532,7 @@ impl StepOp {
             StepOp::TransformUvs { corners, .. } => corners.len() * 4,
             StepOp::StitchUvs { edges, .. } => edges.len() * 4,
             StepOp::RelaxUvs { corners, .. } | StepOp::StraightenUvs { corners, .. } => corners.len() * 4,
+            StepOp::SetUvs { uvs } => uvs.len() * 8,
             StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }
@@ -542,6 +567,11 @@ pub enum ObjectKind {
     Deformer {
         deformer: Deformer,
     },
+    /// A falloff field. Inside a deformer it sets how strongly the deformer acts at each point
+    /// (the field's own transform places it in the deformer's frame); several fields combine.
+    Field {
+        field: Field,
+    },
     /// A joint of a skeleton: a transform drawn as a bone to each child joint ([`rig`]).
     Joint {
         radius: f32,
@@ -561,6 +591,11 @@ pub enum ObjectKind {
         #[serde(default)]
         target: Option<ObjectId>,
     },
+    /// Hair growing from its parent mesh: guide curves, how render hairs are made from them, and
+    /// the maps that steer growth and grooming ([`hair`]).
+    Hair {
+        hair: Arc<hair::HairData>,
+    },
     /// A simulation driving its parent mesh: settings, and the cache the last bake produced
     /// ([`sim`]).
     Sim {
@@ -575,10 +610,12 @@ impl ObjectKind {
             ObjectKind::Mesh { .. } => "Mesh",
             ObjectKind::SmoothCage { .. } => "Smooth cage",
             ObjectKind::Deformer { .. } => "Deformer",
+            ObjectKind::Field { .. } => "Falloff field",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
         }
     }
@@ -619,6 +656,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::Hair { hair } => hair.heap_bytes(),
             ObjectKind::Sim { sim } => sim.heap_bytes(),
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
@@ -745,6 +783,7 @@ impl Scene {
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        hair::repair(&mut self);
         sim::repair(&mut self);
         point_deform::repair(&mut self);
         self.sets.truncate(MAX_SETS);
@@ -1000,6 +1039,7 @@ impl Scene {
         match self.get(parent).map(|p| &p.kind) {
             Some(ObjectKind::SmoothCage { .. }) => true,
             Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            Some(ObjectKind::Sim { .. }) => self.is_particles(parent) && self.generator_input(parent) == Some(id),
             _ => false,
         }
     }
@@ -1019,6 +1059,19 @@ impl Scene {
             c = o.parent.and_then(|p| self.get(p));
         }
         true
+    }
+
+    /// The falloff fields inside `id` (a deformer), each with the matrix taking the deformer's
+    /// frame into its own. Hidden fields are off.
+    pub fn field_stack(&self, id: ObjectId) -> FieldStack {
+        let mut stack = FieldStack::new();
+        for c in self.children(id) {
+            let Some(o) = self.get(c) else { continue };
+            if let (true, ObjectKind::Field { field }) = (o.visible, &o.kind) {
+                stack.push(o.transform.matrix().inverse(), field.clone());
+            }
+        }
+        stack
     }
 
     /// Combined revision of an object and everything its output depends on (children for
@@ -1060,3 +1113,5 @@ impl Scene {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod uv_tests;

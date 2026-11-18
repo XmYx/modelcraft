@@ -96,10 +96,26 @@ impl GrowSpec {
 
 /// Guide curves: `len()` strands of `points_per_strand()` points each. Point 0 of a strand is its root.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "RawGuides")]
 pub struct Guides {
     roots: Vec<SurfacePoint>,
     points_per_strand: usize,
     points: Vec<Vec3>,
+}
+
+/// The stored form of [`Guides`]: read from a file, then checked by [`Guides::from_parts`].
+#[derive(serde::Deserialize)]
+struct RawGuides {
+    roots: Vec<SurfacePoint>,
+    points_per_strand: usize,
+    points: Vec<Vec3>,
+}
+
+impl TryFrom<RawGuides> for Guides {
+    type Error = HairError;
+    fn try_from(r: RawGuides) -> Result<Guides, HairError> {
+        Guides::from_parts(r.roots, r.points_per_strand, r.points, &Limits::default())
+    }
 }
 
 impl Guides {
