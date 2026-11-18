@@ -182,7 +182,10 @@ pub fn apply(doc: &mut Document, cmd: &HairCommand, out: &mut Outcome) -> Result
             });
             let data = HairData::grow(&evaluated, grow, interp).map_err(err)?;
             let name = doc.scene.unique_name(name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Hair"));
-            out.created.push(doc.scene.add(name, ObjectKind::Hair { hair: Arc::new(data) }, Some(*mesh))?);
+            let id = doc.scene.add(name, ObjectKind::Hair { hair: Arc::new(data) }, Some(*mesh))?;
+            // A hair colour to start from (Properties edits the material like any object's).
+            doc.scene.edit(id)?.material.base_color = [0.45, 0.30, 0.18, 1.0];
+            out.created.push(id);
         }
         HairCommand::Remove { id } => {
             hair_data(doc, *id)?;

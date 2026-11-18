@@ -28,6 +28,8 @@ pub enum HairAction {
     SymmetryY,
     SymmetryZ,
     ApplyAll,
+    ToggleStrands,
+    ToggleGuides,
     BrushBigger,
     BrushSmaller,
     MaskAll,
@@ -40,7 +42,7 @@ impl HairAction {
         use HairAction::*;
         let mut v = vec![Add, Remove, Regrow, ToggleGroom];
         v.extend(BrushKind::ALL.map(Brush));
-        v.extend([SymmetryX, SymmetryY, SymmetryZ, ApplyAll, BrushBigger, BrushSmaller, MaskAll, MaskInvert, MaskClear]);
+        v.extend([SymmetryX, SymmetryY, SymmetryZ, ApplyAll, ToggleStrands, ToggleGuides, BrushBigger, BrushSmaller, MaskAll, MaskInvert, MaskClear]);
         v
     }
 
@@ -55,6 +57,8 @@ impl HairAction {
             HairAction::SymmetryY => tl!("Hair Symmetry Y"),
             HairAction::SymmetryZ => tl!("Hair Symmetry Z"),
             HairAction::ApplyAll => tl!("Apply Hair Brush to All Guides"),
+            HairAction::ToggleStrands => tl!("Show Hair Strands"),
+            HairAction::ToggleGuides => tl!("Show Hair Guides"),
             HairAction::BrushBigger => tl!("Larger Hair Brush"),
             HairAction::BrushSmaller => tl!("Smaller Hair Brush"),
             HairAction::MaskAll => tl!("Hair Mask All"),
@@ -74,6 +78,8 @@ impl HairAction {
             HairAction::SymmetryY => "hair.symmetry_y".into(),
             HairAction::SymmetryZ => "hair.symmetry_z".into(),
             HairAction::ApplyAll => "hair.apply_all".into(),
+            HairAction::ToggleStrands => "hair.show_strands".into(),
+            HairAction::ToggleGuides => "hair.show_guides".into(),
             HairAction::BrushBigger => "hair.brush_bigger".into(),
             HairAction::BrushSmaller => "hair.brush_smaller".into(),
             HairAction::MaskAll => "hair.mask_all".into(),
@@ -116,8 +122,45 @@ pub struct StrokeState {
     last_dab: Option<Vec3>,
 }
 
+/// Most strands drawn while editing when "limit" is on, whatever the percentage.
+pub const EDIT_STRAND_LIMIT: usize = 100_000;
+
+/// What the viewport shows of the hair.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplaySettings {
+    /// Draw render hairs (on the GPU path).
+    pub strands: bool,
+    /// Draw the guide curves of selected hair (always when strands are off).
+    pub guides: bool,
+    /// Share of the strands drawn, 0.1 to 100.
+    pub percent: f32,
+    /// Never draw more than [`EDIT_STRAND_LIMIT`] strands, whatever the percentage.
+    pub limit: bool,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> DisplaySettings {
+        DisplaySettings { strands: true, guides: true, percent: 100.0, limit: true }
+    }
+}
+
+/// How many of `total` strands the viewport draws.
+pub fn strands_to_draw(total: usize, d: &DisplaySettings) -> usize {
+    if total == 0 || !d.strands {
+        return 0;
+    }
+    let share = if d.percent.is_finite() { f64::from(d.percent).clamp(0.1, 100.0) } else { 100.0 };
+    // The small subtraction keeps 0.1 % of 1,000 at one strand, not two (an f32 0.1 is a little over).
+    let mut n = (total as f64 * share / 100.0 - 1e-4).ceil() as usize;
+    if d.limit {
+        n = n.min(EDIT_STRAND_LIMIT);
+    }
+    n.clamp(1, total)
+}
+
 /// Grooming state of the window.
 pub struct GroomUi {
+    pub display: DisplaySettings,
     /// The pointer grooms (rather than selects) while a hair object is selected.
     pub active: bool,
     pub brush: Brush,
@@ -136,6 +179,7 @@ pub struct GroomUi {
 impl Default for GroomUi {
     fn default() -> GroomUi {
         GroomUi {
+            display: DisplaySettings::default(),
             active: false,
             brush: Brush::new(BrushKind::Comb),
             symmetry: Symmetry::default(),
@@ -218,6 +262,14 @@ pub fn act(app: &mut ModelApp, a: HairAction) {
             };
             *flag = !*flag;
             app.status = if *flag { crate::tlf!("{action} on", action = a.label()) } else { crate::tlf!("{action} off", action = a.label()) };
+        }
+        HairAction::ToggleStrands => {
+            app.groom.display.strands = !app.groom.display.strands;
+            app.status = if app.groom.display.strands { tl!("Hair strands shown") } else { tl!("Hair strands hidden") };
+        }
+        HairAction::ToggleGuides => {
+            app.groom.display.guides = !app.groom.display.guides;
+            app.status = if app.groom.display.guides { tl!("Hair guides shown") } else { tl!("Hair guides hidden") };
         }
         HairAction::BrushBigger => scale_radius(app, 1.25),
         HairAction::BrushSmaller => scale_radius(app, 0.8),
@@ -388,6 +440,28 @@ fn guides_and_render(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
     let Some((_, mut grow, mut interp)) = app.groom.draft.clone() else { return };
     let mut render_changed = false;
     ui.add_space(6.0);
+    ui.label(RichText::new(tl!("Display")).strong());
+    let mut d = app.groom.display;
+    for (on, action) in [(&mut d.strands, HairAction::ToggleStrands), (&mut d.guides, HairAction::ToggleGuides)] {
+        let r = ui.checkbox(on, action.label());
+        set_name(ui, &r, action.label());
+    }
+    let r = ui.checkbox(&mut d.limit, crate::tlf!("Limit to {count} strands while editing", count = EDIT_STRAND_LIMIT));
+    set_name(ui, &r, tl!("Limit strands while editing"));
+    ui.horizontal(|ui| {
+        num(ui, &mut d.percent, 0.5, 0.1..=100.0, tl!("Hair display percent"));
+    });
+    app.groom.display = d;
+    if let Some(ObjectKind::Hair { hair }) = app.doc.scene.get(id).map(|o| &o.kind)
+        && let Some(emitter) = emitter_of(app, id)
+    {
+        let hair = hair.clone();
+        let mesh = app.doc.eval.evaluate(&app.doc.scene, emitter).mesh;
+        let total = hair.strand_count(&mesh);
+        let shown = strands_to_draw(total, &app.groom.display);
+        ui.label(RichText::new(crate::tlf!("Showing {shown} of {total} strands", shown = shown, total = total)).color(theme::TEXT_DIM).small());
+    }
+    ui.add_space(6.0);
     ui.label(RichText::new(tl!("Guides")).strong());
     egui::Grid::new("hair-grow").num_columns(2).show(ui, |ui| {
         let mut n = match grow.amount {
@@ -472,6 +546,10 @@ pub fn guide_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
         let world = scene.world_matrix(emitter);
         let guides = app.groom.preview.as_ref().filter(|(id, _)| *id == o.id).map_or(&hair.guides, |(_, g)| g);
         let selected = app.selection.contains(&o.id) || app.selection.contains(&emitter);
+        let editing = app.groom.stroke.as_ref().is_some_and(|s| s.hair == o.id);
+        if !editing && !(app.groom.display.guides && (selected || !app.groom.display.strands)) {
+            continue;
+        }
         let color = if selected { [0.95, 0.78, 0.42, 1.0] } else { [0.62, 0.55, 0.42, 0.9] };
         for i in 0..guides.len() {
             for w in guides.strand(i).windows(2) {
@@ -480,6 +558,42 @@ pub fn guide_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
                 }
                 out.push((world.transform_point3(w[0]).to_array(), world.transform_point3(w[1]).to_array(), color));
             }
+        }
+    }
+    out
+}
+
+/// The hair to draw this frame on the GPU path: uploads (or reuses) each hair's strands, a prefix of
+/// the groom sized by the display settings, and returns what to draw. A hair being groomed shows its
+/// guides only until the stroke ends.
+pub fn hair_specs(doc: &mut modelcraft_engine::Document, groom: &GroomUi, selection: &[ObjectId], g: &mut crate::gpu::GpuState) -> Vec<crate::gpu::HairSpec> {
+    let _ = selection;
+    let hairs: Vec<(ObjectId, ObjectId, u64, std::sync::Arc<modelcraft_engine::scene::hair::HairData>, [f32; 4])> = doc
+        .scene
+        .objects()
+        .iter()
+        .filter(|o| doc.scene.visible(o.id))
+        .filter_map(|o| match (&o.kind, o.parent) {
+            (ObjectKind::Hair { hair }, Some(emitter)) => Some((o.id, emitter, o.rev, hair.clone(), o.material.base_color)),
+            _ => None,
+        })
+        .take(64)
+        .collect();
+    let mut out = Vec::new();
+    for (id, emitter, rev, hair, color) in hairs {
+        if groom.stroke.as_ref().is_some_and(|s| s.hair == id) {
+            continue;
+        }
+        let mesh = doc.eval.evaluate(&doc.scene, emitter).mesh;
+        let wanted = strands_to_draw(hair.strand_count(&mesh), &groom.display);
+        if wanted == 0 {
+            continue;
+        }
+        let emitter_rev = doc.scene.get(emitter).map_or(0, |e| e.rev);
+        let key_rev = rev.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ emitter_rev;
+        let build = |n: usize| hair.strands_with_amount(&mesh, Amount::Count(n)).ok();
+        if let Some(fraction) = g.hair(id.0, key_rev, wanted, build) {
+            out.push(crate::gpu::HairSpec { key: id.0, model: doc.scene.world_matrix(emitter), color: [color[0], color[1], color[2], 0.9], fraction });
         }
     }
     out

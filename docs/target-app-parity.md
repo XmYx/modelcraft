@@ -529,7 +529,7 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Guide curves on a surface; comb, cut, length brushes | C M Z | D | L | Add Hair grows seeded guides on a mesh (count, length, jitter, density map); comb, cut, length, puff, smooth, clump and frizz brushes by pointer (Shift smooths, Ctrl inverts), by typing (Properties and the palette) and as `hair` commands; symmetry on X, Y, Z, a per-vertex mask, one undo step per stroke, saved with the project; guides drawn as lines in the viewport; no hair cards or per-guide selection yet |
-| Render hair interpolated from guides: density, clumping, frizz | C M | P | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k), with clump, frizz, width taper and hard memory caps, editable in Properties; the viewport shows the guides only, and the renderer does not see strands yet |
+| Render hair interpolated from guides: density, clumping, frizz | C M | D | L | `modelcraft-hair` blends up to millions of strands from the guides (barycentric or nearest-k) with density map, clump, frizz, width taper and hard memory caps, editable in Properties; the viewport draws them on the GPU as one call with a display percentage and a 100,000-strand edit limit (1,000,000 strands at 821 fps, 10 % at 3,443 fps on an RTX 4090, 1920x1080, `docs/performance.md`); guides show for selected hair; no strand shading in the viewport, and the path tracer does not see strands yet (see Hair and fibre shading) |
 | Sculpted fibre meshes | Z | M | M | |
 | Hair to cards / geometry | C M | M | M | |
 | Import and export of curve grooms | C M | M | S | |
