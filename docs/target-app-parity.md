@@ -319,15 +319,16 @@ Weight: 4
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
-| Seams and unwrap (conformal / angle-based) | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport; no angle-based (ABF) solver |
-| Packing | C M | P | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density as a history step and CLI; no UI yet |
+| Seams and conformal unwrap | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport |
+| Angle-based unwrap (ABF) | C M Z | M | M | |
+| Packing | C M | D | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density (a work bound and a shelf fallback above 500 islands); Pack UV Islands in the UV Editor and menu, history step, CLI |
 | UDIM tiles | C M Z | M | M | |
-| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | `modelcraft-uvpack`: all five, per face selection, as a history step and CLI; no UI yet |
+| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode); camera projection through the history step and CLI only |
 | Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
 | Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
-| UV layout export as an image | C M Z | P | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines, from the engine and `modelcraft-cli export-uv`; no menu entry yet. UVs round-trip exactly through GLB and OBJ (tested) |
+| UV layout export as an image | C M Z | D | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines from the UV Editor, the UV menu and `modelcraft-cli export-uv`. UVs round-trip exactly through GLB and OBJ (tested) |
 
 ## Sculpting: brushes, strokes and masks
 
