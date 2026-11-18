@@ -11,6 +11,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::cloth::ClothSettings;
+use crate::particles::ParticleSettings;
 use crate::rigid::RigidSettings;
 use crate::{DEFAULT_CACHE_BYTES, FrameCache, MAX_CACHE_BYTES, SimTiming};
 
@@ -25,6 +26,8 @@ pub enum SimKind {
     Rigid(RigidSettings),
     /// Cloth: stretch, shear and bend constraints with collisions, pins and wind ([`crate::cloth`]).
     Cloth(ClothSettings),
+    /// Particles born from the parent mesh and shown as instances ([`crate::particles`]).
+    Particles(ParticleSettings),
 }
 
 impl SimKind {
@@ -34,7 +37,14 @@ impl SimKind {
             SimKind::Cache => "Cache",
             SimKind::Rigid(_) => "Rigid body",
             SimKind::Cloth(_) => "Cloth",
+            SimKind::Particles(_) => "Particles",
         }
+    }
+
+    /// Whether the cache holds the points of the parent mesh (so the mesh is shown deformed).
+    /// Particles are shown as instances instead.
+    pub fn drives_mesh(&self) -> bool {
+        !matches!(self, SimKind::Particles(_))
     }
 
     /// Whether baking this kind runs a solver (a cache from a file has nothing to run).
@@ -102,6 +112,7 @@ impl SimObject {
         match &mut self.kind {
             SimKind::Rigid(r) => r.sanitize(),
             SimKind::Cloth(c) => c.sanitize(),
+            SimKind::Particles(p) => p.sanitize(),
             SimKind::Cache => {}
         }
         self.max_cache_mib = self.max_cache_mib.clamp(1, (MAX_CACHE_BYTES >> 20) as u32);

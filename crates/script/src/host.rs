@@ -190,6 +190,7 @@ impl Shared {
             | Command::SculptClip { .. }
             | Command::SculptExtract { .. }
             | Command::SculptProject { .. }
+            | Command::TransferUvs { .. }
             | Command::AddMesh { .. }
             | Command::SetPositions { .. }
             | Command::Anim(_)

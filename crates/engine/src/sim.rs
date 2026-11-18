@@ -11,6 +11,7 @@ use modelcraft_formats::FormatError;
 use modelcraft_formats::pointcache::PointCache;
 use modelcraft_scene::{ObjectId, ObjectKind, SceneError};
 use modelcraft_sim::cloth::ClothSettings;
+use modelcraft_sim::particles::{EmitterKind, ParticleSettings};
 use modelcraft_sim::rigid::RigidSettings;
 use modelcraft_sim::{SimKind, SimObject, SimTiming};
 use serde::{Deserialize, Serialize};
@@ -74,7 +75,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("attach_cache", "Play a .mcpc point cache on a mesh: mesh, path, start_frame? (the scene frame of the file's first sample)"),
     ("set", "Change a simulation: id, start_frame?, end_frame?, fps?, substeps? (1 to 64), seed?, max_cache_mib?"),
     ("clear_cache", "Throw a baked cache away: id"),
-    ("add", "Give a mesh a simulation: mesh, kind (rigid_active, rigid_passive, cloth)"),
+    ("add", "Give a mesh a simulation: mesh, kind (rigid_active, rigid_passive, cloth, particles)"),
     (
         "set_kind",
         "Replace a simulation's settings: id, kind {type: rigid, role, shape, mass, friction, bounciness, velocity, spin, gravity, ground, joints, …}",
@@ -190,17 +191,29 @@ pub fn apply(doc: &mut Document, cmd: &SimCommand, out: &mut Outcome) -> Result<
             }
         }
         SimCommand::Add { mesh, kind } => {
-            if !matches!(doc.scene.get(*mesh).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
+            let is_mesh = matches!(doc.scene.get(*mesh).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }));
+            if doc.scene.get(*mesh).is_none() {
+                return Err(SceneError::NoObject(*mesh).into());
+            }
+            // Particles can be born from any object (a point emitter); the others drive a mesh.
+            if !is_mesh && kind != "particles" {
                 return invalid("a simulation drives a mesh object");
             }
             if sim_of(doc, *mesh).is_some() {
-                return invalid("the mesh already has a simulation: delete it first");
+                return invalid("the object already has a simulation: delete it first");
             }
             let (kind, label) = match kind.as_str() {
                 "rigid_active" => (SimKind::Rigid(RigidSettings::default()), "Rigid body"),
                 "rigid_passive" => (SimKind::Rigid(RigidSettings::passive()), "Collider"),
                 "cloth" => (SimKind::Cloth(ClothSettings::default()), "Cloth"),
-                other => return invalid(format!("unknown simulation {other:?} (rigid_active, rigid_passive, cloth)")),
+                "particles" => {
+                    let mut p = ParticleSettings::default();
+                    if !is_mesh {
+                        p.emitter = EmitterKind::Point;
+                    }
+                    (SimKind::Particles(p), "Particles")
+                }
+                other => return invalid(format!("unknown simulation {other:?} (rigid_active, rigid_passive, cloth, particles)")),
             };
             let mut sim = SimObject::new(kind);
             let t = doc.scene.anim.time;

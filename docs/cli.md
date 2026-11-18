@@ -8,7 +8,7 @@ modelcraft-cli run scene.modelcraft script.jsonl -o out.modelcraft
 modelcraft-cli info scene.modelcraft          # object tree with counts
 modelcraft-cli validate model.glb             # evaluate and check every mesh
 modelcraft-cli export scene.modelcraft out.glb
-modelcraft-cli export-uv scene.modelcraft layout.png --size 2048   # UV layout as SVG or PNG
+modelcraft-cli export-uv scene.modelcraft layout.png --size 2048   # UV layout as SVG or PNG (--udim: one file per tile)
 modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
@@ -50,7 +50,7 @@ Object ids are numbers (`info` prints them).
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …} |
-| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin, method (lscm, abf)} · {op: stitch_uvs, edges, align?, scale?} · {op: relax_uvs, corners, iterations, mode (rigid, conformal)} · {op: straighten_uvs, corners, strength} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform)} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) · {op: decimate, ratio} (keeps about `ratio` of the triangles, 0..1, with UVs and patches; the result is triangles) |
+| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin, method (lscm, abf), from_patches?} · {op: stitch_uvs, edges, align?, scale?} · {op: relax_uvs, corners, iterations, mode (rigid, conformal)} · {op: straighten_uvs, corners, strength} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform), tiles?, texel_density?} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) · {op: decimate, ratio} (keeps about `ratio` of the triangles, 0..1, with UVs and patches; the result is triangles) |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
@@ -112,8 +112,23 @@ frame, so moving objects, deformed meshes and baked rigid bodies all work; a clo
 its colliders back. A cloth is baked on its own (`bake` on it), and a cloth baked earlier is a
 collider for the next. Edits to the colliders do not mark a cloth's cache stale.
 
-`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`
-and `sim-bench cloth` measure a bake.
+`particles` (`add` with `kind: "particles"`, under the emitter object) is a particle system shown as
+instances. Its settings (`kind` with `type: "particles"`): `emitter` (`point` at the object's
+origin, `surface` of the parent mesh, `volume` inside it), `rate` per second and `burst` at the start
+frame, `lifetime` and `speed` with their `_variation`, `direction` (`normal`, `fixed` with
+`fixed_direction`, `random`) and a `spread` cone in degrees, `inherit` (the emitter's own speed),
+`gravity`, `drag` (against the air, or the `wind` with its `turbulence`), a `noise_*` acceleration
+field, `attractors` (`attract` or `vortex`, `position`, `strength`, `radius`, `axis`), `collide`
+with `bounciness` and `friction` (against every other visible mesh, or `collide_with`),
+`capacity` (the slots of the pool: the most alive at once), and the drawn `size` with
+`size_variation`. A pool slot is one point of the cache and a dead slot is stored as NaN. The cache is
+in world space, so moving the system's own object does not move the particles. The system shows its
+pool as instances of the first mesh inside it, or of a small sphere; the system object's own
+material colours them. The viewport and the path-traced render draw the instances; up to 10,000
+are drawn at once.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`,
+`sim-bench cloth` and `sim-bench particles` measure a bake.
 
 ### Animation
 
@@ -205,6 +220,15 @@ The mask (1 where brushes act fully, 0 where they never touch a guide) and the d
 `regrow` puts guides) are values on the emitter's vertices. Limits (checked before allocating):
 200,000 guides, 5,000,000 hairs, 64 points per strand and 40 million points per operation, 50,000
 dabs per stroke.
+
+```
+modelcraft-cli macro-script <commands.jsonl|project.journal> [--name NAME] [-o <out.rhai>]
+```
+
+`macro-script` writes a [recorded macro](scripting.md#recorded-macros) script from one JSON command
+per line (as `run` reads them) or from a crash journal, printing it without `-o`. It replays the
+commands on an empty scene to learn which objects each one creates, so the script names them
+instead of relying on their numbers, and the script repeats the commands as one undo step.
 
 ### Rigging
 
