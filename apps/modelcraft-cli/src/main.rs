@@ -894,6 +894,7 @@ fn bench(polys: u32, dabs: usize) -> Result<(), String> {
                             selected: false,
                             show_mask: true,
                             patch_tint: false,
+                            uv_checker: false,
                             roughness: 0.5,
                         }],
                         lines: &[],

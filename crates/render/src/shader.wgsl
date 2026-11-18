@@ -22,6 +22,7 @@ struct VIn {
     @location(1) normal: vec3<f32>,
     @location(2) mask: f32,
     @location(3) patch_id: f32,
+    @location(4) uv: vec2<f32>,
 };
 
 struct VOut {
@@ -31,6 +32,7 @@ struct VOut {
     @location(2) mask: f32,
     // Flat: a triangle takes the patch of its first vertex, so shared vertices do not blend ids.
     @location(3) @interpolate(flat) patch_id: f32,
+    @location(4) uv: vec2<f32>,
 };
 
 @vertex
@@ -43,6 +45,7 @@ fn vs_mesh(v: VIn) -> VOut {
     o.normal = (draw.model * vec4<f32>(v.normal, 0.0)).xyz;
     o.mask = v.mask;
     o.patch_id = v.patch_id;
+    o.uv = v.uv;
     return o;
 }
 
@@ -59,7 +62,14 @@ fn fs_mesh(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32
     }
     let v = normalize(cam.eye.xyz - i.world);
     var base = draw.color.rgb;
-    if (draw.flags.z > 0.5) {
+    if (draw.flags.z > 1.5) {
+        // UV checker: eight cells to the unit square, tinted along u (red) and v (green) so a
+        // stretched or mirrored layout shows.
+        let cell = floor(i.uv * 8.0);
+        let k = abs(fract((cell.x + cell.y) * 0.5) * 2.0);
+        let tint = vec3<f32>(0.55 + 0.45 * fract(i.uv.x), 0.55 + 0.45 * fract(i.uv.y), 0.62);
+        base = mix(vec3<f32>(0.86), vec3<f32>(0.30), k) * tint;
+    } else if (draw.flags.z > 0.5) {
         base = mix(base, 0.35 + 0.6 * hash(i.patch_id + 1.0), 0.55);
     }
     // Light rig in view-relative terms so the model always reads well.
