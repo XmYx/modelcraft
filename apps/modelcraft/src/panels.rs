@@ -10,7 +10,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, MODIFIERS, PRIMITIVES};
+use crate::actions::{self, ARRAYS, Action, CLONERS, DEFORMERS, FIELDS, MODIFIERS, PRIMITIVES};
 use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::dock::Move;
 use crate::theme;
@@ -98,6 +98,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
                 ui.separator();
                 action_button(app, ui, Action::AddCage);
+                for a in ARRAYS {
+                    action_button(app, ui, Action::AddArray(a));
+                }
+                action_button(app, ui, Action::AddSymmetry);
                 action_button(app, ui, Action::AddGroup);
                 ui.separator();
                 for d in DEFORMERS {
@@ -510,6 +514,33 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.2, g));
             p.circle_filled(c, 2.0, g);
         }
+        ObjectKind::Array { .. } => {
+            let g = Color32::from_rgb(130, 210, 120);
+            for dx in [-4.0, 0.0, 4.0] {
+                p.rect_stroke(
+                    egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.5, 8.0)),
+                    0.0,
+                    egui::Stroke::new(1.0, g),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        ObjectKind::Symmetry { .. } => {
+            let g = Color32::from_rgb(130, 210, 120);
+            p.line_segment([c + egui::vec2(0.0, -6.0), c + egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, g));
+            p.rect_stroke(
+                egui::Rect::from_center_size(c + egui::vec2(-3.5, 0.0), egui::vec2(5.0, 8.0)),
+                0.0,
+                egui::Stroke::new(1.0, g),
+                egui::StrokeKind::Inside,
+            );
+            p.rect_stroke(
+                egui::Rect::from_center_size(c + egui::vec2(3.5, 0.0), egui::vec2(5.0, 8.0)),
+                0.0,
+                egui::Stroke::new(1.0, g),
+                egui::StrokeKind::Inside,
+            );
+        }
         ObjectKind::Field { .. } => {
             // A soft disc: strong in the middle, fading out.
             let t = Color32::from_rgb(110, 210, 200);
@@ -673,6 +704,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ui.label(RichText::new(tl!("Shows its first mesh child subdivided. Edit the child; the cage follows.")).color(theme::TEXT_DIM).small());
             });
         }
+        ObjectKind::Array { array } => {
+            egui::CollapsingHeader::new(tl!("Array")).default_open(true).show(ui, |ui| crate::generator_ui::array_fields(app, ui, id, *array));
+        }
+        ObjectKind::Symmetry { axis, weld } => {
+            egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
+        }
         ObjectKind::Field { field } => {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
         }
@@ -687,7 +724,10 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         _ => {}
     }
-    if matches!(obj.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Instance { .. }) {
+    if matches!(
+        obj.kind,
+        ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Instance { .. }
+    ) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
             let mut m = obj.material.clone();
             let mut rgb = [m.base_color[0], m.base_color[1], m.base_color[2]];
@@ -916,6 +956,7 @@ fn deformer_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Defor
                 vec![drag(ui, amplitude, 0.005, -10.0..=10.0, tl!("Amplitude")), drag(ui, frequency, 0.01, 0.0..=100.0, tl!("Frequency"))]
             }
             Deformer::Round { amount } => vec![drag(ui, amount, 0.01, 0.0..=1.0, tl!("Amount"))],
+            Deformer::Shear { x, z } => vec![drag(ui, x, 0.01, -1000.0..=1000.0, tl!("Slide X")), drag(ui, z, 0.01, -1000.0..=1000.0, tl!("Slide Z"))],
         })
         .inner;
     if let Some(r) = r.iter().find(|r| r.changed() || r.drag_stopped()) {

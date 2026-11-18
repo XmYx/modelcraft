@@ -20,9 +20,12 @@ pub enum Deformer {
     Ripple { amplitude: f32, frequency: f32 },
     /// Pull every point towards the mean radius (`amount` 0..1).
     Round { amount: f32 },
+    /// Slide points sideways in proportion to their height above the bottom: `x` and `z` are how
+    /// far the top moves per unit of height (the bottom stays put).
+    Shear { x: f32, z: f32 },
 }
 
-pub const KINDS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
+pub const KINDS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
 
 impl Deformer {
     pub fn default_of(kind: &str) -> Option<Deformer> {
@@ -32,6 +35,7 @@ impl Deformer {
             "taper" => Deformer::Taper { amount: -0.5 },
             "ripple" => Deformer::Ripple { amplitude: 0.1, frequency: 2.0 },
             "round" => Deformer::Round { amount: 1.0 },
+            "shear" => Deformer::Shear { x: 0.5, z: 0.0 },
             _ => return None,
         })
     }
@@ -43,6 +47,7 @@ impl Deformer {
             Deformer::Taper { .. } => "taper",
             Deformer::Ripple { .. } => "ripple",
             Deformer::Round { .. } => "round",
+            Deformer::Shear { .. } => "shear",
         }
     }
 
@@ -93,6 +98,10 @@ impl Deformer {
                     p + radial * w
                 }
                 Deformer::Round { amount } => p.lerp(p.normalize_or_zero() * mean_r, amount.clamp(0.0, 1.0)),
+                Deformer::Shear { x, z } => {
+                    let up = p.y - lo;
+                    Vec3::new(p.x + finite(x) * up, p.y, p.z + finite(z) * up)
+                }
             }
         };
         let moved: Vec<Vec3> = local
@@ -112,6 +121,10 @@ impl Deformer {
             .collect();
         m.map_positions(|i, p| moved.get(i as usize).copied().unwrap_or(p));
     }
+}
+
+fn finite(v: f32) -> f32 {
+    if v.is_finite() { v.clamp(-1000.0, 1000.0) } else { 0.0 }
 }
 
 #[cfg(test)]

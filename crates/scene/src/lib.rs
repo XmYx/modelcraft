@@ -37,6 +37,7 @@ use glam::{Mat4, Quat, Vec3};
 pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES, Modifier};
 pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
+pub use modelcraft_ops::array::Array;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 pub use modelcraft_sim::{FrameCache, SimKind, SimObject};
@@ -570,6 +571,16 @@ pub enum ObjectKind {
     Deformer {
         deformer: Deformer,
     },
+    /// Shows real copies of its first mesh child joined into one mesh, in a row or a ring.
+    Array {
+        array: Array,
+    },
+    /// Shows its first mesh child mirrored across a plane through its origin (0 = X, 1 = Y,
+    /// 2 = Z), joined at the seam.
+    Symmetry {
+        axis: u32,
+        weld: f32,
+    },
     /// A falloff field. Inside a deformer it sets how strongly the deformer acts at each point
     /// (the field's own transform places it in the deformer's frame); several fields combine.
     Field {
@@ -626,6 +637,8 @@ impl ObjectKind {
             ObjectKind::Mesh { .. } => "Mesh",
             ObjectKind::SmoothCage { .. } => "Smooth cage",
             ObjectKind::Deformer { .. } => "Deformer",
+            ObjectKind::Array { .. } => "Array",
+            ObjectKind::Symmetry { .. } => "Symmetry",
             ObjectKind::Field { .. } => "Falloff field",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
@@ -1116,22 +1129,27 @@ impl Scene {
         m
     }
 
-    /// True if the object is the input of its parent generator (a smooth cage's mesh child, or
-    /// the source a clone generator clones) and so is shown through it, not directly. Other
-    /// children of a clone generator are ordinary objects and draw as they are.
+    /// True if the object is the input of its parent generator (a smooth cage, array, symmetry
+    /// or clone generator) and so is shown through it, not directly. The input of a generator is
+    /// its first child that makes geometry; other children are ordinary objects and draw as they are.
     pub fn is_cage_input(&self, id: ObjectId) -> bool {
         let Some(parent) = self.get(id).and_then(|o| o.parent) else { return false };
         match self.get(parent).map(|p| &p.kind) {
             Some(ObjectKind::SmoothCage { .. }) => true,
-            Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            Some(ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
             Some(ObjectKind::Sim { .. }) => self.is_particles(parent) && self.generator_input(parent) == Some(id),
             _ => false,
         }
     }
 
-    /// The input a generator shows: the first mesh or smooth cage child.
+    /// The input a generator shows: its first child that makes geometry (a mesh or another
+    /// generator).
     pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
-        self.children(id).into_iter().find(|c| self.get(*c).is_some_and(|o| matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. })))
+        self.children(id).into_iter().find(|c| {
+            self.get(*c).is_some_and(|o| {
+                matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+            })
+        })
     }
 
     pub fn visible(&self, id: ObjectId) -> bool {
