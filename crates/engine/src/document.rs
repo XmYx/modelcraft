@@ -563,6 +563,40 @@ impl Document {
                 }
                 Outcome::default()
             }
+            Command::SculptProject { id, source, reach } => {
+                let (id, source) = (*id, *source);
+                self.ensure_session(id)?;
+                if source == id {
+                    return invalid("an object cannot be projected onto itself");
+                }
+                if reach.is_some_and(|r| !(r.is_finite() && r > 0.0)) {
+                    return invalid("the reach must be a number above zero");
+                }
+                if self.scene.get(source).is_none() {
+                    return Err(SceneError::NoObject(source).into());
+                }
+                let mesh = self.eval.evaluate(&self.scene, source).mesh;
+                if mesh.face_count() == 0 {
+                    return invalid("the source object has no surface");
+                }
+                // The source, in the space of the object being sculpted.
+                let to_target = self.scene.world_matrix(id).inverse() * self.scene.world_matrix(source);
+                let mut moved = (*mesh).clone();
+                moved.map_positions(|_, p| to_target.transform_point3(p));
+                let surface = SculptMesh::new(&moved, None, None);
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let size = s.mesh.positions.iter().fold((glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+                let reach = reach.unwrap_or(((size.1 - size.0).length() * 0.1).max(1e-6));
+                let change = s.mesh.project_onto(&surface, reach);
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
+                }
+                Outcome::default()
+            }
             Command::SculptGroups { id, .. } | Command::SculptVisibility { id, .. } | Command::SculptRegion { id, .. } | Command::SculptExtract { id, .. } => {
                 let id = *id;
                 self.ensure_session(id)?;
@@ -1037,6 +1071,7 @@ impl Document {
             | Command::SculptRegion { .. }
             | Command::SculptClip { .. }
             | Command::SculptExtract { .. }
+            | Command::SculptProject { .. }
             | Command::SculptShape { .. } => {
                 return invalid("not a scene command");
             }
