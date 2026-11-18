@@ -18,6 +18,24 @@ clay dab per frame with X symmetry (each dab touching ~30 k vertices) for 300 fr
 
 In the same run: dab 1.21 ms mean (1.84 ms p95), dirty-chunk upload 0.45 ms mean (0.61 ms p95).
 
+### The app window after the per-frame copy was removed (2026-11-18)
+
+The Sculpt panel synced the sculpt session into the scene on every frame. During a stroke that
+copied every vertex and made the Properties panel rebuild the whole object, which the table
+above (measured before that panel existed) does not show. Measured with the machine's load
+average at 23 to 31 on 24 threads (other builds), `modelcraft --bench-viewport N [--bench-polys P]`:
+
+| Triangles | Session | Sculpt frame before | Sculpt frame after (mean / p95) | Orbit frame after | Dab | Upload |
+|---|---|---|---|---|---|---|
+| 2,007,372 | Wayland (60 Hz cap) | 64.7 ms (15.5 fps), p95 96.2 ms | 17.0 ms (59 fps) / 17.3 ms | 16.7 ms | 1.5 ms | 1.6 ms mean, 0.6 ms p50 |
+| 2,007,372 | X11, uncapped | not measured | 5.9 ms (169 fps) / 8.8 ms | 5.0 ms (198 fps) | 1.9 ms | 0.8 ms |
+| 12,582,912 | X11, uncapped | not measured | 16.8 ms (59.5 fps) / 23.8 ms | 6.2 ms (161 fps) | 11.2 ms mean, 16.2 ms p95 | 7.8 ms mean, 3.1 ms p50 |
+
+The 12.6 M row is the first measurement of the app window at that size (`--bench-polys 6291456`,
+the largest quad sphere the primitive makes): one clay dab per frame with X symmetry at a radius
+of 12 % of the object, which touches far more vertices than the engine bench's radius. 20 M
+triangles are still not measured: the primitive stops at 1024 segments.
+
 ## Sculpt latency (engine, `modelcraft-cli bench --polys 1000000 --dabs 300`)
 
 Mesh: 1,003,686 quads → 2,007,372 triangles. Generating it: 1.1 s; starting a sculpt session
@@ -160,6 +178,22 @@ never fewer than 4), so a 12.6 M-triangle mesh takes about six times as long. Un
 patches or visibility restores the scene and rebuilds the sculpt session (about 0.8 s here); doing
 one does not rebuild it. In the app, a change of patches or visibility uploads the whole sculpt
 mesh again (not measured separately; the same upload as starting a session).
+
+## Decimate and Project Detail (`MODELCRAFT_BENCH_ONLY=decimate modelcraft-cli bench --groups --polys N`)
+
+Measured 2026-11-18, single-threaded, load average about 30 on 24 threads (other builds). The
+mesh is a quad sphere; the projection target is the same sphere and its source a copy with a
+bump pattern, so both have the same count.
+
+| Triangles | Decimate to 10 % | Largest gap between a face and the sphere after it | Project Detail (all vertices) | Worst distance left to the source |
+|---|---|---|---|---|
+| 202,800 | 2.8 s | 6.6e-4 of the radius | 0.67 s | 1.2e-7 |
+| 2,007,372 | 50.7 s | 8.2e-5 of the radius | 28.1 s | 1.2e-7 |
+
+Decimation spends its time re-checking each collapse (the link condition, UV carry-over, patch
+lines, triangle turning) when its turn comes; nothing in it runs in parallel yet. Every vertex of
+the result is a vertex of the input (within 1.2e-7 of the sphere here, the float error of the
+input itself). Project Detail casts two rays per vertex and falls back to a closest-point search.
 
 ## Render engine (path tracer)
 
@@ -364,6 +398,67 @@ images, error against a 4096-sample reference:
 The tree has no orientation cones and does not split, so lights that face away still take
 samples; the references' many-light samplers do both.
 
+### Many lights: resampled direct lighting (`--restir`)
+
+`craft-render-core::restir` resamples the direct light at the first surface (Bitterli et al. 2020,
+ReSTIR DI) with the light tree as the source of candidates; `craft-render-gpu` runs the same
+four stages as compute kernels. `unbiased` is for final frames: `M` candidates per pixel and pass,
+one kept, a shadow ray for the kept one, then one pass of merging with the reservoirs of up to four
+neighbours, normalised exactly (a shadow ray from each merged pixel finds how many could have
+produced the kept point). `viewport` adds temporal reuse (the previous pass's reservoir at the same
+pixel, its count capped at 20 passes' worth) and normalises by the sum of counts, which needs no
+extra rays but is biased and correlates consecutive passes. Indirect bounces still use the light
+tree, so only the first bounce changes.
+
+Tests: the unbiased mode's mean image equals the plain estimator's within 2–5 % on every benchmark
+scene (measured on the benchmark scenes at 512 spp: 0.996–1.004 of the plain mean); a viewport render
+stays within 8 % of it (measured 0.92–0.99; it is darker near shadow edges and in partly occluded
+lighting); GPU and CPU images of the same samples agree to a relative MSE of 0.000001 on night-street
+(both modes), studio and interior.
+
+Night-street, 256×256, 5 seeds, reference 4096 spp. Mean relMSE at 1 / 4 / 16 / 64 / 256 spp.
+`M` is candidates and `k` merged neighbours. (The M=4, k=0 row used a reference of 2048 spp, whose own
+error is about twice as large.)
+
+| Estimator | relMSE | Seconds at 64 spp (CPU) / 256 spp (GPU) |
+|---|---|---|
+| CPU, plain (light tree) | 6.79 / 1.009 / 0.262 / 0.072 / – | 0.58 |
+| CPU, unbiased, M=8, k=4 | 1.026 / 0.276 / 0.080 / 0.0195 / – | 2.03 |
+| CPU, unbiased, M=16, k=0 | 1.153 / 0.280 / 0.071 / 0.0186 / – | 3.26 |
+| CPU, viewport, M=8, k=4 | 1.001 / 0.343 / 0.101 / 0.050 / – | 2.66 |
+| GPU, plain | 6.79 / 1.009 / 0.262 / 0.072 / 0.0198 | 0.059 |
+| GPU, unbiased, M=4, k=0 | – / – / – / 0.0308 / 0.0094 | 0.106 |
+| GPU, unbiased, M=8, k=4 | 1.026 / 0.275 / 0.080 / 0.0195 / 0.0058 | 0.161 |
+| GPU, unbiased, M=16, k=4 | 1.138 / 0.276 / 0.069 / 0.0189 / 0.0055 | 0.207 |
+| GPU, viewport, M=8, k=4 | 1.001 / 0.343 / 0.101 / 0.051 / 0.0369 | 0.144 |
+
+The CPU rows ran at a load average of 36–48 and the GPU rows at 27–35 (other builds; the GPU itself
+was idle), so seconds are upper bounds; errors do not depend on load.
+
+Read honestly:
+- **At equal samples** the unbiased mode lowers the error 3.3–3.7× on both devices (0.0198 → 0.0058
+  at 256 spp on the GPU), and the benefit stops at about that: the error left at 0.0055–0.006 comes
+  from the bounces after the first, which this technique does not touch (more candidates or
+  neighbours do not lower it).
+- **At equal time it is roughly even, not a win, on this scene.** The extra work costs 2–3.5× the
+  time of a plain sample (a candidate is a tree descent, a light point and a full BSDF
+  evaluation), so efficiency 1 / (relMSE × seconds) is 1.0–1.25× the plain estimator's on the GPU
+  (M=4: 1.16×) and 1.0–1.6× on the CPU (best at 1–4 spp). The research note's 2–10× target was
+  not met: our baseline, the light tree, is far stronger than the power sampling of the paper, and
+  most of what is left is indirect.
+- **The viewport mode is not for converging.** It cleans a few passes fastest (0.101 against
+  0.262 at 16 spp) and then stops improving (0.050 at 64 spp, 0.037 at 256 spp on the GPU) because
+  consecutive passes share reservoirs; its mean image is 1–8 % darker than the plain estimator's
+  (night-street 0.92–0.94, interior 0.94–0.96, studio and Cornell box 0.99, materials 0.96,
+  showcase 0.94–0.99).
+- Throughput on the GPU at 1024×1024 (64 spp, night-street): plain 316 M samples/s; unbiased
+  M=8,k=4 120 M/s (2.6× the time), M=4 149 M/s. The plumbing alone (M=1, no neighbours) costs
+  26 % more than a plain sample, each further candidate about 14 %, and four neighbours with their
+  exact normalisation about 40–47 %.
+- Where it should pay most is a scene whose cost is almost all first-bounce direct light from very
+  many lights (a long depth-1 render: CPU, 48×48, 10 seeds, 16 spp, relMSE 0.31 plain against 0.12
+  with M=16); it needs the following passes to be cheap for the whole picture to gain.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
@@ -386,7 +481,7 @@ A procedurally generated stand-in for a character: a tube of 100,000 vertices (1
 point), every joint keyed on two rotation channels (180 curves) so that every point moves on
 every frame. Each frame goes to the frame (curves → joint transforms) and evaluates the mesh
 through the dependency graph (the primitive and history are cached; only the skin runs). Two runs,
-measured while three other builds shared the machine; single-threaded.
+measured while three other builds shared the machine; single-threaded (as the code was then).
 
 | | Linear blend | Dual quaternion |
 |---|---|---|
@@ -398,8 +493,65 @@ measured while three other builds shared the machine; single-threaded.
 
 Binding (automatic heat weights: 60 conjugate-gradient solves over the surface): 10.6–11.4 s, once.
 The gap between the kernel and the evaluation (≈ 5 ms) is copying the mesh and rebuilding its
-positions for the new pose. These are engine numbers; playback in the app adds a full vertex
-upload and normals for the changed mesh each frame, which has not been measured yet.
+positions for the new pose. These are engine numbers from before skinning ran on several cores;
+the next section has the app's playback and the kernels as they are now.
+
+## Skinned character in the app (`modelcraft --bench-skin 300`, add `--bench-skin-dq`)
+
+The same character as above, built by the same code (`rig::bench_character`: 100,000 vertices,
+60 joints, heat weights, 4 influences), played in the app: each frame goes to the next frame
+(curves → joints, constraints), evaluates the mesh through the dependency graph, and the viewport
+turns the new mesh into triangles with smoothed normals, uploads it and draws it. RTX 4090,
+1600×1000, no vsync, 24 hardware threads. **The machine was shared with other builds throughout
+(load average 27 to 58 on 24 threads), so these numbers are noisy and pessimistic**; each line
+says the load it was taken under.
+
+| | Frame, mean (p95) | Frames per second | Evaluate | Upload (triangles, normals, buffers) | Load |
+|---|---|---|---|---|---|
+| Before: skinning and viewport data on one thread (`RAYON_NUM_THREADS=1`, same session as the next line) | 57.0 ms (95.5) | 17.6 | 5.8 ms | 38.3 ms | 27 |
+| **Now**, linear blend | 36.0–39.2 ms (52–66) | **25.5–27.8** | 4.0–4.3 ms | 20.7–21.1 ms | 28 |
+| **Now**, dual quaternion | 38.8 ms (55.0) | **25.8** | 4.5 ms | 21.0 ms | 28 |
+| Skinning on all cores, viewport data still on one thread, linear blend | 65.6 ms (101) | 15.2 | 8.3 ms | 44.4 ms | 46–58 |
+| The same, dual quaternion | 90.1 ms (152) | 11.1 | 12.9 ms | 64.7 ms | 46–58 |
+
+Pose (curves → 60 joints, constraints) is 0.10–0.19 ms in every run.
+
+Read honestly:
+- Playback of this character is about 26 frames per second, just at its 24: there is no
+  headroom, and under heavier load it falls to 15.
+- **The upload is the frame**, not the skinning: more than half of every frame goes into
+  rebuilding the mesh's drawing data (one vertex per face corner with a smoothed normal, 400,000
+  of them, and the triangle list) and creating new GPU buffers, although only positions changed.
+  Building that data in up to 8 runs of faces at once (`buffers::mesh_data`) took it from 38 to
+  21 ms in the same session. The fix that remains is structural: keep the GPU mesh and its
+  triangle list while a mesh only deforms, and write positions and normals into it.
+- Evaluation (4 ms) is mostly copying the mesh for the new pose (≈ 15 MB of topology that did
+  not change), not the skinning kernel.
+
+**Skinning kernels alone** (`modelcraft-cli bench-skin`, 100,000 points, 4 influences, best of
+five batches of ten):
+
+| | One core | In 4 pieces (`RAYON_NUM_THREADS=4`) | In 8 pieces (`=8`) | Default (at most 8 pieces, 24 threads), three runs |
+|---|---|---|---|---|
+| Linear blend | 1.05–1.94 ms | 0.36 ms | 0.57 ms | 0.32, 2.31, 3.93 ms |
+| Dual quaternion | 3.13–6.14 ms | 0.74 ms | 0.96 ms | 0.73, 5.60, 6.29 ms |
+
+On idle cores the kernels are 3 to 4 times faster in pieces (0.3 ms and 0.7 ms). On a saturated
+machine the same code can be *slower* than one core (the pieces wait for a thread): with one piece
+per hardware thread it was 4.9–7.8 ms against 2.0 ms, which is why skinning is cut into at most
+8 pieces. The results are bit-identical on one core and on many (tested).
+
+**Engine evaluation** (`bench-skin`, pose + evaluate, no viewport), under load 45–50: linear blend
+7.5–15.0 ms mean (65–131 evaluated frames per second), dual quaternion 8.2–11.0 ms (90–121);
+before this change, under the same kind of load, 6.2–13.7 ms and 11.1–12.5 ms. The spread between
+runs is larger than any difference: evaluation is dominated by the mesh copy, and nothing can be
+claimed here beyond "not slower".
+
+**Finding an object** (`Scene::get`) used to walk the object list; the scene now keeps an index
+from id to position, kept in step by everything that adds, removes or reorders objects (a test
+compares it with a walk of the list after each kind of change). On this 62-object scene it does
+not show (pose stayed at 0.1 ms); it is there for scenes with thousands of objects, where every
+world matrix walked the list once per ancestor. It was not timed on such a scene.
 
 ## UV unwrap (engine, `modelcraft-cli uv-bench --segments N`)
 
@@ -423,6 +575,69 @@ precision (angle error below 1e-4°, area RMS below 1e-6; see `crates/uv/src/tes
 Preconditioned conjugate gradients on the same system stalled (residual 1.7e-5 after 8,000
 iterations at 64×32), which is why the solver is direct; conjugate gradients remain as the
 fallback above 24 M factor entries.
+
+### Angle-based flattening (ABF) against LSCM (`uv-bench --method both`)
+
+`UnwrapMethod::Abf` solves for the angles of the flat triangles (Sheffer and de Sturler 2001) with
+the reduced Newton system of ABF++ (Sheffer et al. 2005): per iteration one sparse Cholesky
+factorisation of two unknowns per interior vertex, then a least-squares fit of triangles of those
+angles (the LSCM system) for the positions. Convergence is a constraint residual below 1e-8; an island
+that does not reach it is flattened by LSCM and `IslandReport::abf_fell_back` says so. Same machine
+and release build as above (loaded). Angle error is in degrees against the surface; area RMS is the
+RMS of the log area ratio, so 0 means one scale everywhere. All unwraps have 0 flipped triangles.
+
+Sphere with one pole-to-pole seam (`--shape sphere --cut meridian`): one interior everywhere else,
+the hard case for an angle-preserving map.
+
+| Sphere | Solver | Time | Newton iterations | Mean / max angle error | Max stretch | Area RMS (log) |
+|---|---|---|---|---|---|---|
+| 64×32 (1,986 vertices) | LSCM | 11 ms | | 2.18° / 9.78° | 1.489 | 0.98 |
+| | ABF | 43 ms | 3 | 2.55° / 6.76° | 1.208 | 1.35 |
+| 256×128 (32,514 vertices) | LSCM | 661 ms | | 0.55° / 5.04° | 1.217 | 1.01 |
+| | ABF | 3,938 ms | 3 | 0.67° / 2.08° | 1.051 | 1.45 |
+
+ABF has the smaller worst-case angle and stretch error and the larger mean angle error and area
+distortion: it minimises the relative squared deviation of angles (and spreads the curvature of
+the surface evenly), where LSCM minimises the conformal energy. It is 4 to 6 times slower here
+(three factorisations and a reconstruction, against one solve).
+
+The same shapes with the automatic cut (`--cut auto`, which gives a closed shape a branching cut;
+most vertices are then on the boundary, where angles are free):
+
+| Shape (segments 64) | Solver | Time | Mean / max angle error | Area RMS (log) |
+|---|---|---|---|---|
+| Sphere | LSCM | 10 ms | 0.14° / 0.43° | 0.49 |
+| | ABF | 15 ms | 0.11° / 0.19° | 0.008 |
+| Round cube | LSCM | 5 ms | 0.34° / 1.92° | 2.07 |
+| | ABF | 9 ms | 0.20° / 0.97° | 0.044 |
+| Torus | LSCM | 11 ms | 0.23° / 0.78° | 4.84 |
+| | ABF | 12 ms | 0.18° / 0.69° | 0.024 |
+
+Developable shapes (a tube cut along a line, a cone cut along a generatrix) are already feasible
+angle sets: ABF takes 0 Newton iterations and both solvers are exact (angle error and area RMS
+below 1e-4). The tests also check that ABF's energy never exceeds LSCM's on the sphere, round cube
+and torus (`abf_is_closer_to_the_surface_angles_than_lscm_on_curved_islands`).
+
+### Relax (`uv-bench --relax N`)
+
+`relax_corners` runs N local/global iterations (Liu et al. 2008) on the whole layout: the global
+system (cotangent Laplacian, two unknowns per vertex) is factored once and solved N times. After
+a LSCM unwrap of a sphere with one seam (`--shape sphere --cut meridian`), 15 iterations, same
+machine and release build as above:
+
+| Sphere | Mode | Time | Fit energy before to after |
+|---|---|---|---|
+| 64×32 (1,986 vertices) | keep lengths | 46 ms | 0.223 to 0.101 |
+| | keep angles | 29 ms | 2.1e-3 to 1.9e-3 |
+| 256×128 (32,514 vertices) | keep lengths | 815 ms | 0.230 to 0.098 |
+| | keep angles | 784 ms | 1.3e-4 to 1.3e-4 |
+
+Keeping lengths spreads the area out (on the 32×16 sphere in the tests the area RMS falls from
+0.92 to 0.36 and the largest area ratio from 5.6 to 3.1) and gives up angles (mean angle error
+6.0° to 15.1°). Keeping angles has little left to improve on a layout that is already conformal.
+The energy is the fit energy of that mode, and a relaxation that would raise it is discarded.
+On a 8×8 grid whose interior vertices were knocked about by up to 0.015 of its width, 60 iterations
+bring the maximum angle error from 17.3° to 4e-5° (`relax_restores_a_jittered_grid_to_an_isometry`).
 
 ## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
 

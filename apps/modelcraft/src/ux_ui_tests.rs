@@ -140,7 +140,9 @@ fn a_protection_tag_is_added_from_properties_and_refuses_a_typed_position() {
     h.run();
     assert_eq!(h.state().doc.scene.get(id).unwrap().transform.translation.x, 2.0);
     // The tag can be removed again from its own button.
-    h.get_by_label("Remove Protection Tag").click();
+    h.get_by_label("Remove Protection Tag").scroll_to_me();
+    h.run();
+    h.get_by_label("Remove Protection Tag").click_accesskit();
     h.run();
     assert!(h.state().doc.scene.tag(id, TagKind::Protection).is_none());
 }
@@ -284,4 +286,20 @@ fn a_preset_is_saved_from_one_object_and_applied_to_another() {
     h.get_by_label("Remove Preset: Shiny").click();
     h.run();
     assert!(h.state().doc.scene.presets.is_empty());
+}
+
+#[test]
+fn the_file_menu_offers_3mf_and_usd_export() {
+    let mut h = harness();
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    h.get_by_label("Export").click();
+    h.run();
+    h.run();
+    h.get_by_label_contains("3MF");
+    h.get_by_label_contains("USD");
+    for a in [crate::actions::Action::Export3mf, crate::actions::Action::ExportUsda] {
+        assert!(crate::actions::all().contains(&a), "{a:?} is in the palette and the shortcuts dialog");
+    }
 }

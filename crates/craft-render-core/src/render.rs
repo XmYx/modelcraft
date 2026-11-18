@@ -151,11 +151,13 @@ pub struct Renderer {
     reference: Vec<f32>,
     /// Sample count at which the guide is next updated (learning passes double in length).
     next_update: u32,
+    /// Resampled direct lighting, when the settings ask for it (and the image is small enough).
+    restir: Option<crate::restir::RestirState>,
 }
 
 /// What one pass adds to one pixel.
 #[derive(Clone, Copy, Default)]
-struct PixelSums {
+pub(crate) struct PixelSums {
     radiance: [f32; 3],
     albedo: [f32; 3],
     normal: [f32; 3],
@@ -164,15 +166,45 @@ struct PixelSums {
     luminance_sq: f32,
 }
 
+/// Add one sample (its radiance `l`, the features of its first surface, its place `ndc` on the
+/// image plane) to a pixel's sums.
+pub(crate) fn add_sample(
+    acc: &mut PixelSums,
+    l: glam::Vec3A,
+    f: &crate::integrator::Features,
+    ndc: Vec2,
+    previous: &Option<PreparedCamera>,
+    w: usize,
+    h: usize,
+) {
+    for k in 0..3 {
+        acc.radiance[k] += l[k];
+        acc.albedo[k] += f.albedo[k];
+        acc.normal[k] += f.normal[k];
+    }
+    let lum = crate::math::luminance(l);
+    acc.luminance_sq += lum * lum;
+    acc.depth += f.depth;
+    if let (Some(p), Some(prev)) = (f.position, previous)
+        && let Some(before) = prev.project(p)
+    {
+        acc.motion[0] += (ndc.x - before.x) * 0.5 * w as f32;
+        acc.motion[1] += (before.y - ndc.y) * 0.5 * h as f32;
+    }
+}
+
 impl Renderer {
     pub fn new(scene: Arc<Scene>, settings: RenderSettings) -> Result<Renderer, SceneError> {
         let film = Film::new(settings.width, settings.height)?;
         let camera = scene.camera.prepare(settings.width as f32 / settings.height as f32);
         let scratch = vec![PixelSums::default(); film.sum.len()];
         let previous = settings.previous_camera.map(|c| c.prepare(settings.width as f32 / settings.height as f32));
-        let learns = settings.integrator.guiding || settings.integrator.adaptive_splitting;
+        let restir =
+            settings.integrator.restir.active(&settings.integrator, film.sum.len()).then(|| crate::restir::RestirState::new(settings.width, settings.height));
+        // Learned sampling and resampled direct lighting are separate estimators; the latter wins.
+        let learns = (settings.integrator.guiding || settings.integrator.adaptive_splitting) && restir.is_none();
         let guide = learns.then(|| Guide::new(scene.bounds.min, scene.bounds.max, GuideConfig::default()));
-        Ok(Renderer { scene, settings, camera, film, previous, scratch, guide, reference: Vec::new(), next_update: 1 })
+        Ok(Renderer { scene, settings, camera, film, previous, scratch, guide, reference: Vec::new(), next_update: 1, restir })
     }
 
     pub fn film(&self) -> &Film {
@@ -220,6 +252,17 @@ impl Renderer {
     fn pass(&mut self, samples: u32, cancel: &AtomicBool) -> bool {
         let (w, h) = (self.film.width as usize, self.film.height as usize);
         let first = self.film.samples;
+        if let Some(state) = &mut self.restir {
+            // One sample at a time: reuse needs the whole image's reservoirs of one sample.
+            self.scratch.iter_mut().for_each(|p| *p = PixelSums::default());
+            for s in first..first + samples {
+                crate::restir::run_sample(state, &self.scene, &self.camera, &self.previous, &self.settings, s, &mut self.scratch, cancel);
+                if cancel.load(Ordering::Relaxed) {
+                    return false;
+                }
+            }
+            return self.commit(samples);
+        }
         let (scene, camera, settings, previous) = (&*self.scene, &self.camera, &self.settings, &self.previous);
         let (guide, reference) = (self.guide.as_ref(), &self.reference);
         let z_bits = crate::sampler::z_order_bits(self.film.width, self.film.height);
@@ -230,7 +273,6 @@ impl Renderer {
             for (x, px) in row.iter_mut().enumerate() {
                 let seed = Sampler::pixel_seed(x as u32, y as u32, settings.seed);
                 let mut acc = PixelSums::default();
-                let mut rgb = glam::Vec3A::ZERO;
                 for s in first..first + samples {
                     let ordered =
                         if settings.pixel_order == PixelOrder::ZCurve { Sampler::z_ordered(x as u32, y as u32, s, z_bits, settings.seed) } else { None };
@@ -245,28 +287,19 @@ impl Renderer {
                         }
                         None => radiance_and_features(scene, camera.ray(ndc, lens), &mut sampler, &settings.integrator),
                     };
-                    rgb += l;
-                    let lum = crate::math::luminance(l);
-                    acc.luminance_sq += lum * lum;
-                    for k in 0..3 {
-                        acc.albedo[k] += f.albedo[k];
-                        acc.normal[k] += f.normal[k];
-                    }
-                    acc.depth += f.depth;
-                    if let (Some(p), Some(prev)) = (f.position, previous)
-                        && let Some(before) = prev.project(p)
-                    {
-                        acc.motion[0] += (ndc.x - before.x) * 0.5 * w as f32;
-                        acc.motion[1] += (before.y - ndc.y) * 0.5 * h as f32;
-                    }
+                    add_sample(&mut acc, l, &f, ndc, previous, w, h);
                 }
-                acc.radiance = rgb.to_array();
                 *px = acc;
             }
         });
         if cancel.load(Ordering::Relaxed) {
             return false;
         }
+        self.commit(samples)
+    }
+
+    /// Add the pass in `scratch` to the film.
+    fn commit(&mut self, samples: u32) -> bool {
         let film = &mut self.film;
         for (i, add) in self.scratch.iter().enumerate() {
             for k in 0..3 {

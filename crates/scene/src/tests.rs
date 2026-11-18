@@ -228,7 +228,11 @@ fn unwrap_step_writes_uvs_that_later_steps_keep() {
     let mut ev = Evaluator::new();
     let id = s.add("Cube", cube_kind(), None).unwrap();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-        steps.push(Step { id: 1, enabled: true, op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01 } });
+        steps.push(Step {
+            id: 1,
+            enabled: true,
+            op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01, method: Default::default() },
+        });
         steps.push(Step { id: 2, enabled: true, op: StepOp::Subdivide { levels: 1 } });
     }
     let e = ev.evaluate(&s, id);
@@ -258,6 +262,7 @@ fn unwrap_step_with_stale_input_is_skipped() {
                 pins: vec![UvPin { corner: 9999, uv: [0.0, 0.0] }],
                 auto_cut: true,
                 margin: 5.0,
+                method: Default::default(),
             },
         });
     }
@@ -292,8 +297,8 @@ fn uv_edit_steps_move_weld_and_record_seams() {
     // Weld an edge; JSON defaults for the new steps.
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
         steps.clear();
-        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0] } });
-        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999] } });
+        steps.push(Step { id: 3, enabled: true, op: StepOp::StitchUvs { edges: vec![0], align: false, scale: false } });
+        steps.push(Step { id: 4, enabled: true, op: StepOp::StitchUvs { edges: vec![999], align: false, scale: false } });
     }
     let e = ev.evaluate(&s, id);
     assert_eq!(e.errors.len(), 1, "an edge that does not exist is reported, the step skipped");
@@ -328,4 +333,58 @@ fn pack_and_project_steps_write_uvs() {
         steps.push(Step { id: 3, enabled: true, op: StepOp::ProjectUvs { projection: Projection::Box, fit: Fit::None, faces: vec![999] } });
     }
     assert_eq!(ev.evaluate(&s, id).errors.len(), 1);
+}
+
+#[test]
+fn objects_are_found_by_id_through_every_kind_of_change() {
+    // The index must agree with a plain walk of the list after adds, removes, undo-style
+    // re-inserts, reparenting, reordering, and for scenes straight from a file.
+    fn check(s: &Scene, ids: &[ObjectId]) {
+        for id in ids.iter().copied().chain([ObjectId(0), ObjectId(9_999)]) {
+            let walked = s.objects().iter().find(|o| o.id == id).map(|o| o.id);
+            assert_eq!(s.get(id).map(|o| o.id), walked, "get {id:?}");
+            assert_eq!(s.index_of(id), s.objects().iter().position(|o| o.id == id), "index_of {id:?}");
+        }
+    }
+    let mut s = Scene::new();
+    let mut ids = Vec::new();
+    for i in 0..40 {
+        let parent = if i % 3 == 0 { None } else { ids.get(i / 2).copied() };
+        ids.push(s.add(format!("O{i}"), ObjectKind::Group, parent).unwrap());
+        check(&s, &ids);
+    }
+    let removed = s.remove(ids[4]);
+    assert!(removed.len() > 1, "a subtree went");
+    check(&s, &ids);
+    for (i, o) in removed.into_iter().rev() {
+        s.insert_at(i, o);
+    }
+    check(&s, &ids);
+    s.reparent(ids[7], Some(ids[1])).unwrap();
+    check(&s, &ids);
+    s.move_in_stack(ids[9], -1).unwrap();
+    s.move_in_stack(ids[2], 5).unwrap();
+    check(&s, &ids);
+    s.edit(ids[20]).unwrap().name = "renamed".into();
+    assert_eq!(s.get(ids[20]).unwrap().name, "renamed");
+    // From a file: no index until it is repaired, and lookups still work in between.
+    let json = serde_json::to_string(&s).unwrap();
+    let raw: Scene = serde_json::from_str(&json).unwrap();
+    check(&raw, &ids);
+    let mut bare = s.clone();
+    *bare.index = crate::Index::default();
+    assert!(bare == s, "the index is not part of what a scene is");
+    check(&bare, &ids);
+    let fixed = raw.repaired().unwrap();
+    check(&fixed, &ids);
+    // A clone keeps working after the original changes, and the other way round.
+    let mut copy = fixed.clone();
+    copy.remove(ids[0]);
+    check(&copy, &ids);
+    check(&fixed, &ids);
+    // A thousand objects: every lookup lands, and a missing id is known to be missing.
+    let mut big = Scene::new();
+    let many: Vec<ObjectId> = (0..1000).map(|i| big.add(format!("B{i}"), ObjectKind::Group, None).unwrap()).collect();
+    assert!(many.iter().all(|id| big.get(*id).is_some_and(|o| o.id == *id)));
+    assert!(big.get(ObjectId(123_456)).is_none());
 }

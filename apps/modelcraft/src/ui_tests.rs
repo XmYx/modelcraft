@@ -270,6 +270,12 @@ fn detail_levels_and_shape_layers_by_keyboard() {
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().shapes[0].strength, 0.25);
     assert_eq!(h.state().doc.undo.len(), before + 1, "one undo step per edit");
+    // The Brushes pane scrolls inside the dock, and with shape layers listed the radio sits below
+    // its visible part: ask for it to be scrolled into view first, as assistive technology and
+    // Tab focus do, then click it.
+    let base = h.get_by_role_and_label(Role::RadioButton, "Base sculpt");
+    base.scroll_to_me();
+    h.run();
     h.get_by_role_and_label(Role::RadioButton, "Base sculpt").click();
     h.run();
     assert_eq!(h.state().doc.sculpt_layer(id).unwrap().active_shape, None);
@@ -418,6 +424,43 @@ fn undo_history_reaches_back_into_the_last_session() {
 }
 
 #[test]
+fn panels_dock_tab_and_hide_without_dragging() {
+    use crate::app::PanelId;
+    use crate::dock::Pane;
+    let mut h = harness();
+    h.run();
+    let ws = h.state().workspace;
+    // Tab the Undo History in with Properties from the panel's options menu.
+    h.get_by_label("Panel options: Undo History").click();
+    h.run();
+    h.get_by_label("Tab With Properties").click();
+    h.run();
+    let loc = format!("{:?}", h.state().layouts.get(ws).location(&Pane::History));
+    assert!(loc.contains("anchor: Some(Properties), placement: Tab"), "{loc}");
+    assert!(h.state().status.contains("Undo History moved"), "announced: {}", h.state().status);
+    // Hide it from View > Panels, then show it again.
+    h.get_by_label("View").click();
+    h.run();
+    h.get_by_label("Panels").click();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Undo History").click();
+    h.run();
+    assert!(!h.state().layouts.shown(ws, PanelId::History));
+    crate::dock::move_panel(h.state_mut(), PanelId::History, crate::dock::Move::Show);
+    h.run();
+    assert!(h.state().layouts.shown(ws, PanelId::History));
+    // F6 moves keyboard focus into the next shown panel.
+    h.key_press(Key::F6);
+    h.run();
+    h.run();
+    // The viewport stays whatever happens, and a saved layout comes back.
+    let saved = h.state().layouts.to_saved();
+    let back = crate::dock::Layouts::from_saved(&saved);
+    assert_eq!(back.get(ws), h.state().layouts.get(ws));
+    assert!(back.get(ws).contains(&Pane::Viewport));
+}
+
+#[test]
 fn agents_drive_the_window_over_the_control_channel() {
     use std::io::{BufRead, BufReader, Write};
     let mut h = harness();
@@ -521,6 +564,9 @@ fn patch_grouping_and_mesh_check_by_keyboard() {
     h.get_by_label("Patches and Cleanup").click();
     h.run();
     assert!(h.query_by_label_contains("N-gons: 0").is_some());
+    // The docked Properties pane scrolls; ask for the button to be scrolled into view first.
+    h.get_by_label("Clean Up Mesh").scroll_to_me();
+    h.run();
     h.get_by_label("Clean Up Mesh").click();
     h.run();
     let last = h.state().doc.scene.get(id).unwrap().steps().last().map(|s| s.op.name());

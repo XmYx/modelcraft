@@ -1,0 +1,1 @@
+- Export to 3MF and USD text (.usda), and import of .usda; 3MF import reads the file's unit and Z-up axis.

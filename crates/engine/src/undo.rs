@@ -136,6 +136,22 @@ impl UndoStack {
         self.recount();
         v
     }
+    /// The `back`-th newest done entry (0 is the newest).
+    pub fn newest(&self, back: usize) -> Option<&UndoEntry> {
+        self.done.len().checked_sub(back + 1).and_then(|i| self.done.get(i))
+    }
+    /// Take the redo history aside (to be put back with [`UndoStack::restore_redo`]), so that
+    /// changes made meanwhile do not clear it.
+    pub fn take_redo(&mut self) -> Vec<UndoEntry> {
+        let v = std::mem::take(&mut self.undone);
+        self.recount();
+        v
+    }
+    /// Put the redo history back after [`UndoStack::take_redo`].
+    pub fn restore_redo(&mut self, redo: Vec<UndoEntry>) {
+        self.undone = redo;
+        self.recount();
+    }
     /// Forget everything that could be redone.
     pub fn clear_redo(&mut self) {
         self.undone.clear();

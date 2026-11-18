@@ -67,15 +67,6 @@ impl NavPreset {
     }
 }
 
-/// Where a panel lives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dock {
-    Left,
-    Right,
-    Float,
-    Hidden,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PanelId {
     Tree,
@@ -95,50 +86,6 @@ impl PanelId {
             PanelId::Paint => tl!("Paint"),
             PanelId::History => tl!("Undo History"),
         }
-    }
-}
-
-/// Panel placement per workspace (the workspace layouts).
-#[derive(Clone, Debug)]
-pub struct Layout {
-    pub docks: std::collections::HashMap<(Workspace, PanelId), Dock>,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        use Dock::*;
-        use PanelId::*;
-        use Workspace::*;
-        let mut d = std::collections::HashMap::new();
-        for (ws, panel, dock) in [
-            (Model, Tree, Left),
-            (Model, Properties, Right),
-            (Model, Brushes, Hidden),
-            (Model, PanelId::Paint, Hidden),
-            (Model, History, Left),
-            (Sculpt, History, Hidden),
-            (Workspace::Paint, History, Hidden),
-            (Sculpt, Tree, Hidden),
-            (Sculpt, Brushes, Left),
-            (Sculpt, Properties, Right),
-            (Sculpt, PanelId::Paint, Hidden),
-            (Workspace::Paint, Tree, Left),
-            (Workspace::Paint, Properties, Hidden),
-            (Workspace::Paint, Brushes, Hidden),
-            (Workspace::Paint, PanelId::Paint, Right),
-        ] {
-            d.insert((ws, panel), dock);
-        }
-        Layout { docks: d }
-    }
-}
-
-impl Layout {
-    pub fn dock(&self, ws: Workspace, p: PanelId) -> Dock {
-        self.docks.get(&(ws, p)).copied().unwrap_or(Dock::Hidden)
-    }
-    pub fn set(&mut self, ws: Workspace, p: PanelId, d: Dock) {
-        self.docks.insert((ws, p), d);
     }
 }
 
@@ -222,7 +169,7 @@ pub struct ModelApp {
     /// Brush presets the user saved (shown after the built-in ones).
     pub user_presets: Vec<modelcraft_engine::sculpt::preset::BrushPreset>,
     pub ops: OpParams,
-    pub layout: Layout,
+    pub layouts: crate::dock::Layouts,
     pub status: String,
     pub palette: Option<crate::panels::Palette>,
     pub numeric: Option<NumericTransform>,
@@ -261,6 +208,8 @@ pub struct ModelApp {
     pub frames: u64,
     pub frame_times: std::collections::VecDeque<f32>,
     pub bench: Option<crate::viewport::Bench>,
+    /// The rig tool that has the viewport's pointer (placing joints, painting weights).
+    pub rig_tool: crate::rig_tools::RigTool,
     pub focus_panel: usize,
     pub last_frame: Option<std::time::Instant>,
     pub autosave_at: Option<std::time::Instant>,
@@ -348,7 +297,7 @@ impl ModelApp {
             brush_px: 60.0,
             user_presets: Vec::new(),
             ops: OpParams::default(),
-            layout: Layout::default(),
+            layouts: Default::default(),
             status: tl!("Ready"),
             palette: None,
             numeric: None,
@@ -382,6 +331,7 @@ impl ModelApp {
             frames: 0,
             frame_times: Default::default(),
             bench: None,
+            rig_tool: crate::rig_tools::RigTool::default(),
             focus_panel: 0,
             last_frame: None,
             autosave_at: None,
@@ -394,6 +344,9 @@ impl ModelApp {
         if let Some(port) = cli.control {
             app.agents.port = port;
             crate::agents::start(&mut app, ctx);
+        }
+        if let Some(n) = cli.bench_skin {
+            crate::rig_tools::start_bench(&mut app, n, cli.bench_skin_dq);
         }
         if let Some(n) = cli.bench_frames {
             let polys = cli.bench_polys.unwrap_or(1_000_000);
@@ -463,6 +416,7 @@ impl ModelApp {
             .map(|b| modelcraft_engine::sculpt::preset::BrushPreset::new(&b.name, &b.brush))
             .collect();
         self.doc.keep_history = p.keep_history;
+        self.layouts = crate::dock::Layouts::from_saved(&p.layouts);
         self.allow_agents = p.allow_agents;
         self.shelf = crate::shelf::cleaned(p.shelf.clone());
         self.show_grid = p.show_grid;
@@ -483,6 +437,7 @@ impl ModelApp {
             NavPreset::RightMouse => "right",
         };
         let presets = self.user_presets.clone();
+        let layouts = self.layouts.to_saved();
         let (recent, snap, brush_px, keep_history, allow_agents) = (self.recent.clone(), self.snap, self.brush_px, self.doc.keep_history, self.allow_agents);
         let (shelf, grid, axes, wire, patches, unit, language) =
             (self.shelf.clone(), self.show_grid, self.show_axes, self.show_wire, self.show_patches, self.unit, self.language.clone());
@@ -490,6 +445,7 @@ impl ModelApp {
         if let Some(store) = &mut self.prefs {
             store.update(|p| {
                 p.keep_history = keep_history;
+                p.layouts = layouts;
                 p.allow_agents = allow_agents;
                 p.shelf = shelf;
                 p.show_grid = grid;
@@ -729,6 +685,8 @@ impl ModelApp {
             ExportObj => self.export_dialog("obj"),
             ExportStl => self.export_dialog("stl"),
             ExportFbx => self.export_dialog("fbx"),
+            Export3mf => self.export_dialog("3mf"),
+            ExportUsda => self.export_dialog("usda"),
             Undo => {
                 self.drag = None;
                 self.run(Command::Undo);
@@ -896,11 +854,12 @@ impl ModelApp {
             Palette => self.palette = Some(crate::panels::Palette::default()),
             NextPanel => {
                 // Next panel that is shown in this workspace.
-                let shown: Vec<usize> =
-                    PanelId::ALL.iter().enumerate().filter(|(_, p)| self.layout.dock(self.workspace, **p) != Dock::Hidden).map(|(i, _)| i).collect();
+                let shown = self.layouts.shown_panels(self.workspace);
                 if !shown.is_empty() {
                     self.focus_panel = self.focus_panel.wrapping_add(1);
-                    let idx = shown.get(self.focus_panel % shown.len()).copied().unwrap_or(0);
+                    let p = shown.get(self.focus_panel % shown.len()).copied().unwrap_or(PanelId::Tree);
+                    self.layouts.raise(crate::dock::Pane::of(p));
+                    let idx = PanelId::ALL.iter().position(|x| *x == p).unwrap_or(0);
                     ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("panel-focus", idx))));
                 }
             }
@@ -1088,7 +1047,7 @@ impl ModelApp {
     pub fn open_dialog(&mut self) {
         if let Some(p) = rfd::FileDialog::new()
             .add_filter("ModelCraft", &["modelcraft"])
-            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"])
+            .add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf", "usda", "usd"])
             .pick_file()
         {
             self.open_path(p);
@@ -1096,7 +1055,7 @@ impl ModelApp {
     }
 
     fn import_dialog(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf"]).pick_file() {
+        if let Some(p) = rfd::FileDialog::new().add_filter(tl!("3D files"), &["glb", "gltf", "obj", "stl", "ply", "fbx", "3mf", "usda", "usd"]).pick_file() {
             self.run(Command::Import { path: p.display().to_string(), up: self.exchange.up, scale: self.exchange.scale });
         }
     }
@@ -1282,35 +1241,7 @@ impl ModelApp {
         crate::shelf::bar(self, ui);
         crate::panels::status_bar(self, ui);
         crate::anim_ui::bottom_panel(self, ui);
-        for side in [Dock::Left, Dock::Right] {
-            let panels: Vec<PanelId> = PanelId::ALL.iter().copied().filter(|p| self.layout.dock(self.workspace, *p) == side).collect();
-            if panels.is_empty() {
-                continue;
-            }
-            let id = if side == Dock::Left { "dock-left" } else { "dock-right" };
-            let panel = if side == Dock::Left { egui::Panel::left(id) } else { egui::Panel::right(id) };
-            panel.resizable(true).default_size(if side == Dock::Left { 240.0 } else { 300.0 }).min_size(180.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    for p in panels {
-                        crate::panels::dock_panel(self, ui, p);
-                    }
-                });
-            });
-        }
-        for p in PanelId::ALL {
-            if self.layout.dock(self.workspace, p) == Dock::Float {
-                let mut open = true;
-                egui::Window::new(p.label())
-                    .id(egui::Id::unique(("float", p as u8)))
-                    .open(&mut open)
-                    .default_width(280.0)
-                    .show(&ctx, |ui| crate::panels::panel_body(self, ui, p));
-                if !open {
-                    self.layout.set(self.workspace, p, Dock::Hidden);
-                }
-            }
-        }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL_DEEP)).show(ui, |ui| crate::viewport::show(self, ui));
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL)).show(ui, |ui| crate::dock::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         crate::prefs_ui::show(self, &ctx);
         crate::organize_ui::show(self, &ctx);
