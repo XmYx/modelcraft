@@ -56,3 +56,5 @@ mod groups_tests;
 mod rig_tests;
 #[cfg(test)]
 mod sim_tests;
+#[cfg(test)]
+mod uv_udim_tests;

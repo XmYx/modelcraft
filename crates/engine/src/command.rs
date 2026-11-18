@@ -253,6 +253,19 @@ pub enum Command {
         id: ObjectId,
         thickness: f32,
     },
+    /// Give the mesh object `id` the UVs of the mesh object `source`: each corner takes the UV at
+    /// the closest point of the source's surface (in world space, so the objects may sit
+    /// anywhere), as a history step on `id`. `max_distance` is in world units; corners further
+    /// than that keep their UV. With `per_island` (the default) a face is looked up on one source
+    /// island only, so it never straddles a source seam.
+    TransferUvs {
+        id: ObjectId,
+        source: ObjectId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_distance: Option<f32>,
+        #[serde(default = "yes")]
+        per_island: bool,
+    },
     /// Move the vertices of the mesh being sculpted onto the surface of another object, no
     /// further than `reach` (in the sculpted object's units; a tenth of its size when left out).
     SculptProject {
@@ -302,6 +315,10 @@ fn two() -> u32 {
     2
 }
 
+fn yes() -> bool {
+    true
+}
+
 /// Command names with a one-line description (for `modelcraft-cli commands` and the agent channel).
 pub const COMMANDS: &[(&str, &str)] = &[
     ("add_primitive", "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent?"),
@@ -348,6 +365,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("sculpt_clip", "Move what lies on the normal's side of a plane onto it: id, point, normal"),
     ("sculpt_extract", "New object from the masked faces as a closed shell: id, thickness"),
+    ("transfer_uvs", "Give a mesh the UVs of another by closest-point lookup, as a history step: id, source, max_distance?, per_island?"),
     ("sculpt_project", "Move the sculpted mesh onto the surface of another object, as far as the mask allows: id, source, reach?"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
@@ -438,6 +456,7 @@ impl Command {
             Command::SculptClip { .. } => "Clip to plane".into(),
             Command::SculptExtract { .. } => "Extract shell".into(),
             Command::SculptProject { .. } => "Project detail".into(),
+            Command::TransferUvs { .. } => "Transfer UVs".into(),
             Command::AddMesh { .. } => "Add mesh".into(),
             Command::SetPositions { .. } => "Set positions".into(),
             Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),

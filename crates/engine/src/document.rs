@@ -782,6 +782,7 @@ impl Document {
             | Command::SetCageLevels { id, .. }
             | Command::SetDeformer { id, .. }
             | Command::AddStep { id, .. }
+            | Command::TransferUvs { id, .. }
             | Command::SetStep { id, .. }
             | Command::EnableStep { id, .. }
             | Command::RemoveStep { id, .. }
@@ -926,6 +927,39 @@ impl Document {
                 let sid = self.scene.fresh_id();
                 self.mesh_steps(*id)?.push(Step { id: sid, enabled: true, op: op.clone() });
                 let e = self.eval.evaluate(&self.scene, *id);
+                out.warnings.extend(e.errors.iter().map(|e| e.message.clone()));
+            }
+            Command::TransferUvs { id, source, max_distance, per_island } => {
+                let (id, source) = (*id, *source);
+                if source == id {
+                    return invalid("an object cannot take UVs from itself");
+                }
+                if max_distance.is_some_and(|d| !(d.is_finite() && d >= 0.0)) {
+                    return invalid("the distance limit must be a number, zero or more");
+                }
+                let from = self.eval.evaluate(&self.scene, source).mesh;
+                if !matches!(self.scene.get(source).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) || !from.has_uvs() {
+                    return invalid("the source must be a mesh object with UVs");
+                }
+                let to = self.eval.evaluate(&self.scene, id).mesh;
+                if !matches!(self.scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) || to.face_count() == 0 {
+                    return invalid("the target must be a mesh object with faces");
+                }
+                // The source in the space of the target, and the distance limit from world units into it.
+                let (world_to, world_from) = (self.scene.world_matrix(id), self.scene.world_matrix(source));
+                let to_target = world_to.inverse() * world_from;
+                let mut moved = (*from).clone();
+                moved.map_positions(|_, p| to_target.transform_point3(p));
+                let scale = world_to.transform_vector3(glam::Vec3::X).length().max(1e-12);
+                let opts = modelcraft_uv::TransferOptions { max_distance: max_distance.map(|d| d / scale), per_island: *per_island };
+                let (uvs, report) = modelcraft_uv::transfer_uvs(&moved, &to, &opts).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                let sid = self.scene.fresh_id();
+                let uvs: Vec<[f32; 2]> = uvs.iter().map(|u| u.to_array()).collect();
+                self.mesh_steps(id)?.push(Step { id: sid, enabled: true, op: StepOp::SetUvs { uvs: std::sync::Arc::new(uvs) } });
+                if report.too_far > 0 {
+                    out.warnings.push(format!("{} of {} corners were further than the distance limit and kept their UVs", report.too_far, report.corners));
+                }
+                let e = self.eval.evaluate(&self.scene, id);
                 out.warnings.extend(e.errors.iter().map(|e| e.message.clone()));
             }
             Command::SetStep { id, index, op } => {
@@ -1316,6 +1350,52 @@ impl Document {
         let mesh = self.eval.evaluate(&self.scene, id).mesh;
         let bytes = if ext == "svg" { uvlayout::svg(&mesh, size)?.into_bytes() } else { uvlayout::png(&mesh, size)? };
         craft_atomic_write(path, &bytes)
+    }
+
+    /// Write one layout picture per UDIM tile the mesh's UVs lie in, named `stem.1001.ext`,
+    /// `stem.1002.ext`, … next to `path`'s stem (`path` has the `.svg` or `.png` extension).
+    /// Returns the files written; a mesh whose UVs lie in no tile writes none and is an error.
+    pub fn export_uv_layout_udim(&mut self, path: &Path, object: Option<ObjectId>, size: u32) -> Result<Vec<std::path::PathBuf>, EngineError> {
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if ext != "svg" && ext != "png" {
+            return Err(EngineError::Invalid("export the UV layout to .svg or .png".into()));
+        }
+        self.sync_sculpt();
+        let id = match object {
+            Some(id) => id,
+            None => {
+                let ids: Vec<ObjectId> = self.scene.tree_order().into_iter().map(|(id, _)| id).collect();
+                ids.into_iter()
+                    .find(|id| {
+                        matches!(self.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }))
+                            && self.scene.visible(*id)
+                            && self.eval.evaluate(&self.scene, *id).mesh.has_uvs()
+                    })
+                    .ok_or_else(|| EngineError::Invalid("no visible mesh has UVs".into()))?
+            }
+        };
+        if self.scene.get(id).is_none() {
+            return Err(EngineError::Invalid(format!("no object {}", id.0)));
+        }
+        let mesh = self.eval.evaluate(&self.scene, id).mesh;
+        let tiles = modelcraft_uvpack::udim_tiles(&mesh);
+        if tiles.is_empty() {
+            return Err(EngineError::Invalid("the UVs lie in no UDIM tile (1001 to 1100)".into()));
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("uv-layout").to_string();
+        let mut written = Vec::with_capacity(tiles.len());
+        for number in tiles {
+            let Some((column, row)) = modelcraft_uvpack::tile_of_number(number) else { continue };
+            let bytes = if ext == "svg" {
+                uvlayout::svg_tile(&mesh, size, column as u32, row as u32)?.into_bytes()
+            } else {
+                uvlayout::png_tile(&mesh, size, column as u32, row as u32)?
+            };
+            let file = path.with_file_name(format!("{stem}.{number}.{ext}"));
+            craft_atomic_write(&file, &bytes)?;
+            written.push(file);
+        }
+        Ok(written)
     }
 
     /// Total triangles of everything visible (for the status bar).

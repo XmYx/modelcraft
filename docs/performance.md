@@ -639,6 +639,40 @@ The energy is the fit energy of that mode, and a relaxation that would raise it 
 On a 8×8 grid whose interior vertices were knocked about by up to 0.015 of its width, 60 iterations
 bring the maximum angle error from 17.3° to 4e-5° (`relax_restores_a_jittered_grid_to_an_isometry`).
 
+### UV transfer (`uv-transfer-bench --segments N`)
+
+An unwrapped sphere of N×N/2 quads gives its UVs to a sphere 1.5 times finer (so every target
+corner lies on or just off the source surface), by closest point on the triangles of the source
+(uniform grid, expanding shells). Same machine and release build as above.
+
+| Source / target faces | Target corners | Per island | Plain | Mean distance to the source |
+|---|---|---|---|---|
+| 512 / 1,152 | 4,512 | 10 ms | 6 ms | 4.4e-3 |
+| 8,192 / 18,432 | 73,344 | 171 ms | 159 ms | 2.7e-4 |
+| 14,450 / 32,385 | 129,030 | 539 ms | 487 ms | 1.7e-4 |
+| 31,250 / 70,125 | 279,750 | 1,188 ms | 937 ms | 7.6e-5 |
+
+About 4 microseconds a corner, growing slowly with size. Per island costs one more lookup per face
+(the anchor). The distance is the gap between the two tessellations of the sphere, not an error of
+the search: a mesh gets its own UVs back to 1e-4 (`a_mesh_gets_its_own_uvs_back`).
+
+### UDIM packing (`uv-pack-bench --islands N --tiles T`)
+
+The same random rectangles as above, dealt to T tiles largest first, packed per tile with MaxRects
+and brought to the common smallest scale, so the texel density is the same in every tile. Same
+machine and release build.
+
+| Islands | Tiles | Rotation | Time | Common scale (one tile: 200 islands 0.154) | Utilisation per tile |
+|---|---|---|---|---|---|
+| 200 | 1 | fit | 63 ms | 0.154 | 84.8 % |
+| 200 | 4 | none / fit | 22 / 16 ms | 0.308 / 0.313 | 84.9 % / 87.5 % |
+| 1,000 | 4 | none / fit | 417 / 457 ms | 0.138 / 0.139 | 81.9 % / 83.5 % |
+| 1,000 | 16 | none / fit | 82 / 90 ms | 0.278 / 0.282 | 83.3 % / 86.2 % |
+
+Four tiles double the linear scale of one, as they should (the areas are four times larger), and
+dealing by area keeps the tiles within a fraction of a percent of each other. Packing many small
+sets is faster than one large one because MaxRects work grows faster than linearly with islands.
+
 ## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
 
 Random rectangular islands (fixed seed, sides 0.05 to 1.55, even texel density), packed into the
