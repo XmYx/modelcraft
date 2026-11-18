@@ -45,6 +45,33 @@ fn mask_tools_by_keyboard_and_buttons() {
     assert!(count(&h) > start, "undo brings the blurred mask back");
 }
 
+#[test]
+fn drawing_the_panels_does_not_copy_the_sculpt_into_the_scene() {
+    // The Sculpt panel used to sync the session into the scene on every frame; during a stroke
+    // that copied every vertex and made the Properties panel rebuild the object each frame.
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Quad sphere");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    h.run();
+    let brush = h.state().brush.clone();
+    assert!(h.state_mut().doc.stroke_begin(brush));
+    let dab = modelcraft_engine::sculpt::Dab { center: glam::Vec3::Y, view_dir: -glam::Vec3::Y, pressure: 1.0, grab_delta: glam::Vec3::ZERO, scale: 1.0 };
+    h.state_mut().doc.stroke_dab(dab);
+    assert!(h.state().doc.sculpt.as_ref().unwrap().unsynced);
+    let id = h.state().doc.sculpt.as_ref().unwrap().id;
+    let in_scene = std::sync::Arc::as_ptr(&h.state().doc.sculpt_layer(id).unwrap().positions);
+    for _ in 0..5 {
+        h.step();
+    }
+    assert!(h.state().doc.sculpt.as_ref().unwrap().unsynced, "a frame synced the session");
+    assert_eq!(std::sync::Arc::as_ptr(&h.state().doc.sculpt_layer(id).unwrap().positions), in_scene, "the scene's layer was replaced");
+    // Ending the stroke and saving still see the stroke.
+    h.state_mut().doc.stroke_end();
+    h.state_mut().doc.sync_sculpt();
+    assert_ne!(std::sync::Arc::as_ptr(&h.state().doc.sculpt_layer(id).unwrap().positions), in_scene);
+}
+
 /// Drag the primary button across the viewport, from `from` to `to` in screen points.
 fn drag(h: &mut Harness<'static, ModelApp>, from: egui::Pos2, to: egui::Pos2) {
     let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
