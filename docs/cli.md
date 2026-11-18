@@ -20,9 +20,11 @@ modelcraft-cli run-script scene.modelcraft tool.rhai -o out.modelcraft   # a scr
 modelcraft-cli bench-skin --verts 100000 --joints 60 --frames 120
                                               # bind, pose and skin a procedural tube
 modelcraft-cli bench --polys 1000000          # sculpt and GPU timings
+modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell, trim and occlusion timings
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
+modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
 modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
 
@@ -47,7 +49,7 @@ Object ids are numbers (`info` prints them).
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …} |
-| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform)} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} |
+| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin, method (lscm, abf)} · {op: stitch_uvs, edges, align?, scale?} · {op: relax_uvs, corners, iterations, mode (rigid, conformal)} · {op: straighten_uvs, corners, strength} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform)} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) · {op: decimate, ratio} (keeps about `ratio` of the triangles, 0..1, with UVs and patches; the result is triangles) |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
@@ -55,10 +57,16 @@ Object ids are numbers (`info` prints them).
 | `set_template` | `ids`, `template` (drawn, never picked) |
 | `add_selection_set` | `name`, `ids` |
 | `remove_selection_set` | `index` |
-| `import` | `path` (.glb, .gltf, .obj, .stl, .ply, .fbx, .3mf), `up?` (auto, y, z), `scale?` (metres per file unit) |
+| `import` | `path` (.glb, .gltf, .obj, .stl, .ply, .fbx, .3mf, .usda), `up?` (auto, y, z), `scale?` (metres per file unit) |
 | `end_sculpt` | — |
 | `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge. Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |
-| `sculpt_mask` | `id`, `op`: clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, {patch: {triangle}} |
+| `sculpt_mask` | `id`, `op`: clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}} |
+| `sculpt_groups` | `id`, `op`: {by_normal: {angle}} (degrees) · by_uv_island · by_part · from_mask. Makes patches on the mesh being sculpted |
+| `sculpt_visibility` | `id`, `op`: show_all · invert · hide_masked · hide_unmasked · {hide_patch: {triangle}} · {show_patch: {triangle}} · {isolate: {triangle}}. Hidden faces stay in the mesh; picking and brushes skip them |
+| `sculpt_region` | `id`, `region` {view_proj (16 numbers, column-major, object space to clip space), points [[x, y]…] (3 to 4096 corners, each −1..1, y up), front_only?, eye? (object space)}, `action`: mask, unmask, hide, isolate |
+| `sculpt_clip` | `id`, `point`, `normal` (object space): what lies on the normal's side moves onto the plane, as far as the mask allows |
+| `sculpt_extract` | `id`, `thickness`: a new object from the fully masked faces, as a closed shell |
+| `sculpt_project` | `id`, `source` (another object), `reach?` (how far a vertex may move, in the sculpted object's units; a tenth of its size when left out): the mesh being sculpted moves onto the source's surface, as far as the mask allows |
 | `sculpt_detail` | `id`, `op`: up, down (one detail level; the sculpted detail is kept as a displacement per level) |
 | `sculpt_shape` | `id`, `op`: {add: {name?}} · {remove: {index}} · {merge: {index}} · {strength: {index, strength −1..1}} · {select: {index or null}} · {rename: {index, name}} |
 | `add_mesh` | `positions` [[x,y,z]…], `faces` [[i,j,k…]…], `name?`, `parent?` (a mesh from raw geometry; faces that do not fit are dropped with a warning) |
@@ -120,7 +128,11 @@ names (`levels`, `deformer.angle`, …). Whole-number attributes round; switches
 | `turntable` | `ids`, `axis` (x, y, z; default y), `turns` (default 1), `start?`, `end?`; replaces the rotation curves |
 | `add_layer` | `name?`, `mode?` (add, override); the new layer becomes active |
 | `remove_layer`, `set_active_layer` | `layer` (0 is the base layer) |
-| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?` |
+| `set_layer` | `layer`, `name?`, `weight?` (0..1), `mute?`, `mode?`, `solo?` (only solo layers play over the base), `lock?` (its keys cannot be changed) |
+| `key_layer_weight` | `layer`, `frame?`, `value?` (its weight there without it), `clear?` (remove its weight keys): the layer's weight over time |
+| `move_layer` | `layer`, `delta` (1 up, −1 down) |
+| `paste_keys` | `keys`: `[{id, path, key: {t, v, interp?, tangent?, …}}]`, `offset?` (frames), `to?` (another object; attributes it lacks are skipped) |
+| `set_attr` | `id`, `path`, `value`: set any numeric attribute without keying it |
 | `flatten_layers` | `step` (default 1): bake every layer into the base curves |
 | `set_time` | `frame` (poses the scene; not an undo step) |
 | `set_time_range` | `start?`, `end?`, `fps?` |
@@ -230,6 +242,8 @@ samples per second.
 | `--depth N` | Bounces, default 12 |
 | `--device auto\|cpu\|gpu` | `auto` uses a hardware GPU when there is one and falls back to the CPU; `gpu` fails if it cannot |
 | `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
+| `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
+| `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |

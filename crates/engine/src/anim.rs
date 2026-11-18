@@ -29,6 +29,17 @@ fn axis_y() -> String {
     "y".into()
 }
 
+/// A copied key: where it came from and the key itself (value, interpolation, tangents).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PastedKey {
+    pub id: ObjectId,
+    pub path: String,
+    pub key: modelcraft_anim::Key,
+}
+
+/// Most keys one paste holds.
+pub const MAX_PASTE: usize = 100_000;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum AnimCommand {
@@ -176,6 +187,41 @@ pub enum AnimCommand {
         mute: Option<bool>,
         #[serde(default)]
         mode: Option<LayerMode>,
+        #[serde(default)]
+        solo: Option<bool>,
+        #[serde(default)]
+        lock: Option<bool>,
+    },
+    /// Key a layer's weight at `frame` (the current frame without it) with `value` (its weight
+    /// there without it); `clear` removes every weight key instead.
+    KeyLayerWeight {
+        layer: u32,
+        #[serde(default)]
+        frame: Option<f64>,
+        #[serde(default)]
+        value: Option<f64>,
+        #[serde(default)]
+        clear: bool,
+    },
+    /// Move a layer up the stack (`delta` 1) or down (−1).
+    MoveLayer {
+        layer: u32,
+        delta: i32,
+    },
+    /// Paste copied keys into the active layer, `offset` frames later, on the objects they came
+    /// from or, with `to`, on that object (attributes it does not have are skipped).
+    PasteKeys {
+        keys: Vec<PastedKey>,
+        #[serde(default)]
+        offset: f64,
+        #[serde(default)]
+        to: Option<ObjectId>,
+    },
+    /// Set any numeric attribute by its path, without keying it.
+    SetAttr {
+        id: ObjectId,
+        path: String,
+        value: f64,
     },
     /// Choose the layer that keys are set and edited in (0 is the base).
     SetActiveLayer {
@@ -228,7 +274,11 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("turntable", "Spin objects around an axis over a span, repeating: ids, axis (x, y, z; default y), turns (default 1), start?, end?"),
     ("add_layer", "Add an animation layer on top and make it active: name?, mode? (add, override)"),
     ("remove_layer", "Remove a layer and its curves: layer"),
-    ("set_layer", "Change a layer: layer, name?, weight? (0..1), mute?, mode?"),
+    ("set_layer", "Change a layer: layer, name?, weight? (0..1), mute?, mode?, solo?, lock?"),
+    ("key_layer_weight", "Key a layer's weight: layer, frame?, value?, clear? (removes its weight keys)"),
+    ("move_layer", "Move a layer up or down the stack: layer, delta"),
+    ("set_attr", "Set a numeric attribute by path without keying it: id, path, value"),
+    ("paste_keys", "Paste copied keys into the active layer: keys [{id, path, key {t, v, …}}], offset? (frames), to? (another object)"),
     ("set_active_layer", "Choose the layer keys are set and edited in: layer (0 is the base)"),
     ("flatten_layers", "Bake every layer into the base curves and remove the layers: step (default 1)"),
     ("set_time", "Go to a frame: frame"),
@@ -255,6 +305,11 @@ impl AnimCommand {
             AnimCommand::AddLayer { .. } => "Add animation layer",
             AnimCommand::RemoveLayer { .. } => "Remove animation layer",
             AnimCommand::SetLayer { .. } => "Layer settings",
+            AnimCommand::KeyLayerWeight { clear: true, .. } => "Clear layer weight keys",
+            AnimCommand::KeyLayerWeight { .. } => "Key layer weight",
+            AnimCommand::MoveLayer { .. } => "Move layer",
+            AnimCommand::SetAttr { .. } => "Set attribute",
+            AnimCommand::PasteKeys { .. } => "Paste keys",
             AnimCommand::SetActiveLayer { .. } => "Active layer",
             AnimCommand::FlattenLayers { .. } => "Flatten layers",
             AnimCommand::SetTime { .. } => "Go to frame",
@@ -488,7 +543,65 @@ pub fn apply(scene: &mut Scene, cmd: &AnimCommand, out: &mut Outcome) -> Result<
                 return invalid(format!("no animation layer {layer}"));
             }
         }
-        AnimCommand::SetLayer { layer, name, weight, mute, mode } => {
+        AnimCommand::KeyLayerWeight { layer, frame, value, clear } => {
+            let at = frame.unwrap_or(scene.anim.frame);
+            if !at.is_finite() || value.is_some_and(|v| !v.is_finite()) {
+                return invalid("a key needs a finite frame and value");
+            }
+            let l = scene.anim.layer_mut(*layer).ok_or_else(|| EngineError::Invalid(format!("no animation layer {layer}")))?;
+            if *clear {
+                l.weight_curve = None;
+            } else {
+                let v = value.unwrap_or_else(|| l.weight_at(at)).clamp(0.0, 1.0);
+                let curve = l.weight_curve.get_or_insert_with(|| std::sync::Arc::new(Curve::new()));
+                std::sync::Arc::make_mut(curve).set_key(at, v).ok_or_else(|| EngineError::Invalid("the curve is full".into()))?;
+            }
+        }
+        AnimCommand::PasteKeys { keys, offset, to } => {
+            if keys.is_empty() || keys.len() > MAX_PASTE {
+                return invalid(format!("a paste holds 1 to {MAX_PASTE} keys"));
+            }
+            if !offset.is_finite() {
+                return invalid("the offset is a number of frames");
+            }
+            let (mut pasted, mut skipped) = (0, 0);
+            for k in keys {
+                let target = to.unwrap_or(k.id);
+                let frame = k.key.t + offset;
+                if scene.attr(target, &k.path).is_none() || !frame.is_finite() || !k.key.v.is_finite() {
+                    skipped += 1;
+                    continue;
+                }
+                // Through `set_key` first: it keeps the three angles of a rotation together and
+                // gives a layer its base key; then the copied key's own shape goes in.
+                scene.set_key(target, &k.path, frame, Some(k.key.v))?;
+                let mut key = k.key;
+                key.t = frame;
+                scene.anim.curve_mut(target, &k.path)?.insert(key).ok_or_else(|| EngineError::Invalid("the curve is full".into()))?;
+                pasted += 1;
+            }
+            if pasted == 0 {
+                return invalid("none of the copied attributes exist on the target");
+            }
+            out.warnings.push(if skipped == 0 { format!("{pasted} keys pasted") } else { format!("{pasted} keys pasted, {skipped} skipped") });
+        }
+        AnimCommand::SetAttr { id, path, value } => {
+            if scene.get(*id).is_none() {
+                return Err(modelcraft_scene::SceneError::NoObject(*id).into());
+            }
+            scene.set_attr(*id, path, *value)?;
+            // Not keyed: on an animated attribute it lasts until the frame changes.
+            return Ok(());
+        }
+        AnimCommand::MoveLayer { layer, delta } => {
+            if scene.anim.layer(*layer).is_none() {
+                return invalid(format!("no animation layer {layer}"));
+            }
+            if !scene.anim.move_layer(*layer, *delta) {
+                out.warnings.push("the layer is already at the end of the stack".into());
+            }
+        }
+        AnimCommand::SetLayer { layer, name, weight, mute, mode, solo, lock } => {
             if weight.is_some_and(|w| !w.is_finite()) {
                 return invalid("a weight is a number from 0 to 1");
             }
@@ -499,6 +612,8 @@ pub fn apply(scene: &mut Scene, cmd: &AnimCommand, out: &mut Outcome) -> Result<
             l.weight = weight.map_or(l.weight, |w| w.clamp(0.0, 1.0));
             l.mute = mute.unwrap_or(l.mute);
             l.mode = mode.unwrap_or(l.mode);
+            l.solo = solo.unwrap_or(l.solo);
+            l.lock = lock.unwrap_or(l.lock);
         }
         AnimCommand::SetActiveLayer { layer } => {
             if !scene.anim.set_active_layer(*layer) {

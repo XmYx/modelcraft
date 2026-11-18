@@ -117,6 +117,7 @@ fn commit(app: &mut ModelApp, resp: &egui::Response, target: ObjectId, path: &st
 /// The Properties sections for the active object: its blend shapes (on the mesh or on the
 /// deformer), a lattice's control points, a cluster's summary.
 pub fn properties(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
+    crate::rig_tools::properties(app, ui);
     if let Some((mesh, shapes)) = shapes_of(app, id) {
         let targets = match app.doc.scene.get(shapes).map(|o| o.kind.clone()) {
             Some(ObjectKind::PointDeformer { deformer: PointDeformer::BlendShapes { targets } }) => targets,

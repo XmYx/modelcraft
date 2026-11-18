@@ -286,7 +286,7 @@ fn welding_joins_the_two_sides_of_a_uv_seam() {
     h.key_press(Key::J);
     h.run();
     let s = steps(&h);
-    assert!(matches!(s.last(), Some(StepOp::StitchUvs { edges }) if !edges.is_empty()), "{s:?}");
+    assert!(matches!(s.last(), Some(StepOp::StitchUvs { edges, .. }) if !edges.is_empty()), "{s:?}");
     assert!(h.state().uv.selection.is_empty(), "the selection is cleared after a weld");
 }
 
@@ -482,4 +482,61 @@ fn a_mesh_without_uvs_gets_them_from_a_projection() {
     h.run();
     h.run();
     h.get_by_label_contains("UV canvas, 1 faces");
+}
+
+#[test]
+fn the_angle_based_solver_is_a_menu_entry_and_a_choice_in_the_toolbar() {
+    let mut h = editor("Sphere");
+    h.get_by_role_and_label(Role::ComboBox, "Unwrap solver");
+    palette(&mut h, "Unwrap UVs (Angle-Based)");
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::Unwrap { method: modelcraft_engine::scene::UnwrapMethod::Abf, .. })), "{s:?}");
+    let id = h.state().selection[0];
+    let app = h.state_mut();
+    let scene = app.doc.scene.clone();
+    let out = app.doc.eval.steps_output(&scene, id, usize::MAX);
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    assert!(out.mesh.corner_uvs().iter().all(|u| u.is_finite() && u.min_element() >= -1e-4 && u.max_element() <= 1.0 + 1e-4));
+    // The toolbar choice decides what the plain Unwrap button and shortcut do.
+    h.state_mut().uv.unwrap_method = modelcraft_engine::scene::UnwrapMethod::Abf;
+    h.get_by_label_contains("UV canvas").focus();
+    h.run();
+    h.key_press(Key::U);
+    h.run();
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::Unwrap { method: modelcraft_engine::scene::UnwrapMethod::Abf, .. })), "{s:?}");
+    assert_eq!(s.iter().filter(|o| matches!(o, StepOp::Unwrap { .. })).count(), 2);
+}
+
+#[test]
+fn relax_straighten_and_stitch_are_buttons_and_menu_entries_that_make_history_steps() {
+    let mut h = editor("Plane");
+    for name in ["Relax UVs", "Straighten UVs", "Stitch UV Islands"] {
+        assert!(h.get_all_by_label(name).count() >= 1, "{name} is a control");
+    }
+    h.get_by_role_and_label(Role::SpinButton, "Relax iterations");
+    h.get_by_role_and_label(Role::ComboBox, "Relax fit");
+    h.get_by_role_and_label(Role::CheckBox, "Match scale when stitching");
+    // Nothing selected: relax works on the whole layout; the other two ask for a selection.
+    let before = steps(&h).len();
+    palette(&mut h, "Straighten UVs");
+    h.get_by_label_contains("chain of UV edges");
+    palette(&mut h, "Stitch UV Islands");
+    h.get_by_label_contains("UV edges to stitch");
+    assert_eq!(steps(&h).len(), before, "a command without a selection adds no step");
+    palette(&mut h, "Relax UVs");
+    assert!(matches!(steps(&h).last(), Some(StepOp::RelaxUvs { corners, iterations: 10, .. }) if corners.is_empty()), "{:?}", steps(&h));
+    let id = h.state().selection[0];
+    let app = h.state_mut();
+    let scene = app.doc.scene.clone();
+    let out = app.doc.eval.steps_output(&scene, id, usize::MAX);
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    // With the whole layout selected, straighten has edges to work with but a grid has no open chain.
+    h.get_by_label_contains("UV canvas").focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    assert!(!h.state().uv.selection.is_empty());
+    palette(&mut h, "Relax UVs");
+    assert!(matches!(steps(&h).last(), Some(StepOp::RelaxUvs { corners, .. }) if !corners.is_empty()));
 }

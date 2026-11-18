@@ -13,8 +13,10 @@ pub mod alpha;
 pub mod brush;
 mod bvh;
 pub mod detail;
+pub mod groups;
 pub mod live;
 pub mod preset;
+pub mod project;
 pub mod stroke;
 
 use glam::Vec3;
@@ -23,6 +25,7 @@ use modelcraft_mesh::PolyMesh;
 pub use alpha::Alpha;
 pub use brush::{BrushKind, BrushSettings, Dab, Falloff, Stamp, Stroke, Symmetry};
 pub use bvh::Bvh;
+pub use groups::ScreenRegion;
 pub use stroke::{DabMaker, DabOut, StrokeMode};
 
 /// Vertices per dirty chunk (a GPU upload unit).
@@ -35,6 +38,14 @@ pub struct SculptMesh {
     pub mask: Vec<f32>,
     tris: Vec<[u32; 3]>,
     tri_patch: Vec<u32>,
+    /// The face of the source mesh each triangle came from (not used once live detail has
+    /// changed the triangles), and how many faces there were.
+    tri_face: Vec<u32>,
+    faces: usize,
+    /// Hidden triangles; empty when everything shows.
+    hidden: Vec<bool>,
+    /// Counts every change of patches and visibility.
+    view_rev: u64,
     adj: Adj,
     bvh: Bvh,
     /// Live-detail strokes applied minus undone since the session began.
@@ -163,6 +174,10 @@ impl SculptMesh {
             mask,
             tris,
             tri_patch,
+            tri_face: owner,
+            faces: mesh.face_count(),
+            hidden: Vec::new(),
+            view_rev: 0,
             adj: Adj::Csr { nbr_start, nbr, vtri_start, vtri },
             bvh,
             topo_edits: 0,
@@ -194,7 +209,7 @@ impl SculptMesh {
     }
 
     pub fn heap_bytes(&self) -> usize {
-        self.positions.len() * (12 + 12 + 4 + 4) + self.tris.len() * (12 + 4) + self.adj.heap_bytes() + self.bvh.heap_bytes()
+        self.positions.len() * (12 + 12 + 4 + 4) + self.tris.len() * (12 + 4 + 4) + self.hidden.len() + self.adj.heap_bytes() + self.bvh.heap_bytes()
     }
 
     fn tri_normal(&self, t: u32) -> Vec3 {
@@ -299,7 +314,7 @@ impl SculptMesh {
 
     /// Nearest hit of a ray (object space): `(distance, point, triangle)`.
     pub fn raycast(&self, origin: Vec3, dir: Vec3) -> Option<(f32, Vec3, u32)> {
-        self.bvh.raycast(&self.positions, &self.tris, origin, dir, self.drift)
+        self.bvh.raycast(&self.positions, &self.tris, origin, dir, self.drift, &self.hidden)
     }
 
     /// Vertices within `radius` of `center`.
@@ -318,7 +333,11 @@ impl SculptMesh {
         let positions = &self.positions;
         let stamp = &mut self.stamp;
         let tris = &self.tris;
+        let hidden = &self.hidden;
         self.bvh.visit_sphere(center, radius + self.drift, |t| {
+            if hidden.get(t as usize).copied().unwrap_or(false) {
+                return;
+            }
             if let Some(tri) = tris.get(t as usize) {
                 for v in tri {
                     let Some(s) = stamp.get_mut(*v as usize) else { continue };
@@ -352,7 +371,11 @@ impl SculptMesh {
     }
 
     /// Start a stroke with these brush settings.
-    pub fn begin_stroke(&mut self, brush: BrushSettings) {
+    pub fn begin_stroke(&mut self, mut brush: BrushSettings) {
+        // Live detail would have to split hidden triangles too; it waits until everything shows.
+        if !self.hidden.is_empty() {
+            brush.live_detail = None;
+        }
         self.stroke = Some(StrokeState { brush, original: Default::default(), grabbed: Vec::new(), dabs: Vec::new(), reach: Default::default(), topo: None });
     }
 
@@ -564,5 +587,7 @@ impl SculptMesh {
     }
 }
 
+#[cfg(test)]
+mod groups_tests;
 #[cfg(test)]
 mod tests;

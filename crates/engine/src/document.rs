@@ -322,6 +322,10 @@ impl Document {
             layer.mask = mask;
             if let Some(t) = topology {
                 layer.topology = t;
+                // The faces changed with the triangles: patches kept on the layer follow.
+                if !layer.patches.is_empty() {
+                    layer.patches = Arc::new(s.mesh.face_patches());
+                }
             }
         }
     }
@@ -347,7 +351,13 @@ impl Document {
         if layer.positions.len() != input.vertex_count() {
             return invalid("the sculpt layer no longer matches the mesh (an earlier step changed the vertex count)");
         }
-        let mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
+        let mut mesh = SculptMesh::new(&input, Some(&layer.positions), Some(&layer.mask));
+        if layer.patches.len() == mesh.face_count() {
+            mesh.set_face_patches(&layer.patches);
+        }
+        if layer.hidden.len() == mesh.face_count() {
+            mesh.set_face_hidden(&layer.hidden);
+        }
         self.sculpt = Some(SculptSession { id, step_id, mesh, unsynced: false, had_topology: layer.topology.is_some(), topo_synced: 0 });
         Ok(())
     }
@@ -378,6 +388,8 @@ impl Document {
             Some("live detail works on the base detail level only, with no finer levels kept")
         } else if !l.shapes.is_empty() {
             Some("merge or remove the shape layers before using live detail")
+        } else if !l.hidden.is_empty() {
+            Some("show everything before using live detail")
         } else {
             None
         }
@@ -514,12 +526,96 @@ impl Document {
                     MaskOp::Shrink => s.mesh.mask_shrink(),
                     MaskOp::Hollows => s.mesh.mask_by_bend(false),
                     MaskOp::Ridges => s.mesh.mask_by_bend(true),
+                    MaskOp::Occlusion => s.mesh.mask_by_occlusion(),
                 };
                 s.unsynced = true;
                 if !change.is_empty() {
                     self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
                 }
                 Outcome::default()
+            }
+            Command::SculptRegion { id, region, action: action @ (crate::groups::RegionAction::Mask | crate::groups::RegionAction::Unmask) } => {
+                self.ensure_session(*id)?;
+                if !region.is_valid() {
+                    return invalid("the region needs 3 to 4096 corners with finite numbers");
+                }
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let change = s.mesh.mask_region(region, if *action == crate::groups::RegionAction::Mask { 1.0 } else { 0.0 });
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptClip { id, point, normal } => {
+                self.ensure_session(*id)?;
+                if !point.is_finite() || !normal.is_finite() || normal.length_squared() == 0.0 {
+                    return invalid("the plane needs a finite point and a normal with a length");
+                }
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let change = s.mesh.clip_plane(*point, *normal);
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id: *id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptProject { id, source, reach } => {
+                let (id, source) = (*id, *source);
+                self.ensure_session(id)?;
+                if source == id {
+                    return invalid("an object cannot be projected onto itself");
+                }
+                if reach.is_some_and(|r| !(r.is_finite() && r > 0.0)) {
+                    return invalid("the reach must be a number above zero");
+                }
+                if self.scene.get(source).is_none() {
+                    return Err(SceneError::NoObject(source).into());
+                }
+                let mesh = self.eval.evaluate(&self.scene, source).mesh;
+                if mesh.face_count() == 0 {
+                    return invalid("the source object has no surface");
+                }
+                // The source, in the space of the object being sculpted.
+                let to_target = self.scene.world_matrix(id).inverse() * self.scene.world_matrix(source);
+                let mut moved = (*mesh).clone();
+                moved.map_positions(|_, p| to_target.transform_point3(p));
+                let surface = SculptMesh::new(&moved, None, None);
+                let Some(s) = &mut self.sculpt else { return invalid("not sculpting") };
+                if s.mesh.in_stroke() {
+                    return invalid("finish the stroke first");
+                }
+                let size = s.mesh.positions.iter().fold((glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+                let reach = reach.unwrap_or(((size.1 - size.0).length() * 0.1).max(1e-6));
+                let change = s.mesh.project_onto(&surface, reach);
+                s.unsynced = true;
+                if !change.is_empty() {
+                    self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
+                }
+                Outcome::default()
+            }
+            Command::SculptGroups { id, .. } | Command::SculptVisibility { id, .. } | Command::SculptRegion { id, .. } | Command::SculptExtract { id, .. } => {
+                let id = *id;
+                self.ensure_session(id)?;
+                if self.sculpt.as_ref().is_some_and(|s| s.mesh.in_stroke()) {
+                    return invalid("finish the stroke first");
+                }
+                let c = cmd.clone();
+                let out = self.scene_change(&cmd, move |doc| match &c {
+                    Command::SculptGroups { op, .. } => doc.apply_groups(id, *op),
+                    Command::SculptVisibility { op, .. } => doc.apply_visibility(id, *op),
+                    Command::SculptRegion { region, action, .. } => doc.apply_region_view(id, region, *action == crate::groups::RegionAction::Isolate),
+                    Command::SculptExtract { thickness, .. } => doc.apply_extract(id, *thickness),
+                    _ => Ok(Outcome::default()),
+                })?;
+                self.sync_session_view(id)?;
+                out
             }
             Command::SculptDetail { id, .. } | Command::SculptShape { id, .. } => {
                 let id = *id;
@@ -973,6 +1069,12 @@ impl Document {
             | Command::SculptStroke { .. }
             | Command::SculptMask { .. }
             | Command::SculptDetail { .. }
+            | Command::SculptGroups { .. }
+            | Command::SculptVisibility { .. }
+            | Command::SculptRegion { .. }
+            | Command::SculptClip { .. }
+            | Command::SculptExtract { .. }
+            | Command::SculptProject { .. }
             | Command::SculptShape { .. } => {
                 return invalid("not a scene command");
             }
@@ -1006,24 +1108,67 @@ impl Document {
             return made;
         }
         if made > 1 && self.groups.is_empty() {
-            let entries = self.undo.take_last(made);
-            if entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. })) {
-                let first = entries.first();
-                let last = entries.last();
-                if let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (first, last) {
-                    let (before, after) = (before.clone(), after.clone());
-                    let bytes = 512 + self.scene.len() * 300;
-                    // The merged step replays as one batch of what the group ran.
-                    let cmd = Command::Batch { label: Some(g.label.clone()), commands: entries.iter().map(|e| e.command().clone()).collect() };
-                    self.undo.push(UndoEntry::Scene { label: g.label, cmd: Box::new(cmd), before, after, bytes });
-                    return made;
-                }
-            }
-            for e in entries {
-                self.undo.push_done(e);
-            }
+            self.fold_last(made, &g.label);
         }
         made
+    }
+
+    /// Merge the newest `n` undo entries into one step named `label`, when they are all scene
+    /// changes (the step then replays as one batch). Returns whether it did; otherwise the
+    /// entries are left as they were.
+    fn fold_last(&mut self, n: usize, label: &str) -> bool {
+        if n == 0 {
+            return false;
+        }
+        let entries = self.undo.take_last(n);
+        if entries.len() == n
+            && entries.iter().all(|e| matches!(e, UndoEntry::Scene { .. }))
+            && let (Some(UndoEntry::Scene { before, .. }), Some(UndoEntry::Scene { after, .. })) = (entries.first(), entries.last())
+        {
+            let (before, after) = (before.clone(), after.clone());
+            let bytes = 512 + self.scene.len() * 300;
+            let mut commands = Vec::new();
+            for e in &entries {
+                match e.command() {
+                    // Flatten, so merging again and again does not nest batches without end.
+                    Command::Batch { commands: inner, .. } => commands.extend(inner.iter().cloned()),
+                    c => commands.push(c.clone()),
+                }
+            }
+            let cmd = Command::Batch { label: Some(label.to_string()), commands };
+            self.undo.push_done(UndoEntry::Scene { label: label.to_string(), cmd: Box::new(cmd), before, after, bytes });
+            return true;
+        }
+        for e in entries {
+            self.undo.push_done(e);
+        }
+        false
+    }
+
+    /// A place in the undo history, for [`Document::fold_undo_since`]. It stays valid when old
+    /// entries are dropped to stay within the memory budget.
+    pub fn undo_mark(&self) -> usize {
+        self.undo.len() + self.undo.dropped
+    }
+
+    /// Merge the undo entries made since `mark` into one step. Without `into_previous` the step is
+    /// named `label`; with it the entry just before `mark` (the user's step the changes answer)
+    /// joins them and keeps its own name. Does not touch the redo history. Only scene changes
+    /// merge (a sculpt stroke before the mark is never joined); returns how many entries became
+    /// one, or 0 when nothing was merged.
+    pub fn fold_undo_since(&mut self, mark: usize, label: &str, into_previous: bool) -> usize {
+        self.sync_sculpt();
+        let made = self.undo_mark().saturating_sub(mark).min(self.undo.len());
+        if made == 0 {
+            return 0;
+        }
+        let mut n = made;
+        let mut name = label.to_string();
+        if into_previous && let Some(UndoEntry::Scene { label, .. }) = self.undo.newest(made) {
+            name = label.clone();
+            n += 1;
+        }
+        if self.fold_last(n, &name) { n } else { 0 }
     }
 
     /// How many undo groups are open.
@@ -1091,7 +1236,8 @@ impl Document {
     /// with skins, blend shapes, curves or constraints is written with them (joints, weights,
     /// morph targets and one clip of the playback range) instead of as the posed mesh.
     pub fn export_report(&mut self, path: &Path, convert: exchange::Convert) -> Result<Vec<String>, EngineError> {
-        let kind = Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl or .fbx".into()))?;
+        let kind =
+            Kind::from_path(path).filter(|k| k.can_write()).ok_or_else(|| EngineError::Invalid("export to .glb, .obj, .stl, .fbx, .3mf or .usda".into()))?;
         if kind == Kind::Glb && convert == exchange::Convert::default() && modelcraft_formats::gltf_rig::scene_has_rig(&self.scene) {
             self.sync_sculpt();
             let (bytes, warnings) = modelcraft_formats::gltf_rig::export_glb(&self.scene)?;

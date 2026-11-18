@@ -1,0 +1,1 @@
+| 2026-11-18 | In-app performance: playback of the skinned benchmark character measured in the app (`--bench-skin`, vertex upload included), skinning and the viewport's mesh data on several cores with bit-identical results, objects found through an index instead of a walk of the list; numbers and what still bounds playback in docs/performance.md |

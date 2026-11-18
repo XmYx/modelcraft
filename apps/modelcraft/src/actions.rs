@@ -16,6 +16,8 @@ pub enum Action {
     ExportObj,
     ExportStl,
     ExportFbx,
+    Export3mf,
+    ExportUsda,
     Undo,
     Redo,
     Delete,
@@ -85,6 +87,7 @@ pub enum Action {
     ScriptRunSelection,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
     MeshTool(crate::mesh_tools::Tool),
     RadialMenu,
@@ -110,6 +113,8 @@ pub fn all() -> Vec<Action> {
         ExportObj,
         ExportStl,
         ExportFbx,
+        Export3mf,
+        ExportUsda,
         Undo,
         Redo,
         Delete,
@@ -174,6 +179,7 @@ pub fn all() -> Vec<Action> {
     ]);
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
+    v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
     v
 }
@@ -263,6 +269,8 @@ impl Action {
             ExportObj => tl!("Export OBJ…"),
             ExportStl => tl!("Export STL…"),
             ExportFbx => tl!("Export FBX…"),
+            Export3mf => tl!("Export 3MF…"),
+            ExportUsda => tl!("Export USD…"),
             Undo => tl!("Undo"),
             Redo => tl!("Redo"),
             Delete => tl!("Delete"),
@@ -348,6 +356,7 @@ impl Action {
             KeyboardShortcuts => tl!("Keyboard Shortcuts…"),
             Anim(a) => a.label(),
             Rig(a) => a.label(),
+            Sculpt(a) => a.label(),
             Uv(a) => a.label(),
         }
     }
@@ -366,6 +375,8 @@ impl Action {
             ExportObj => "file.export_obj",
             ExportStl => "file.export_stl",
             ExportFbx => "file.export_fbx",
+            Export3mf => "file.export_3mf",
+            ExportUsda => "file.export_usda",
             Undo => "edit.undo",
             Redo => "edit.redo",
             Delete => "edit.delete",
@@ -446,6 +457,7 @@ impl Action {
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
+            Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             About => "help.about",
@@ -543,6 +555,7 @@ impl Action {
             NextPanel => "F6",
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
+            Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
             _ => return None,
         })
@@ -552,13 +565,13 @@ impl Action {
     pub fn menu(self) -> &'static str {
         use Action::*;
         match self {
-            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
+            New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             AddPrimitive(_) | AddCage | AddDeformer(_) | AddCloner(_) | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
-            | LiveDetail | EvenRemesh => "Sculpt",
+            | LiveDetail | EvenRemesh | Sculpt(_) => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
             Palette | KeyboardShortcuts | About => "Help",
             ScriptWindow | ScriptRun | ScriptRunSelection => "Scripts",

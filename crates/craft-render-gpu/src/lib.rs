@@ -43,6 +43,8 @@ pub struct Caps {
     pub max_buffer_size: u64,
     pub max_storage_buffer_binding_size: u64,
     pub max_compute_workgroups_per_dimension: u32,
+    /// Storage buffers one shader stage may bind (the resampled direct light kernels need 10).
+    pub max_storage_buffers: u32,
 }
 
 /// A device and queue with their capabilities.
@@ -82,6 +84,8 @@ impl GpuContext {
             let wanted = wgpu::Limits {
                 max_buffer_size: have.max_buffer_size,
                 max_storage_buffer_binding_size: have.max_storage_buffer_binding_size,
+                // Resampled direct lighting binds two more buffers than the portable eight.
+                max_storage_buffers_per_shader_stage: have.max_storage_buffers_per_shader_stage.clamp(8, 12),
                 ..wgpu::Limits::default()
             };
             let open = |limits: wgpu::Limits| {
@@ -110,6 +114,7 @@ impl GpuContext {
             max_buffer_size: limits.max_buffer_size,
             max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
             max_compute_workgroups_per_dimension: limits.max_compute_workgroups_per_dimension,
+            max_storage_buffers: limits.max_storage_buffers_per_shader_stage,
         };
         GpuContext { device, queue, caps }
     }
@@ -156,7 +161,16 @@ struct Params {
     texture_count: u32,
     has_cutouts: u32,
     has_env: u32,
+    restir_mode: u32,
+    restir_candidates: u32,
+    restir_neighbors: u32,
+    restir_radius: f32,
+    restir_history: f32,
+    pad: [u32; 3],
 }
+
+// The uniform block is padded to 16 bytes in WGSL; keep both sides the same size.
+const _: () = assert!(std::mem::size_of::<Params>().is_multiple_of(16));
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -314,9 +328,23 @@ const KIND_SUN: u32 = 6;
 /// enough for the driver's watchdog and for the interface to stay responsive.
 const WORK_PER_DISPATCH: u64 = 1 << 26;
 
+/// The kernels of resampled direct lighting, which run one sample at a time.
+struct RestirKernels {
+    initial: wgpu::ComputePipeline,
+    temporal: wgpu::ComputePipeline,
+    spatial: wgpu::ComputePipeline,
+    shade: wgpu::ComputePipeline,
+}
+
+/// What runs a sample: the one kernel that renders it whole, or the stages of resampled lighting.
+enum Kernels {
+    Plain(wgpu::ComputePipeline),
+    Restir(RestirKernels),
+}
+
 /// A progressive render on the GPU. Create one per scene and image size.
 pub struct GpuRenderer {
-    pipeline: wgpu::ComputePipeline,
+    kernels: Kernels,
     bind_group: wgpu::BindGroup,
     params_buf: wgpu::Buffer,
     accum: wgpu::Buffer,
@@ -351,10 +379,14 @@ fn scoped<T>(ctx: &GpuContext, f: impl FnOnce() -> T) -> Result<T, GpuError> {
 impl GpuRenderer {
     /// Upload `scene` and prepare to render it at the size in `settings`.
     pub fn new(ctx: &GpuContext, scene: &Scene, settings: RenderSettings) -> Result<GpuRenderer, GpuError> {
-        if settings.integrator.guiding || settings.integrator.adaptive_splitting {
+        let (w, h) = (settings.width, settings.height);
+        let restir = settings.integrator.restir.active(&settings.integrator, w as usize * h as usize) && !scene.lights.is_empty();
+        if (settings.integrator.guiding || settings.integrator.adaptive_splitting) && !restir {
             return Err(GpuError::Unsupported("path guiding and adaptive splitting"));
         }
-        let (w, h) = (settings.width, settings.height);
+        if restir && ctx.caps.max_storage_buffers < 10 {
+            return Err(GpuError::Unsupported("resampled direct lighting on a device with fewer than ten storage buffers per stage"));
+        }
         let max_side = ctx.caps.max_compute_workgroups_per_dimension.saturating_mul(8).min(craft_render_core::render::MAX_IMAGE_SIDE);
         if w == 0 || h == 0 || w > max_side || h > max_side {
             return Err(GpuError::BadImageSize(w, h));
@@ -495,6 +527,7 @@ impl GpuRenderer {
             return Err(GpuError::TooLarge { what: "image", needed: accum_size, allowed });
         }
 
+        let restir_cfg = settings.integrator.restir.clamped();
         let cam = scene.camera.prepare(w as f32 / h as f32).data();
         let with = |v: [f32; 3], w: f32| [v[0], v[1], v[2], w];
         let i = settings.integrator;
@@ -548,21 +581,26 @@ impl GpuRenderer {
             texture_count: scene.textures.len() as u32,
             has_cutouts: u32::from(scene.has_cutouts),
             has_env: u32::from(has_env),
+            restir_mode: if restir { restir_cfg.mode as u32 } else { 0 },
+            restir_candidates: restir_cfg.candidates,
+            restir_neighbors: restir_cfg.neighbors,
+            restir_radius: restir_cfg.radius,
+            restir_history: restir_cfg.history,
+            pad: [0; 3],
         };
+
+        let pixels = u64::from(w) * u64::from(h);
+        // Two samples of first surfaces (48 bytes) and four planes of reservoirs (32 bytes).
+        let (gbuf_size, resv_size) = (pixels * 48 * 2, pixels * 32 * 4);
+        if restir && gbuf_size.max(resv_size) > allowed {
+            return Err(GpuError::TooLarge { what: "reservoirs", needed: gbuf_size.max(resv_size), allowed });
+        }
 
         scoped(ctx, || {
             let device = &ctx.device;
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("craft path tracer"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("pathtrace.wgsl").into()),
-            });
-            let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("craft path tracer"),
-                layout: None,
-                module: &module,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
             });
             let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("params"),
@@ -575,15 +613,74 @@ impl GpuRenderer {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
-            let buffers = [&params_buf, &nodes_buf, &tris_buf, &attrs_buf, &mats_buf, &lights_buf, &blob_buf, &words_buf, &accum];
+            let mut buffers = vec![&params_buf, &nodes_buf, &tris_buf, &attrs_buf, &mats_buf, &lights_buf, &blob_buf, &words_buf, &accum];
+            let rs_buffers;
+            if restir {
+                let make = |label: &'static str, size: u64| {
+                    device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false })
+                };
+                rs_buffers = [make("first surfaces", gbuf_size), make("reservoirs", resv_size)];
+                buffers.extend(rs_buffers.iter());
+            }
             let entries: Vec<wgpu::BindGroupEntry<'_>> =
                 buffers.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("craft path tracer"),
-                layout: &pipeline.get_bind_group_layout(0),
-                entries: &entries,
+            if !restir {
+                let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("craft path tracer"),
+                    layout: None,
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("craft path tracer"),
+                    layout: &pipeline.get_bind_group_layout(0),
+                    entries: &entries,
+                });
+                return GpuRenderer { kernels: Kernels::Plain(pipeline), bind_group, params_buf, accum, params, samples: 0 };
+            }
+            // The stages share one layout: the kernels use different subsets of the bindings.
+            let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = (0..buffers.len() as u32)
+                .map(|binding| wgpu::BindGroupLayoutEntry {
+                    binding,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: if binding == 0 {
+                            wgpu::BufferBindingType::Uniform
+                        } else {
+                            wgpu::BufferBindingType::Storage { read_only: (1..=7).contains(&binding) }
+                        },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                })
+                .collect();
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("craft restir"), entries: &layout_entries });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("craft restir"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
             });
-            GpuRenderer { pipeline, bind_group, params_buf, accum, params, samples: 0 }
+            let kernel = |name: &'static str| {
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(name),
+                    layout: Some(&pipeline_layout),
+                    module: &module,
+                    entry_point: Some(name),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            };
+            let kernels = RestirKernels {
+                initial: kernel("restir_initial"),
+                temporal: kernel("restir_temporal"),
+                spatial: kernel("restir_spatial"),
+                shade: kernel("restir_shade"),
+            };
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("craft restir"), layout: &layout, entries: &entries });
+            GpuRenderer { kernels: Kernels::Restir(kernels), bind_group, params_buf, accum, params, samples: 0 }
         })
     }
 
@@ -596,6 +693,37 @@ impl GpuRenderer {
     pub fn render(&mut self, ctx: &GpuContext, samples: u32) -> Result<(), GpuError> {
         let mut left = samples.min(MAX_SAMPLES - self.samples);
         let pixels = u64::from(self.params.size[0]) * u64::from(self.params.size[1]);
+        let (gx, gy) = (self.params.size[0].div_ceil(8), self.params.size[1].div_ceil(8));
+        if let Kernels::Restir(k) = &self.kernels {
+            // One sample at a time: reuse needs the reservoirs of the whole image for one sample.
+            // The queue orders each parameter write before its dispatches, so several samples go
+            // in flight before the CPU waits.
+            while left > 0 {
+                let batch = left.min(16);
+                scoped(ctx, || {
+                    for _ in 0..batch {
+                        self.params.first_sample = self.samples;
+                        self.params.samples = 1;
+                        ctx.queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&self.params));
+                        let mut enc = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("craft restir") });
+                        let viewport = self.params.restir_mode == 2;
+                        let stages = [Some(&k.initial), viewport.then_some(&k.temporal), Some(&k.spatial), Some(&k.shade)];
+                        for pipeline in stages.into_iter().flatten() {
+                            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("craft restir"), timestamp_writes: None });
+                            pass.set_pipeline(pipeline);
+                            pass.set_bind_group(0, &self.bind_group, &[]);
+                            pass.dispatch_workgroups(gx, gy, 1);
+                        }
+                        ctx.queue.submit([enc.finish()]);
+                        self.samples += 1;
+                    }
+                    ctx.device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ()).map_err(|e| GpuError::Device(e.to_string()))
+                })??;
+                left -= batch;
+            }
+            return Ok(());
+        }
+        let Kernels::Plain(pipeline) = &self.kernels else { return Ok(()) };
         let per_dispatch = (WORK_PER_DISPATCH / pixels.max(1)).clamp(1, 64) as u32;
         while left > 0 {
             let n = left.min(per_dispatch);
@@ -606,9 +734,9 @@ impl GpuRenderer {
                 let mut enc = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("craft path tracer") });
                 {
                     let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("craft path tracer"), timestamp_writes: None });
-                    pass.set_pipeline(&self.pipeline);
+                    pass.set_pipeline(pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
-                    pass.dispatch_workgroups(self.params.size[0].div_ceil(8), self.params.size[1].div_ceil(8), 1);
+                    pass.dispatch_workgroups(gx, gy, 1);
                 }
                 ctx.queue.submit([enc.finish()]);
                 ctx.device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ()).map_err(|e| GpuError::Device(e.to_string()))
@@ -655,7 +783,10 @@ impl GpuRenderer {
 }
 
 #[cfg(test)]
-mod tests {
+mod restir_tests;
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
     use craft_render_core::integrator::IntegratorSettings;
     use craft_render_core::{Material, mean_rgb, render_image, scenes};
@@ -665,7 +796,7 @@ mod tests {
     /// inside a vendor driver on a busy machine.
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    struct TestGpu {
+    pub(crate) struct TestGpu {
         ctx: GpuContext,
         _turn: std::sync::MutexGuard<'static, ()>,
     }
@@ -678,7 +809,7 @@ mod tests {
     }
 
     /// The GPU for a test, or `None` (with a note) on machines without an adapter.
-    fn gpu() -> Option<TestGpu> {
+    pub(crate) fn gpu() -> Option<TestGpu> {
         let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
         let ctx = GpuContext::new();
         match &ctx {
