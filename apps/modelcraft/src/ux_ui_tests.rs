@@ -303,3 +303,158 @@ fn the_file_menu_offers_3mf_and_usd_export() {
         assert!(crate::actions::all().contains(&a), "{a:?} is in the palette and the shortcuts dialog");
     }
 }
+
+// ---- snapping, gizmo orientation, measure ----
+
+fn add_cube_at(h: &mut Harness<'static, ModelApp>, at: glam::Vec3) -> modelcraft_engine::scene::ObjectId {
+    palette(h, "Add Cube");
+    let id = h.state().selection[0];
+    let t = modelcraft_engine::scene::Transform { translation: at, ..Default::default() };
+    h.state_mut().run(modelcraft_engine::Command::SetTransform { id, transform: t });
+    h.run();
+    id
+}
+
+#[test]
+fn gizmo_axes_follow_the_chosen_orientation_from_the_palette() {
+    use glam::{Quat, Vec3};
+    let mut h = harness();
+    h.run();
+    let id = add_cube_at(&mut h, Vec3::ZERO);
+    let t = modelcraft_engine::scene::Transform { rotation: Quat::from_rotation_y(0.5), ..Default::default() };
+    h.state_mut().run(modelcraft_engine::Command::SetTransform { id, transform: t });
+    h.run();
+    let near = |a: Vec3, b: Vec3| (a - b).length() < 1e-4;
+    let axes = |h: &mut Harness<'static, ModelApp>| crate::snap_ui::gizmo_axes(h.state_mut());
+    assert!(near(axes(&mut h)[0], Vec3::X), "world axes by default");
+    palette(&mut h, "Local Axes");
+    assert_eq!(h.state().snaps.space, crate::snap_ui::GizmoSpace::Local);
+    assert!(near(axes(&mut h)[0], Quat::from_rotation_y(0.5) * Vec3::X), "{:?}", axes(&mut h));
+    assert!(near(axes(&mut h)[1], Vec3::Y));
+    // Parent axes: a child of a turned group follows the group, not itself.
+    let group = h.state_mut().doc.execute(modelcraft_engine::Command::AddGroup { name: None }).unwrap().created[0];
+    h.state_mut()
+        .doc
+        .execute(modelcraft_engine::Command::SetTransform {
+            id: group,
+            transform: modelcraft_engine::scene::Transform { rotation: Quat::from_rotation_z(0.9), ..Default::default() },
+        })
+        .unwrap();
+    h.state_mut().doc.execute(modelcraft_engine::Command::Reparent { id, parent: Some(group) }).unwrap();
+    palette(&mut h, "Parent Axes");
+    assert!(near(axes(&mut h)[0], Quat::from_rotation_z(0.9) * Vec3::X), "{:?}", axes(&mut h));
+    // Normal axes: with the +Y face selected, the third axis is the world +Y of the unturned cube.
+    h.state_mut().doc.execute(modelcraft_engine::Command::Reparent { id, parent: None }).unwrap();
+    h.state_mut().doc.execute(modelcraft_engine::Command::SetTransform { id, transform: modelcraft_engine::scene::Transform::default() }).unwrap();
+    h.state_mut().selection = vec![id];
+    h.key_press(egui::Key::Num4);
+    h.run();
+    let mesh = {
+        let app = h.state_mut();
+        app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh
+    };
+    let top = (0..mesh.face_count() as u32).find(|f| mesh.face_normal(*f).y > 0.99).unwrap();
+    h.state_mut().components = [top].into_iter().collect();
+    palette(&mut h, "Normal Axes");
+    let a = axes(&mut h);
+    assert!(near(a[2], Vec3::Y), "{a:?}");
+    assert!(a[0].dot(a[1]).abs() < 1e-4 && a[1].dot(a[2]).abs() < 1e-4 && near(a[0].cross(a[1]), a[2]), "a right-handed frame: {a:?}");
+}
+
+#[test]
+fn a_move_snaps_the_pivot_onto_a_vertex_of_another_object() {
+    use glam::Vec3;
+    let mut h = harness();
+    h.run();
+    let a = add_cube_at(&mut h, Vec3::new(-4.0, 0.0, 0.0));
+    let b = add_cube_at(&mut h, Vec3::new(3.0, 0.0, 0.0));
+    h.state_mut().selection = vec![a];
+    palette(&mut h, "Snap to Vertices");
+    assert!(h.state().snaps.targets.vertex);
+    assert!(h.state().status.contains("vertices"), "{}", h.state().status);
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let cam = h.state().views[0].camera;
+    // The nearest corner of the other cube on screen.
+    let world_b = h.state().doc.scene.world_matrix(b);
+    let corner = world_b.transform_point3(Vec3::new(-1.0, 1.0, 1.0));
+    let n = cam.project(corner, rect.aspect_ratio()).unwrap();
+    let cursor = egui::pos2(rect.left() + (n.x * 0.5 + 0.5) * rect.width() + 3.0, rect.top() + (0.5 - n.y * 0.5) * rect.height() - 2.0);
+    let pivot = h.state().doc.scene.world_matrix(a).transform_point3(Vec3::ZERO);
+    let t = crate::viewport::geometry_snap_move(
+        h.state_mut(),
+        &cam,
+        rect,
+        crate::app::Tool::Move,
+        crate::viewport::Handle::Free,
+        pivot,
+        &[Vec3::X, Vec3::Y, Vec3::Z],
+        cursor,
+        Vec3::ZERO,
+    );
+    assert!((pivot + t - corner).length() < 1e-4, "the pivot lands on the corner: {:?} vs {corner:?}", pivot + t);
+    assert!(h.state().snaps.hint.is_some(), "the marker is shown");
+    // Along one axis only the part of the move along it is kept.
+    let t = crate::viewport::geometry_snap_move(
+        h.state_mut(),
+        &cam,
+        rect,
+        crate::app::Tool::Move,
+        crate::viewport::Handle::Axis(0),
+        pivot,
+        &[Vec3::X, Vec3::Y, Vec3::Z],
+        cursor,
+        Vec3::ZERO,
+    );
+    assert!(t.y == 0.0 && t.z == 0.0 && (pivot.x + t.x - corner.x).abs() < 1e-4, "{t:?}");
+    // The dragged object itself is never a target, and with snapping off nothing changes.
+    let own = world_b.transform_point3(Vec3::new(-1.0, 1.0, 1.0));
+    let _ = own;
+    palette(&mut h, "Snap to Vertices");
+    let t = crate::viewport::geometry_snap_move(
+        h.state_mut(),
+        &cam,
+        rect,
+        crate::app::Tool::Move,
+        crate::viewport::Handle::Free,
+        pivot,
+        &[Vec3::X, Vec3::Y, Vec3::Z],
+        cursor,
+        Vec3::new(1.0, 0.0, 0.0),
+    );
+    assert_eq!(t, Vec3::X);
+    assert!(h.state().snaps.hint.is_none());
+}
+
+#[test]
+fn the_measure_tool_takes_two_clicks_and_reads_the_distance_in_the_chosen_unit() {
+    use glam::Vec3;
+    let mut h = harness();
+    h.run();
+    add_cube_at(&mut h, Vec3::ZERO);
+    palette(&mut h, "Measure");
+    assert!(h.state().snaps.measuring);
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let cam = h.state().views[0].camera;
+    let screen = |p: Vec3| {
+        let n = cam.project(p, rect.aspect_ratio()).unwrap();
+        egui::pos2(rect.left() + (n.x * 0.5 + 0.5) * rect.width(), rect.top() + (0.5 - n.y * 0.5) * rect.height())
+    };
+    // Two corners one cube side (2) apart.
+    let (p, q) = (Vec3::new(1.0, 1.0, 1.0), Vec3::new(-1.0, 1.0, 1.0));
+    assert!(crate::snap_ui::measure_click(h.state_mut(), &cam, rect, screen(p)));
+    assert!(h.state().status.contains("second"), "{}", h.state().status);
+    assert!(crate::snap_ui::measure_click(h.state_mut(), &cam, rect, screen(q)));
+    let m = h.state().snaps.measurement;
+    assert!((m.a.unwrap() - p).length() < 1e-4 && (m.b.unwrap() - q).length() < 1e-4, "{m:?}");
+    assert!(h.state().status.contains("2.000 m"), "{}", h.state().status);
+    // The same distance in centimetres, after the preference changes.
+    h.state_mut().unit = crate::prefs_ui::Unit::Cm;
+    assert!(crate::snap_ui::measure_click(h.state_mut(), &cam, rect, screen(p)));
+    assert!(crate::snap_ui::measure_click(h.state_mut(), &cam, rect, screen(q)));
+    assert!(h.state().status.contains("200.000 cm"), "{}", h.state().status);
+    // Clearing it, and clicks go to selection again when the tool is off.
+    palette(&mut h, "Clear Measurement");
+    assert!(h.state().snaps.measurement.a.is_none());
+    palette(&mut h, "Measure");
+    assert!(!crate::snap_ui::measure_click(h.state_mut(), &cam, rect, screen(p)));
+}

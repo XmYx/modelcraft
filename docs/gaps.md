@@ -96,7 +96,7 @@ users and sit lower only because they are expensive.
 | 20 | **S4** Masks and visibility: cavity/curvature masks, lasso and clip tools, hide by group, shell extract, watertight | Sculpting | 5 | 28.5 | 0.87 | 3.1 | — | 41.2 % | 704 |
 | 21 | **G5** Plugin SDK | Scripting and node graph | 1 | 25 | 0.74 | 3.0 | — | 41.9 % | 729 |
 | 22 | **R4** Materials: OpenPBR-class layered surface, texture inputs, bump/normal/displacement, per-patch assignment, rendered .mcmat links, MaterialX, library | Render engine | 7 | 86 | 2.44 | 2.8 | — | 44.4 % | 815 |
-| 23 | **X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units | UI/UX | 3 | 24 | 0.68 | 2.8 | — | 45.1 % | 839 |
+| 23 | ~~**X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units~~ (mostly done: custom orientation and viewport pivot dragging remain) | UI/UX | 3 | 24 | 0.68 | 2.8 | — | 45.1 % | 839 |
 | 24 | **S1** Detail levels: multiresolution with reconstruction of lower levels | Sculpting | 2 | 33 | 0.93 | 2.8 | — | 46.0 % | 872 |
 | 25 | **S7** Decimation and detail projection | Sculpting | 2 | 33 | 0.93 | 2.8 | — | 46.9 % | 905 |
 | 26 | **U1** UV editor, seams, unwrap, packing, checker and distortion display | UV and paint | 5 | 62.5 | 1.70 | 2.7 | — | 48.6 % | 967.5 |
@@ -322,7 +322,7 @@ Undo history now survives save and open (X7, done). **X3**: docking with tabs, s
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
-| **X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units | 3 | 24 | 0.68 | 23 | — |
+| ~~**X1** Vertex/edge/surface snapping, gizmo orientations and pivots, measure tool and units~~ (mostly done: custom orientation and viewport pivot dragging remain) | 3 | 24 | 0.68 | 23 | — |
 | **X2** Viewport aids: reference images, bookmarks, display modes, isolate, matcaps, stats, headless render command, safe frames, camera objects | 9 | 32 | 1.02 | 18 | — |
 | **X3** Docking with tabs and splits, radial menus, shelves, full preferences, shipped translations | 5 | 25.5 | 1.19 | 4 | — |
 | ~~**X4** Object manager depth: multi-edit, drag-and-drop, search, tags, layers, instances, sets, user attributes, lock, copy attributes, pivots~~ (done) | 11 | 54 | 2.24 | 8 | — |
