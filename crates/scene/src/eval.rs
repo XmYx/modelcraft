@@ -157,7 +157,7 @@ impl Evaluator {
             return Evaluated::default();
         }
         // A skinned mesh also depends on where its joints are.
-        let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id);
+        let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id) ^ crate::sim::sim_key(scene, id);
         if let Some((k, e)) = self.finals.get(&id)
             && *k == key
         {
@@ -185,6 +185,11 @@ impl Evaluator {
                 }
                 let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
                 if let Some(m) = skinned {
+                    e.mesh = Arc::new(m);
+                }
+                e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
+                let (simulated, problems) = crate::sim::apply_sims(scene, id, &e.mesh);
+                if let Some(m) = simulated {
                     e.mesh = Arc::new(m);
                 }
                 e.errors.extend(problems.into_iter().map(|message| StepError { step: usize::MAX, message }));
@@ -249,9 +254,12 @@ impl Evaluator {
                 out.errors = errors;
                 out
             }
-            ObjectKind::Group | ObjectKind::Deformer { .. } | ObjectKind::Joint { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } => {
-                Evaluated::default()
-            }
+            ObjectKind::Group
+            | ObjectKind::Deformer { .. }
+            | ObjectKind::Joint { .. }
+            | ObjectKind::Skin { .. }
+            | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Sim { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));
         result

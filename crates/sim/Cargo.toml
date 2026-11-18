@@ -1,0 +1,20 @@
+[package]
+name = "modelcraft-sim"
+description = "ModelCraft simulation kernel: a fixed-step solver loop with substeps, a bounded frame cache that bakes to point-cache frames, seeded runs, with no scene or UI dependency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

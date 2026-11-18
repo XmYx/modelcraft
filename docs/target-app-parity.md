@@ -319,15 +319,16 @@ Weight: 4
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
-| Seams and unwrap (conformal / angle-based) | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport; no angle-based (ABF) solver |
-| Packing | C M | P | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density as a history step and CLI; no UI yet |
+| Seams and conformal unwrap | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport |
+| Angle-based unwrap (ABF) | C M Z | M | M | |
+| Packing | C M | D | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density (a work bound and a shelf fallback above 500 islands); Pack UV Islands in the UV Editor and menu, history step, CLI |
 | UDIM tiles | C M Z | M | M | |
-| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | `modelcraft-uvpack`: all five, per face selection, as a history step and CLI; no UI yet |
+| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | Planar, box, cylindrical and spherical from the UV Editor and menu (selected faces in face mode); camera projection through the history step and CLI only |
 | Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
 | Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
-| UV layout export as an image | C M Z | P | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines, from the engine and `modelcraft-cli export-uv`; no menu entry yet. UVs round-trip exactly through GLB and OBJ (tested) |
+| UV layout export as an image | C M Z | D | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines from the UV Editor, the UV menu and `modelcraft-cli export-uv`. UVs round-trip exactly through GLB and OBJ (tested) |
 
 ## Sculpting: brushes, strokes and masks
 
@@ -501,7 +502,7 @@ Weight: 8
 | Motion-capture import (BVH) and mapping | C M | M | M | |
 | Cached playback | M | M | M | |
 | Camera sequencer / shot list | C M | M | M | |
-| Point cache of deformed meshes | C M | P | M | `modelcraft-cli bake` writes an object's vertices per frame to a documented `.mcpc` file (local or world space); no playback from a cache, no Alembic |
+| Point cache of deformed meshes | C M | P | M | `modelcraft-cli bake` writes an object's vertices per frame to a documented `.mcpc` file (local or world space); `sim attach_cache` plays such a file on a mesh through the timeline (see Simulation); no Alembic |
 | Turntable and simple timeline for sculpts | Z | P | S | Turntable command (one linear turn that repeats) and the timeline; no movie recording |
 
 ## Simulation
@@ -517,7 +518,7 @@ Weight: 6
 | Forces: gravity, wind, turbulence, vortex, attract | C M | M | M | |
 | Smoke and fire | C M | M | XL | |
 | Liquids | C M | M | XL | |
-| Simulation cache and playback | C M | M | M | |
+| Simulation cache and playback | C M | P | M | The framework is in: a fixed-step solver loop with substeps from a seed (repeatable bit for bit), a cache bounded in frames, points and bytes that bakes per frame, cancels between frames, saves in the project as a `.mcpc` blob and plays back by scene frame (linear between frames); a `.mcpc` file from any tool drives a mesh through `attach_cache`. No solver yet and no panel: nothing in the app bakes one |
 | Ropes and hair dynamics | C M | M | L | |
 | Cloth-like sculpt brushes | Z | M | M | |
 
@@ -556,10 +557,10 @@ Weight: 5
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
-| User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder; no scripted tool registration or recorded macros yet |
+| User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder, and a script can register its own menu commands (`register_tool`); recorded macros are not built |
 | Script editor with a console | C M | M | M | |
 | User tools, shelves and recorded macros | C M Z | P | M | Any command can sit on the Quick Bar; no recorded macros or user-written tools yet |
-| Event callbacks (scene changed, selection changed) | C M | M | M | |
+| Event callbacks (scene changed, selection changed) | C M | D | M | `on_selection_changed`, `on_scene_changed`, `on_scene_loaded` and `on_frame_changed` in scripts; the app reports them once per frame, never during a drag or stroke ([scripting.md](scripting.md)) |
 | Plugin SDK for native extensions | C M Z | M | L | |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
 
@@ -569,8 +570,8 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| glTF 2.0 / GLB import | C M Z | D | S | Through craft-mesh; welded, parts become patches |
-| GLB export | C M Z | D | S | Hierarchy, TRS, materials, UVs, normals; triangulated (glTF has no quads) |
+| glTF 2.0 / GLB import | C M Z | D | S | Through craft-mesh; welded, parts become patches. Files with skins, morph targets or animations come in as joints, skins, blend shapes and curves (first clip) through `craft-gltf-anim` |
+| GLB export | C M Z | D | S | Hierarchy, TRS, materials, UVs, normals; triangulated (glTF has no quads). A rigged or animated scene is written with its skins, morph targets and one clip baked from the solved scene; round-trip tested |
 | OBJ import and export | C M Z | D | S | Quads kept |
 | STL export, STL and PLY import | C M Z | D | S | |
 | FBX import and export | C M Z | D | M | Import binary and ASCII 6.x/7.x through craft-mesh; export FBX 7.4 ASCII (meshes with quads, UVs, normals, material colour, hierarchy, TRS); round-trip tested |
@@ -632,8 +633,10 @@ Weight: 3
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Simulation framework: `crates/sim/src/tests.rs` (`the_same_seed_gives_the_same_cache_and_another_seed_does_not`, `memory_and_step_counts_are_bounded`, `cancelling_at_any_frame_reports_how_far_it_got` and `random_runs_stay_within_budget_and_sample_without_panicking` proptests), `crates/scene/src/sim.rs` (`the_timeline_plays_the_cache_and_only_then`), `crates/engine/src/sim_tests.rs` (`a_baked_point_cache_plays_on_the_timeline_and_survives_undo_and_save`), `crates/formats/src/project.rs` (`a_simulation_cache_is_saved_as_a_point_cache_blob_and_comes_back`).
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Deformer stack: `crates/anim/src/deform.rs` (`ffd_is_a_convex_combination`, `frame_shares_are_continuous_and_exact_at_the_frames` proptests), `crates/engine/src/deformer_tests.rs` (`blend_shapes_with_in_betweens_and_keyed_weights`, `lattices_clusters_and_the_order_of_the_stack`, `shapes_run_before_the_skin_and_everything_survives_a_save`), `apps/modelcraft/src/deform_ui_tests.rs`.
+- Rigged glTF: `crates/craft-gltf-anim/src/tests.rs` (`a_rigged_animated_document_round_trips_exactly`, `hostile_files_are_refused_or_trimmed_never_trusted`, `corrupted_files_never_panic` proptest), `crates/engine/src/gltf_tests.rs` (`skins_shapes_and_clips_round_trip_through_glb`, `constraints_are_baked_into_the_clip_and_limits_are_said`).
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
