@@ -255,7 +255,7 @@ pub fn from_bytes_with_history<T: for<'de> Deserialize<'de>>(bytes: &[u8], with_
 pub enum HistoryRead<T> {
     /// The file stores no history.
     None,
-    Found(History<T>),
+    Found(Box<History<T>>),
     /// The file stores a history that could not be read; the reason.
     Dropped(String),
 }
@@ -289,7 +289,7 @@ fn read_history<T: for<'de> Deserialize<'de>>(zip: &mut craft_zip::Archive<'_>) 
     if h.done.len().saturating_add(h.undone.len()) > MAX_HISTORY_ENTRIES {
         return HistoryRead::Dropped("the history is too long".into());
     }
-    HistoryRead::Found(History { base, done: h.done, undone: h.undone })
+    HistoryRead::Found(Box::new(History { base, done: h.done, undone: h.undone }))
 }
 
 /// Save atomically: the old file stays whole until the new one is complete on disk.

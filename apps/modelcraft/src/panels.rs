@@ -515,7 +515,7 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
         }
         ObjectKind::Instance { .. } => {
             // An instance: the mesh diamond drawn dashed, linked to its master.
-            let pts = vec![c + egui::vec2(0.0, -5.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-5.0, 0.0)];
+            let pts = [c + egui::vec2(0.0, -5.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-5.0, 0.0)];
             p.add(egui::Shape::dashed_line(&[pts[0], pts[1], pts[2], pts[3], pts[0]], egui::Stroke::new(1.2, blue), 2.0, 2.0));
         }
         ObjectKind::Sim { .. } => {

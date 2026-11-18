@@ -138,7 +138,7 @@ impl Document {
             }
             project::HistoryRead::Found(h) => {
                 let steps = h.done.len();
-                match Document::rebuilt(h, &scene) {
+                match Document::rebuilt(*h, &scene) {
                     Ok(d) => {
                         let mut d = d;
                         d.history_note = (steps > 0).then(|| format!("Restored {steps} undo steps from the last session."));
