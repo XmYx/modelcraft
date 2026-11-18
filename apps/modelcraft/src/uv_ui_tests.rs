@@ -540,3 +540,29 @@ fn relax_straighten_and_stitch_are_buttons_and_menu_entries_that_make_history_st
     palette(&mut h, "Relax UVs");
     assert!(matches!(steps(&h).last(), Some(StepOp::RelaxUvs { corners, .. }) if !corners.is_empty()));
 }
+
+#[test]
+fn udim_tiles_polygon_group_unwrap_and_tile_numbers_are_controls_that_make_steps() {
+    let mut h = editor("Cube");
+    h.get_by_role_and_label(Role::SpinButton, "UDIM tiles");
+    // Two tiles: K packs the six islands of the cube over 1001 and 1002.
+    h.state_mut().uv.pack_tiles = 2;
+    h.get_by_label_contains("UV canvas").focus();
+    h.run();
+    h.key_press(Key::K);
+    h.run();
+    h.run();
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::PackUvs { tiles: 2, texel_density: None, .. })), "{s:?}");
+    let id = h.state().selection[0];
+    let app = h.state_mut();
+    let scene = app.doc.scene.clone();
+    let mesh = app.doc.eval.steps_output(&scene, id, usize::MAX).mesh;
+    assert_eq!(modelcraft_engine::uvpack::udim_tiles(&mesh), vec![1001, 1002]);
+    // The canvas names the tiles it shows.
+    h.get_by_label_contains("UV canvas");
+    // Unwrapping by polygon groups is a menu command with its own step.
+    palette(&mut h, "Unwrap UVs by Polygon Groups");
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::Unwrap { from_patches: true, .. })), "{s:?}");
+}

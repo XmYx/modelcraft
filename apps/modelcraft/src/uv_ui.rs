@@ -122,6 +122,7 @@ pub enum UvAction {
     SeamsByAngle,
     Unwrap,
     UnwrapAbf,
+    UnwrapGroups,
     Relax,
     Straighten,
     Stitch,
@@ -134,13 +135,14 @@ pub enum UvAction {
 }
 
 impl UvAction {
-    pub const ALL: [UvAction; 15] = [
+    pub const ALL: [UvAction; 16] = [
         UvAction::Editor,
         UvAction::MarkSeam,
         UvAction::ClearSeam,
         UvAction::SeamsByAngle,
         UvAction::Unwrap,
         UvAction::UnwrapAbf,
+        UvAction::UnwrapGroups,
         UvAction::Relax,
         UvAction::Straighten,
         UvAction::Stitch,
@@ -160,6 +162,7 @@ impl UvAction {
             UvAction::SeamsByAngle => tl!("Mark Seams by Angle"),
             UvAction::Unwrap => tl!("Unwrap UVs"),
             UvAction::UnwrapAbf => tl!("Unwrap UVs (Angle-Based)"),
+            UvAction::UnwrapGroups => tl!("Unwrap UVs by Polygon Groups"),
             UvAction::Relax => tl!("Relax UVs"),
             UvAction::Straighten => tl!("Straighten UVs"),
             UvAction::Stitch => tl!("Stitch UV Islands"),
@@ -180,6 +183,7 @@ impl UvAction {
             UvAction::SeamsByAngle => "uv.seams_by_angle",
             UvAction::Unwrap => "uv.unwrap",
             UvAction::UnwrapAbf => "uv.unwrap_abf",
+            UvAction::UnwrapGroups => "uv.unwrap_groups",
             UvAction::Relax => "uv.relax",
             UvAction::Straighten => "uv.straighten",
             UvAction::Stitch => "uv.stitch",
@@ -279,6 +283,8 @@ pub struct UvUi {
     /// Iterations and fit of `Relax UVs`.
     pub relax_iterations: u32,
     pub relax_mode: RelaxMode,
+    /// UDIM tiles `Pack UV Islands` spreads the islands over (1 is the unit square).
+    pub pack_tiles: u32,
     /// `Stitch UV Islands` also resizes the moved island so the edges are as long as its neighbour's.
     pub stitch_scale: bool,
     /// Position of the keyboard element cursor (Page Up and Page Down walk the elements).
@@ -315,6 +321,7 @@ impl Default for UvUi {
             relax_iterations: 10,
             relax_mode: RelaxMode::Rigid,
             stitch_scale: false,
+            pack_tiles: 1,
             cursor: 0,
             gesture: None,
             target: None,
@@ -405,6 +412,7 @@ pub fn act(app: &mut ModelApp, a: UvAction) {
         UvAction::SeamsByAngle => seams_by_angle(app),
         UvAction::Unwrap => unwrap(app),
         UvAction::UnwrapAbf => unwrap_with(app, UnwrapMethod::Abf),
+        UvAction::UnwrapGroups => unwrap_op(app, app.uv.unwrap_method, true),
         UvAction::Relax => relax(app),
         UvAction::Straighten => straighten(app),
         UvAction::Stitch => stitch(app),
@@ -490,6 +498,12 @@ pub fn unwrap(app: &mut ModelApp) {
 
 /// Unwrap with a given solver (see [`UnwrapMethod`]).
 pub fn unwrap_with(app: &mut ModelApp, method: UnwrapMethod) {
+    unwrap_op(app, method, false);
+}
+
+/// Unwrap, cutting along the borders between polygon groups too when `from_patches` is set, so
+/// that every group is an island.
+fn unwrap_op(app: &mut ModelApp, method: UnwrapMethod, from_patches: bool) {
     let Some((id, mesh)) = subject(app) else {
         app.status = tl!("Select a mesh first");
         return;
@@ -502,7 +516,7 @@ pub fn unwrap_with(app: &mut ModelApp, method: UnwrapMethod) {
         .filter(|c| (**c as usize) < mesh.corner_count() && mesh.has_uvs())
         .map(|c| UvPin { corner: *c, uv: mesh.uv(*c).to_array() })
         .collect();
-    let op = StepOp::Unwrap { seams: seams.to_vertex_pairs(), angle: None, pins, auto_cut: true, margin: 0.01, method };
+    let op = StepOp::Unwrap { seams: seams.to_vertex_pairs(), angle: None, pins, auto_cut: true, margin: 0.01, method, from_patches };
     if app.run(Command::AddStep { id, op }) {
         app.selection = vec![id];
         app.uv.selection.clear();
@@ -519,7 +533,7 @@ pub fn pack(app: &mut ModelApp) {
         app.status = tl!("This mesh has no UVs yet. Project or unwrap it to make some.");
         return;
     }
-    let op = StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform };
+    let op = StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform, tiles: app.uv.pack_tiles, texel_density: None };
     if app.run(Command::AddStep { id, op }) {
         app.selection = vec![id];
         app.uv.selection.clear();
@@ -546,11 +560,19 @@ pub fn project(app: &mut ModelApp, projection: Projection) {
 
 /// Ask for a file and write the layout of the selected mesh as SVG or PNG.
 pub fn export_layout(app: &mut ModelApp) {
-    let Some((id, _)) = subject(app) else {
+    let Some((id, mesh)) = subject(app) else {
         app.status = tl!("Select a mesh first");
         return;
     };
     let Some(path) = rfd::FileDialog::new().add_filter("SVG", &["svg"]).add_filter("PNG", &["png"]).set_file_name("uv-layout.svg").save_file() else { return };
+    // A layout over several UDIM tiles is one picture per tile, named name.1001.png and so on.
+    if modelcraft_engine::uvpack::udim_tiles(&mesh).len() > 1 {
+        app.status = match app.doc.export_uv_layout_udim(&path, Some(id), 2048) {
+            Ok(files) => crate::tlf!("Exported {count} UDIM tiles next to {file}", count = files.len(), file = path.display()),
+            Err(e) => crate::tlf!("Export failed: {error}", error = e),
+        };
+        return;
+    }
     app.status = match app.doc.export_uv_layout(&path, Some(id), 2048) {
         Ok(()) => crate::tlf!("Exported {file}", file = path.display()),
         Err(e) => crate::tlf!("Export failed: {error}", error = e),
@@ -993,6 +1015,9 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Layout"));
+        ui.label(tl!("UDIM tiles"));
+        let r = ui.add(egui::DragValue::new(&mut app.uv.pack_tiles).speed(0.1).range(1..=100));
+        name(ui, &r, tl!("UDIM tiles"));
         for (label, a) in [
             (tl!("Pack UV Islands"), UvAction::Pack),
             (tl!("Planar"), UvAction::ProjectPlanar),
@@ -1439,27 +1464,62 @@ fn input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, rect: Rect, d
     }
 }
 
+/// The UDIM tiles to draw: the unit square, and every tile the UVs reach (at most 100).
+fn visible_tiles(m: &PolyMesh) -> Vec<(i32, i32)> {
+    let (mut lo, mut hi) = (Vec2::ZERO, Vec2::ONE);
+    if m.face_count() <= MAX_DRAW_FACES {
+        for c in m.corner_uvs() {
+            if c.is_finite() {
+                lo = lo.min(*c);
+                hi = hi.max(*c);
+            }
+        }
+    }
+    let (first, last) = (modelcraft_engine::uvpack::tile_of(lo), modelcraft_engine::uvpack::tile_of(hi));
+    // v grows downwards, so the tile row of the lowest v is the highest row.
+    let (c0, c1) = (first.0.max(0), last.0.clamp(0, 9));
+    let (r0, r1) = (last.1.max(0), first.1.clamp(0, 9));
+    let mut out = vec![(0, 0)];
+    for row in r0..=r1 {
+        for col in c0..=c1 {
+            if (col, row) != (0, 0) && out.len() < 100 {
+                out.push((col, row));
+            }
+        }
+    }
+    out
+}
+
 fn draw(app: &mut ModelApp, ui: &egui::Ui, rect: Rect, d: &Derived, resp: &egui::Response) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::PANEL_DEEP);
     let u = &app.uv;
     let m = &d.mesh;
-    // The unit square, with a checker when asked.
-    let (a, b) = (to_screen(u, rect, Vec2::ZERO), to_screen(u, rect, Vec2::ONE));
-    if u.checker {
-        let cells = 16;
-        for j in 0..cells {
-            for i in 0..cells {
-                let (p, q) = (
-                    to_screen(u, rect, Vec2::new(i as f32, j as f32) / cells as f32),
-                    to_screen(u, rect, Vec2::new(i as f32 + 1.0, j as f32 + 1.0) / cells as f32),
-                );
-                let c = if (i + j) % 2 == 0 { Color32::from_rgb(0x4A, 0x4D, 0x53) } else { Color32::from_rgb(0x34, 0x37, 0x3C) };
-                painter.rect_filled(Rect::from_two_pos(p, q), 0.0, c);
+    // The unit square (and every other UDIM tile the UVs reach), with a checker when asked.
+    let tiles = visible_tiles(m);
+    for &(col, row) in &tiles {
+        let origin = Vec2::new(col as f32, -(row as f32));
+        if u.checker {
+            let cells = if tiles.len() > 4 { 8 } else { 16 };
+            for j in 0..cells {
+                for i in 0..cells {
+                    let (p, q) = (
+                        to_screen(u, rect, origin + Vec2::new(i as f32, j as f32) / cells as f32),
+                        to_screen(u, rect, origin + Vec2::new(i as f32 + 1.0, j as f32 + 1.0) / cells as f32),
+                    );
+                    let c = if (i + j) % 2 == 0 { Color32::from_rgb(0x4A, 0x4D, 0x53) } else { Color32::from_rgb(0x34, 0x37, 0x3C) };
+                    painter.rect_filled(Rect::from_two_pos(p, q), 0.0, c);
+                }
             }
         }
+        let (a, b) = (to_screen(u, rect, origin), to_screen(u, rect, origin + Vec2::ONE));
+        painter.rect_stroke(Rect::from_two_pos(a, b), 0.0, Stroke::new(1.0, theme::TEXT_DIM), egui::StrokeKind::Outside);
+        if tiles.len() > 1
+            && let Some(number) = modelcraft_engine::uvpack::udim_number(col, row)
+        {
+            painter.text(a + vec2(4.0, 3.0), egui::Align2::LEFT_TOP, number.to_string(), egui::FontId::proportional(12.0), theme::TEXT_DIM);
+        }
     }
-    painter.rect_stroke(Rect::from_two_pos(a, b), 0.0, Stroke::new(1.0, theme::TEXT_DIM), egui::StrokeKind::Outside);
     if m.face_count() > MAX_DRAW_FACES {
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Too many faces to draw"), egui::FontId::proportional(14.0), theme::TEXT);
         return;

@@ -347,6 +347,10 @@ pub enum StepOp {
         /// The solver for each island: least-squares conformal or angle-based flattening.
         #[serde(default)]
         method: UnwrapMethod,
+        /// Also cut along every border between two patches (polygon groups), so each patch
+        /// becomes an island.
+        #[serde(default)]
+        from_patches: bool,
     },
     /// Pack the islands the UVs already form into the unit square: `margin` between them as a
     /// fraction of the square, optional rotation, and an even texel density.
@@ -357,6 +361,13 @@ pub enum StepOp {
         rotation: Rotation,
         #[serde(default = "default_density")]
         density: Density,
+        /// Spread the islands over this many UDIM tiles (1 is the unit square).
+        #[serde(default = "default_tiles")]
+        tiles: u32,
+        /// Pack into as many tiles as this texel density needs (UV units per metre of surface),
+        /// at most 100; overrides `tiles`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        texel_density: Option<f32>,
     },
     /// Give the corners of `faces` (all faces when empty) UVs from a planar, box, cylindrical,
     /// spherical or camera projection of their positions.
@@ -435,6 +446,10 @@ pub struct UvPin {
 
 fn default_margin() -> f32 {
     0.01
+}
+
+fn default_tiles() -> u32 {
+    1
 }
 
 fn default_relax_iterations() -> u32 {
@@ -985,3 +1000,5 @@ impl Scene {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod uv_tests;

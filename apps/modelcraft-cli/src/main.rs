@@ -32,7 +32,7 @@ Commands:
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
   export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
-  export-uv <project> <out.svg|png> [--size N] [--object ID]
+  export-uv <project> <out.svg|png> [--size N] [--object ID] [--udim]
                                     the UV layout of a mesh object as a picture
   convert <in> <out> [--up auto|y|z] [--scale M]
                                     any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
@@ -54,7 +54,8 @@ Commands:
   mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
   bench --groups [--polys N]        patch, visibility, region, shell, trim and occlusion times
-  uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
+  uv-pack-bench [--islands N] [--tiles T]
+                                    pack N random island rectangles (into T UDIM tiles): time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
   uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian] [--relax N]
                                     unwrap a sphere (or tube, cone, torus, roundcube): time and distortion
@@ -210,7 +211,15 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             let mut d = load(arg(a, 0, "project")?)?;
             let size = flag(a, "--size").and_then(|v| v.parse().ok()).unwrap_or(1024);
             let object = flag(a, "--object").and_then(|v| v.parse().ok()).map(modelcraft_engine::scene::ObjectId);
-            d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+            if a.iter().any(|x| x == "--udim") {
+                let files = d.export_uv_layout_udim(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())?;
+                for f in files {
+                    println!("{}", f.display());
+                }
+                Ok(())
+            } else {
+                d.export_uv_layout(Path::new(arg(a, 1, "output")?), object, size).map_err(|e| e.to_string())
+            }
         }
         "convert" => {
             let c = convert_flags(a)?;
@@ -295,7 +304,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             &flag(a, "--cut").unwrap_or_else(|| "auto".to_string()),
             flag(a, "--relax").and_then(|v| v.parse().ok()).unwrap_or(0),
         ),
-        "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
+        "uv-pack-bench" => {
+            uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200), flag(a, "--tiles").and_then(|v| v.parse().ok()).unwrap_or(1))
+        }
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
@@ -675,7 +686,7 @@ fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str, relax: u32) -> 
 }
 
 /// Pack N random rectangles (fixed seed) with the default options for each rotation mode.
-fn uv_pack_bench(n: usize) -> Result<(), String> {
+fn uv_pack_bench(n: usize, tiles: u32) -> Result<(), String> {
     use modelcraft_engine::uvpack::{Density, PackIsland, PackOptions, Rotation, pack};
     let n = n.clamp(1, 100_000);
     let mut state = 0x9E37_79B9_7F4A_7C15u64;
@@ -697,6 +708,24 @@ fn uv_pack_bench(n: usize) -> Result<(), String> {
         .collect();
     // The margin is per island on every side, so many islands need a thinner one to fit at all.
     let margin = if n <= 1000 { 0.004 } else { 0.0005 };
+    if tiles > 1 {
+        use modelcraft_engine::uvpack::{UdimOptions, UdimTiles, pack_udim};
+        for rotation in [Rotation::None, Rotation::Fit] {
+            let t = Instant::now();
+            let r =
+                pack_udim(&islands, &UdimOptions { margin, rotation, density: Density::Uniform, tiles: UdimTiles::Count(tiles) }).map_err(|e| e.to_string())?;
+            let (lo, hi) = r.utilisation.iter().fold((f32::MAX, f32::MIN), |(l, h), u| (l.min(*u), h.max(*u)));
+            println!(
+                "{n} islands over {tiles} tiles, rotation {rotation:?}: {:.0} ms, scale {:.4}, utilisation {:.1} to {:.1} % per tile, {} tiles used",
+                ms(t),
+                r.scale,
+                lo * 100.0,
+                hi * 100.0,
+                r.tiles_used.len()
+            );
+        }
+        return Ok(());
+    }
     for rotation in [Rotation::None, Rotation::Quarter, Rotation::Fit] {
         let t = Instant::now();
         let r = pack(&islands, &PackOptions { margin, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;

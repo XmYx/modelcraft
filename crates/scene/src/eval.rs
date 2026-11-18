@@ -366,12 +366,15 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
-        StepOp::Unwrap { seams, angle, pins, auto_cut, margin, method } => {
+        StepOp::Unwrap { seams, angle, pins, auto_cut, margin, method, from_patches } => {
             use modelcraft_uv::{Pin, SeamSet, UnwrapOptions};
             let mut set = SeamSet::from_vertex_pairs(seams);
             set.retain_existing(m);
             if let Some(a) = angle {
                 set.mark_by_angle(m, *a);
+            }
+            if *from_patches {
+                set.mark_patch_borders(m);
             }
             let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
             let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
@@ -400,9 +403,18 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
         StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
-        StepOp::PackUvs { margin, rotation, density } => {
-            let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
-            let (uvs, _) = modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+        StepOp::PackUvs { margin, rotation, density, tiles, texel_density } => {
+            let uvs = if *tiles > 1 || texel_density.is_some() {
+                let tiles = match texel_density {
+                    Some(d) => modelcraft_uvpack::UdimTiles::Density { texel_density: *d, max_tiles: modelcraft_uvpack::MAX_TILES },
+                    None => modelcraft_uvpack::UdimTiles::Count(*tiles),
+                };
+                let opts = modelcraft_uvpack::UdimOptions { margin: *margin, rotation: *rotation, density: *density, tiles };
+                modelcraft_uvpack::pack_udim_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?.0
+            } else {
+                let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
+                modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?.0
+            };
             let mut out = m.clone();
             out.set_uvs(&uvs)?;
             Ok(out)

@@ -1239,6 +1239,52 @@ impl Document {
         craft_atomic_write(path, &bytes)
     }
 
+    /// Write one layout picture per UDIM tile the mesh's UVs lie in, named `stem.1001.ext`,
+    /// `stem.1002.ext`, … next to `path`'s stem (`path` has the `.svg` or `.png` extension).
+    /// Returns the files written; a mesh whose UVs lie in no tile writes none and is an error.
+    pub fn export_uv_layout_udim(&mut self, path: &Path, object: Option<ObjectId>, size: u32) -> Result<Vec<std::path::PathBuf>, EngineError> {
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if ext != "svg" && ext != "png" {
+            return Err(EngineError::Invalid("export the UV layout to .svg or .png".into()));
+        }
+        self.sync_sculpt();
+        let id = match object {
+            Some(id) => id,
+            None => {
+                let ids: Vec<ObjectId> = self.scene.tree_order().into_iter().map(|(id, _)| id).collect();
+                ids.into_iter()
+                    .find(|id| {
+                        matches!(self.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }))
+                            && self.scene.visible(*id)
+                            && self.eval.evaluate(&self.scene, *id).mesh.has_uvs()
+                    })
+                    .ok_or_else(|| EngineError::Invalid("no visible mesh has UVs".into()))?
+            }
+        };
+        if self.scene.get(id).is_none() {
+            return Err(EngineError::Invalid(format!("no object {}", id.0)));
+        }
+        let mesh = self.eval.evaluate(&self.scene, id).mesh;
+        let tiles = modelcraft_uvpack::udim_tiles(&mesh);
+        if tiles.is_empty() {
+            return Err(EngineError::Invalid("the UVs lie in no UDIM tile (1001 to 1100)".into()));
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("uv-layout").to_string();
+        let mut written = Vec::with_capacity(tiles.len());
+        for number in tiles {
+            let Some((column, row)) = modelcraft_uvpack::tile_of_number(number) else { continue };
+            let bytes = if ext == "svg" {
+                uvlayout::svg_tile(&mesh, size, column as u32, row as u32)?.into_bytes()
+            } else {
+                uvlayout::png_tile(&mesh, size, column as u32, row as u32)?
+            };
+            let file = path.with_file_name(format!("{stem}.{number}.{ext}"));
+            craft_atomic_write(&file, &bytes)?;
+            written.push(file);
+        }
+        Ok(written)
+    }
+
     /// Total triangles of everything visible (for the status bar).
     pub fn triangle_count(&mut self) -> usize {
         let ids: Vec<ObjectId> = self.scene.objects().iter().map(|o| o.id).collect();
