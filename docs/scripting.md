@@ -138,7 +138,14 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
   back is delivered once when playback stops. A callback cut short only because the others used
   up the budget is skipped, not counted as a failure. The policy is `PlaybackPolicy` in
   `modelcraft-script` (`EventPacer` is the UI-free part; `Session::fire_within` takes the
-  budget). A scene change by the user, a script or an
+  budget).
+- **Undo.** What callbacks change never adds undo steps of its own. A callback that answers a
+  user step (or an agent's or a script's) is merged into that step, which keeps its name, so one
+  Undo takes both back and one Redo returns both. A callback that runs for no step (a selection
+  or frame change) makes one "Script callbacks" step for everything the callbacks of that frame
+  did. The redo history is held aside while callbacks run, so reacting to an Undo does not make
+  Redo impossible. (`Document::fold_undo_since` in the engine does the merging; only scene
+  changes merge, a sculpt stroke stays a step of its own.) A scene change by the user, a script or an
   agent all count; a frame change poses the scene, so it also reports a scene change. A callback
   that prints or fails shows in the Output panel.
 - **Arguments.** `--arg name=value` on the command line becomes `arg("name", default)` and

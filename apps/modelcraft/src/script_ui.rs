@@ -113,6 +113,9 @@ pub struct ScriptState {
     clock: std::time::Instant,
     /// Playback was running in the last frame (to deliver what was held back when it stops).
     was_playing: bool,
+    /// The undo history's mark at the end of the last frame: steps made after it are the
+    /// user's (or an agent's), and callbacks that answer them join the newest one.
+    last_mark: usize,
 }
 
 impl Default for ScriptState {
@@ -155,6 +158,7 @@ impl ScriptState {
             pacer: EventPacer::new(PlaybackPolicy::default()),
             clock: std::time::Instant::now(),
             was_playing: false,
+            last_mark: 0,
         };
         s.reload();
         s
@@ -451,6 +455,7 @@ pub fn tick(app: &mut ModelApp) {
             app.script.loaded = false;
             app.script.was_playing = false;
             app.script.pacer.flush();
+            app.script.last_mark = app.doc.undo_mark();
         }
         return;
     }
@@ -485,8 +490,15 @@ pub fn tick(app: &mut ModelApp) {
     app.script.last_sig = sig;
     app.script.last_frame = frame;
     if immediate.is_empty() && paced.is_empty() {
+        app.script.last_mark = app.doc.undo_mark();
         return;
     }
+    // What the callbacks change joins one undo step (see `Document::fold_undo_since`): the user's
+    // step that they answer when there is one, otherwise a single "Script callbacks" step. The
+    // redo history is held aside, so reacting to an Undo does not make it impossible to Redo.
+    let user_step = app.doc.undo_mark() > app.script.last_mark && !app.doc.undo.can_redo();
+    let mark = app.doc.undo_mark();
+    let redo = app.doc.undo.take_redo();
     for e in &immediate {
         fire(app, e, None);
     }
@@ -512,6 +524,9 @@ pub fn tick(app: &mut ModelApp) {
             app.script.pacer.record_cost(now, spent);
         }
     }
+    app.doc.fold_undo_since(mark, &tl!("Script callbacks"), user_step);
+    app.doc.undo.restore_redo(redo);
+    app.script.last_mark = app.doc.undo_mark();
     app.script.last_selection = app.selection.clone();
     app.script.last_sig = scene_signature(app);
     app.script.last_frame = app.doc.scene.anim.frame;
