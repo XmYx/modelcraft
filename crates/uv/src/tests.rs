@@ -547,3 +547,108 @@ fn a_pin_the_solver_drops_does_not_fix_the_island() {
     assert!(res.islands[0].pinned);
     assert!((out.uv(a) - glam::Vec2::new(7.0, 7.0)).length() < 1e-4 || (out.uv(b) - glam::Vec2::new(7.0, 7.0)).length() < 1e-4);
 }
+
+fn cube_islands() -> (PolyMesh, Charts) {
+    let m = Primitive::Cube { size: Vec3::splat(2.0), segments: 1 }.build().unwrap();
+    let c = Charts::build(&m, &SeamSet::from_uv_discontinuities(&m)).unwrap();
+    (m, c)
+}
+
+#[test]
+fn transform_moves_exactly_the_listed_corners() {
+    let (m, charts) = cube_islands();
+    let corners = island_corners(&m, &charts, 0);
+    assert_eq!(corners.len(), 4, "one cube face");
+    let t = UvTransform { translate: glam::Vec2::new(0.25, -0.5), ..UvTransform::default() };
+    let out = transform_corners(&m, &corners, &t).unwrap();
+    for c in 0..m.corner_count() as u32 {
+        let want = if corners.contains(&c) { m.uv(c) + glam::Vec2::new(0.25, -0.5) } else { m.uv(c) };
+        assert!((out.uv(c) - want).length() < 1e-6, "corner {c}");
+    }
+    // Rotating a quarter turn about the island's centre keeps its shape; scaling by 2 doubles its size.
+    let (lo, hi) = bounds(&m, &corners.iter().copied().collect()).unwrap();
+    let pivot = 0.5 * (lo + hi);
+    let rot = transform_corners(&m, &corners, &UvTransform { rotate_deg: 90.0, pivot, ..UvTransform::default() }).unwrap();
+    let (rlo, rhi) = bounds(&rot, &corners.iter().copied().collect()).unwrap();
+    // A quarter turn swaps the width and the height and keeps the centre.
+    assert!(((rhi - rlo) - glam::Vec2::new((hi - lo).y, (hi - lo).x)).length() < 1e-5 && ((0.5 * (rlo + rhi)) - pivot).length() < 1e-5);
+    assert!(corners.iter().any(|c| (rot.uv(*c) - m.uv(*c)).length() > 0.01));
+    // A half turn keeps the bounds and moves every corner to the opposite one.
+    let half = transform_corners(&m, &corners, &UvTransform { rotate_deg: 180.0, pivot, ..UvTransform::default() }).unwrap();
+    assert!(corners.iter().all(|c| (half.uv(*c) - (2.0 * pivot - m.uv(*c))).length() < 1e-5));
+    let big = transform_corners(&m, &corners, &UvTransform { scale: glam::Vec2::new(2.0, 2.0), pivot, ..UvTransform::default() }).unwrap();
+    let (blo, bhi) = bounds(&big, &corners.iter().copied().collect()).unwrap();
+    assert!(((bhi - blo) - (hi - lo) * 2.0).length() < 1e-5);
+    // Mirroring (negative scale) flips the island in UV space.
+    let flip = transform_corners(&m, &corners, &UvTransform { scale: glam::Vec2::new(-1.0, 1.0), pivot, ..UvTransform::default() }).unwrap();
+    assert!(measure(&flip).0.flipped >= 2);
+    // Bad input: no UVs, a non-finite transform, corners that do not exist.
+    let mut bare = m.clone();
+    bare.clear_uvs();
+    assert_eq!(transform_corners(&bare, &[0], &t).unwrap_err(), UvError::NoUvs);
+    assert!(matches!(transform_corners(&m, &[0], &UvTransform { rotate_deg: f32::NAN, ..UvTransform::default() }), Err(UvError::Invalid(_))));
+    assert_eq!(transform_corners(&m, &[9999, 4_000_000_000], &t).unwrap().corner_uvs(), m.corner_uvs());
+}
+
+#[test]
+fn stitching_welds_the_two_sides_of_an_edge() {
+    let (m, _) = cube_islands();
+    let (edge, _) = (0..m.edge_count() as u32).map(|e| (e, SeamSet::from_uv_discontinuities(&m))).find(|(e, s)| s.contains(&m, *e)).unwrap();
+    let before = SeamSet::from_uv_discontinuities(&m).len();
+    let out = stitch_edges(&m, &[edge]).unwrap();
+    let after = SeamSet::from_uv_discontinuities(&out);
+    assert!(!after.contains(&out, edge), "the edge is continuous now");
+    assert_eq!(after.len(), before - 1, "no other seam was touched");
+    // The welded corners sit at the centre of where they were.
+    let h = m.edge_half_edge(edge);
+    let t = m.twin(h);
+    let want = 0.5 * (m.uv(h) + m.uv(m.next(t)));
+    assert!((out.uv(h) - want).length() < 1e-5 && (out.uv(m.next(t)) - want).length() < 1e-5);
+    // An edge that is already continuous, a missing one and a boundary one change nothing.
+    let plane = plane(2);
+    assert_eq!(stitch_edges(&plane, &[0, 1, 999]).unwrap().corner_uvs(), plane.corner_uvs());
+    assert_eq!(stitch_edges(&m, &[]).unwrap().corner_uvs(), m.corner_uvs());
+    // Welding every seam of a cube gives one island again (its UVs collapse onto each other).
+    let all: Vec<u32> = SeamSet::from_uv_discontinuities(&m).edge_ids(&m);
+    let welded = stitch_edges(&m, &all).unwrap();
+    assert!(SeamSet::from_uv_discontinuities(&welded).is_empty());
+    assert_eq!(Charts::build(&welded, &SeamSet::from_uv_discontinuities(&welded)).unwrap().islands.len(), 1);
+    let mut bare = m.clone();
+    bare.clear_uvs();
+    assert_eq!(stitch_edges(&bare, &[0]).unwrap_err(), UvError::NoUvs);
+}
+
+#[test]
+fn uv_vertex_and_island_selection_helpers() {
+    let (m, charts) = cube_islands();
+    // On a cube with split faces every UV vertex is one corner; on a welded plane an inner vertex has four.
+    assert_eq!(uv_vertex_corners(&m, &charts, 0), vec![0]);
+    let p = plane(2);
+    let pc = Charts::build(&p, &SeamSet::from_uv_discontinuities(&p)).unwrap();
+    let inner = (0..p.corner_count() as u32).find(|c| p.origin(*c) == 4).unwrap();
+    assert_eq!(uv_vertex_corners(&p, &pc, inner).len(), 4);
+    assert_eq!(island_corners(&p, &pc, inner).len(), p.corner_count());
+    let set: std::collections::BTreeSet<u32> = [inner].into();
+    assert_eq!(expand_to_uv_vertices(&p, &pc, &set).len(), 4);
+    assert!(uv_vertex_corners(&p, &pc, 9999).is_empty() && island_corners(&p, &pc, 9999).is_empty());
+    assert!(bounds(&p, &std::collections::BTreeSet::new()).is_none());
+}
+
+proptest! {
+    #[test]
+    fn random_transforms_and_stitches_never_break_the_mesh(
+        corners in proptest::collection::vec(0u32..40, 0..30),
+        edges in proptest::collection::vec(0u32..40, 0..20),
+        rot in -720.0f32..720.0,
+        sx in -3.0f32..3.0,
+    ) {
+        let m = Primitive::Cube { size: Vec3::ONE, segments: 1 }.build().unwrap();
+        let t = UvTransform { translate: glam::Vec2::new(0.1, -0.2), rotate_deg: rot, scale: glam::Vec2::new(sx, 1.0), pivot: glam::Vec2::splat(0.5) };
+        let a = transform_corners(&m, &corners, &t).unwrap();
+        prop_assert!(a.corner_uvs().iter().all(|u| u.is_finite()));
+        a.validate().unwrap();
+        let b = stitch_edges(&a, &edges).unwrap();
+        prop_assert!(b.corner_uvs().iter().all(|u| u.is_finite()));
+        prop_assert_eq!(b.corner_count(), m.corner_count());
+    }
+}

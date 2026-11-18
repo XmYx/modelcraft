@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 modelcraft-mesh = { workspace = true }
+craft-image-codecs = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-ops = { workspace = true }
 modelcraft-sim = { workspace = true }

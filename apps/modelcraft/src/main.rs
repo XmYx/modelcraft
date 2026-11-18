@@ -21,13 +21,19 @@ mod clone_ui_tests;
 mod constraint_ui;
 #[cfg(test)]
 mod constraint_ui_tests;
+mod deform_ui;
+#[cfg(test)]
+mod deform_ui_tests;
 mod demo;
 mod exchange_ui;
 mod gpu;
 mod keys;
 mod material_ui;
+mod mesh_tools;
 mod panels;
 mod prefs;
+mod prefs_ui;
+mod radial;
 mod render_view;
 mod rig_ui;
 #[cfg(test)]
@@ -35,9 +41,13 @@ mod rig_ui_tests;
 mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;
+mod shelf;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
+mod uv_ui;
+#[cfg(test)]
+mod uv_ui_tests;
 mod viewport;
 
 use args::{Cli, Launch};

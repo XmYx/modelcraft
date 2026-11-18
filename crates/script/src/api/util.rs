@@ -29,7 +29,42 @@ impl Rng {
     }
 }
 
-pub(crate) fn register(engine: &mut Engine, _s: &Rc<Shared>) {
+/// A command-line argument as the most specific script value: a switch, a whole number, a
+/// number or text.
+fn parse_arg(v: &str) -> Dynamic {
+    if v == "true" || v == "false" {
+        Dynamic::from_bool(v == "true")
+    } else if let Ok(i) = v.parse::<INT>() {
+        Dynamic::from_int(i)
+    } else if let Some(f) = v.parse::<f64>().ok().filter(|f| f.is_finite()) {
+        Dynamic::from_float(f)
+    } else {
+        Dynamic::from(v.to_string())
+    }
+}
+
+pub(crate) fn register(engine: &mut Engine, s: &Rc<Shared>) {
+    let sh = s.clone();
+    engine.register_fn("args", move || -> R<rhai::Map> {
+        let a = sh.args.try_borrow().map_err(|_| rt("the arguments are busy"))?;
+        Ok(a.iter().map(|(k, v)| (k.as_str().into(), parse_arg(v))).collect())
+    });
+    let sh = s.clone();
+    engine.register_fn("arg", move |name: &str, default: Dynamic| -> R<Dynamic> {
+        let a = sh.args.try_borrow().map_err(|_| rt("the arguments are busy"))?;
+        Ok(a.get(name).map(|v| parse_arg(v)).unwrap_or(default))
+    });
+    let sh = s.clone();
+    engine.register_fn("current_file", move || -> R<Dynamic> {
+        let f = sh.file.try_borrow().map_err(|_| rt("the file name is busy"))?;
+        Ok(f.clone().map(Dynamic::from).unwrap_or(Dynamic::UNIT))
+    });
+    engine.register_fn("round_to", |x: Dynamic, digits: INT| -> R<f64> {
+        let x = num(&x)?;
+        let k = 10f64.powi(digits.clamp(0, 12) as i32);
+        Ok((x * k).round() / k)
+    });
+
     engine.register_type_with_name::<Rng>("Rng");
     engine.register_fn("rng", |seed: INT| Rng::new(seed as u64));
     engine.register_fn("next", |r: &mut Rng| r.unit());

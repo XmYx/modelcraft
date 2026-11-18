@@ -103,7 +103,7 @@ full 3D suite stays in the denominator, however large.
 | Professional modeler | No | Missing knife, booleans, vertex snapping, UV tools, normals editing, splines |
 | Motion designer | No | No cloners, effectors, fields or animation |
 | Animator keying objects and parameters | Preview | Keys on any number, curves, timeline, auto-key, Key Sheet and Curve Editor; no layers, clips or motion paths |
-| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending and constraints work; no blend shapes, weight brush or control shapes yet |
+| Rigging, character animation | No | Joints, automatic skin weights, both skinning methods, IK with FK blending, constraints and blend shapes work; no weight brush or control shapes yet |
 | Simulation | No | Not started |
 | Look development and final rendering | No | Viewport shading only; no offline renderer |
 
@@ -255,8 +255,8 @@ Weight: 9
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
 | Custom normals: harden, average, weighted by face area | C M | M | M | |
-| Polygon groups (patches) and grouping tools | C M Z | P | S | Stored per face, tinted, masked by patch; no grouping tools in the UI |
-| Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | P | S | `PolyMesh::build` repairs and reports; no cleanup tool in the UI |
+| Polygon groups (patches) and grouping tools | C M Z | D | S | Group by crease angle or by shell, new patch from selection, select patch; history steps (`crates/ops/src/patches.rs`) |
+| Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | D | S | `PolyMesh::build` repairs non-manifold and lamina faces on every result; Mesh ▸ Patches and Cleanup finds n-gons, triangles, open borders, faces with no area and poles, and Clean Up Mesh welds and removes no-area faces |
 | Transfer attributes between meshes (positions, UVs, normals) | M | M | M | |
 | Align, distribute and snap objects together | C M | M | S | |
 | Polygon pen: draw polygons point by point | C M | M | M | |
@@ -283,7 +283,7 @@ Weight: 4
 |---|---|---|---|---|
 | Bend, twist, taper | C M Z | D | S | In the deformer's own frame |
 | Ripple / wave, spherify | C M | D | S | Ripple, Round |
-| Lattice / free-form deformation | C M | M | M | |
+| Lattice / free-form deformation | C M | P | M | A lattice of up to 8 cells per axis around a mesh, as one Bézier volume (the 1986 paper) or cell by cell, with a deformer stack order shared with clusters, blend shapes and skins (reorder by command); control points are moved by number and are keyable; the cage is drawn but its points are not picked in the viewport; clusters (weighted points following an object, with a soft radius) live in the same stack |
 | Wrap, shrink-wrap and surface deformers | C M | M | M | |
 | Noise and texture displacement deformer | C M | M | S | |
 | Smooth, relax and delta-smoothing deformers | C M | M | M | |
@@ -318,15 +318,16 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
-| UV editor | C M | M | L | |
-| Seams and unwrap (conformal / angle-based) | C M Z | P | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as a history step and CLI; no seam UI yet, no angle-based solver |
+| UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
+| Seams and unwrap (conformal / angle-based) | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport; no angle-based (ABF) solver |
 | Packing | C M | M | M | |
 | UDIM tiles | C M Z | M | M | |
 | Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
-| Relax, straighten, align and stitch tools | C M | M | M | |
-| Checker display, texel density, distortion heat map | C M Z | M | S | |
+| Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
+| Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
 | Transfer UVs between meshes | M Z | M | S | |
+| UV layout export as an image | C M Z | P | S | `modelcraft-formats`: SVG and PNG of a mesh's UV outlines, from the engine and `modelcraft-cli export-uv`; no menu entry yet. UVs round-trip exactly through GLB and OBJ (tested) |
 
 ## Sculpting: brushes, strokes and masks
 
@@ -470,7 +471,7 @@ Weight: 6
 | IK solvers: two-bone, multi-chain, spline IK | C M | P | L | Closed-form two-bone with a pole, FABRIK and CCD for longer chains (a pole turns the solved chain), solved in dependency order after the goal's own constraints; bone lengths kept (property tests); no spline IK, no joint limits, no stretch |
 | FK / IK switching and blending | C M | D | M | An IK constraint's weight blends from the joints' own rotations to the solved ones and is keyable (`constraint.<id>.weight`); Match FK to IK and Match IK to FK switch without a jump (tests) |
 | Constraints: parent, point, orient, aim, scale, pole vector | C M | D | M | Position, rotation, scale, as-child and look-at constraints with several weighted sources, kept offsets and a keyable weight; the pole is part of the IK constraint; evaluated in dependency order with cycles reported and skipped (tests); no per-axis skipping |
-| Blend shapes with in-betweens | C M Z | M | M | |
+| Blend shapes with in-betweens | C M Z | D | M | A blend-shape deformer under a mesh holds named targets made from another mesh with the same points (sparse offsets), each with in-between shapes at chosen weights and a keyable weight; runs first in the deformer stack, before skins (tests); targets are not edited in place and there are no per-target weight maps |
 | Corrective shapes driven by pose | C M | M | M | |
 | Control shapes and character sets | C M | M | M | |
 | Rig templates: biped, quadruped | C M | M | L | |
@@ -526,8 +527,8 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Guide curves on a surface; comb, cut, length brushes | C M Z | M | L | |
-| Render hair interpolated from guides: density, clumping, frizz | C M | M | L | |
+| Guide curves on a surface; comb, cut, length brushes | C M Z | M | L | `modelcraft-hair` grows seeded guides from a surface with density and length maps; no brushes or UI yet |
+| Render hair interpolated from guides: density, clumping, frizz | C M | M | L | `modelcraft-hair` blends up to millions of strands from guides (barycentric or nearest-k), with clump, frizz, width taper and hard memory caps; `modelcraft-cli hair-bench` measures it; not in the app yet |
 | Sculpted fibre meshes | Z | M | M | |
 | Hair to cards / geometry | C M | M | M | |
 | Import and export of curve grooms | C M | M | S | |
@@ -555,7 +556,7 @@ Weight: 5
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | M | M | |
-| User tools, shelves and recorded macros | C M Z | M | M | |
+| User tools, shelves and recorded macros | C M Z | P | M | Any command can sit on the Quick Bar; no recorded macros or user-written tools yet |
 | Event callbacks (scene changed, selection changed) | C M | M | M | |
 | Plugin SDK for native extensions | C M Z | M | L | |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
@@ -595,11 +596,11 @@ Weight: 4
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |
 | Customisable shortcuts | C M Z | D | S | Suite Keyboard Shortcuts dialog (craft-keymap): conflicts, saved sets, per-workspace contexts |
-| Radial and marking menus | C M Z | M | M | |
-| User palettes and shelves | C M Z | M | M | |
+| Radial and marking menus | C M Z | D | M | Radial Menu (Shift+Q): eight context actions (add objects, component tools, brushes); numbers 1–8, Tab and Enter, or the pointer |
+| User palettes and shelves | C M Z | D | M | Quick Bar: any command as a button, edited in Preferences or from its context menu, saved in the preferences |
 | Undo history panel (jump to any step) | M Z | D | S | |
 | Open Recent, incremental save | C M Z | D | S | |
-| Preferences | C M Z | P | S | Navigation, snapping, brush size, shortcuts; no units or display settings |
+| Preferences | C M Z | D | S | Preferences window (Ctrl+,): language, navigation, length units, display (grid, axis triad, wireframe, patches), snapping steps, brush size, Quick Bar, shortcuts |
 | Translated interface | C M Z | P | M | Strings go through craft-i18n; no shipped translations |
 | Accessibility: keyboard paths, screen-reader tree | | X | S | Tree items, viewport object nodes, numeric gizmo path, kittest tests |
 
@@ -631,6 +632,7 @@ Weight: 3
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
 - Simulation framework: `crates/sim/src/tests.rs` (`the_same_seed_gives_the_same_cache_and_another_seed_does_not`, `memory_and_step_counts_are_bounded`, `cancelling_at_any_frame_reports_how_far_it_got` and `random_runs_stay_within_budget_and_sample_without_panicking` proptests), `crates/scene/src/sim.rs` (`the_timeline_plays_the_cache_and_only_then`), `crates/engine/src/sim_tests.rs` (`a_baked_point_cache_plays_on_the_timeline_and_survives_undo_and_save`), `crates/formats/src/project.rs` (`a_simulation_cache_is_saved_as_a_point_cache_blob_and_comes_back`).
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
+- Deformer stack: `crates/anim/src/deform.rs` (`ffd_is_a_convex_combination`, `frame_shares_are_continuous_and_exact_at_the_frames` proptests), `crates/engine/src/deformer_tests.rs` (`blend_shapes_with_in_betweens_and_keyed_weights`, `lattices_clusters_and_the_order_of_the_stack`, `shapes_run_before_the_skin_and_everything_survives_a_save`), `apps/modelcraft/src/deform_ui_tests.rs`.
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 
@@ -657,6 +659,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | Deformation: blend shapes with in-betweens done; lattice partial |
 | 2026-11-18 | minor | IK and constraints: constraints and FK/IK blending done; IK solvers, baking constraints, expressions and driven keys partial |
 | 2026-11-17 | minor | Rigging: dual-quaternion skinning done; joints, linear-blend skinning and weight tools partial |
 | 2026-11-17 | minor | Animation tools: rotation cleanup done; animation layers, motion paths, point cache and turntable partial |

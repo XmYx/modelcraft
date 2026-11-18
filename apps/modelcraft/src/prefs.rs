@@ -23,6 +23,15 @@ pub struct Prefs {
     pub keep_history: bool,
     /// Open the agent control channel at start.
     pub allow_agents: bool,
+    /// Action ids on the shelf.
+    pub shelf: Vec<String>,
+    pub show_grid: bool,
+    pub show_axes: bool,
+    pub show_wire: bool,
+    pub show_patches: bool,
+    pub unit: crate::prefs_ui::Unit,
+    /// Interface language code; `None` follows the system.
+    pub language: Option<String>,
     #[serde(with = "craft_keymap::keymap::overrides_list")]
     pub shortcuts: craft_keymap::Overrides,
 }
@@ -40,6 +49,13 @@ impl Default for Prefs {
             brush_presets: Vec::new(),
             keep_history: true,
             allow_agents: false,
+            shelf: Vec::new(),
+            show_grid: true,
+            show_axes: true,
+            show_wire: true,
+            show_patches: false,
+            unit: Default::default(),
+            language: None,
             shortcuts: Default::default(),
         }
     }

@@ -8,6 +8,7 @@ modelcraft-cli run scene.modelcraft script.jsonl -o out.modelcraft
 modelcraft-cli info scene.modelcraft          # object tree with counts
 modelcraft-cli validate model.glb             # evaluate and check every mesh
 modelcraft-cli export scene.modelcraft out.glb
+modelcraft-cli export-uv scene.modelcraft layout.png --size 2048   # UV layout as SVG or PNG
 modelcraft-cli convert in.obj out.glb
 modelcraft-cli recover scene.modelcraft       # replay the crash journal and save
 modelcraft-cli control [scene.modelcraft]     # JSON-lines channel on stdin/stdout
@@ -45,7 +46,7 @@ Object ids are numbers (`info` prints them).
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …} |
-| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin} |
+| `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
 | `remove_step` | `id`, `index` |
@@ -112,13 +113,29 @@ $ printf '%s\n' '{"cmd":"add_primitive","kind":"cube"}' \
 
 ## Scripts
 
-`modelcraft-cli run-script <project|new> <script.rhai> [-o <out>]` runs a [Rhai script](scripting.md)
-over a project (or an empty scene) and saves like `run` does. Scripts have no file access unless
-it is granted: they may read the script's folder and the project's folder, and write nowhere;
-`--allow-read DIR` and `--allow-write DIR` (repeatable) grant more, `--time-limit SECS` and
-`--max-ops N` change the limits, and `--no-save` runs without writing. Errors print as
-`file:line:column: message` and give a non-zero exit status. Commands the script ran before an
-error stay applied in memory but nothing is saved.
+```
+modelcraft-cli run-script <project|new> <script.rhai> [-o <out>] [options]
+modelcraft-cli run-script <project|new> -e '<script text>' [options]
+modelcraft-cli batch-script <script.rhai> <file>... --out-dir DIR [--format modelcraft|glb|obj|stl] [options]
+```
+
+`run-script` runs a [Rhai script](scripting.md) over a project (or an empty scene) and saves like
+`run` does. `batch-script` runs one script over many files (projects or any importable model),
+saves each result in `--out-dir` (named after the input; a second input with the same file name gets `_2`, `_3`, ... instead of overwriting the first), prints one line per file and exits with status 1 if any file
+failed (`--stop-on-error` stops at the first). Scripts have no file access unless it is granted:
+they may read the script's folder and the project's folder, and write nowhere (`batch-script`
+lets them write in `--out-dir`).
+
+| Option | Meaning |
+|---|---|
+| `--arg NAME=VALUE` | An argument the script reads with `arg("NAME", default)` or `args()` (repeatable; values read as true/false, whole numbers, numbers or text) |
+| `--allow-read DIR`, `--allow-write DIR` | More folders the script may read or write (repeatable) |
+| `--time-limit SECS`, `--max-ops N` | The limits of one run (defaults 10 s, 10,000,000 operations) |
+| `--json` | `run-script` prints one JSON object on stdout: `ok`, `value`, `output` (kind, text, line), `commands`, `operations`, `seconds`, `error` (file, line, column, message) |
+| `--no-save` | Run and report, write nothing |
+
+Errors print as `file:line:column: message` and give a non-zero exit status. Commands the script
+ran before an error stay applied in memory but nothing is saved.
 
 ### Rigging
 
@@ -142,6 +159,21 @@ One command, `rig`, with the operation in `op`: `{"cmd":"rig","op":"add_joint","
 | `remove_constraint` | `id` |
 | `match_ik` | `id`, `to`: `fk` (the joints keep the solved pose, blend 0) or `ik` (the goal and pole move onto the chain, blend 1) |
 | `bake_constraints` | `objects`, `start?`, `end?` (the playback range without them), `step` (default 1), `keep?`: key the solved transforms, then switch the constraints off |
+
+| `add_shape` | `mesh`, `from` (a mesh with the same points, in the shape wanted), `name?`; with `target` (a shape's index) and `at` (0–1) the shape becomes an in-between of that target |
+| `set_shape` | `mesh`, `target`, `weight?`, `name?` |
+| `remove_shape` | `mesh`, `target`, `frame?` (one in-between; the whole shape without it) |
+| `add_lattice` | `mesh`, `divisions` [x, y, z] (1–8 cells, default 2), `linear?` (cell by cell instead of one Bézier volume) |
+| `edit_lattice` | `id`, `points` (control point indices, X fastest, then Y, then Z), `translate?` or `to?` [x, y, z] in the lattice's space (the box is one unit wide), `reset?`, `linear?` |
+| `add_cluster` | `mesh`, `points?`, `weights?`, `radius?` (every point within it of the centre, with a smooth falloff), `center?` [x, y, z] in the mesh's space, `name?` |
+| `set_cluster_weights` | `id`, `points`, `weight` (0 takes them out) |
+| `move_in_stack` | `id`, `delta` (negative: earlier) |
+
+Blend shapes, lattices, clusters and skins are children of the mesh they deform and run in child
+order after the parametric deformers: the deformer stack. A blend shape's weight is the attribute
+`target.<index>.weight` of the blend-shape object and a lattice's control points are
+`point.<index>.x|y|z` of the lattice, so `anim set_key` keys them. A cluster follows its own
+transform.
 
 Constraints run after every command and frame change, in dependency order: a constraint that reads
 what another writes runs after it, and constraints that depend on themselves are skipped and named

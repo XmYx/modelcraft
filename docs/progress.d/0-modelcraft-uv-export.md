@@ -1,0 +1,1 @@
+| 2026-11-17 | UV export: tests that every primitive's UVs and seams round-trip exactly through GLB and OBJ (including tiled UVs and the OBJ v flip) and that the GLB a consumer such as TextureCraft receives has TEXCOORD_0 for every primitive; UV layout pictures as SVG and PNG (`modelcraft-formats::uvlayout`, `Document::export_uv_layout`, `modelcraft-cli export-uv`) |

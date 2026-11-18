@@ -37,6 +37,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Animation (panel), Key Sheet, Curve Editor | timeline, dope sheet and graph/function-curve editors | "Key sheet" and "curve editor" are generic descriptions; the reference apps' editor names are not used | Use |
 | Joint, Add Joint, Orient Joints, Mirror Joints, Skin, Bind Skin, Unbind Skin, Normalize / Prune / Mirror Skin Weights | joints, skin binding and weight tools | Generic rigging terms | Use |
 | Add IK to Joint Chain, IK blend, Match FK to IK, Match IK to FK, Constrain Position / Rotation / Scale, Constrain as Child, Constrain to Look At, Bake Constraints to Keys, Driven key, Formula | inverse kinematics, FK/IK switching, point / orient / scale / parent / aim constraints, baking, driven keys and expressions | Generic rigging terms and plain descriptions of what each constraint does; the solver names (Two bones, Reaching, Joint by joint) describe the methods, which the docs cite by their paper names | Use |
+| Blend shapes, In-between shape, Lattice, Control point, Cell by cell, Cluster, Move Deformer Earlier / Later | morph targets with in-betweens, free-form deformation (Bézier volume or trilinear), cluster deformer, deformer stack order | Generic terms; "Cell by cell" describes the trilinear mode | Use |
 | Volume-Preserving Skin | dual-quaternion skinning | Our own description of what the option does; the method's name appears in the docs only | Use |
 | Animation layer, Base layer, Add Layer, Layer weight, Mute Layer, Layer Replaces, Flatten Layers | animation layers (additive / override, merge) | Generic terms | Use |
 | Motion Paths, Turntable, Smooth Rotation Keys | motion trails, turntable animation, Euler filter | Generic descriptions; "Euler filter" is the mathematician's name and appears only in the parity map and the command id | Use |
@@ -48,10 +49,13 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
 | Extrude, Inset, Bevel, Loop Cut, Merge, Weld, Subdivide, Triangulate | polygon tools | Generic modeling terms | Use |
+| Export UV Layout | UV snapshot / UV template export | Generic description; product terms avoided | Use |
 | Seams, Mark Seam, Clear Seam, Unwrap UVs, Pin | UV cutting and flattening tools | Generic modeling terms; no product-specific tool names used | Use |
+| UV Editor, UV Vertex / Edge / Face / Island, Weld, Pin, Heat map | UV editor tools | Generic terms; product tool names avoided | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
 | Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
+| Hair, Guides, Strands, Density, Clump, Frizz, Comb, Cut, Length, Puff, Smooth (hair tools) | the references' curve-hair and fur systems, their guide and brush names | Plain English words; no reference product, module or brush name (with trademarks or prefixes) is used | Use |
 | Clone modifiers (planned) | effectors | "Effector" is the reference's term, so it is not used | Use |
 | Falloff fields (planned) | fields | Generic geometry words | Use |
 
@@ -59,3 +63,6 @@ Names deliberately **not** used as labels: the reference products' names and the
 (their remesher, sculpt-mesh, layer and brush product names, object/attribute manager names,
 "construction history", "channel box", "subdivision surface" object name, "polygroups", "alphas",
 "dyntopo", "multires"). The parity document names the products only to describe the comparison.
+| Radial Menu | pie / marking menus | Generic ("radial menu" is a common UI pattern name); the reference term avoided | Use |
+| Quick Bar | shelves / custom palettes | No live software mark found for this phrase in class 9; plain descriptive words | Use |
+| Preferences | settings dialogs | Generic | Use |

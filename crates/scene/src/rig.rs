@@ -4,7 +4,8 @@
 //! a bone to each child joint. A **skin** is a child of a mesh object that binds the mesh's
 //! points to joints: it stores, per joint, the matrix that takes a point of the mesh at bind time
 //! into the joint's space, and per point the joints it follows ([`modelcraft_anim::skin`]).
-//! Skins run after the mesh's deformers, in child order. Posing a joint changes the skinned mesh
+//! Skins run after the mesh's parametric deformers, in child order together with the other stack
+//! deformers ([`apply_stack`]). Posing a joint changes the skinned mesh
 //! without touching the mesh object, so the evaluator's cache key for a skinned mesh also covers
 //! the world matrices of its joints ([`pose_key`]).
 
@@ -103,11 +104,16 @@ pub fn pose_key(scene: &Scene, mesh: ObjectId) -> u64 {
     h | 1
 }
 
-/// Apply the skins of a mesh object to its evaluated mesh. Returns the skinned mesh (`None`
-/// when the object has no skin) and messages for skins that could not run.
-pub fn apply_skins(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option<PolyMesh>, Vec<String>) {
-    let skins = scene.skins_of(mesh_id);
-    if skins.is_empty() {
+/// Run the deformer stack of a mesh object on its evaluated mesh: its visible blend-shape,
+/// lattice, cluster and skin children, in child order ([`crate::point_deform`]). Returns the
+/// deformed mesh (`None` when nothing ran) and messages for what could not run.
+pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option<PolyMesh>, Vec<String>) {
+    let stack: Vec<&crate::Object> = scene
+        .objects()
+        .iter()
+        .filter(|o| o.parent == Some(mesh_id) && o.visible && matches!(o.kind, ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. }))
+        .collect();
+    if stack.is_empty() {
         return (None, Vec::new());
     }
     let mut errors = Vec::new();
@@ -115,7 +121,16 @@ pub fn apply_skins(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option
     let mut positions: Vec<Vec3> = mesh.positions().to_vec();
     let mut out = Vec::new();
     let mut changed = false;
-    for (_, s) in skins {
+    for o in stack {
+        let s = match &o.kind {
+            ObjectKind::Skin { skin } => skin,
+            ObjectKind::PointDeformer { deformer } => {
+                errors.extend(deformer.apply(&mut positions, o.transform.matrix()));
+                changed = true;
+                continue;
+            }
+            _ => continue,
+        };
         if s.weights.points() != positions.len() {
             errors.push(format!("the skin binds {} points but the mesh now has {}: bind it again", s.weights.points(), positions.len()));
             continue;
@@ -143,9 +158,9 @@ pub fn apply_skins(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option
     if !changed {
         return (None, errors);
     }
-    let mut skinned = mesh.clone();
-    match skinned.set_positions(&positions) {
-        Ok(()) => (Some(skinned), errors),
+    let mut deformed = mesh.clone();
+    match deformed.set_positions(&positions) {
+        Ok(()) => (Some(deformed), errors),
         Err(e) => {
             errors.push(e.to_string());
             (None, errors)
