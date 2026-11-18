@@ -1,0 +1,1 @@
+| 2026-11-18 | Shortcuts while a widget has focus: only a focused text field counts as typing, so Undo, Redo and Select All work with a canvas, ruler or panel focused, and the workspace single-letter keys (E, D …) go to the field while one is typing |

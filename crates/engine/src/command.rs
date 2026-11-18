@@ -253,6 +253,14 @@ pub enum Command {
         id: ObjectId,
         thickness: f32,
     },
+    /// Move the vertices of the mesh being sculpted onto the surface of another object, no
+    /// further than `reach` (in the sculpted object's units; a tenth of its size when left out).
+    SculptProject {
+        id: ObjectId,
+        source: ObjectId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reach: Option<f32>,
+    },
     /// Add a mesh object from raw geometry: `positions` as [x, y, z] and `faces` as lists of
     /// vertex indices (counter-clockwise). Faces that do not fit the vertices are dropped and
     /// reported as a warning, like an import.
@@ -316,7 +324,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
-        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}): id, op",
+        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op",
     ),
     ("set_step", "Change a history step: id, index, op"),
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
@@ -342,6 +350,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("sculpt_clip", "Move what lies on the normal's side of a plane onto it: id, point, normal"),
     ("sculpt_extract", "New object from the masked faces as a closed shell: id, thickness"),
+    ("sculpt_project", "Move the sculpted mesh onto the surface of another object, as far as the mask allows: id, source, reach?"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
         "sculpt_shape",
@@ -430,6 +439,7 @@ impl Command {
             .into(),
             Command::SculptClip { .. } => "Clip to plane".into(),
             Command::SculptExtract { .. } => "Extract shell".into(),
+            Command::SculptProject { .. } => "Project detail".into(),
             Command::AddMesh { .. } => "Add mesh".into(),
             Command::SetPositions { .. } => "Set positions".into(),
             Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),

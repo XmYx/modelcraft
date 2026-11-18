@@ -421,5 +421,6 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::EvenRemesh { cell } => modelcraft_ops::remesh::even_remesh(m, *cell),
         StepOp::TrimPlane { point, normal, cap } => modelcraft_ops::trim::trim_plane(m, *point, *normal, *cap),
+        StepOp::Decimate { ratio } => modelcraft_ops::decimate::decimate(m, *ratio),
     }
 }

@@ -189,6 +189,7 @@ impl Shared {
             | Command::SculptRegion { .. }
             | Command::SculptClip { .. }
             | Command::SculptExtract { .. }
+            | Command::SculptProject { .. }
             | Command::AddMesh { .. }
             | Command::SetPositions { .. }
             | Command::Anim(_)
