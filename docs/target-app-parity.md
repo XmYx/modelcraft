@@ -292,8 +292,8 @@ Weight: 4
 | Collision deformer | C | M | M | |
 | Explode / shatter deformer | C | M | S | |
 | Deformer weights painted per vertex | C M | M | M | |
-| Falloff fields: linear, spherical, radial, box, noise, shader | C | M | L | |
-| Field layers: combine, remap, delay, freeze | C | M | M | |
+| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear and noise fields with a remap curve; they weight the deformers they sit in; no radial or shader field |
+| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer, blended by multiply, add, subtract, smallest or largest, then remapped; no delay or freeze |
 
 ## Procedural cloning and effectors
 
@@ -511,9 +511,9 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Rigid bodies with collisions and constraints | C M | M | L | |
+| Rigid bodies with collisions and constraints | C M | P | L | Active and passive bodies (a passive one follows its keyed animation) with box, sphere, hull and triangle-mesh colliders, gravity, friction, bounciness, damping, sleeping, continuous collision detection and fixed, hinge (with limits) and point joints, baked together as one world through `sim add` / `sim bake` (Rapier, deterministic); tests bound energy gain and penetration depth; no panel or viewport tools yet, no motors or springs, no collision groups |
 | Soft bodies | C M | M | L | |
-| Cloth | C M | M | L | |
+| Cloth | C M | P | L | XPBD on any mesh: stretch, shear and dihedral bend with a stiffness each, pins by vertex list, by sculpt mask or following an object, collisions with every other mesh or a chosen list (moving, deformed and baked colliders included) with friction, self collision, wind with turbulence; baked through `sim bake` and played from the cache; tests cover hanging, draping on a sphere and a box without penetration, moving floors, friction carrying, pins, wind and determinism; no panel or viewport tools, no tearing, no cloth-sculpt brushes, cloth does not push its colliders |
 | Particles: emitters, birth and death, per-particle attributes | C M | M | L | |
 | Forces: gravity, wind, turbulence, vortex, attract | C M | M | M | |
 | Smoke and fire | C M | M | XL | |
@@ -631,6 +631,8 @@ Weight: 3
 - UI: `apps/modelcraft/src/ui_tests.rs`, keyboard-driven kittest flows with the accessibility check on (save prompt, undo history, loop/grow selection, mirror, snapping, shortcuts dialog among them).
 - Selection and mesh tools: `crates/ops/src/select.rs` (`loops_rings_and_borders`, `grow_and_shrink_faces`), `edit.rs` (`bridge_fill_and_mirror`, mirror/bridge/fill in the random-sequence proptest).
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
+- Cloth: `crates/sim/src/cloth_tests.rs` (`cloth_drapes_over_a_sphere_without_going_into_it`, `a_sheet_dropped_on_a_box_never_goes_into_it`, `self_collision_keeps_a_falling_layer_on_top_of_another`, `random_settings_never_blow_up` proptest), `crates/sim/src/cloth.rs` (`the_hinge_gradient_matches_finite_differences`), `crates/engine/src/sim_cloth_tests.rs`.
+- Rigid bodies: `crates/sim/src/rigid_tests.rs` (`energy_is_never_gained_and_a_bounce_keeps_only_its_share`, `a_stack_of_boxes_does_not_sink_into_itself`, `a_fast_ball_does_not_tunnel_through_a_thin_wall`, `a_hinge_to_the_world_swings_on_a_circle_and_gains_no_energy`, `random_stacks_never_produce_non_finite_points_or_sink_through_the_ground` proptest), `crates/engine/src/sim_rigid_tests.rs` (`a_baked_rigid_body_falls_lands_and_plays_back_on_the_timeline`, `a_bake_is_repeatable_survives_save_and_is_rebuilt_by_crash_recovery`).
 - Simulation framework: `crates/sim/src/tests.rs` (`the_same_seed_gives_the_same_cache_and_another_seed_does_not`, `memory_and_step_counts_are_bounded`, `cancelling_at_any_frame_reports_how_far_it_got` and `random_runs_stay_within_budget_and_sample_without_panicking` proptests), `crates/scene/src/sim.rs` (`the_timeline_plays_the_cache_and_only_then`), `crates/engine/src/sim_tests.rs` (`a_baked_point_cache_plays_on_the_timeline_and_survives_undo_and_save`), `crates/formats/src/project.rs` (`a_simulation_cache_is_saved_as_a_point_cache_blob_and_comes_back`).
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Deformer stack: `crates/anim/src/deform.rs` (`ffd_is_a_convex_combination`, `frame_shares_are_continuous_and_exact_at_the_frames` proptests), `crates/engine/src/deformer_tests.rs` (`blend_shapes_with_in_betweens_and_keyed_weights`, `lattices_clusters_and_the_order_of_the_stack`, `shapes_run_before_the_skin_and_everything_survives_a_save`), `apps/modelcraft/src/deform_ui_tests.rs`.

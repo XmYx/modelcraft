@@ -748,6 +748,21 @@ impl ModelApp {
                 }
                 None => self.status = tl!("Select a mesh to deform"),
             },
+            AddField(kind) => {
+                // Into the selected deformer, or the deformer a selected field already sits in.
+                let scene = &self.doc.scene;
+                let target = self.active().and_then(|a| match scene.get(a).map(|o| (&o.kind, o.parent)) {
+                    Some((ObjectKind::Deformer { .. }, _)) => Some(a),
+                    Some((ObjectKind::Field { .. }, Some(p))) => Some(p),
+                    _ => None,
+                });
+                match target {
+                    Some(target) => {
+                        self.run(Command::AddField { kind: kind.into(), target });
+                    }
+                    None => self.status = tl!("Select a deformer for the falloff field"),
+                }
+            }
             AddCloner(kind) => {
                 // The selected mesh (or smooth cage) becomes the source; with none, a small cube is made.
                 let input = self
