@@ -13,7 +13,8 @@ A ZIP archive (written by craft-zip, saved atomically by craft-atomic):
 | `history/commands.json` | optional: `{ "format": "modelcraft.history", "version": 1, "done": [<Command>…], "undone": [<Command>…] }` |
 
 `scene` is the serde form of `modelcraft_scene::Scene`: `objects` (id, name, parent, transform
-{translation, rotation quaternion xyzw, scale}, visible, material, kind) and `next_id`. Large arrays
+{translation, rotation quaternion xyzw, scale}, visible, material, kind, `locked` and `template`
+when true), `next_id` and `sets` (selection sets `{name, ids}`, left out when there are none). Large arrays
 (stored meshes, sculpt layers) are left empty in the JSON and listed in `blobs` as
 `"<object>/source"` or `"<object>/step/<step id>"` → entry name.
 

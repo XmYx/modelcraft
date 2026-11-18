@@ -42,6 +42,7 @@ const CORE: &[&str] = &[
     "modelcraft-mesh",
     "modelcraft-ops",
     "modelcraft-uv",
+    "modelcraft-uvpack",
     "modelcraft-hair",
     "modelcraft-clone",
     "modelcraft-sim",

@@ -2516,6 +2516,7 @@ name = "modelcraft"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "craft-atomic",
  "craft-fonts-build",
  "craft-i18n",
  "craft-image-codecs",
@@ -2533,6 +2534,7 @@ dependencies = [
  "modelcraft-ops",
  "modelcraft-render",
  "modelcraft-scene",
+ "modelcraft-script",
  "modelcraft-sculpt",
  "rfd",
  "serde",
@@ -2602,6 +2604,7 @@ dependencies = [
  "modelcraft-sculpt",
  "modelcraft-sim",
  "modelcraft-uv",
+ "modelcraft-uvpack",
  "proptest",
  "serde",
  "serde_json",
@@ -2694,6 +2697,7 @@ dependencies = [
  "modelcraft-ops",
  "modelcraft-sim",
  "modelcraft-uv",
+ "modelcraft-uvpack",
  "proptest",
  "serde",
  "serde_json",
@@ -2738,6 +2742,19 @@ dependencies = [
 
 [[package]]
 name = "modelcraft-uv"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "modelcraft-mesh",
+ "modelcraft-ops",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "modelcraft-uvpack"
 version = "0.1.0"
 dependencies = [
  "glam",

@@ -302,3 +302,30 @@ fn uv_edit_steps_move_weld_and_record_seams() {
     let back: Step = serde_json::from_str(r#"{"id":1,"op":"seams"}"#).unwrap();
     assert!(back.op.is_marker());
 }
+
+#[test]
+fn pack_and_project_steps_write_uvs() {
+    use modelcraft_uvpack::Axis;
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let id = s.add("Cube", cube_kind(), None).unwrap();
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
+        steps.push(Step { id: 1, enabled: true, op: StepOp::ProjectUvs { projection: Projection::Box, fit: Fit::Uniform, faces: vec![] } });
+        steps.push(Step { id: 2, enabled: true, op: StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform } });
+    }
+    let e = ev.evaluate(&s, id);
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    assert!(e.mesh.has_uvs());
+    assert!(e.mesh.corner_uvs().iter().all(|u| u.is_finite() && u.min_element() >= -1e-5 && u.max_element() <= 1.0 + 1e-5));
+    // JSON defaults.
+    let back: Step = serde_json::from_str(r#"{"id":1,"op":"pack_uvs"}"#).unwrap();
+    assert!(matches!(back.op, StepOp::PackUvs { rotation: Rotation::Fit, density: Density::Uniform, .. }));
+    let back: Step = serde_json::from_str(r#"{"id":1,"op":"project_uvs","projection":{"kind":"planar","from":"pos_y"}}"#).unwrap();
+    assert!(matches!(back.op, StepOp::ProjectUvs { projection: Projection::Planar { from: Axis::PosY }, fit: Fit::Uniform, .. }));
+    // A selection that no longer fits is reported, not fatal; packing a mesh without UVs too.
+    if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
+        steps.clear();
+        steps.push(Step { id: 3, enabled: true, op: StepOp::ProjectUvs { projection: Projection::Box, fit: Fit::None, faces: vec![999] } });
+    }
+    assert_eq!(ev.evaluate(&s, id).errors.len(), 1);
+}

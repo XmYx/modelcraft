@@ -27,6 +27,7 @@ craft-render-bvh = { path = "crates/craft-render-bvh" }
 craft-render-core = { path = "crates/craft-render-core" }
 craft-render-gpu = { path = "crates/craft-render-gpu" }
 modelcraft-uv = { path = "crates/uv" }
+modelcraft-uvpack = { path = "crates/uvpack" }
 modelcraft-hair = { path = "crates/hair" }
 
 # shared Craft libraries (storytold/craft-libs), pinned by commit like the other Craft apps
@@ -94,6 +95,8 @@ opt-level = 3
 [profile.dev.package.modelcraft-ops]
 opt-level = 3
 [profile.dev.package.modelcraft-uv]
+opt-level = 3
+[profile.dev.package.modelcraft-uvpack]
 opt-level = 3
 [profile.dev.package.modelcraft-sculpt]
 opt-level = 3
