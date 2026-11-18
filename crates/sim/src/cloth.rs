@@ -230,8 +230,12 @@ pub struct ClothSolver {
     cur: Vec<ColliderMesh>,
     /// (collider, triangle) of every item in `coll_hash`.
     coll_tris: Vec<(u32, u32)>,
+    /// The box of every item of `coll_hash`, grown by a thickness: a cheap test before any maths.
+    coll_boxes: Vec<(Vec3, Vec3)>,
     coll_hash: SpatialHash,
     coll_built_static: bool,
+    /// The box around every collider triangle (and where it was), grown by a thickness.
+    coll_bounds: (Vec3, Vec3),
     stamp: Vec<u32>,
     stamp_now: u32,
     self_hash: SpatialHash,
@@ -378,8 +382,10 @@ impl ClothSolver {
             prev: Vec::new(),
             cur: Vec::new(),
             coll_tris: Vec::new(),
+            coll_boxes: Vec::new(),
             coll_hash: SpatialHash::new(1.0),
             coll_built_static: false,
+            coll_bounds: (Vec3::ZERO, Vec3::ZERO),
             stamp: Vec::new(),
             stamp_now: 0,
             self_hash: SpatialHash::new(thickness * 2.0),
@@ -390,6 +396,16 @@ impl ClothSolver {
     /// The largest relative change of an edge from its rest length (for tests and diagnostics).
     pub fn max_stretch(&self) -> f32 {
         self.stretch.iter().map(|l| (self.x[l.a as usize].distance(self.x[l.b as usize]) / l.rest - 1.0).abs()).fold(0.0, f32::max)
+    }
+
+    /// Mean, 99th percentile and largest relative change of an edge from its rest length.
+    pub fn stretch_stats(&self) -> (f32, f32, f32) {
+        let mut e: Vec<f32> = self.stretch.iter().map(|l| (self.x[l.a as usize].distance(self.x[l.b as usize]) / l.rest - 1.0).abs()).collect();
+        if e.is_empty() {
+            return (0.0, 0.0, 0.0);
+        }
+        e.sort_by(f32::total_cmp);
+        (e.iter().sum::<f32>() / e.len() as f32, e[(e.len() * 99 / 100).min(e.len() - 1)], e[e.len() - 1])
     }
 
     /// How many stretch, shear and bend constraints the mesh gave.
@@ -441,10 +457,12 @@ impl ClothSolver {
             }
         }
         let avg = (sum_size / sampled.max(1) as f64) as f32;
-        let cell = (avg * 1.5).max(self.desc.settings.thickness * 4.0).max(1e-3);
+        let cell = avg.max(self.desc.settings.thickness * 4.0).max(1e-3);
         self.coll_hash = SpatialHash::new(cell);
         self.coll_tris.clear();
+        self.coll_boxes.clear();
         let r = self.desc.settings.thickness;
+        let mut bounds = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
         for (m, c) in self.cur.iter().enumerate() {
             let prev = self.prev.get(m).filter(|q| q.positions.len() == c.positions.len());
             for (ti, t) in c.triangles.iter().enumerate() {
@@ -465,10 +483,13 @@ impl ClothSolver {
                 if !ok || !lo.is_finite() || !hi.is_finite() {
                     continue;
                 }
+                bounds = (bounds.0.min(lo - Vec3::splat(r)), bounds.1.max(hi + Vec3::splat(r)));
                 self.coll_hash.insert_box(self.coll_tris.len() as u32, lo - Vec3::splat(r), hi + Vec3::splat(r));
+                self.coll_boxes.push((lo - Vec3::splat(r), hi + Vec3::splat(r)));
                 self.coll_tris.push((m as u32, ti as u32));
             }
         }
+        self.coll_bounds = bounds;
         self.coll_hash.finish();
         self.stamp.clear();
         self.stamp.resize(self.coll_tris.len(), 0);
@@ -562,9 +583,11 @@ impl ClothSolver {
 
     /// Push the predicted positions out of the colliders. `alpha0` and `alpha1` are how far
     /// through the frame the substep starts and ends.
-    fn collide_colliders(&mut self, alpha0: f32, alpha1: f32) {
+    /// Only the vertices in `only` are tested when given; returns the ones that were moved.
+    fn collide_colliders(&mut self, alpha0: f32, alpha1: f32, only: Option<&[u32]>) -> Vec<u32> {
+        let mut touched: Vec<u32> = Vec::new();
         if self.cur.is_empty() || self.coll_tris.is_empty() {
-            return;
+            return touched;
         }
         let s = &self.desc.settings;
         let (r, mu) = (s.thickness, s.friction);
@@ -576,12 +599,20 @@ impl ClothSolver {
             }
         };
         let mut hits: Vec<u32> = Vec::new();
-        for i in 0..self.p.len() {
+        let count = only.map_or(self.p.len(), <[u32]>::len);
+        for k in 0..count {
+            let i = only.and_then(|o| o.get(k)).map_or(k, |v| *v as usize);
             if self.pinned[i] {
                 continue;
             }
             let prev = self.x[i];
             let travel = self.p[i].distance(prev);
+            // Far from every collider: nothing to do.
+            let reach = Vec3::splat(travel + 2.0 * r);
+            let q0 = self.p[i];
+            if q0.cmplt(self.coll_bounds.0 - reach).any() || q0.cmpgt(self.coll_bounds.1 + reach).any() {
+                continue;
+            }
             hits.clear();
             self.coll_hash.query(self.p[i], travel + 2.0 * r, |k| hits.push(k));
             self.stamp_now = self.stamp_now.wrapping_add(1);
@@ -596,6 +627,11 @@ impl ClothSolver {
                 }
                 *seen = self.stamp_now;
                 let Some((m, ti)) = self.coll_tris.get(*k as usize).copied() else { continue };
+                if let Some((lo, hi)) = self.coll_boxes.get(*k as usize)
+                    && (q0.cmplt(*lo - reach).any() || q0.cmpgt(*hi + reach).any())
+                {
+                    continue;
+                }
                 let (Some(mesh), Some(t)) = (self.cur.get(m as usize), self.cur.get(m as usize).and_then(|c| c.triangles.get(ti as usize))) else { continue };
                 let pm = self.prev.get(m as usize);
                 let (a, b, c) = (pos_at(mesh, pm, t[0], alpha1), pos_at(mesh, pm, t[1], alpha1), pos_at(mesh, pm, t[2], alpha1));
@@ -649,8 +685,12 @@ impl ClothSolver {
                     out -= tangent / tl * tl.min(mu * moved.length());
                 }
                 self.p[i] = out;
+                if touched.last() != Some(&(i as u32)) {
+                    touched.push(i as u32);
+                }
             }
         }
+        touched
     }
 
     fn collide_self(&mut self) {
@@ -792,8 +832,10 @@ impl Solver for ClothSolver {
             self.collide_self();
         }
         // Two passes: resolving one triangle can push a vertex into the next one.
-        self.collide_colliders(alpha0, alpha1);
-        self.collide_colliders(alpha0, alpha1);
+        let touched = self.collide_colliders(alpha0, alpha1, None);
+        if !touched.is_empty() {
+            self.collide_colliders(alpha0, alpha1, Some(&touched));
+        }
         for i in 0..self.x.len() {
             if !self.p[i].is_finite() {
                 // Keep the last good position and stop: better a stuck vertex than a lost cloth.

@@ -90,8 +90,21 @@ animation is ignored while it is simulated; a collider's keys move it and push t
 Each cache is stored in its mesh's own space under the object's own transform, so the object does
 not move: the mesh does.
 
-`modelcraft-cli commands` lists the operations as `sim op=…`, and
-`modelcraft-cli sim-bench rigid --bodies 1000 --frames 120` measures a bake.
+`cloth` (`add` with `kind: "cloth"`) simulates the mesh as a cloth with extended position-based
+dynamics. Its settings (`kind` with `type: "cloth"`): `mass` (kg), `stretch`, `shear`, `bend`
+(0 to 1; 1 is inextensible for stretch), `damping`, `thickness` (the radius of a vertex in
+collisions, metres), `friction`, `iterations` per substep, `gravity`, `wind` (`direction`,
+`strength` in metres per second, `turbulence` 0 to 1, `scale` and `speed` of the gusts, seeded by
+the simulation's `seed`), `collide` (with other visible meshes, or only the ids in `collide_with`),
+`self_collision`, and the pins: `pinned` (vertex indices; `sim pin_vertices` adds or releases
+some), `pin_mask` (also hold the vertices whose sculpt mask is above one half) and `pin_follow`
+(a mesh or group id: the pins move as that object does). Colliders are read from the scene at every
+frame, so moving objects, deformed meshes and baked rigid bodies all work; a cloth does not push
+its colliders back. A cloth is baked on its own (`bake` on it), and a cloth baked earlier is a
+collider for the next. Edits to the colliders do not mark a cloth's cache stale.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`
+and `sim-bench cloth` measure a bake.
 
 ### Animation
 

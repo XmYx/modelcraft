@@ -8,10 +8,11 @@ use modelcraft_engine::simulation::cloth::{ClothDesc, ClothSettings, ClothSolver
 use modelcraft_engine::simulation::rigid::{BodyDesc, RigidSettings, RigidWorld, WorldDesc};
 use modelcraft_engine::simulation::{BakeConfig, Silent, SimTiming, Solver, bake};
 
-pub const USAGE: &str = "  sim-bench cloth [--vertices N] [--frames N] [--substeps N] [--iterations N] [--self] [--sphere]
-                                    drop a square cloth (about N vertices, pinned at two corners)
-                                    over a sphere: solve time per frame and per substep; --self adds
-                                    self collision, --sphere the collider (defaults: 10000 vertices,
+pub const USAGE: &str = "  sim-bench cloth [--vertices N] [--frames N] [--substeps N] [--iterations N] [--self] [--sphere] [--pin]
+                                    drop a square cloth (about N vertices)
+                                    onto a sphere: solve time per frame and per substep; --self adds
+                                    self collision, --sphere the collider, --pin holds two corners
+                                    (defaults: 10000 vertices,
                                     120 frames at 24 fps, 8 substeps, 2 iterations)
   sim-bench rigid [--bodies N] [--frames N] [--substeps N]
                                     bake N boxes falling into a pile on a ground: solve time per
@@ -113,7 +114,7 @@ fn cloth(a: &[String]) -> Result<(), String> {
     let frames: u32 = number::<u32>(a, "--frames", 120)?.clamp(2, 10_000);
     let substeps: u32 = number::<u32>(a, "--substeps", 8)?.clamp(1, 64);
     let iterations: u32 = number::<u32>(a, "--iterations", 2)?.clamp(1, 16);
-    let (self_collision, with_sphere) = (a.iter().any(|x| x == "--self"), a.iter().any(|x| x == "--sphere"));
+    let (self_collision, with_sphere, pin) = (a.iter().any(|x| x == "--self"), a.iter().any(|x| x == "--sphere"), a.iter().any(|x| x == "--pin"));
     // A square sheet two metres across, a metre above the sphere, a quad per cell.
     let side = (n as f32).sqrt().round().max(4.0) as u32;
     let mut points = Vec::with_capacity(((side + 1) * (side + 1)) as usize);
@@ -126,8 +127,13 @@ fn cloth(a: &[String]) -> Result<(), String> {
     let polygons: Vec<Vec<u32>> =
         (0..side).flat_map(|j| (0..side).map(move |i| (i, j))).map(|(i, j)| vec![at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)]).collect();
     let vertices = points.len();
-    let settings =
-        ClothSettings { iterations, self_collision, thickness: (2.0 / side as f32) * 0.5, pinned: vec![at(0, 0), at(side, 0)], ..ClothSettings::default() };
+    let settings = ClothSettings {
+        iterations,
+        self_collision,
+        thickness: (2.0 / side as f32) * 0.5,
+        pinned: if pin { vec![at(0, 0), at(side, 0)] } else { vec![] },
+        ..ClothSettings::default()
+    };
     let provider: Option<ColliderProvider> = with_sphere.then(|| {
         let c = vec![sphere(Vec3::new(0.0, 0.2, 0.0), 0.45)];
         Box::new(move |_: f64| c.clone()) as ColliderProvider
@@ -142,12 +148,14 @@ fn cloth(a: &[String]) -> Result<(), String> {
     let cache = bake(&mut solver, &cfg, &mut Silent).map_err(|e| e.to_string())?;
     let solve = ms(t);
     println!(
-        "{{\"sim\":\"cloth\",\"vertices\":{vertices},\"constraints\":{},\"frames\":{},\"substeps\":{substeps},\"iterations\":{iterations},\"self_collision\":{self_collision},\"sphere\":{with_sphere},\"setup_ms\":{setup:.1},\"solve_ms\":{solve:.1},\"ms_per_frame\":{:.2},\"ms_per_substep\":{:.3},\"max_stretch\":{:.3},\"cache_mib\":{:.1}}}",
+        "{{\"sim\":\"cloth\",\"vertices\":{vertices},\"constraints\":{},\"frames\":{},\"substeps\":{substeps},\"iterations\":{iterations},\"self_collision\":{self_collision},\"sphere\":{with_sphere},\"pinned\":{pin},\"setup_ms\":{setup:.1},\"solve_ms\":{solve:.1},\"ms_per_frame\":{:.2},\"ms_per_substep\":{:.3},\"stretch_mean\":{:.4},\"stretch_p99\":{:.3},\"stretch_max\":{:.3},\"cache_mib\":{:.1}}}",
         stretch + shear + bend,
         cache.frames(),
         solve / f64::from(frames),
         solve / (f64::from(frames) * f64::from(substeps)),
-        solver.max_stretch(),
+        solver.stretch_stats().0,
+        solver.stretch_stats().1,
+        solver.stretch_stats().2,
         cache.bytes() as f64 / (1 << 20) as f64
     );
     Ok(())
