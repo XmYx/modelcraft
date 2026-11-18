@@ -1,0 +1,1 @@
+| 2026-11-17 | Live Array (linear or radial copies joined into one mesh, at most 1,000 copies, bounded by the face limit) and Symmetry generators that chain and follow their input, and a Shear deformer; `add_array`, `add_symmetry`, `set_array` and `set_symmetry` commands, Properties sections, property tests |

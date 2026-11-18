@@ -37,6 +37,8 @@ pub enum Action {
     AddPrimitive(&'static str),
     AddCage,
     AddDeformer(&'static str),
+    AddArray(&'static str),
+    AddSymmetry,
     AddField(&'static str),
     AddCloner(&'static str),
     AddCloneModifier(&'static str),
@@ -103,7 +105,9 @@ pub enum Action {
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
-pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round"];
+pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
+/// The array layouts (`modelcraft_ops::array::KINDS`).
+pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 /// The falloff field shapes (`modelcraft_field::SHAPES`).
 pub const FIELDS: &[&str] = modelcraft_engine::field::SHAPES;
 /// The clone layouts (`modelcraft_clone::KINDS`).
@@ -148,6 +152,8 @@ pub fn all() -> Vec<Action> {
     v.extend(PRIMITIVES.iter().map(|p| AddPrimitive(p)));
     v.extend([AddCage, AddGroup]);
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
+    v.extend(ARRAYS.iter().map(|a| AddArray(a)));
+    v.push(AddSymmetry);
     v.extend(FIELDS.iter().map(|f| AddField(f)));
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend(MODIFIERS.iter().map(|m| AddCloneModifier(m)));
@@ -222,6 +228,7 @@ pub fn deformer_label(d: &str) -> String {
         "taper" => tl!("Taper"),
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
+        "shear" => tl!("Shear"),
         _ => d.to_string(),
     }
 }
@@ -316,6 +323,8 @@ impl Action {
             AddPrimitive(p) => crate::tlf!("Add {shape}", shape = prim_label(p)),
             AddCage => tl!("Add Smooth Cage"),
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
+            AddArray(a) => crate::tlf!("Add {layout} Array", layout = crate::generator_ui::array_label(a)),
+            AddSymmetry => tl!("Add Symmetry"),
             AddField(f) => crate::tlf!("Add {shape} Falloff Field", shape = crate::field_ui::shape_label(f)),
             AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
             AddCloneModifier(m) => crate::tlf!("Add {mode} Clone Modifier", mode = crate::modifier_ui::mode_label(m)),
@@ -429,6 +438,8 @@ impl Action {
             AddPrimitive(p) => return format!("create.{p}"),
             AddCage => "create.smooth_cage",
             AddDeformer(d) => return format!("create.deformer.{d}"),
+            AddArray(a) => return format!("create.array.{a}"),
+            AddSymmetry => "create.symmetry",
             AddField(f) => return format!("create.field.{f}"),
             AddCloner(c) => return format!("create.clones.{c}"),
             AddCloneModifier(m) => return format!("create.clone_modifier.{m}"),
@@ -608,7 +619,7 @@ impl Action {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             Organize(_) => "Organize",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddGroup => "Create",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
