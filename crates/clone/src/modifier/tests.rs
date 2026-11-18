@@ -388,10 +388,11 @@ proptest! {
             Mode::Plain => Mode::Plain,
         };
         let mut set = row(count);
+        let expected = set.len();
         let wt = |p: Vec3| p.x * 0.3;
         m.apply(&mut set, &Context { seed, time, target: Some(Vec3::new(p1, p2, p3)), weight: &wt });
         prop_assert!(finite(&set));
-        prop_assert_eq!(set.len(), count as usize);
+        prop_assert_eq!(set.len(), expected);
         for (i, inst) in set.instances.iter().enumerate() {
             prop_assert_eq!(inst.index, i as u32);
         }
