@@ -58,6 +58,7 @@ const CORE: &[&str] = &[
     "craft-render-core",
     "craft-render-gpu",
     "craft-render-guide",
+    "craft-render-denoise",
 ];
 
 fn layers() -> Result<(), String> {
