@@ -21,11 +21,15 @@ mod clone_ui_tests;
 mod constraint_ui;
 #[cfg(test)]
 mod constraint_ui_tests;
+mod deform_ui;
+#[cfg(test)]
+mod deform_ui_tests;
 mod demo;
 mod exchange_ui;
 mod gpu;
 mod keys;
 mod material_ui;
+mod mesh_tools;
 mod panels;
 mod prefs;
 mod render_view;

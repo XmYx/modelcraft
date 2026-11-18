@@ -85,6 +85,7 @@ pub enum Action {
     ScriptRunSelection,
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
+    MeshTool(crate::mesh_tools::Tool),
 }
 
 pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
@@ -129,6 +130,7 @@ pub fn all() -> Vec<Action> {
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend([Extrude, Inset, Bevel, LoopCut, Merge, Bridge, FillHole, Mirror(0), Mirror(1), Mirror(2), Subdivide, Triangulate, Flip, Collapse]);
+    v.extend(crate::mesh_tools::ALL.iter().map(|t| MeshTool(*t)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -317,6 +319,7 @@ impl Action {
             ScriptWindow => tl!("Scripts Window"),
             ScriptRun => tl!("Run Script"),
             ScriptRunSelection => tl!("Run Selection"),
+            MeshTool(t) => t.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             About => tl!("About ModelCraft"),
@@ -423,6 +426,7 @@ impl Action {
             ScriptWindow => "scripts.window",
             ScriptRun => "scripts.run",
             ScriptRunSelection => "scripts.run_selection",
+            MeshTool(t) => t.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
@@ -532,7 +536,7 @@ impl Action {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog => "Edit",
             AddPrimitive(_) | AddCage | AddDeformer(_) | AddCloner(_) | AddGroup => "Create",
-            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse => "Mesh",
+            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
             SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
             | LiveDetail | EvenRemesh => "Sculpt",

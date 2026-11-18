@@ -232,6 +232,7 @@ pub struct ModelApp {
     /// Up axis and unit of files read and written (File ▸ Exchange Settings).
     pub exchange: modelcraft_engine::formats::exchange::Convert,
     pub script: crate::script_ui::ScriptState,
+    pub mesh_tools: crate::mesh_tools::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -339,6 +340,7 @@ impl ModelApp {
             render_view: Default::default(),
             exchange: Default::default(),
             script: Default::default(),
+            mesh_tools: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -621,7 +623,7 @@ impl ModelApp {
         }
     }
 
-    fn add_step(&mut self, op: StepOp) {
+    pub fn add_step(&mut self, op: StepOp) {
         let Some(id) = self.edit_target() else {
             self.status = tl!("Select a mesh first");
             return;
@@ -842,6 +844,7 @@ impl ModelApp {
             ScriptWindow => crate::script_ui::toggle(self),
             ScriptRun => crate::script_ui::run_editor(self, false),
             ScriptRunSelection => crate::script_ui::run_editor(self, true),
+            MeshTool(t) => crate::mesh_tools::run(self, t),
         }
     }
 
