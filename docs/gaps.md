@@ -203,8 +203,16 @@ Limits of what exists:
   separate channel. Skin weights are painted by a command dab, not by a viewport brush; heat
   weights skip the paper's visibility test, so two limbs that touch can share weights; weights
   cannot be copied between meshes and are saved as JSON. Evaluation is single-threaded and
-  `Scene::get` is a linear search, which shows with thousands of objects. glTF export writes
-  the posed mesh, not the skin or the animation.
+  `Scene::get` is a linear search, which shows with thousands of objects. A `.glb` export of a scene with
+  skins, blend shapes, curves or constraints writes them (`craft-gltf-anim`, see
+  architecture.md): one clip sampled every frame of the playback range from the solved scene,
+  the four strongest joints per vertex, shapes at full weight. Not kept, and said in the export's
+  warnings: lattices and clusters, in-between shapes, a second skin on one mesh. Import reads the
+  first clip (the file's other clips are listed in the warnings; choosing one needs a `clip`
+  option on the import command), bakes rotations and spline channels to one key per frame, and
+  ignores cameras, lights, textures and extensions. The rigged writer keeps base colour,
+  metallic and roughness only, no textures. Axis and unit conversion on a rigged export falls
+  back to the static writer.
 - Constraints and IK: no joint limits, stretch or spline IK; constraints act on whole channels
   (no per-axis skipping); FABRIK cannot fold a chain that lies exactly on the line to its goal.
   Dependencies are tracked per object and channel (translate, rotate, scale, or one other
@@ -269,7 +277,7 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 ## Scripting and node graph
 
-Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1's language (Rhai, see [scripting.md](scripting.md)), object-model API and headless API are in; the script editor, event callbacks and user tools remain. The node view (**G3**) shows the dependency graph the evaluator already has.
+Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1 is in except recorded macros: the language (Rhai, see [scripting.md](scripting.md)), the object-model and headless APIs, the Scripts window, callbacks and scripted tools. The node view (**G3**) shows the dependency graph the evaluator already has.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -281,7 +289,7 @@ Every action is already a serializable command, so **G1** binds a language to an
 
 ## Simulation
 
-Not started. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
+The simulation framework (D1's cache and playback) is in: `modelcraft-sim` runs a solver on fixed substeps from a seed, caches every frame within bounds and plays it back through the timeline. The solvers come next, one slice each: rigid bodies, cloth, particles, then the panel and soft bodies. **D1** rigid bodies needs the time model from A1. Hair (**D4**) ranks high because grooming is a whole area with no rows done; its render half (hair shading) is in R7. Smoke, fire and liquids (**D6**) are the most expensive items in the plan and are among the few that can stay undone at 90 %.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
@@ -305,7 +313,7 @@ FBX (F1, done) is read through craft-mesh and written as 7.4 ASCII by `crates/fo
 
 ## UI/UX
 
-Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4** is the object-manager depth Cinema 4D users expect; the tree has no drag-and-drop reparenting today (the row menu does it), and Properties edits only the active object.
+Undo history now survives save and open (X7, done). **X3**: the radial menu, the Quick Bar and the full Preferences window are in; docking with tabs and splits (its own pull request) and shipped translations (catalogs in craft-i18n) remain. **X4**: tree search, drag-and-drop, lock and reference-only objects, selection sets, multi-object editing and copy/paste of attributes are in; tags, layers, instances, user attributes, attribute presets and pivots remain.
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

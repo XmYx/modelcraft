@@ -45,6 +45,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Stepped, Linear, Curved (interpolation); Automatic, Flat, Free, Split (tangents); Hold, Continue, Repeat, Repeat with offset, Back and forth (outside the keys) | key interpolation, tangent types, pre/post infinity | Plain words; no product's tangent-type names ("spline", "clamped", "plateau") used as labels | Use |
 | Keyboard Shortcuts (dialog) | shortcut editors | Generic; the dialog is the suite's shared craft-keymap one | Use |
 | Render View, Update while editing | interactive / progressive render windows (the references use product-specific names for theirs) | Generic words; no live software mark found for the phrase in class 9; the references' own names avoided | Use |
+| Learn where light comes from (Render View) | path guiding, light cache or irradiance-map style options (the references use product-specific names) | A plain description of what it does; no product name used | Use |
 | Studio, Daylight, Panorama image (Render View lighting) | dome lights, physical sun-and-sky systems, HDRI lighting | Generic words; the references' product names for their skies and domes avoided | Use |
 | Mask, Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease | sculpt brushes | Generic sculpting verbs used across tools; no product-specific brush names (with trademarks or prefixes) used | Use |
 | Bend, Twist, Taper | deformers | Generic | Use |
@@ -56,6 +57,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | UV Editor, UV Vertex / Edge / Face / Island, Weld, Pin, Heat map | UV editor tools | Generic terms; product tool names avoided | Use |
 | Model / Sculpt / Paint (workspaces) | workspace layouts | Generic | Use |
 | Clones, Clone generator; layouts Linear, Radial, Grid, Scatter, Surface, Vertices | the cloner object and its modes | Plain descriptive words. The reference's object name, its motion-graphics brand and "honeycomb" are not used as labels (the internal command id `add_cloner` is not a label) | Use |
+| Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
 | Hair, Guides, Strands, Density, Clump, Frizz, Comb, Cut, Length, Puff, Smooth (hair tools) | the references' curve-hair and fur systems, their guide and brush names | Plain English words; no reference product, module or brush name (with trademarks or prefixes) is used | Use |
 | Clone modifiers (planned) | effectors | "Effector" is the reference's term, so it is not used | Use |
 | Falloff fields (planned) | fields | Generic geometry words | Use |
@@ -67,3 +69,8 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Radial Menu | pie / marking menus | Generic ("radial menu" is a common UI pattern name); the reference term avoided | Use |
 | Quick Bar | shelves / custom palettes | No live software mark found for this phrase in class 9; plain descriptive words | Use |
 | Preferences | settings dialogs | Generic | Use |
+| Lock, Unlock | protecting objects from edits | Generic | Use |
+| Reference Only | template objects | Generic words; the reference term avoided | Use |
+| Selection Sets | named selections / quick selection sets | Generic | Use |
+| Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
+| Search objects | outliner filters | Generic | Use |

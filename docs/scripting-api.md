@@ -160,10 +160,10 @@ changes the scene runs a command, so it is journaled and undoable, and `undo_gro
 
 ## Tools and callbacks
 
-- `register_tool(label, fn)`: Add a command that runs `fn`; the app lists it in the Scripts menu (the app's wiring lands in a later change). Registering the same label again replaces it; running the script again replaces everything it registered.
+- `register_tool(label, fn)`: Add a command that runs `fn`; the app lists it in the Scripts menu. Registering the same label again replaces it; running the script again replaces everything it registered.
 - `register_tool(label, tip, fn)`: The same with a tooltip.
 - `tool_count() -> int`: How many tools are registered.
-- `on_event(name, fn)`: Call `fn(event)` when an event happens (the host reports events; the app's wiring lands in a later change). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.
+- `on_event(name, fn)`: Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.
 - `on_scene_loaded(fn)`: Call `fn(event)` when a project is opened, imported or started new.
 - `on_selection_changed(fn)`: Call `fn(event)` when the selection changes; `event.selection` is the new selection.
 - `on_scene_changed(fn)`: Call `fn(event)` when anything in the scene changed, whoever changed it (callbacks do not trigger themselves).

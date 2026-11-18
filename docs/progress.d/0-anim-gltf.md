@@ -1,0 +1,1 @@
+| 2026-11-18 | glTF animation I/O: the `craft-gltf-anim` crate (skins, morph targets and animation clips; GLB writer, GLB and .gltf reader with limits; shaped to move to craft-libs), rigged `.glb` export with one clip baked from the solved scene, import of rigged files into joints, skins, blend shapes and curves, round-trip tests |

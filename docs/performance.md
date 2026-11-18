@@ -194,7 +194,7 @@ about 50), so the seconds are upper bounds; the errors per sample count do not d
 |---|---|---|---|---|
 | cornell (diffuse interreflection) | 36 | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 2.76 | 0.00005 |
 | materials (small bright light on glossy metal: MIS stress) | 39,686 | 4.94 / 0.805 / 0.128 / 0.049 / 0.0121 | 3.39 | 0.0006 |
-| interior (sun and sky through a small window) | 2,238 | 0.246 / 0.046 / 0.0185 / **0.262 / 0.148** | 5.50 | 0.0017 |
+| interior (sun and sky through a small window) | 2,238 | 0.246 / 0.046 / 0.0185 / **0.219 / 0.120** | 5.50 | 0.0014 |
 | night-street (10,000 emissive triangles, 500 point and spot lights) | 10,602 | 6.79 / 1.01 / 0.262 / 0.072 / 0.0198 | 2.43 | 0.0012 |
 | studio (dome panorama, three area lights, coated and metal objects) | 36,104 | 0.326 / 0.081 / 0.0204 / 0.0052 / 0.0013 | 2.82 | 0.00008 |
 | showcase (glass, coat, fuzz, thin film, textures) | 72,196 | 2.45 / 0.692 / 0.166 / 0.049 / 0.0135 | 3.46 | 0.0010 |
@@ -202,11 +202,11 @@ about 50), so the seconds are upper bounds; the errors per sample count do not d
 Read honestly:
 - Error falls as 1/N on cornell and studio (a factor of 4 per 4× samples): the estimator is
   healthy there. Seconds to relMSE 0.01: 0.25 s (cornell) and 0.64 s (studio), interpolated.
-- **interior gets worse at 64 and 256 samples** (the spread at 256 spp is 0.005–0.62 across
+- **interior gets worse at 64 and 256 samples** (the spread at 256 spp is 0.005–0.48 across
   seeds): a few paths that reach the sun through the window by way of the metal ball or the coat
-  carry enormous energy, and one such sample in an image dominates its relMSE. This is the case
-  path guiding, a radiance cache or at least path regularisation exists for; none is implemented.
-  `clamp_indirect` hides it at the cost of energy and is off by default.
+  carry enormous energy, and one such sample in an image dominates its relMSE. Learned sampling
+  (below) is the answer to it. `clamp_indirect` hides it at the cost of energy and is off by
+  default.
 - materials, night-street and showcase converge at 1/N from 16 samples on but start from large
   errors (speckle from the small bright light on glossy metal, and caustic paths through glass).
 
@@ -218,7 +218,7 @@ the GPU itself was idle.
 |---|---|---|
 | cornell | 0.220 / 0.054 / 0.0137 / 0.0035 / 0.0009 | 0.053 |
 | materials | 4.94 / 0.805 / 0.128 / 0.049 / 0.0121 | 0.123 |
-| interior | 0.246 / 0.046 / 0.0185 / 0.262 / 0.148 | 0.114 |
+| interior | 0.246 / 0.046 / 0.0185 / 0.219 / 0.120 | 0.115 |
 | night-street | 6.79 / 1.01 / 0.262 / 0.072 / 0.0198 | 0.057 |
 | studio | 0.326 / 0.081 / 0.0205 / 0.0052 / 0.0013 | 0.115 |
 | showcase | 2.45 / 0.692 / 0.166 / 0.049 / 0.0135 | 0.168 |
@@ -228,7 +228,95 @@ through the same estimator; the GPU takes 1/20 to 1/50 of the time. Before this 
 rendered three of these scenes and chose lights by power: night-street then stood at
 12.6 / 3.41 / 0.848 / 0.236 / 0.0656 (3.3× the samples of the CPU for the same error) and
 materials at 6.07 / 1.22 / 0.221 / 0.069 / 0.0178. The interior scene's rise at 64 and 256 samples
-is the estimator's (see above), now on both devices.
+is the estimator's (see above), now on both devices. (The interior rows were measured again
+after sun disks became lights that paths find; they were 0.262 / 0.148 at 64 / 256 spp before.)
+
+### Indirect light and fireflies: learned sampling (`--guiding --splitting`)
+
+`craft-render-guide` is a hash grid over the scene (three resolutions, 16,384 cells). Each cell
+holds a radiance cache (mean and second moment of the light leaving it) and a 16×16 equal-area
+image of where the light it reflects arrives from, both filled by the paths of earlier passes
+(passes end at 1, 2, 4, 8, … samples). Two things read it:
+
+- **guiding**: part of the continuing directions at diffuse and fuzz lobes is drawn from the
+  cell's image instead of the BSDF, as one mixture density;
+- **adaptive roulette and splitting**: a path is ended, kept or split into up to four by its
+  expected contribution (throughput × the root second moment of the cell's cache) against the root
+  second moment of its pixel's samples.
+
+The grid takes about 50 MB whatever the scene (fixed-point sums in atomic integers, so recording
+from many threads gives the same tables in any order).
+
+Neither changes the expected image (a test holds a long render's mean to 2 % of the plain
+estimator's, and the errors below fall to the reference's own error), and a render stays
+deterministic per seed.
+
+The **interior** scene (a room lit through a small window by sun and sky), CPU, 256×256, **eight**
+seeds per budget, reference 4096 samples of the plain estimator (its own relMSE 0.0014). The load
+average was 47–64 during these runs (other builds), so seconds are upper bounds and comparable
+only roughly; errors do not depend on load. Mean relMSE, with the median and the worst seed, because
+the mean of a few seeds is ruled by its worst one here:
+
+| Estimator | 16 spp | 64 spp | 256 spp | 1024 spp | Seconds at 256 / 1024 spp |
+|---|---|---|---|---|---|
+| plain: mean | 0.0190 | 0.145 | 0.0856 | 0.0382 | 7.1 / 28.4 |
+| plain: median, worst | 0.0116, 0.050 | 0.0052, 0.67 | 0.0293, 0.48 | 0.0082, 0.14 | |
+| guiding: mean | 0.0705 | 0.0706 | 0.0710 | 0.0107 | 9.5 / 33.3 |
+| guiding: median, worst | 0.0133, 0.36 | 0.0329, 0.18 | 0.0192, 0.45 | 0.0062, 0.038 | |
+| adaptive splitting: mean | 0.0421 | 0.113 | 0.0307 | 0.0071 | 8.7 / 33.4 |
+| adaptive splitting: median, worst | 0.0104, 0.15 | 0.0174, 0.74 | 0.0277, 0.073 | 0.0066, 0.013 | |
+| **both: mean** | 0.0518 | 0.0384 | **0.0120** | **0.0043** | 14.7 / 44.2 |
+| both: median, worst | 0.0114, 0.21 | 0.0070, 0.21 | 0.0104, 0.020 | 0.0039, 0.0072 | |
+
+Read honestly:
+- **Before**, the error did not fall with samples: 0.145 at 64 spp, 0.086 at 256, 0.038 at 1024,
+  with seeds between 0.004 and 0.48 at 256 spp. **After** (both), it falls every step from 64 spp
+  on, is 7× lower at 256 spp and 9× lower at 1024 spp, and the seeds agree (0.003–0.020 at 256 spp).
+  Both at 256 spp (14.7 s) has a third of the error of the plain estimator at 1024 spp (28.4 s).
+  Efficiency, 1 / (relMSE × seconds): 1.7 → 5.7 at 256 spp, 0.9 → 5.3 at 1024 spp.
+- **Below about 64 samples learned sampling is worse** (0.052 against 0.019 at 16 spp): the first
+  passes sample from distributions learned from very few paths. It is a final-frame technique,
+  off by default.
+- **Guiding alone** helps late (3.6× at 1024 spp) and is unreliable before; the two belong
+  together, because the mixture makes paths that miss the learned directions heavier at every
+  bounce, and splitting is what spreads such a path's weight. The share of guided samples is kept
+  below one minus the surface's albedo so that this weight never exceeds 1. Measured on the way:
+  without that bound guiding alone stood at 1.16 and 0.131 at 256 and 1024 spp (worst seed 8.0);
+  with the bound but with the sun a point for paths, at 0.99 and 0.30; the figures above need
+  both the bound and the sun's disk (next point but one).
+- **What is left**: the remaining bright samples are the sun's reflection off the table's
+  mirror-smooth coat onto the walls (a caustic through a solid angle of 7·10⁻⁵ sr). A cell's
+  16×16 image has bins of 0.05 sr, so it can raise the chance of finding that direction by tens,
+  not thousands. Finer directions where the light is (adaptive trees, or lobes fitted per cell)
+  and a caustics method are the next steps.
+- Sun disks are now lights with a size in the sky: a path that leaves the scene inside the disk
+  finds it, weighted against aiming at it (a test: a sun in a mirror, MSE more than 10× lower
+  than aiming alone at 16 spp). This is correct for mirrors seen directly, and guided paths, which
+  learn to head for the window, need it. It did **not** change the plain estimator's numbers on
+  the interior (0.172 / 0.096 / 0.037 at 64 / 256 / 1024 spp before it, the same within seed
+  noise), because the rare event there is the wall's bounce towards the mirror, not the mirror's
+  view of the sun.
+
+The same pair on the test scene of `guiding_and_adaptive_splitting_keep_the_image_and_lower_its_noise`
+(a closed room lit only by a lamp shining at the ceiling, 32×32, 256 spp, three seeds): relMSE
+0.266 plain, 0.250 guiding, 0.192 adaptive splitting, 0.124 both; with two bounces only, where
+finding the bright patch is all there is, 0.583 plain against 0.190 guided.
+
+On the other five scenes the pair buys little and costs time, which is why it is off by default
+(five seeds, relMSE at 64 / 256 spp with both on, against the plain table above; seconds at 256
+spp under a load average of 38–53, against the plain run's under a load of about 50):
+
+| Scene | Both on | Plain | Seconds at 256 spp, both / plain |
+|---|---|---|---|
+| cornell | 0.0035 / 0.0009 | 0.0035 / 0.0009 | 5.4 / 2.8 |
+| materials | 0.0469 / 0.0093 | 0.049 / 0.0121 | 3.8 / 3.4 |
+| night-street | 0.0768 / 0.0206 | 0.072 / 0.0198 | 3.0 / 2.4 |
+| studio | 0.0050 / 0.0013 | 0.0052 / 0.0013 | 3.6 / 2.8 |
+| showcase | 0.0328 / 0.0085 | 0.049 / 0.0135 | 5.5 / 3.5 |
+
+`render-bench` now prints the median next to the mean and takes `--guiding` and `--splitting`;
+its reference is always the plain estimator, so a technique that changed the expected image would
+show as an error that stops falling. FLIP is still not implemented.
 
 ### Sample order, feature images and environment sampling (measured by their tests)
 
