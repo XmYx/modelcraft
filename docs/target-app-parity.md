@@ -569,8 +569,8 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| glTF 2.0 / GLB import | C M Z | D | S | Through craft-mesh; welded, parts become patches |
-| GLB export | C M Z | D | S | Hierarchy, TRS, materials, UVs, normals; triangulated (glTF has no quads) |
+| glTF 2.0 / GLB import | C M Z | D | S | Through craft-mesh; welded, parts become patches. Files with skins, morph targets or animations come in as joints, skins, blend shapes and curves (first clip) through `craft-gltf-anim` |
+| GLB export | C M Z | D | S | Hierarchy, TRS, materials, UVs, normals; triangulated (glTF has no quads). A rigged or animated scene is written with its skins, morph targets and one clip baked from the solved scene; round-trip tested |
 | OBJ import and export | C M Z | D | S | Quads kept |
 | STL export, STL and PLY import | C M Z | D | S | |
 | FBX import and export | C M Z | D | M | Import binary and ASCII 6.x/7.x through craft-mesh; export FBX 7.4 ASCII (meshes with quads, UVs, normals, material colour, hierarchy, TRS); round-trip tested |
@@ -634,6 +634,7 @@ Weight: 3
 - Animation: `crates/anim/src/curve.rs` (`passes_through_every_key`, `automatic_tangents_never_overshoot`, `edits_keep_the_invariants` proptests), `crates/scene/src/anim.rs` (`every_number_of_an_object_is_an_attribute`, `frames_pose_the_scene_and_only_changed_objects_are_re_evaluated`, `hostile_animation_is_repaired`), `crates/engine/src/anim_tests.rs` (`auto_key_turns_edits_into_keys`, `animation_survives_save_and_crash_recovery`), `apps/modelcraft/src/anim_ui_tests.rs` (keying, scrubbing, Key Sheet and Curve Editor by keyboard and number).
 - Constraints and IK: `crates/anim/src/ik.rs` (`two_bone_keeps_lengths_and_reaches_when_it_can`, `chains_stay_finite_and_keep_their_bones` proptests), `crates/anim/src/expr.rs` (`any_text_parses_or_fails_cleanly` proptest), `crates/scene/src/constraint_tests.rs` (`constraints_run_in_dependency_order_whatever_their_list_order`, `cycles_are_reported_and_skipped_and_the_rest_still_runs`, `any_constraints_solve_finitely_and_repeatably` proptest), `crates/engine/src/constraint_tests.rs`, `apps/modelcraft/src/constraint_ui_tests.rs`.
 - Deformer stack: `crates/anim/src/deform.rs` (`ffd_is_a_convex_combination`, `frame_shares_are_continuous_and_exact_at_the_frames` proptests), `crates/engine/src/deformer_tests.rs` (`blend_shapes_with_in_betweens_and_keyed_weights`, `lattices_clusters_and_the_order_of_the_stack`, `shapes_run_before_the_skin_and_everything_survives_a_save`), `apps/modelcraft/src/deform_ui_tests.rs`.
+- Rigged glTF: `crates/craft-gltf-anim/src/tests.rs` (`a_rigged_animated_document_round_trips_exactly`, `hostile_files_are_refused_or_trimmed_never_trusted`, `corrupted_files_never_panic` proptest), `crates/engine/src/gltf_tests.rs` (`skins_shapes_and_clips_round_trip_through_glb`, `constraints_are_baked_into_the_clip_and_limits_are_said`).
 - Rigging: `crates/anim/src/skin.rs` (`dual_quaternions_keep_the_radius_where_linear_blending_collapses`, `heat_weights_follow_the_surface_and_blend_at_the_joint`, `skinning_is_finite_and_bounded_by_the_joint_motions` proptest), `crates/anim/src/skeleton.rs`, `crates/scene/src/rig.rs` (`posing_a_joint_deforms_the_skinned_mesh_and_only_then`, `hostile_rigs_are_repaired`), `crates/engine/src/rig_tests.rs`, `apps/modelcraft/src/rig_ui_tests.rs`.
 - Screenshots: [modeling with history](images/modelcraft-model.png), [sculpting 2 M triangles](images/modelcraft-sculpt.png).
 

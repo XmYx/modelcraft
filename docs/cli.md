@@ -181,7 +181,13 @@ atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smo
 Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
 `@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
 
-A skinned mesh exports and bakes (`modelcraft-cli bake`) in its current pose.
+A point cache (`modelcraft-cli bake`) holds a skinned mesh as it is posed frame by frame.
+Exporting to `.glb` keeps the rig instead: when the scene has skins, blend shapes, curves or
+constraints, the file holds the joints, each bound mesh in its rest shape with joints and
+weights, blend shapes as morph targets and one animation clip sampled at every frame of the
+playback range (curves, layers, constraints and IK all baked into it). What glTF cannot hold is
+printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
+builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
 ## Rendering
 
