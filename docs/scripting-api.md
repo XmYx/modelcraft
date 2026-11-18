@@ -199,8 +199,10 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::add_primitive` | Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent? |
 | `cmd::add_group` | Add an empty group: name? |
 | `cmd::add_smooth_cage` | Add a smooth cage generator around input? with levels |
+| `cmd::add_array` | Add an array generator (linear, radial) around input?: real copies joined into one mesh |
+| `cmd::add_symmetry` | Add a symmetry generator around input? mirrored across axis (0 X, 1 Y, 2 Z) |
+| `cmd::add_deformer` | Add a deformer (bend, twist, taper, ripple, round, shear) under target |
 | `cmd::add_cloner` | Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input |
-| `cmd::add_deformer` | Add a deformer (bend, twist, taper, ripple, round) under target |
 | `cmd::add_clone_modifier` | Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner |
 | `cmd::add_field` | Add a falloff field (sphere, box, linear, noise) inside the target deformer or clone modifier |
 | `cmd::delete` | Delete objects and their children: ids |
@@ -213,6 +215,8 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::set_primitive` | Change a primitive's parameters: id, primitive |
 | `cmd::set_cage_levels` | Change a smooth cage's levels: id, levels |
 | `cmd::set_deformer` | Change a deformer's parameters: id, deformer |
+| `cmd::set_array` | Change an array's layout, copies and steps: id, array |
+| `cmd::set_symmetry` | Change a symmetry's axis and join distance: id, axis, weld |
 | `cmd::set_field` | Change a falloff field (shape, remap curve, invert, strength, blend): id, field |
 | `cmd::set_clone_modifier` | Change a clone modifier (mode, strength, position, rotation, scale, tint) and its target object: id, modifier, target? |
 | `cmd::set_cloner` | Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target? |
