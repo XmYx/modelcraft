@@ -150,17 +150,17 @@ Weight: 5
 | Groups and nulls | C M | D | S | |
 | Attributes panel for the active object | C M Z | D | M | Transform, shape, cage, deformer, material, history |
 | Numeric entry for every transform | C M Z | D | S | Properties fields and Transform by Numbers (Ctrl+T) |
-| Multi-object editing in the attributes panel | C M | P | M | Selection list exists; Properties edits the active object only |
-| Drag-and-drop in the tree | C M | M | S | Menu alternative exists |
-| Search and filter in the tree | C M | M | S | |
+| Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
+| Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
+| Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
 | Tags: per-object behaviours (display, render, protection, look-at) | C | M | M | |
 | Display and render layers | C M | M | M | |
 | Instances that share a mesh | C M | M | M | |
-| Selection sets | C M | M | S | |
+| Selection sets | C M | D | S | Saved in the scene, follow deletes, selected by name |
 | Custom user attributes on objects | C M | M | M | |
 | Scene overrides (takes, render setups) | C M | M | L | |
-| Lock and template objects (visible, not selectable) | C M | M | S | |
-| Copy and paste attributes; attribute presets | C M | M | S | |
+| Lock and template objects (visible, not selectable) | C M | D | S | Locked objects refuse edits in the engine; reference-only objects are drawn but never picked |
+| Copy and paste attributes; attribute presets | C M | P | S | Copy and paste transform, material and visibility onto many objects; no presets |
 | Object pivot separate from the origin | C M Z | M | S | |
 
 ## Dependency graph, history and node editing
@@ -320,9 +320,9 @@ Weight: 4
 | UVs on primitives, kept through edits | C M Z | P | S | Interpolated through ops; extrude walls get simple UVs |
 | UV editor | C M | D | L | UV Editor window: select vertices, edges, faces and islands (click, box, keyboard), move, rotate, scale by dragging, keys or numbers, pin, weld, flip, undoable history steps |
 | Seams and unwrap (conformal / angle-based) | C M Z | D | L | `modelcraft-uv`: seams by edge, angle and path, automatic cuts into discs, conformal (LSCM) unwrap with pins, as history steps, the UV menu and the UV Editor; seams show red in the viewport; no angle-based (ABF) solver |
-| Packing | C M | M | M | |
+| Packing | C M | P | M | `modelcraft-uvpack`: MaxRects with margin, rotation and even texel density as a history step and CLI; no UI yet |
 | UDIM tiles | C M Z | M | M | |
-| Projections: planar, box, cylindrical, spherical, camera | C M Z | M | M | |
+| Projections: planar, box, cylindrical, spherical, camera | C M Z | P | M | `modelcraft-uvpack`: all five, per face selection, as a history step and CLI; no UI yet |
 | Relax, straighten, align and stitch tools | C M | P | M | Weld (stitch) the sides of seams, flip, pivot-based numeric align; no relax or straighten |
 | Checker display, texel density, distortion heat map | C M Z | P | S | Checker background and angle, area and stretch heat maps in the UV Editor, with texel density and distortion numbers; no checker on the 3D viewport yet |
 | Automatic UVs from polygon groups | Z | M | M | |
@@ -549,12 +549,14 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Embedded scripting language | C M Z | P | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant ([scripting.md](scripting.md)); runs from `modelcraft-cli run-script`, no in-app way to run a script yet |
+| Embedded scripting language | C M Z | D | L | Rhai in `modelcraft-script`, sandboxed with limits and file access only by grant; runs in the app's Scripts window and from `modelcraft-cli run-script` ([scripting.md](scripting.md)) |
 | Object-model API over every command | C M Z | D | M | `cmd::<name>` for every registry command, scene queries, dependency graph, history-node evaluation, mesh handles, undo groups |
 | Command line: batch run, convert, export, validate | C M | D | S | `modelcraft-cli` run/exec/convert/export/info/validate/recover/bench |
 | Headless scene API (batch interpreter) | C M | D | S | `modelcraft-cli run-script`: queries, control flow and commands over a project |
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
+| Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
+| User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder; no scripted tool registration or recorded macros yet |
 | Script editor with a console | C M | M | M | |
 | User tools, shelves and recorded macros | C M Z | P | M | Any command can sit on the Quick Bar; no recorded macros or user-written tools yet |
 | Event callbacks (scene changed, selection changed) | C M | M | M | |

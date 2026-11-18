@@ -231,6 +231,7 @@ pub struct ModelApp {
     pub render_view: crate::render_view::RenderView,
     /// Up axis and unit of files read and written (File ▸ Exchange Settings).
     pub exchange: modelcraft_engine::formats::exchange::Convert,
+    pub script: crate::script_ui::ScriptState,
     pub mesh_tools: crate::mesh_tools::State,
     pub radial: Option<crate::radial::Radial>,
     pub prefs_window: crate::prefs_ui::PrefsWindow,
@@ -241,6 +242,7 @@ pub struct ModelApp {
     pub unit: crate::prefs_ui::Unit,
     /// Interface language code; `None` follows the system.
     pub language: Option<String>,
+    pub objects: crate::object_manager::State,
     pub recovery: Option<PathBuf>,
     pub gpu: Option<crate::gpu::GpuState>,
     pub gpu_failed: bool,
@@ -297,6 +299,8 @@ impl ModelApp {
         if app.allow_agents {
             crate::agents::start(&mut app, &cc.egui_ctx);
         }
+        app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
+        crate::script_ui::startup(&mut app);
         app
     }
 
@@ -347,6 +351,7 @@ impl ModelApp {
             about: false,
             render_view: Default::default(),
             exchange: Default::default(),
+            script: Default::default(),
             mesh_tools: Default::default(),
             radial: None,
             prefs_window: Default::default(),
@@ -355,6 +360,7 @@ impl ModelApp {
             show_axes: true,
             unit: Default::default(),
             language: None,
+            objects: Default::default(),
             recovery: None,
             gpu: None,
             gpu_failed: false,
@@ -737,8 +743,11 @@ impl ModelApp {
                     };
                     self.add_step(op);
                 } else if !self.selection.is_empty() {
-                    let ids = std::mem::take(&mut self.selection);
-                    self.run(Command::Delete { ids });
+                    // A refused delete (a locked object) keeps the selection.
+                    let ids = self.selection.clone();
+                    if self.run(Command::Delete { ids }) {
+                        self.selection.clear();
+                    }
                 }
             }
             Duplicate => {
@@ -887,9 +896,13 @@ impl ModelApp {
             }
             About => self.about = true,
             RenderView => crate::render_view::toggle(self, ctx),
+            ScriptWindow => crate::script_ui::toggle(self),
+            ScriptRun => crate::script_ui::run_editor(self, false),
+            ScriptRunSelection => crate::script_ui::run_editor(self, true),
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
+            Objects(op) => crate::object_manager::run(self, op),
         }
     }
 
@@ -1251,6 +1264,7 @@ impl ModelApp {
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);
+        crate::script_ui::quick_strip(self, ui);
         crate::shelf::bar(self, ui);
         crate::panels::status_bar(self, ui);
         crate::anim_ui::bottom_panel(self, ui);
@@ -1293,7 +1307,7 @@ impl ModelApp {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if crate::render_view::escape(self, ctx) || self.radial.is_some() {
+        if crate::render_view::escape(self, ctx) || self.radial.is_some() || crate::script_ui::escape(self, ctx) || crate::script_ui::keys(self, ctx) {
             return;
         }
         if crate::uv_ui::keys(self, ctx) {

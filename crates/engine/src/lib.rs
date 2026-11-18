@@ -38,6 +38,7 @@ pub use modelcraft_scene as scene;
 pub use modelcraft_sculpt as sculpt;
 pub use modelcraft_sim as simulation;
 pub use modelcraft_uv as uv;
+pub use modelcraft_uvpack as uvpack;
 
 #[cfg(test)]
 mod anim_tests;
