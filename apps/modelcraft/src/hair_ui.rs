@@ -11,7 +11,8 @@ use glam::Vec3;
 use modelcraft_engine::Command;
 use modelcraft_engine::hair::{HairCommand, MapEdit, MapKind};
 use modelcraft_engine::scene::{ObjectId, ObjectKind};
-use modelcraft_hair::{Amount, Blend, Brush, BrushKind, Dab, GrowSpec, Guides, InterpSpec, Stroke, Surface, Symmetry, apply_dabs};
+use modelcraft_hair::{Amount, Blend, Brush, BrushKind, Dab, DynamicsSettings, GrowSpec, Guides, InterpSpec, Stroke, Surface, Symmetry, apply_dabs};
+use modelcraft_sim::SimTiming;
 
 use crate::app::ModelApp;
 use crate::panels::set_name;
@@ -30,6 +31,10 @@ pub enum HairAction {
     ApplyAll,
     ToggleStrands,
     ToggleGuides,
+    Bake,
+    ClearBake,
+    ExportGlb,
+    ExportCache,
     BrushBigger,
     BrushSmaller,
     MaskAll,
@@ -42,7 +47,23 @@ impl HairAction {
         use HairAction::*;
         let mut v = vec![Add, Remove, Regrow, ToggleGroom];
         v.extend(BrushKind::ALL.map(Brush));
-        v.extend([SymmetryX, SymmetryY, SymmetryZ, ApplyAll, ToggleStrands, ToggleGuides, BrushBigger, BrushSmaller, MaskAll, MaskInvert, MaskClear]);
+        v.extend([
+            SymmetryX,
+            SymmetryY,
+            SymmetryZ,
+            ApplyAll,
+            ToggleStrands,
+            ToggleGuides,
+            Bake,
+            ClearBake,
+            ExportGlb,
+            ExportCache,
+            BrushBigger,
+            BrushSmaller,
+            MaskAll,
+            MaskInvert,
+            MaskClear,
+        ]);
         v
     }
 
@@ -59,6 +80,10 @@ impl HairAction {
             HairAction::ApplyAll => tl!("Apply Hair Brush to All Guides"),
             HairAction::ToggleStrands => tl!("Show Hair Strands"),
             HairAction::ToggleGuides => tl!("Show Hair Guides"),
+            HairAction::Bake => tl!("Bake Hair Dynamics"),
+            HairAction::ClearBake => tl!("Clear Hair Bake"),
+            HairAction::ExportGlb => tl!("Export Hair as glTF…"),
+            HairAction::ExportCache => tl!("Export Hair Point Cache…"),
             HairAction::BrushBigger => tl!("Larger Hair Brush"),
             HairAction::BrushSmaller => tl!("Smaller Hair Brush"),
             HairAction::MaskAll => tl!("Hair Mask All"),
@@ -80,6 +105,10 @@ impl HairAction {
             HairAction::ApplyAll => "hair.apply_all".into(),
             HairAction::ToggleStrands => "hair.show_strands".into(),
             HairAction::ToggleGuides => "hair.show_guides".into(),
+            HairAction::Bake => "hair.bake".into(),
+            HairAction::ClearBake => "hair.clear_bake".into(),
+            HairAction::ExportGlb => "hair.export_glb".into(),
+            HairAction::ExportCache => "hair.export_cache".into(),
             HairAction::BrushBigger => "hair.brush_bigger".into(),
             HairAction::BrushSmaller => "hair.brush_smaller".into(),
             HairAction::MaskAll => "hair.mask_all".into(),
@@ -174,6 +203,8 @@ pub struct GroomUi {
     hover: Option<(Pos2, f32)>,
     /// Growth and render settings being edited for one hair object.
     draft: Option<(ObjectId, GrowSpec, InterpSpec)>,
+    /// Dynamics settings being edited for one hair object.
+    dyn_draft: Option<(ObjectId, DynamicsSettings, SimTiming)>,
 }
 
 impl Default for GroomUi {
@@ -188,6 +219,7 @@ impl Default for GroomUi {
             preview: None,
             hover: None,
             draft: None,
+            dyn_draft: None,
         }
     }
 }
@@ -271,6 +303,33 @@ pub fn act(app: &mut ModelApp, a: HairAction) {
             app.groom.display.guides = !app.groom.display.guides;
             app.status = if app.groom.display.guides { tl!("Hair guides shown") } else { tl!("Hair guides hidden") };
         }
+        HairAction::Bake => match target_hair(app) {
+            Some(id) => {
+                if app.run(Command::Hair(HairCommand::Bake { id })) {
+                    app.status = tl!("Hair baked: scrub the timeline to play it");
+                }
+            }
+            None => app.status = tl!("Select hair first"),
+        },
+        HairAction::ClearBake => match target_hair(app) {
+            Some(id) => {
+                app.run(Command::Hair(HairCommand::ClearBake { id }));
+            }
+            None => app.status = tl!("Select hair first"),
+        },
+        HairAction::ExportGlb | HairAction::ExportCache => {
+            let Some(id) = target_hair(app) else {
+                app.status = tl!("Select hair first");
+                return;
+            };
+            let glb = a == HairAction::ExportGlb;
+            let name = app.doc.scene.get(id).map_or_else(|| "Hair".to_string(), |o| o.name.clone());
+            let dialog = rfd::FileDialog::new().set_file_name(format!("{name}.{}", if glb { "glb" } else { "mcpc" }));
+            let dialog = if glb { dialog.add_filter("glTF binary", &["glb"]) } else { dialog.add_filter("Point cache", &["mcpc"]) };
+            if let Some(path) = dialog.save_file() {
+                export_to(app, id, &path, glb);
+            }
+        }
         HairAction::BrushBigger => scale_radius(app, 1.25),
         HairAction::BrushSmaller => scale_radius(app, 0.8),
         HairAction::ApplyAll => match target_hair(app) {
@@ -288,6 +347,19 @@ pub fn act(app: &mut ModelApp, a: HairAction) {
         HairAction::MaskInvert => map_edit(app, MapEdit::Invert),
         HairAction::MaskClear => map_edit(app, MapEdit::Clear),
     }
+}
+
+/// Write a hair object's guides to `path` as glTF lines or as a point cache, in world space, and say
+/// what was written in the status bar. (The dialogs call this; so do the tests.)
+pub fn export_to(app: &mut ModelApp, id: ObjectId, path: &std::path::Path, glb: bool) {
+    use modelcraft_engine::{HairExportFormat, HairExportWhat};
+    let format = if glb { HairExportFormat::Glb } else { HairExportFormat::Mcpc };
+    // glTF carries the render hairs (capped); the point cache carries the guides, frame by frame.
+    let what = if glb { HairExportWhat::Strands } else { HairExportWhat::Guides };
+    app.status = match app.doc.export_hair(id, path, format, what, 100_000, true) {
+        Ok(msg) => msg,
+        Err(e) => crate::tlf!("{action} failed: {error}", action = if glb { tl!("Export Hair as glTF…") } else { tl!("Export Hair Point Cache…") }, error = e),
+    };
 }
 
 fn scale_radius(app: &mut ModelApp, k: f32) {
@@ -425,6 +497,72 @@ pub fn properties(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
             }
         });
         guides_and_render(app, ui, id);
+        dynamics(app, ui, id);
+    });
+}
+
+/// Dynamics: how the guides move when baked, the frames it covers, the bake and the exports.
+fn dynamics(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
+    let Some(ObjectKind::Hair { hair }) = app.doc.scene.get(id).map(|o| o.kind.clone()) else { return };
+    if app.groom.dyn_draft.as_ref().is_none_or(|d| d.0 != id) {
+        app.groom.dyn_draft = Some((id, hair.dynamics, hair.timing));
+    }
+    let Some((_, mut dynamics, mut timing)) = app.groom.dyn_draft else { return };
+    let mut changed = false;
+    ui.add_space(6.0);
+    ui.label(RichText::new(tl!("Dynamics")).strong());
+    egui::Grid::new("hair-dynamics").num_columns(2).show(ui, |ui| {
+        for (axis, name) in [(0, tl!("Gravity X")), (1, tl!("Gravity Y")), (2, tl!("Gravity Z"))] {
+            let r = num(ui, &mut dynamics.gravity[axis], 0.1, -1.0e4..=1.0e4, name);
+            changed |= committed(&r);
+            ui.end_row();
+        }
+        for (axis, name) in [(0, tl!("Wind X")), (1, tl!("Wind Y")), (2, tl!("Wind Z"))] {
+            let r = num(ui, &mut dynamics.wind[axis], 0.1, -1.0e4..=1.0e4, name);
+            changed |= committed(&r);
+            ui.end_row();
+        }
+        let r = num(ui, &mut dynamics.damping, 0.01, 0.0..=1.0, tl!("Hair damping"));
+        changed |= committed(&r);
+        ui.end_row();
+        let r = num(ui, &mut dynamics.stiffness, 0.01, 0.0..=1.0, tl!("Hair stiffness"));
+        changed |= committed(&r);
+        ui.end_row();
+        let r = num(ui, &mut dynamics.clearance, 0.001, 0.0..=1000.0, tl!("Collision clearance"));
+        changed |= committed(&r);
+        ui.end_row();
+        let (mut start, mut end) = (timing.start_frame as f32, timing.end_frame as f32);
+        let r = num(ui, &mut start, 1.0, -100_000.0..=100_000.0, tl!("Bake start frame"));
+        if r.changed() {
+            timing.start_frame = f64::from(start);
+        }
+        changed |= committed(&r);
+        ui.end_row();
+        let r = num(ui, &mut end, 1.0, -100_000.0..=100_000.0, tl!("Bake end frame"));
+        if r.changed() {
+            timing.end_frame = f64::from(end);
+        }
+        changed |= committed(&r);
+        ui.end_row();
+    });
+    let r = ui.checkbox(&mut dynamics.collide, tl!("Collide with the emitter"));
+    set_name(ui, &r, tl!("Collide with the emitter"));
+    changed |= r.changed();
+    app.groom.dyn_draft = Some((id, dynamics, timing));
+    if changed {
+        app.run(Command::Hair(HairCommand::SetDynamics { id, dynamics: Some(dynamics), timing: Some(timing), seed: None }));
+    }
+    let baked = match &hair.baked {
+        Some(c) => crate::tlf!("Baked: {frames} frames of {points} points", frames = c.frames(), points = c.points()),
+        None => tl!("Not baked: the hair shows its groomed shape"),
+    };
+    ui.label(RichText::new(baked).color(theme::TEXT_DIM).small());
+    ui.horizontal_wrapped(|ui| {
+        for a in [HairAction::Bake, HairAction::ClearBake, HairAction::ExportGlb, HairAction::ExportCache] {
+            if ui.button(a.label()).clicked() {
+                act(app, a);
+            }
+        }
     });
 }
 
@@ -544,7 +682,8 @@ pub fn guide_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
         let ObjectKind::Hair { hair } = &o.kind else { continue };
         let Some(emitter) = o.parent else { continue };
         let world = scene.world_matrix(emitter);
-        let guides = app.groom.preview.as_ref().filter(|(id, _)| *id == o.id).map_or(&hair.guides, |(_, g)| g);
+        let at = hair.at_frame(scene.anim.frame);
+        let guides = app.groom.preview.as_ref().filter(|(id, _)| *id == o.id).map_or(&at.guides, |(_, g)| g);
         let selected = app.selection.contains(&o.id) || app.selection.contains(&emitter);
         let editing = app.groom.stroke.as_ref().is_some_and(|s| s.hair == o.id);
         if !editing && !(app.groom.display.guides && (selected || !app.groom.display.strands)) {
@@ -584,13 +723,18 @@ pub fn hair_specs(doc: &mut modelcraft_engine::Document, groom: &GroomUi, select
         if groom.stroke.as_ref().is_some_and(|s| s.hair == id) {
             continue;
         }
+        // A baked hair is drawn as it is at the current frame (the strands follow the cache).
+        let frame = doc.scene.anim.frame;
+        let hair_at = hair.at_frame(frame);
+        let hair = &*hair_at;
         let mesh = doc.eval.evaluate(&doc.scene, emitter).mesh;
         let wanted = strands_to_draw(hair.strand_count(&mesh), &groom.display);
         if wanted == 0 {
             continue;
         }
         let emitter_rev = doc.scene.get(emitter).map_or(0, |e| e.rev);
-        let key_rev = rev.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ emitter_rev;
+        let frame_key = if hair.baked.is_some() { frame.to_bits() } else { 0 };
+        let key_rev = rev.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ emitter_rev ^ frame_key.rotate_left(21);
         let build = |n: usize| hair.strands_with_amount(&mesh, Amount::Count(n)).ok();
         if let Some(fraction) = g.hair(id.0, key_rev, wanted, build) {
             out.push(crate::gpu::HairSpec { key: id.0, model: doc.scene.world_matrix(emitter), color: [color[0], color[1], color[2], 0.9], fraction });

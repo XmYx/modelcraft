@@ -12,12 +12,13 @@ workspace = true
 
 [dependencies]
 modelcraft-mesh = { workspace = true }
+modelcraft-sim = { workspace = true }
 glam = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 modelcraft-ops = { workspace = true }
 proptest = { workspace = true }
-serde_json = { workspace = true }

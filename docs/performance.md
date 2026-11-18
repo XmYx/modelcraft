@@ -901,6 +901,23 @@ the bare sphere here, because most camera paths cross many fibres and every fibr
 ray and a bounce. A render of hair is capped at 1,000,000 strands per hair object (a prefix of the
 groom, an unbiased thinner copy).
 
+### Baking and exporting (`hair-bench --bake`, `hair-export`)
+
+Dynamics (`modelcraft_hair::StrandSolver` run by `modelcraft_sim::bake`): Verlet with gravity, damping, a
+weak shape spring, 8 length-constraint passes per step and collision with the sphere (a grid of its
+16,128 triangles), 4 substeps per frame, all 24 cores, strands independent of each other. Load average
+about 22.
+
+| Guides × points | Frames | Bake | Per frame | Cache |
+|---|---|---|---|---|
+| 5,000 × 8 | 60 | 431 ms | 7.2 ms | 28.8 MB |
+| 50,000 × 8 | 24 | 1,104 ms | 46 ms | 115.2 MB |
+
+A bake runs on the window's thread, so the app waits for it; scrubbing afterwards plays the cache (and a
+baked hair's strands are made again for each frame shown). Exports: 10,000 strands of 10 points as glTF
+lines is 2.3 MB (100,000 points, 90,000 segments); 3,000 guides of 10 points as one frame of point cache
+is 0.36 MB.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have
