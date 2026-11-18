@@ -1200,14 +1200,11 @@ impl Document {
         }
         if made > 1 && self.groups.is_empty() {
             self.fold_last(made, &g.label);
-<<<<<<< HEAD
         }
         if self.groups.is_empty()
             && let Some(rec) = self.recorder.as_mut()
         {
             rec.close_group(&g.label, true, made > 0);
-=======
->>>>>>> origin/staging
         }
         made
     }
