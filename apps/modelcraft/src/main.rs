@@ -39,6 +39,8 @@ mod render_view;
 mod rig_ui;
 #[cfg(test)]
 mod rig_ui_tests;
+#[cfg(test)]
+mod script_cb_ui_tests;
 mod script_ui;
 mod sculpt_ui;
 #[cfg(test)]

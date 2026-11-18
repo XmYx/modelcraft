@@ -163,11 +163,11 @@ changes the scene runs a command, so it is journaled and undoable, and `undo_gro
 - `register_tool(label, fn)`: Add a command that runs `fn`; the app lists it in the Scripts menu. Registering the same label again replaces it; running the script again replaces everything it registered.
 - `register_tool(label, tip, fn)`: The same with a tooltip.
 - `tool_count() -> int`: How many tools are registered.
-- `on_event(name, fn)`: Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.
+- `on_event(name, fn)`: Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame, skipped} where it has them.
 - `on_scene_loaded(fn)`: Call `fn(event)` when a project is opened, imported or started new.
 - `on_selection_changed(fn)`: Call `fn(event)` when the selection changes; `event.selection` is the new selection.
 - `on_scene_changed(fn)`: Call `fn(event)` when anything in the scene changed, whoever changed it (callbacks do not trigger themselves).
-- `on_frame_changed(fn)`: Call `fn(event)` when the current frame changed; `event.frame` is the new frame.
+- `on_frame_changed(fn)`: Call `fn(event)` when the current frame changed; `event.frame` is the new frame, and `event.skipped` how many frame changes were folded into it while the timeline played (0 otherwise).
 - `clear_callbacks()`: Remove the callbacks this script registered.
 
 ## Arguments
@@ -217,6 +217,10 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::enable_step` | Switch a history step on or off: id, index, enabled |
 | `cmd::remove_step` | Remove a history step: id, index |
 | `cmd::collapse` | Bake an object's history into its mesh: id |
+| `cmd::set_locked` | Protect objects from edits or allow them again: ids, locked |
+| `cmd::set_template` | Show objects for reference only (not picked in the viewport): ids, template |
+| `cmd::add_selection_set` | Remember a selection: name, ids |
+| `cmd::remove_selection_set` | Forget a selection set: index |
 | `cmd::import_file` | Import a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file: path, up? (auto, y, z), scale? (metres per file unit) |
 | `cmd::begin_sculpt` | Start sculpting a mesh object: id |
 | `cmd::end_sculpt` | Stop sculpting |

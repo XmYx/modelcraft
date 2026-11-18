@@ -130,7 +130,15 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
   as one undoable change; the startup script and a script open in the editor can both register
   tools. The app reports events once per frame, never while a drag or a brush stroke is going on
   (the change is reported when it ends), and what a callback changes itself is not reported
-  again, so callbacks cannot trigger themselves. A scene change by the user, a script or an
+  again, so callbacks cannot trigger themselves. While the timeline plays, `frame_changed` and
+  `scene_changed` (which change every drawn frame) are coalesced instead of running per frame:
+  one batch per 50 ms carrying the newest frame (`event.skipped` says how many frames it
+  stands for), all callbacks of a batch share an 8 ms budget and each is stopped after 25 ms, the
+  next batch waits until the last one's cost divided by a 25 % duty has passed, and what was held
+  back is delivered once when playback stops. A callback cut short only because the others used
+  up the budget is skipped, not counted as a failure. The policy is `PlaybackPolicy` in
+  `modelcraft-script` (`EventPacer` is the UI-free part; `Session::fire_within` takes the
+  budget). A scene change by the user, a script or an
   agent all count; a frame change poses the scene, so it also reports a scene change. A callback
   that prints or fails shows in the Output panel.
 - **Arguments.** `--arg name=value` on the command line becomes `arg("name", default)` and
