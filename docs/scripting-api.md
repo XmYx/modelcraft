@@ -163,11 +163,11 @@ changes the scene runs a command, so it is journaled and undoable, and `undo_gro
 - `register_tool(label, fn)`: Add a command that runs `fn`; the app lists it in the Scripts menu. Registering the same label again replaces it; running the script again replaces everything it registered.
 - `register_tool(label, tip, fn)`: The same with a tooltip.
 - `tool_count() -> int`: How many tools are registered.
-- `on_event(name, fn)`: Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame} where it has them.
+- `on_event(name, fn)`: Call `fn(event)` when an event happens (the app reports them once per frame). Names: scene_loaded, selection_changed, scene_changed, frame_changed. `event` is #{event, selection} or #{event, frame, skipped} where it has them.
 - `on_scene_loaded(fn)`: Call `fn(event)` when a project is opened, imported or started new.
 - `on_selection_changed(fn)`: Call `fn(event)` when the selection changes; `event.selection` is the new selection.
 - `on_scene_changed(fn)`: Call `fn(event)` when anything in the scene changed, whoever changed it (callbacks do not trigger themselves).
-- `on_frame_changed(fn)`: Call `fn(event)` when the current frame changed; `event.frame` is the new frame.
+- `on_frame_changed(fn)`: Call `fn(event)` when the current frame changed; `event.frame` is the new frame, and `event.skipped` how many frame changes were folded into it while the timeline played (0 otherwise).
 - `clear_callbacks()`: Remove the callbacks this script registered.
 
 ## Arguments
@@ -212,16 +212,25 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::set_cage_levels` | Change a smooth cage's levels: id, levels |
 | `cmd::set_deformer` | Change a deformer's parameters: id, deformer |
 | `cmd::set_cloner` | Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target? |
-| `cmd::add_step` | Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh): id, op |
+| `cmd::add_step` | Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}): id, op |
 | `cmd::set_step` | Change a history step: id, index, op |
 | `cmd::enable_step` | Switch a history step on or off: id, index, enabled |
 | `cmd::remove_step` | Remove a history step: id, index |
 | `cmd::collapse` | Bake an object's history into its mesh: id |
+| `cmd::set_locked` | Protect objects from edits or allow them again: ids, locked |
+| `cmd::set_template` | Show objects for reference only (not picked in the viewport): ids, template |
+| `cmd::add_selection_set` | Remember a selection: name, ids |
+| `cmd::remove_selection_set` | Forget a selection set: index |
 | `cmd::import_file` | Import a glTF, GLB, OBJ, STL, PLY, FBX or 3MF file: path, up? (auto, y, z), scale? (metres per file unit) |
 | `cmd::begin_sculpt` | Start sculpting a mesh object: id |
 | `cmd::end_sculpt` | Stop sculpting |
 | `cmd::sculpt_stroke` | Apply a brush stroke: id, stroke {brush {…, live_detail?: edge length}, dabs} |
-| `cmd::sculpt_mask` | Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, {patch: {triangle}}) |
+| `cmd::sculpt_mask` | Change the mask: id, op (clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}}) |
+| `cmd::sculpt_groups` | Make patches while sculpting: id, op ({by_normal: {angle}}, by_uv_island, by_part, from_mask) |
+| `cmd::sculpt_visibility` | Hide and show faces while sculpting: id, op (show_all, invert, hide_masked, hide_unmasked, {hide_patch: {triangle}}, {show_patch: {triangle}}, {isolate: {triangle}}) |
+| `cmd::sculpt_region` | Mask or hide inside a screen outline: id, region {view_proj (16 numbers, object to clip space), points [[x, y]…] in −1..1, front_only?, eye?}, action (mask, unmask, hide, isolate) |
+| `cmd::sculpt_clip` | Move what lies on the normal's side of a plane onto it: id, point, normal |
+| `cmd::sculpt_extract` | New object from the masked faces as a closed shell: id, thickness |
 | `cmd::sculpt_detail` | Step up or down a detail level, keeping the sculpted detail: id, op (up, down) |
 | `cmd::sculpt_shape` | Edit shape layers: id, op (add {name?}, remove {index}, merge {index}, strength {index, strength}, select {index or null}, rename {index, name}) |
 | `cmd::add_mesh` | Add a mesh from raw geometry: positions [[x,y,z]…], faces [[i,j,k…]…], name?, parent? |

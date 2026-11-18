@@ -19,7 +19,8 @@ use egui::{Color32, Key, Mesh, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use glam::Vec2;
 use modelcraft_engine::Command;
 use modelcraft_engine::mesh::{NONE, PolyMesh};
-use modelcraft_engine::scene::{Density, Fit, ObjectId, ObjectKind, Projection, Rotation, StepOp, UvPin};
+use modelcraft_engine::scene::{Density, Fit, ObjectId, ObjectKind, Projection, Rotation, StepOp, UnwrapMethod, UvPin};
+use modelcraft_engine::uv::RelaxMode;
 use modelcraft_engine::uv::{
     Charts, Distortion, SeamSet, TriangleMetric, UvTransform, expand_to_uv_vertices, face_triangles, island_corners, measure, per_face, uv_vertex_corners,
 };
@@ -120,6 +121,10 @@ pub enum UvAction {
     ClearSeam,
     SeamsByAngle,
     Unwrap,
+    UnwrapAbf,
+    Relax,
+    Straighten,
+    Stitch,
     Pack,
     ProjectPlanar,
     ProjectBox,
@@ -129,12 +134,16 @@ pub enum UvAction {
 }
 
 impl UvAction {
-    pub const ALL: [UvAction; 11] = [
+    pub const ALL: [UvAction; 15] = [
         UvAction::Editor,
         UvAction::MarkSeam,
         UvAction::ClearSeam,
         UvAction::SeamsByAngle,
         UvAction::Unwrap,
+        UvAction::UnwrapAbf,
+        UvAction::Relax,
+        UvAction::Straighten,
+        UvAction::Stitch,
         UvAction::Pack,
         UvAction::ProjectPlanar,
         UvAction::ProjectBox,
@@ -150,6 +159,10 @@ impl UvAction {
             UvAction::ClearSeam => tl!("Clear Seam"),
             UvAction::SeamsByAngle => tl!("Mark Seams by Angle"),
             UvAction::Unwrap => tl!("Unwrap UVs"),
+            UvAction::UnwrapAbf => tl!("Unwrap UVs (Angle-Based)"),
+            UvAction::Relax => tl!("Relax UVs"),
+            UvAction::Straighten => tl!("Straighten UVs"),
+            UvAction::Stitch => tl!("Stitch UV Islands"),
             UvAction::Pack => tl!("Pack UV Islands"),
             UvAction::ProjectPlanar => tl!("Project UVs: Planar"),
             UvAction::ProjectBox => tl!("Project UVs: Box"),
@@ -166,6 +179,10 @@ impl UvAction {
             UvAction::ClearSeam => "uv.clear_seam",
             UvAction::SeamsByAngle => "uv.seams_by_angle",
             UvAction::Unwrap => "uv.unwrap",
+            UvAction::UnwrapAbf => "uv.unwrap_abf",
+            UvAction::Relax => "uv.relax",
+            UvAction::Straighten => "uv.straighten",
+            UvAction::Stitch => "uv.stitch",
             UvAction::Pack => "uv.pack",
             UvAction::ProjectPlanar => "uv.project_planar",
             UvAction::ProjectBox => "uv.project_box",
@@ -257,6 +274,13 @@ pub struct UvUi {
     pub nudge: f32,
     /// Angle for "mark seams by angle", in degrees.
     pub seam_angle: f32,
+    /// The solver `Unwrap UVs` uses.
+    pub unwrap_method: UnwrapMethod,
+    /// Iterations and fit of `Relax UVs`.
+    pub relax_iterations: u32,
+    pub relax_mode: RelaxMode,
+    /// `Stitch UV Islands` also resizes the moved island so the edges are as long as its neighbour's.
+    pub stitch_scale: bool,
     /// Position of the keyboard element cursor (Page Up and Page Down walk the elements).
     cursor: usize,
     gesture: Option<Gesture>,
@@ -287,6 +311,10 @@ impl Default for UvUi {
             scale_by: Vec2::ONE,
             nudge: 0.01,
             seam_angle: 30.0,
+            unwrap_method: UnwrapMethod::Lscm,
+            relax_iterations: 10,
+            relax_mode: RelaxMode::Rigid,
+            stitch_scale: false,
             cursor: 0,
             gesture: None,
             target: None,
@@ -310,7 +338,14 @@ pub(crate) fn subject(app: &mut ModelApp) -> Option<(ObjectId, Arc<PolyMesh>)> {
 fn keeps_vertex_numbers(op: &StepOp) -> bool {
     matches!(
         op,
-        StepOp::Seams { .. } | StepOp::TransformUvs { .. } | StepOp::StitchUvs { .. } | StepOp::Unwrap { .. } | StepOp::SetPatch { .. } | StepOp::Flip { .. }
+        StepOp::Seams { .. }
+            | StepOp::TransformUvs { .. }
+            | StepOp::StitchUvs { .. }
+            | StepOp::RelaxUvs { .. }
+            | StepOp::StraightenUvs { .. }
+            | StepOp::Unwrap { .. }
+            | StepOp::SetPatch { .. }
+            | StepOp::Flip { .. }
     )
 }
 
@@ -369,6 +404,10 @@ pub fn act(app: &mut ModelApp, a: UvAction) {
         UvAction::ClearSeam => mark_seams(app, false),
         UvAction::SeamsByAngle => seams_by_angle(app),
         UvAction::Unwrap => unwrap(app),
+        UvAction::UnwrapAbf => unwrap_with(app, UnwrapMethod::Abf),
+        UvAction::Relax => relax(app),
+        UvAction::Straighten => straighten(app),
+        UvAction::Stitch => stitch(app),
         UvAction::Pack => pack(app),
         UvAction::ProjectPlanar => project(app, Projection::Planar { from: Axis::PosY }),
         UvAction::ProjectBox => project(app, Projection::Box),
@@ -444,8 +483,13 @@ pub fn seams_by_angle(app: &mut ModelApp) {
     write_seams(app, id, &seams);
 }
 
-/// Unwrap the mesh along its seams, keeping the pinned corners where they are.
+/// Unwrap the mesh along its seams with the chosen solver, keeping the pinned corners where they are.
 pub fn unwrap(app: &mut ModelApp) {
+    unwrap_with(app, app.uv.unwrap_method);
+}
+
+/// Unwrap with a given solver (see [`UnwrapMethod`]).
+pub fn unwrap_with(app: &mut ModelApp, method: UnwrapMethod) {
     let Some((id, mesh)) = subject(app) else {
         app.status = tl!("Select a mesh first");
         return;
@@ -458,7 +502,7 @@ pub fn unwrap(app: &mut ModelApp) {
         .filter(|c| (**c as usize) < mesh.corner_count() && mesh.has_uvs())
         .map(|c| UvPin { corner: *c, uv: mesh.uv(*c).to_array() })
         .collect();
-    let op = StepOp::Unwrap { seams: seams.to_vertex_pairs(), angle: None, pins, auto_cut: true, margin: 0.01 };
+    let op = StepOp::Unwrap { seams: seams.to_vertex_pairs(), angle: None, pins, auto_cut: true, margin: 0.01, method };
     if app.run(Command::AddStep { id, op }) {
         app.selection = vec![id];
         app.uv.selection.clear();
@@ -579,9 +623,51 @@ fn weld(app: &mut ModelApp) {
         app.status = tl!("Select the UV edges to weld first");
         return;
     }
-    if app.run(Command::AddStep { id, op: StepOp::StitchUvs { edges } }) {
+    if app.run(Command::AddStep { id, op: StepOp::StitchUvs { edges, align: false, scale: false } }) {
         app.selection = vec![id];
         app.uv.selection.clear();
+    }
+}
+
+/// Sew the selected edges: move the island on one side onto the other, then weld.
+fn stitch(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else { return };
+    let edges = selected_edges(&mesh, &app.uv.selection);
+    if edges.is_empty() {
+        app.status = tl!("Select the UV edges to stitch first");
+        return;
+    }
+    let op = StepOp::StitchUvs { edges, align: true, scale: app.uv.stitch_scale };
+    if app.run(Command::AddStep { id, op }) {
+        app.selection = vec![id];
+        app.uv.selection.clear();
+    }
+}
+
+/// Relax the selected UVs (the whole layout when nothing is selected), the rest staying put.
+fn relax(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else { return };
+    if !mesh.has_uvs() {
+        app.status = tl!("This mesh has no UVs yet. Project or unwrap it to make some.");
+        return;
+    }
+    let corners: Vec<u32> = app.uv.selection.iter().copied().collect();
+    let op = StepOp::RelaxUvs { corners, iterations: app.uv.relax_iterations, mode: app.uv.relax_mode };
+    if app.run(Command::AddStep { id, op }) {
+        app.selection = vec![id];
+    }
+}
+
+/// Lay each selected chain of UV edges on the line between its ends.
+fn straighten(app: &mut ModelApp) {
+    let Some((id, mesh)) = subject(app) else { return };
+    if selected_edges(&mesh, &app.uv.selection).is_empty() {
+        app.status = tl!("Select a chain of UV edges to straighten first");
+        return;
+    }
+    let corners: Vec<u32> = app.uv.selection.iter().copied().collect();
+    if app.run(Command::AddStep { id, op: StepOp::StraightenUvs { corners, strength: 1.0 } }) {
+        app.selection = vec![id];
     }
 }
 
@@ -855,6 +941,15 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
     });
     ui.horizontal_wrapped(|ui| {
+        ui.label(tl!("Unwrap solver"));
+        let methods = [(UnwrapMethod::Lscm, tl!("Conformal (LSCM)")), (UnwrapMethod::Abf, tl!("Angle-based (ABF)"))];
+        let shown = methods.iter().find(|(m, _)| *m == app.uv.unwrap_method).map(|(_, l)| l.clone()).unwrap_or_default();
+        let r = egui::ComboBox::from_id_salt("uv-unwrap-method").selected_text(shown).show_ui(ui, |ui| {
+            for (m, l) in &methods {
+                ui.selectable_value(&mut app.uv.unwrap_method, *m, l.clone());
+            }
+        });
+        name(ui, &r.response, tl!("Unwrap solver"));
         for (label, f) in
             [(tl!("Pin"), 0), (tl!("Unpin"), 1), (tl!("Weld"), 2), (tl!("Mark Seam"), 3), (tl!("Clear Seam"), 4), (tl!("Unwrap UVs"), 5), (tl!("Frame"), 6)]
         {
@@ -872,6 +967,29 @@ fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
             }
         }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label(tl!("Tidy"));
+        for (label, a) in [(tl!("Relax UVs"), UvAction::Relax), (tl!("Straighten UVs"), UvAction::Straighten), (tl!("Stitch UV Islands"), UvAction::Stitch)] {
+            let r = ui.button(label.clone());
+            name(ui, &r, label);
+            if r.clicked() {
+                act(app, a);
+            }
+        }
+        ui.label(tl!("Relax iterations"));
+        let r = ui.add(egui::DragValue::new(&mut app.uv.relax_iterations).speed(0.2).range(1..=200));
+        name(ui, &r, tl!("Relax iterations"));
+        let modes = [(RelaxMode::Rigid, tl!("Keep lengths")), (RelaxMode::Conformal, tl!("Keep angles"))];
+        let shown = modes.iter().find(|(m, _)| *m == app.uv.relax_mode).map(|(_, l)| l.clone()).unwrap_or_default();
+        let r = egui::ComboBox::from_id_salt("uv-relax-mode").selected_text(shown).show_ui(ui, |ui| {
+            for (m, l) in &modes {
+                ui.selectable_value(&mut app.uv.relax_mode, *m, l.clone());
+            }
+        });
+        name(ui, &r.response, tl!("Relax fit"));
+        let r = ui.checkbox(&mut app.uv.stitch_scale, tl!("Match scale when stitching"));
+        name(ui, &r, tl!("Match scale when stitching"));
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Layout"));

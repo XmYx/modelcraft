@@ -32,12 +32,12 @@ Commands:
                                     apply one JSON command per line, then save
   exec <project> '<json command>' [-o <out>]
                                     apply one command, then save
-  export <project> <out.glb|obj|stl|fbx> [--up y|z] [--scale M]
+  export <project> <out.glb|obj|stl|fbx|3mf|usda> [--up y|z] [--scale M]
   export-uv <project> <out.svg|png> [--size N] [--object ID]
                                     the UV layout of a mesh object as a picture
   convert <in> <out> [--up auto|y|z] [--scale M]
                                     any readable file (glTF, OBJ, STL, PLY, FBX, 3MF) to
-                                    .glb, .obj, .stl, .fbx or .modelcraft; --up and --scale
+                                    .glb, .obj, .stl, .fbx, .3mf, .usda or .modelcraft; --up and --scale
                                     (metres per file unit) convert axes and units
   recover <project>                 replay the crash journal next to a project and save
   control [project]                 JSON-lines control channel on stdin/stdout:
@@ -57,7 +57,8 @@ Commands:
   bench --groups [--polys N]        patch, visibility, region, shell, trim, occlusion, decimate and projection times
   uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
-  uv-bench [--segments N]           unwrap a sphere of N×N/2 quads: time and distortion
+  uv-bench [--segments N] [--shape S] [--method lscm|abf|both] [--cut auto|meridian] [--relax N]
+                                    unwrap a sphere (or tube, cone, torus, roundcube): time and distortion
   -h, --help | -V, --version
 ";
 
@@ -290,7 +291,13 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
         "sim-bench" => sim_cmd::bench(a),
-        "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
+        "uv-bench" => uv_bench(
+            flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64),
+            &flag(a, "--method").unwrap_or_else(|| "lscm".to_string()),
+            &flag(a, "--shape").unwrap_or_else(|| "sphere".to_string()),
+            &flag(a, "--cut").unwrap_or_else(|| "auto".to_string()),
+            flag(a, "--relax").and_then(|v| v.parse().ok()).unwrap_or(0),
+        ),
         "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
@@ -331,49 +338,16 @@ fn bake(a: &[String]) -> Result<(), String> {
 /// and the kernels alone.
 fn bench_skin(verts: usize, joints: usize, frames: usize) -> Result<(), String> {
     use modelcraft_engine::animation::skin;
-    use modelcraft_engine::{AnimCommand, BindMethod, RigCommand};
+    use modelcraft_engine::{BindMethod, RigCommand};
     let joints = joints.clamp(2, 1000);
     let frames = frames.clamp(2, 100_000);
-    // Enough sides that the ring count stays within the primitive's limit.
-    let sides = (verts as u32).div_ceil(1000).clamp(64, 1024);
-    let rings = ((verts as u32 / sides).saturating_sub(1)).clamp(joints as u32, 1024);
-    let height = joints as f32;
     let mut d = Document::new();
     let run = |d: &mut Document, c: Command| d.execute(c).map_err(|e| e.to_string());
-    let mesh = run(&mut d, Command::AddPrimitive { kind: "cylinder".into(), name: None, parent: None })?.created.first().copied().ok_or("no mesh")?;
-    let primitive = modelcraft_engine::ops::primitives::Primitive::Cylinder { radius: 1.0, height, sides, rings, caps: false };
-    run(&mut d, Command::SetPrimitive { id: mesh, primitive })?;
-    let mut chain = Vec::with_capacity(joints);
-    for i in 0..joints {
-        let y = -height / 2.0 + height * i as f32 / (joints - 1) as f32;
-        let id = run(&mut d, Command::Rig(RigCommand::AddJoint { parent: chain.last().copied(), position: Some([0.0, y, 0.0]), name: None }))?
-            .created
-            .first()
-            .copied()
-            .ok_or("no joint")?;
-        chain.push(id);
-    }
-    let count = d.eval.evaluate(&d.scene, mesh).mesh.vertex_count();
     let t = Instant::now();
-    let skin_id =
-        run(&mut d, Command::Rig(RigCommand::BindSkin { mesh, joints: chain.clone(), method: BindMethod::Heat, influences: 4, dual_quaternion: false }))?
-            .created
-            .first()
-            .copied()
-            .ok_or("no skin")?;
-    println!("mesh: {count} vertices, {joints} joints; bind with heat weights (4 influences) {:.0} ms", ms(t));
-    // Every joint sways on Z and twists on Y, out of phase, so every point moves every frame.
-    let end = frames as f64 - 1.0;
-    for (i, j) in chain.iter().enumerate() {
-        for (path, amount) in [("rotate.z", 4.0), ("rotate.y", 6.0)] {
-            for (frame, sign) in [(0.0, 1.0), (end / 2.0, -1.0), (end, 1.0)] {
-                let value = sign * amount * if i % 2 == 0 { 1.0 } else { -1.0 };
-                run(&mut d, Command::Anim(AnimCommand::SetKey { id: *j, path: path.into(), frame: Some(frame), value: Some(value) }))?;
-            }
-        }
-    }
-    run(&mut d, Command::Anim(AnimCommand::SetTimeRange { start: Some(0.0), end: Some(end), fps: Some(24.0) }))?;
-    println!("animation: {} curves on {joints} joints, {frames} frames at 24 fps", d.scene.anim.tracks().len());
+    let (mesh, skin_id, _) = modelcraft_engine::rig::bench_character(&mut d, verts, joints, frames, BindMethod::Heat).map_err(|e| e.to_string())?;
+    let count = d.eval.evaluate(&d.scene, mesh).mesh.vertex_count();
+    println!("mesh: {count} vertices, {joints} joints; built and bound with heat weights (4 influences) in {:.0} ms", ms(t));
+    println!("animation: {} curves on {joints} joints, {frames} frames at 24 fps; {} threads", d.scene.anim.tracks().len(), rayon_threads());
     for dq in [false, true] {
         run(&mut d, Command::Rig(RigCommand::SetSkin { mesh, dual_quaternion: dq }))?;
         let (mut pose, mut eval) = (Vec::with_capacity(frames), Vec::with_capacity(frames));
@@ -409,14 +383,22 @@ fn bench_skin(verts: usize, joints: usize, frames: usize) -> Result<(), String> 
     let world: Vec<glam::Mat4> = bound.joints.iter().map(|j| scene.world_matrix(*j)).collect();
     let mats = skin::skin_matrices(&world, &bound.inverse_bind);
     let mut out = Vec::new();
-    for (name, f) in
-        [("linear blend", skin::linear_blend as fn(&[Vec3], &skin::SkinWeights, &[glam::Mat4], &mut Vec<Vec3>)), ("dual quaternion", skin::dual_quaternion)]
-    {
-        let t = Instant::now();
-        for _ in 0..20 {
-            f(&rest, &bound.weights, &mats, &mut out);
+    type Kernel = fn(&[Vec3], &skin::SkinWeights, &[glam::Mat4], &mut Vec<Vec3>, bool);
+    for (name, f) in [("linear blend", skin::linear_blend_with as Kernel), ("dual quaternion", skin::dual_quaternion_with)] {
+        let mut per = [0.0; 2];
+        for (slot, parallel) in per.iter_mut().zip([false, true]) {
+            // The best of five batches: the machine is rarely idle.
+            *slot = (0..5)
+                .map(|_| {
+                    let t = Instant::now();
+                    for _ in 0..10 {
+                        f(&rest, &bound.weights, &mats, &mut out, parallel);
+                    }
+                    ms(t) / 10.0
+                })
+                .fold(f64::MAX, f64::min);
         }
-        println!("kernel {name}: {:.2} ms per {count} points", ms(t) / 20.0);
+        println!("kernel {name}: {:.2} ms on one core, {:.2} ms on all, per {count} points", per[0], per[1]);
     }
     Ok(())
 }
@@ -592,30 +574,81 @@ fn uv_report(d: &mut Document) -> Result<(), String> {
     Ok(())
 }
 
-/// Unwrap a welded UV sphere (no seams: the automatic cut gives it a path) and report time and
-/// distortion. Reproduces the numbers in `docs/performance.md`.
-fn uv_bench(segments: u32) -> Result<(), String> {
+/// Unwrap a welded shape (no seams unless the shape is developable: the automatic cut gives a
+/// closed one a path) with each solver asked for and report time and distortion. Reproduces the
+/// numbers in `docs/performance.md`.
+fn uv_bench(segments: u32, method: &str, shape: &str, cut: &str, relax: u32) -> Result<(), String> {
     use modelcraft_engine::ops::{edit, primitives::Primitive};
-    use modelcraft_engine::uv::{SeamSet, UnwrapOptions, measure, unwrap_mesh};
+    use modelcraft_engine::uv::{RelaxMode, RelaxOptions, SeamSet, UnwrapMethod, UnwrapOptions, measure, relax_corners, unwrap_mesh};
     let segments = segments.clamp(4, 512);
     let rings = (segments / 2).max(2);
+    let prim = match shape {
+        "sphere" => Primitive::Sphere { radius: 1.0, segments, rings },
+        "tube" => Primitive::Cylinder { radius: 1.0, height: 2.0, sides: segments, rings, caps: false },
+        "cone" => Primitive::Cone { radius: 1.0, height: 1.5, sides: segments, caps: false },
+        "torus" => Primitive::Torus { radius: 1.0, tube: 0.35, segments, sides: (segments / 2).max(3) },
+        "roundcube" => Primitive::RoundCube { radius: 1.0, segments: (segments / 4).max(2) },
+        other => return Err(format!("unknown shape `{other}` (sphere, tube, cone, torus, roundcube)")),
+    };
+    let methods: Vec<(&str, UnwrapMethod)> = match method {
+        "lscm" => vec![("LSCM", UnwrapMethod::Lscm)],
+        "abf" => vec![("ABF", UnwrapMethod::Abf)],
+        "both" => vec![("LSCM", UnwrapMethod::Lscm), ("ABF", UnwrapMethod::Abf)],
+        other => return Err(format!("unknown method `{other}` (lscm, abf, both)")),
+    };
     let t = Instant::now();
-    let raw = Primitive::Sphere { radius: 1.0, segments, rings }.build().map_err(|e| e.to_string())?;
+    let raw = prim.build().map_err(|e| e.to_string())?;
     let mesh = edit::weld(&raw, 1e-5).map_err(|e| e.to_string())?;
-    println!("sphere {segments}x{rings}: {} quads, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
-    let t = Instant::now();
-    let (out, res) = unwrap_mesh(&mesh, &SeamSet::new(), &UnwrapOptions::default()).map_err(|e| e.to_string())?;
-    let solve = ms(t);
-    let isl = res.islands.first();
-    println!(
-        "unwrap (auto cut of {} edges, LSCM): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
-        res.cut.edges_added,
-        isl.map_or(0, |i| i.iterations),
-        isl.map_or(0.0, |i| i.residual),
-        isl.is_some_and(|i| i.converged)
-    );
-    let (dist, _) = measure(&out);
-    println!("{}", distortion_json(&dist));
+    println!("{shape} {segments}: {} faces, {} vertices, built in {:.0} ms", mesh.face_count(), mesh.vertex_count(), ms(t));
+    let mut seams = SeamSet::new();
+    match cut {
+        "auto" => {}
+        // One seam from the top to the bottom of the shape (pole to pole on a sphere, a line down
+        // a tube, apex to rim on a cone): a single interior everywhere else.
+        "meridian" => {
+            let key = |v: u32| f64::from(mesh.position(v).y) * 1000.0 - f64::from(mesh.position(v).z);
+            let ids = 0..mesh.vertex_count() as u32;
+            let top = ids.clone().max_by(|a, b| key(*a).total_cmp(&key(*b)));
+            let bottom = ids.min_by(|a, b| key(*a).total_cmp(&key(*b)));
+            if let (Some(top), Some(bottom)) = (top, bottom) {
+                seams.mark_path(&mesh, top, bottom).ok_or("no seam path between the ends of the shape")?;
+            }
+        }
+        other => return Err(format!("unknown cut `{other}` (auto, meridian)")),
+    }
+    for (label, m) in methods {
+        let t = Instant::now();
+        let (out, res) = unwrap_mesh(&mesh, &seams, &UnwrapOptions { method: m, ..UnwrapOptions::default() }).map_err(|e| e.to_string())?;
+        let solve = ms(t);
+        let isl = res.islands.first();
+        match isl.and_then(|i| i.abf) {
+            Some(a) => println!(
+                "unwrap {label} (auto cut of {} edges): {solve:.0} ms, {} Newton iterations, constraint residual {:.1e}, converged {}, fell back {}",
+                res.cut.edges_added,
+                a.iterations,
+                a.residual,
+                a.converged,
+                isl.is_some_and(|i| i.abf_fell_back())
+            ),
+            None => println!(
+                "unwrap {label} (auto cut of {} edges): {solve:.0} ms, {} CG iterations, residual {:.1e}, converged {}",
+                res.cut.edges_added,
+                isl.map_or(0, |i| i.iterations),
+                isl.map_or(0.0, |i| i.residual),
+                isl.is_some_and(|i| i.converged)
+            ),
+        }
+        let (dist, _) = measure(&out);
+        println!("{}", distortion_json(&dist));
+        if relax > 0 {
+            for (label, mode) in [("rigid", RelaxMode::Rigid), ("conformal", RelaxMode::Conformal)] {
+                let t = Instant::now();
+                let (relaxed, rep) = relax_corners(&out, &[], &RelaxOptions { iterations: relax, mode }).map_err(|e| e.to_string())?;
+                println!("relax {label} x{relax}: {:.0} ms, energy {:.4e} -> {:.4e}, {} islands", ms(t), rep.energy_before, rep.energy_after, rep.islands);
+                println!("{}", distortion_json(&measure(&relaxed).0));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -660,6 +693,11 @@ fn uv_pack_bench(n: usize) -> Result<(), String> {
 fn pct(v: &mut [f64], q: f64) -> f64 {
     v.sort_by(f64::total_cmp);
     v.get(((v.len() as f64 - 1.0) * q).round().max(0.0) as usize).copied().unwrap_or(0.0)
+}
+
+/// How many threads the parallel kernels use.
+fn rayon_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
 fn ms(t: Instant) -> f64 {
