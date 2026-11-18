@@ -50,7 +50,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 ui.menu_button(tl!("Export"), |ui| {
-                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx] {
+                    for a in [Action::ExportGlb, Action::ExportObj, Action::ExportStl, Action::ExportFbx, Action::Export3mf, Action::ExportUsda] {
                         action_button(app, ui, a);
                     }
                 });

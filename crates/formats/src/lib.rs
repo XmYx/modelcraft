@@ -19,6 +19,8 @@ pub mod gltf_rig;
 pub mod journal;
 pub mod pointcache;
 pub mod project;
+pub mod threemf_write;
+pub mod usd;
 pub mod uvlayout;
 
 /// Name and version written into files.
