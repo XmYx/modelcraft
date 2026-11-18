@@ -264,6 +264,7 @@ impl ModelApp {
         app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
         let drafts = app.recovery_dir.as_ref().map(|d| d.join("scripts"));
         crate::script_recover::init(&mut app, drafts);
+        crate::plugin_ui::init(&mut app, crate::plugin_ui::default_dir());
         crate::script_ui::startup(&mut app);
         app
     }
@@ -932,6 +933,7 @@ impl ModelApp {
             ScriptRun => crate::script_ui::run_editor(self, false),
             ScriptRunSelection => crate::script_ui::run_editor(self, true),
             ScriptRecord => crate::script_macro::toggle(self),
+            PluginsWindow => crate::plugin_ui::toggle(self),
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),

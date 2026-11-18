@@ -161,6 +161,11 @@ on_selection_changed(|e| print(`${e.selection.len()} selected`));
 - **Batch.** `modelcraft-cli batch-script` runs one script over many files, see
   [cli.md](cli.md#scripts).
 
+## Plugins
+
+Script packages with a manifest, permissions and a version, installed from the Plugins window and
+run in a sandbox the user approves, are described in [plugins.md](plugins.md).
+
 ## Over the control channel
 
 `script.run` runs a script on the open scene from outside: through the window's loopback socket

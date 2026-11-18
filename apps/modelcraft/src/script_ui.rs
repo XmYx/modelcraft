@@ -122,6 +122,7 @@ pub struct ScriptState {
     last_mark: usize,
     pub macros: crate::script_macro::MacroState,
     pub recovery: crate::script_recover::Recovery,
+    pub plugins: crate::plugin_ui::PluginState,
 }
 
 impl Default for ScriptState {
@@ -167,6 +168,7 @@ impl ScriptState {
             last_mark: 0,
             macros: Default::default(),
             recovery: Default::default(),
+            plugins: Default::default(),
         };
         s.reload();
         s
@@ -350,6 +352,29 @@ pub fn execute(app: &mut ModelApp, name: &str, source: &str, script: Option<&Pat
     finish(app, name, report)
 }
 
+/// Show a run's console lines, the selection it set and its error (no summary line).
+pub(crate) fn show_report(app: &mut ModelApp, report: &modelcraft_script::RunReport) {
+    for l in &report.lines {
+        let kind = match l.kind {
+            LineKind::Print => ConsoleKind::Print,
+            LineKind::Debug => ConsoleKind::Debug,
+            LineKind::Warning => ConsoleKind::Warning,
+        };
+        app.script.note(kind, l.text.clone(), l.line);
+    }
+    if let Some(sel) = &report.selection {
+        app.selection = sel.clone();
+    }
+    if let Some(e) = &report.error {
+        app.script.note(ConsoleKind::Error, e.to_string(), e.line);
+    }
+    app.prune_selection();
+}
+
+pub(crate) fn finish_report(app: &mut ModelApp, name: &str, report: modelcraft_script::RunReport) -> bool {
+    finish(app, name, report)
+}
+
 /// Show a finished run: console lines, the selection it set, and the outcome in the status line.
 fn finish(app: &mut ModelApp, name: &str, report: modelcraft_script::RunReport) -> bool {
     for l in &report.lines {
@@ -422,10 +447,27 @@ struct Budget {
     left: std::time::Duration,
 }
 
-/// Tell the callbacks of `event`. Returns the time they took.
+/// Tell the callbacks of `event`, the user's scripts and the plugins'. Returns the time they took.
 fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time::Duration {
+    let mut total = std::time::Duration::ZERO;
+    let mut left = budget.map(|b| b.left);
+    for which in std::iter::once(None).chain((0..app.script.plugins.loaded.len()).map(Some)) {
+        let b = budget.zip(left).map(|(b, left)| Budget { each: b.each, left });
+        let t = fire_one(app, which, event, b.as_ref());
+        total += t;
+        left = left.map(|l| l.saturating_sub(t));
+    }
+    total
+}
+
+/// One session's callbacks: the user's (`None`) or a plugin's.
+fn fire_one(app: &mut ModelApp, which: Option<usize>, event: &Event, budget: Option<&Budget>) -> std::time::Duration {
+    let taken = match which {
+        None => app.script.session.take(),
+        Some(i) => app.script.plugins.loaded.get_mut(i).and_then(|p| p.session.take()),
+    };
+    let Some(mut session) = taken else { return std::time::Duration::ZERO };
     let mut ctx = RunContext { selection: app.selection.clone() };
-    let Some(session) = app.script.session.as_mut() else { return std::time::Duration::ZERO };
     let (reports, elapsed) = match budget {
         None => (session.fire(&mut app.doc, &mut ctx, event), std::time::Duration::ZERO),
         Some(b) => {
@@ -433,6 +475,14 @@ fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time
             (f.reports, f.elapsed)
         }
     };
+    match which {
+        None => app.script.session = Some(session),
+        Some(i) => {
+            if let Some(p) = app.script.plugins.loaded.get_mut(i) {
+                p.session = Some(session);
+            }
+        }
+    }
     for r in reports {
         // Callbacks are quiet unless they print or fail: no "finished" line per event.
         for l in &r.lines {
@@ -466,7 +516,7 @@ fn fire(app: &mut ModelApp, event: &Event, budget: Option<&Budget>) -> std::time
 pub fn tick(app: &mut ModelApp) {
     let sig = scene_signature(app);
     let frame = app.doc.scene.anim.frame;
-    let listening = app.script.session.as_ref().is_some_and(|s| s.has_callbacks());
+    let listening = app.script.session.as_ref().is_some_and(|s| s.has_callbacks()) || app.script.plugins.listening();
     if !listening || app.drag.is_some() || app.stroke.is_some() {
         if !listening {
             app.script.last_selection = app.selection.clone();
@@ -1078,6 +1128,8 @@ pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
             ui.label(RichText::new(tl!("No scripts folder on this system")).color(theme::TEXT_DIM).small());
         }
     }
+    ui.separator();
+    crate::plugin_ui::menu(app, ui);
     let tools = app.script.session.as_ref().map(|s| s.tools()).unwrap_or_default();
     if !tools.is_empty() {
         ui.separator();
