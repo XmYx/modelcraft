@@ -753,7 +753,7 @@ fn sculpt_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usi
                     let delta = w.inverse().transform_vector3(now - last);
                     st.grab = Some((origin, n, now));
                     let mut center = st.last.unwrap_or(Vec3::ZERO);
-                    if kind == Some(BrushKind::Pull) {
+                    if kind.is_some_and(BrushKind::travels) {
                         // A pull travels with what it moves, picking up new surface on the way.
                         center += delta;
                         st.last = Some(center);

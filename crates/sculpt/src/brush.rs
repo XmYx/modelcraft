@@ -2,7 +2,7 @@
 //! optional stamp (a pattern that shapes the dab) and the mask. Symmetry repeats each dab
 //! mirrored across the chosen object axes.
 
-use glam::Vec3;
+use glam::{Mat3, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::{SculptMesh, StrokeState};
@@ -50,6 +50,13 @@ pub enum BrushKind {
     Slide,
     /// Swell the surface into a round bulge.
     Bulge,
+    /// Turn what the brush captured around the view direction as the pointer moves sideways.
+    Rotate,
+    /// Move the surface as if it were rubber: everything nearby follows, less with distance,
+    /// and the volume is kept (the regularized Kelvinlet of de Goes and James, 2017).
+    ElasticMove,
+    /// Plane away what stands proud of the surface, a little deeper with every pass.
+    Scrape,
 }
 
 pub const KINDS: &[BrushKind] = &[
@@ -72,6 +79,9 @@ pub const KINDS: &[BrushKind] = &[
     BrushKind::Gouge,
     BrushKind::Slide,
     BrushKind::Bulge,
+    BrushKind::Rotate,
+    BrushKind::ElasticMove,
+    BrushKind::Scrape,
 ];
 
 impl BrushKind {
@@ -96,13 +106,21 @@ impl BrushKind {
             BrushKind::Gouge => "Gouge",
             BrushKind::Slide => "Slide",
             BrushKind::Bulge => "Bulge",
+            BrushKind::Rotate => "Rotate",
+            BrushKind::ElasticMove => "Elastic move",
+            BrushKind::Scrape => "Scrape",
         }
     }
 
     /// The brush moves what it captured when the stroke began, following the pointer's drag
     /// rather than dabbing along the surface.
     pub fn drags(self) -> bool {
-        matches!(self, BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Pull)
+        matches!(self, BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Pull | BrushKind::Rotate | BrushKind::ElasticMove)
+    }
+
+    /// The brush centre travels with the pointer's drag (it does not stay where the stroke began).
+    pub fn travels(self) -> bool {
+        matches!(self, BrushKind::Pull | BrushKind::ElasticMove)
     }
 }
 
@@ -191,23 +209,57 @@ impl Stamp {
     }
 }
 
-/// Mirror axes, in object space.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// Mirror axes and radial copies, in object space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symmetry {
     pub x: bool,
     pub y: bool,
     pub z: bool,
+    /// Radial symmetry: this many copies of every dab, turned evenly around `radial_axis`
+    /// (0 or 1: off).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub radial: u8,
+    /// The axis radial copies turn around: 0 X, 1 Y, 2 Z.
+    #[serde(default = "y_axis", skip_serializing_if = "is_y_axis")]
+    pub radial_axis: u8,
+}
+
+impl Default for Symmetry {
+    fn default() -> Self {
+        Symmetry { x: false, y: false, z: false, radial: 0, radial_axis: 1 }
+    }
+}
+
+/// Most radial copies of a dab.
+pub const MAX_RADIAL: u8 = 64;
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
+fn y_axis() -> u8 {
+    1
+}
+fn is_y_axis(v: &u8) -> bool {
+    *v == 1
 }
 
 impl Symmetry {
-    /// The mirror sign vectors to apply (always starts with the identity).
-    pub fn passes(&self) -> Vec<Vec3> {
-        let mut out = vec![Vec3::ONE];
+    /// The transforms to repeat a dab with (always starts with the identity): every mirror
+    /// combination, for every radial copy.
+    pub fn passes(&self) -> Vec<Mat3> {
+        let mut mirrors = vec![Vec3::ONE];
         for (on, axis) in [(self.x, Vec3::new(-1.0, 1.0, 1.0)), (self.y, Vec3::new(1.0, -1.0, 1.0)), (self.z, Vec3::new(1.0, 1.0, -1.0))] {
             if on {
-                let more: Vec<Vec3> = out.iter().map(|s| *s * axis).collect();
-                out.extend(more);
+                let more: Vec<Vec3> = mirrors.iter().map(|s| *s * axis).collect();
+                mirrors.extend(more);
             }
+        }
+        let copies = self.radial.clamp(1, MAX_RADIAL);
+        let axis = [Vec3::X, Vec3::Y, Vec3::Z].get(self.radial_axis as usize).copied().unwrap_or(Vec3::Y);
+        let mut out = Vec::with_capacity(mirrors.len() * copies as usize);
+        for k in 0..copies {
+            let turn = if k == 0 { Mat3::IDENTITY } else { Mat3::from_axis_angle(axis, std::f32::consts::TAU * f32::from(k) / f32::from(copies)) };
+            out.extend(mirrors.iter().map(|m| turn * Mat3::from_diagonal(*m)));
         }
         out
     }
@@ -271,9 +323,9 @@ impl BrushSettings {
     pub fn new(kind: BrushKind, radius: f32) -> Self {
         let strength = match kind {
             BrushKind::Smooth => 0.5,
-            BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Pull | BrushKind::Slide => 1.0,
+            BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Pull | BrushKind::Slide | BrushKind::Rotate | BrushKind::ElasticMove => 1.0,
             BrushKind::Mask => 0.8,
-            BrushKind::Polish | BrushKind::Trim | BrushKind::Fill => 0.6,
+            BrushKind::Polish | BrushKind::Trim | BrushKind::Fill | BrushKind::Scrape => 0.6,
             _ => 0.4,
         };
         BrushSettings {
@@ -344,15 +396,19 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
     let mut verts = Vec::new();
     let mut targets: Vec<(u32, Vec3)> = Vec::new();
     for (pass, mirror) in b.symmetry.passes().into_iter().enumerate() {
-        let center = dab.center * mirror;
-        let view = dab.view_dir * mirror;
+        let center = mirror * dab.center;
+        let view = mirror * dab.view_dir;
         if let Some(edge) = b.live_detail
             && b.kind != crate::BrushKind::Mask
-            && (!matches!(b.kind, BrushKind::Grab | BrushKind::SurfaceGrab) || first)
+            && (!matches!(b.kind, BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Rotate) || first)
         {
             m.refine_sphere(st, center, radius, edge);
         }
-        if matches!(b.kind, BrushKind::Grab | BrushKind::SurfaceGrab) {
+        if b.kind == BrushKind::ElasticMove {
+            elastic_move(m, st, center, mirror * dab.grab_delta, radius, strength.max(if b.pressure_strength { 0.0 } else { 1.0 }));
+            continue;
+        }
+        if matches!(b.kind, BrushKind::Grab | BrushKind::SurfaceGrab | BrushKind::Rotate) {
             if first {
                 let captured = if b.kind == BrushKind::SurfaceGrab {
                     surface_capture(m, &b, center, radius)
@@ -369,11 +425,21 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
                 };
                 st.grabbed.push(captured);
             }
-            let delta = dab.grab_delta * mirror;
+            let delta = mirror * dab.grab_delta;
+            let amount = strength.max(if b.pressure_strength { 0.0 } else { 1.0 });
             targets.clear();
+            // Rotate: sideways movement of the pointer (across the view) is the angle, one
+            // radian per brush radius; a mirrored pass turns the other way by itself.
+            let axis = view.normalize_or(Vec3::Y);
+            let angle = delta.dot(tangent_basis(view).0) / radius * sign * mirror.determinant().signum();
             for (v, w) in st.grabbed.get(pass).map(Vec::as_slice).unwrap_or_default() {
                 if let Some(p) = m.positions.get(*v as usize) {
-                    targets.push((*v, *p + delta * *w * strength.max(if b.pressure_strength { 0.0 } else { 1.0 })));
+                    let q = if b.kind == BrushKind::Rotate {
+                        center + glam::Quat::from_axis_angle(axis, angle * *w * amount) * (*p - center)
+                    } else {
+                        *p + delta * *w * amount
+                    };
+                    targets.push((*v, q));
                 }
             }
             commit(m, st, &targets);
@@ -471,12 +537,14 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
                 }
             }
             kind => {
-                let delta = dab.grab_delta * mirror;
+                let delta = mirror * dab.grab_delta;
                 let slide = delta - n * delta.dot(n);
                 let bulge_from = center - n * radius * 0.5;
                 let plane_offset = match kind {
                     crate::BrushKind::Clay => n * step * 0.25 * sign,
                     BrushKind::Buildup => n * step * 0.45 * sign,
+                    // Scrape sets its plane a little into the surface at the pointer.
+                    BrushKind::Scrape => (center - c).dot(n) * n - n * step * 0.08 * sign,
                     _ => Vec3::ZERO,
                 };
                 let plane_p = c + plane_offset;
@@ -499,6 +567,11 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
                             let above = (kind == BrushKind::Trim) != b.invert;
                             let d = (p - c).dot(n);
                             if (d > 0.0) == above { p - n * d * w * strength } else { p }
+                        }
+                        BrushKind::Scrape => {
+                            // Lower what is above the plane (raise what is below when inverted).
+                            let d = (p - plane_p).dot(n) * sign;
+                            if d > 0.0 { p - n * d * sign * w * strength } else { p }
                         }
                         BrushKind::Pull => p + delta * w * strength.max(if b.pressure_strength { 0.0 } else { 1.0 }),
                         BrushKind::Slide => p + slide * w * strength,
@@ -525,6 +598,39 @@ pub(crate) fn apply(m: &mut SculptMesh, st: &mut StrokeState, dab: &Dab) {
         }
         commit(m, st, &targets);
     }
+}
+
+/// How far the elastic move reaches, in brush radii (its pull fades to nothing there).
+const ELASTIC_REACH: f32 = 3.0;
+/// Poisson's ratio of the rubber: close to one half, which keeps the volume.
+const ELASTIC_POISSON: f32 = 0.45;
+
+/// One step of the elastic move: a force at `center` that moves the centre itself by `delta`.
+/// The displacement of a point at offset `r` is the regularized Kelvinlet
+/// `((a − b)/rε + a ε²/(2 rε³)) f + (b/rε³) r (r·f)` with `rε = √(|r|² + ε²)`, here with the
+/// brush radius as ε and scaled so that the centre moves by exactly `delta`.
+fn elastic_move(m: &mut SculptMesh, st: &mut StrokeState, center: Vec3, delta: Vec3, radius: f32, amount: f32) {
+    if delta == Vec3::ZERO || !delta.is_finite() {
+        return;
+    }
+    let mut verts = Vec::new();
+    let reach = radius * ELASTIC_REACH;
+    m.query_sphere(center, reach, &mut verts);
+    let (ka, kb) = (1.0f32, 1.0 / (4.0 * (1.0 - ELASTIC_POISSON)));
+    let eps = radius;
+    let at_centre = (1.5 * ka - kb) / eps;
+    let mut targets = Vec::with_capacity(verts.len());
+    for v in &verts {
+        let Some(p) = m.positions.get(*v as usize).copied() else { continue };
+        let r = p - center;
+        let re = (r.length_squared() + eps * eps).sqrt();
+        let u = (((ka - kb) / re + ka * eps * eps / (2.0 * re * re * re)) * delta + (kb / (re * re * re)) * r * r.dot(delta)) / at_centre;
+        // Fade to nothing at the reach, so the stroke has an edge.
+        let fade = Falloff::Smooth.weight(r.length() / reach);
+        let w = fade * amount * (1.0 - m.mask.get(*v as usize).copied().unwrap_or(0.0).clamp(0.0, 1.0));
+        targets.push((*v, p + u * w));
+    }
+    commit(m, st, &targets);
 }
 
 /// What a surface grab moves: the points reachable from the one nearest the brush centre by

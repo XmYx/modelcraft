@@ -94,6 +94,19 @@ the same run at 0.26–0.47 ms, so read these as upper bounds).
 Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
 captured at the first dab, so its row there measures almost nothing.
 
+## Rotate, Elastic move and Scrape (`modelcraft-cli bench --polys 1000000 --dabs 200`)
+
+Measured 2026-11-18 on the same 2,007,372-triangle quad sphere, radius 0.08, X symmetry on, load
+average about 20 on 24 threads. Draw on this run, for comparison: 0.36 ms mean, 0.62 ms p95.
+
+| Brush | Dab mean | Dab p95 | Vertices a stroke touched | Notes |
+|---|---|---|---|---|
+| Rotate | 0.02 ms | 0.04 ms | 798 | Moves what the first dab caught |
+| Elastic move | 2.9 ms | 3.7 ms | 99,926 | Reaches three brush radii, so nine times the surface of a plain dab |
+| Scrape | 0.87 ms | 1.1 ms | 9,404 | |
+
+Radial copies cost one more dab per copy: six copies of a Draw dab take six times a Draw dab.
+
 ## 12.6 M triangles (`modelcraft-cli bench --polys 10000000 --dabs 200`)
 
 Measured 2026-11-17 with the machine's load average near 30 on 24 threads (other builds), so

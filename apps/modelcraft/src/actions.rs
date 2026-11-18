@@ -235,6 +235,9 @@ fn brush_label_id(k: BrushKind) -> &'static str {
         BrushKind::Gouge => "gouge",
         BrushKind::Slide => "slide",
         BrushKind::Bulge => "bulge",
+        BrushKind::Rotate => "rotate",
+        BrushKind::ElasticMove => "elastic_move",
+        BrushKind::Scrape => "scrape",
     }
 }
 
@@ -259,6 +262,9 @@ pub fn brush_label(k: BrushKind) -> String {
         BrushKind::Gouge => tl!("Gouge"),
         BrushKind::Slide => tl!("Slide"),
         BrushKind::Bulge => tl!("Bulge"),
+        BrushKind::Rotate => tl!("Rotate"),
+        BrushKind::ElasticMove => tl!("Elastic Move"),
+        BrushKind::Scrape => tl!("Scrape"),
     }
 }
 
