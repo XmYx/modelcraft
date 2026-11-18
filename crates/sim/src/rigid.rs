@@ -311,8 +311,13 @@ impl RigidWorld {
     fn build(&self) -> Inner {
         let mut world = PhysicsWorld { gravity: rv(self.desc.gravity), ..PhysicsWorld::default() };
         if let Some(y) = self.desc.ground {
-            let ground =
-                ColliderBuilder::cuboid(5000.0, 5.0, 5000.0).translation(rapier3d::math::Vector::new(0.0, y - 5.0, 0.0)).friction(0.5).restitution(0.2);
+            // An exact half-space: everything below `y` is solid. (A huge thin box stood in for it
+            // before; contacts between small bodies and a 10 km box face lose precision, which let a
+            // landing stack sink deep into the floor and then fling it upwards.)
+            let ground = ColliderBuilder::new(rapier3d::prelude::SharedShape::halfspace(rapier3d::math::Vector::Y))
+                .translation(rapier3d::math::Vector::new(0.0, y, 0.0))
+                .friction(0.5)
+                .restitution(0.2);
             world.insert_collider(ground, None);
         }
         let mut handles = Vec::with_capacity(self.desc.bodies.len());
