@@ -34,6 +34,7 @@ pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
+pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
@@ -341,6 +342,25 @@ pub enum StepOp {
         #[serde(default = "default_margin")]
         margin: f32,
     },
+    /// Pack the islands the UVs already form into the unit square: `margin` between them as a
+    /// fraction of the square, optional rotation, and an even texel density.
+    PackUvs {
+        #[serde(default = "default_margin")]
+        margin: f32,
+        #[serde(default = "default_rotation")]
+        rotation: Rotation,
+        #[serde(default = "default_density")]
+        density: Density,
+    },
+    /// Give the corners of `faces` (all faces when empty) UVs from a planar, box, cylindrical,
+    /// spherical or camera projection of their positions.
+    ProjectUvs {
+        projection: Projection,
+        #[serde(default)]
+        fit: Fit,
+        #[serde(default)]
+        faces: Vec<u32>,
+    },
     /// Records seams (pairs of vertices of the step's input mesh) and changes nothing; the UV
     /// editor reads the latest one, and an unwrap step takes them.
     Seams {
@@ -364,6 +384,14 @@ pub enum StepOp {
     StitchUvs {
         edges: Vec<u32>,
     },
+}
+
+fn default_rotation() -> Rotation {
+    Rotation::Fit
+}
+
+fn default_density() -> Density {
+    Density::Uniform
 }
 
 fn unit_scale() -> [f32; 2] {
@@ -413,6 +441,8 @@ impl StepOp {
             StepOp::EvenRemesh { .. } => "Even remesh",
             StepOp::TrimPlane { .. } => "Trim by plane",
             StepOp::Unwrap { .. } => "Unwrap UVs",
+            StepOp::PackUvs { .. } => "Pack UV islands",
+            StepOp::ProjectUvs { .. } => "Project UVs",
             StepOp::Seams { .. } => "Seams",
             StepOp::TransformUvs { .. } => "Transform UVs",
             StepOp::StitchUvs { .. } => "Weld UVs",
@@ -428,6 +458,7 @@ impl StepOp {
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
             StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
             StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
+            StepOp::ProjectUvs { faces, .. } => faces.len() * 4,
             StepOp::Seams { edges } => edges.len() * 8,
             StepOp::TransformUvs { corners, .. } => corners.len() * 4,
             StepOp::StitchUvs { edges } => edges.len() * 4,

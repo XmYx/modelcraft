@@ -385,6 +385,18 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
         }
         StepOp::GroupPatches { grouping } => modelcraft_ops::patches::group(m, *grouping),
         StepOp::CleanUp { distance } => modelcraft_ops::patches::clean_up(m, *distance),
+        StepOp::PackUvs { margin, rotation, density } => {
+            let opts = modelcraft_uvpack::PackOptions { margin: *margin, rotation: *rotation, density: *density };
+            let (uvs, _) = modelcraft_uvpack::pack_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))?;
+            let mut out = m.clone();
+            out.set_uvs(&uvs)?;
+            Ok(out)
+        }
+        StepOp::ProjectUvs { projection, fit, faces } => {
+            edit::check_selection(faces, nf, "face")?;
+            let opts = modelcraft_uvpack::ProjectOptions { projection: *projection, fit: *fit, faces: faces.clone() };
+            modelcraft_uvpack::project_mesh(m, &opts).map_err(|e| OpError::Invalid(e.to_string()))
+        }
         StepOp::Sculpt { layer } => {
             let base = layer.topology.as_deref().unwrap_or(m);
             let mut out = if layer.level == 0 { base.clone() } else { subdivide::catmull_clark(base, u32::from(layer.level))? };

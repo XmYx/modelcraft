@@ -1,0 +1,1 @@
+- UV packing and projections in the engine and command line: pack islands with a margin, rotation and an even texel density, and project UVs planar, box, cylindrical, spherical or from a camera, for all faces or a selection.

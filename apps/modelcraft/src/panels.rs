@@ -142,6 +142,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 }
                 crate::sculpt_groups_ui::menu(app, ui);
             });
+            ui.menu_button(tl!("Scripts"), |ui| crate::script_ui::menu(app, ui));
             ui.menu_button(tl!("View"), |ui| {
                 for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
                     action_button(app, ui, Action::Workspace(ws));
@@ -1117,6 +1118,7 @@ pub struct Palette {
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
+    crate::script_ui::show(app, ctx);
     crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);

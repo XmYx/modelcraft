@@ -18,6 +18,7 @@ modelcraft-clone = { workspace = true }
 modelcraft-scene = { workspace = true }
 modelcraft-sculpt = { workspace = true }
 modelcraft-uv = { workspace = true }
+modelcraft-uvpack = { workspace = true }
 modelcraft-formats = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
