@@ -23,11 +23,11 @@ fn tmp(name: &str) -> PathBuf {
     std::fs::canonicalize(&d).unwrap_or(d)
 }
 
-fn start(dir: &PathBuf, scripts: &PathBuf) -> Harness<'static, ModelApp> {
+fn start(dir: &std::path::Path, scripts: &std::path::Path) -> Harness<'static, ModelApp> {
     let mut h = harness();
     h.run();
-    h.state_mut().script = ScriptState::new(Some(scripts.clone()));
-    crate::script_recover::init(h.state_mut(), Some(dir.clone()));
+    h.state_mut().script = ScriptState::new(Some(scripts.to_path_buf()));
+    crate::script_recover::init(h.state_mut(), Some(dir.to_path_buf()));
     h.state_mut().script.recovery.delay = Duration::ZERO;
     h
 }
