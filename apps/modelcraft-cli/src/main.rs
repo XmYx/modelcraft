@@ -53,6 +53,7 @@ Commands:
                                     document.info, document.save, …)
   mcp [project] [--app [--port N]]  MCP server on stdio; --app drives the running window
   bench [--polys N] [--dabs N]      sculpt latency and GPU upload/draw times on a dense mesh
+  uv-pack-bench [--islands N]       pack N random island rectangles: time and utilisation
   uv <file>                         UV islands and distortion of every mesh object (JSON lines)
   uv-bench [--segments N]           unwrap a sphere of N×N/2 quads: time and distortion
   -h, --help | -V, --version
@@ -275,6 +276,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
         "hair-bench" => hair_cmd::bench(a),
         "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
+        "uv-pack-bench" => uv_pack_bench(flag(a, "--islands").and_then(|v| v.parse().ok()).unwrap_or(200)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
@@ -599,6 +601,44 @@ fn uv_bench(segments: u32) -> Result<(), String> {
     );
     let (dist, _) = measure(&out);
     println!("{}", distortion_json(&dist));
+    Ok(())
+}
+
+/// Pack N random rectangles (fixed seed) with the default options for each rotation mode.
+fn uv_pack_bench(n: usize) -> Result<(), String> {
+    use modelcraft_engine::uvpack::{Density, PackIsland, PackOptions, Rotation, pack};
+    let n = n.clamp(1, 100_000);
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut rnd = move || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 40) as f32 / (1u64 << 24) as f32
+    };
+    let islands: Vec<PackIsland> = (0..n)
+        .map(|_| {
+            let (w, h) = (0.05 + 1.5 * rnd() * rnd(), 0.05 + 1.5 * rnd() * rnd());
+            PackIsland {
+                triangles: vec![
+                    [glam::Vec2::ZERO, glam::Vec2::new(w, 0.0), glam::Vec2::new(w, h)],
+                    [glam::Vec2::ZERO, glam::Vec2::new(w, h), glam::Vec2::new(0.0, h)],
+                ],
+                area_3d: w * h,
+            }
+        })
+        .collect();
+    // The margin is per island on every side, so many islands need a thinner one to fit at all.
+    let margin = if n <= 1000 { 0.004 } else { 0.0005 };
+    for rotation in [Rotation::None, Rotation::Quarter, Rotation::Fit] {
+        let t = Instant::now();
+        let r = pack(&islands, &PackOptions { margin, rotation, density: Density::Uniform }).map_err(|e| e.to_string())?;
+        println!(
+            "{n} islands, rotation {rotation:?}: {:.0} ms, utilisation {:.1} %, scale {:.4}, work {}{}",
+            ms(t),
+            r.utilisation * 100.0,
+            r.scale,
+            r.work,
+            if r.shelf_fallback { " (shelf packer)" } else { "" }
+        );
+    }
     Ok(())
 }
 

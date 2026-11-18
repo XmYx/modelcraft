@@ -1,0 +1,19 @@
+[package]
+name = "modelcraft-uvpack"
+description = "ModelCraft UV packing and projections: MaxRects island packing with margins, rotation and even texel density, and planar, box, cylindrical, spherical and camera projections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+[lints]
+workspace = true
+[dependencies]
+modelcraft-mesh = { workspace = true }
+glam = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+[dev-dependencies]
+modelcraft-ops = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }
