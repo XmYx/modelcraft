@@ -1032,7 +1032,7 @@ name = "craft-render-bvh"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "rayon",
 ]
@@ -1045,7 +1045,7 @@ dependencies = [
  "craft-render-denoise",
  "craft-render-guide",
  "craft-texture",
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "rayon",
  "thiserror 2.0.21",
@@ -1065,9 +1065,9 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "craft-render-core",
- "glam 0.30.10",
+ "glam 0.33.12",
  "log",
- "pollster 0.4.0",
+ "pollster",
  "thiserror 2.0.21",
  "wgpu",
 ]
@@ -1076,7 +1076,7 @@ dependencies = [
 name = "craft-render-guide"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "rayon",
 ]
@@ -1338,7 +1338,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "pollster 1.0.2",
+ "pollster",
  "profiling",
  "raw-window-handle",
  "send_wrapper",
@@ -1844,9 +1844,6 @@ name = "glam"
 version = "0.30.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
-dependencies = [
- "serde_core",
-]
 
 [[package]]
 name = "glam"
@@ -1868,6 +1865,7 @@ checksum = "37bfe73dc8ec21f54d181e5a60554327ec3f1c600c455a75ccbfc65d2106a6c4"
 dependencies = [
  "approx",
  "libm",
+ "serde_core",
 ]
 
 [[package]]
@@ -2652,7 +2650,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui_kittest",
- "glam 0.30.10",
+ "glam 0.33.12",
  "log",
  "modelcraft-engine",
  "modelcraft-formats",
@@ -2674,7 +2672,7 @@ dependencies = [
 name = "modelcraft-anim"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "rayon",
  "serde",
@@ -2691,7 +2689,7 @@ dependencies = [
  "craft-exr",
  "craft-image-codecs",
  "craft-mcp-server",
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-engine",
  "modelcraft-formats",
  "modelcraft-hair",
@@ -2710,7 +2708,7 @@ dependencies = [
 name = "modelcraft-clone"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-mesh",
  "proptest",
  "serde",
@@ -2726,7 +2724,7 @@ dependencies = [
  "craft-atomic",
  "craft-control",
  "craft-gltf-anim",
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-anim",
  "modelcraft-clone",
  "modelcraft-field",
@@ -2749,7 +2747,7 @@ dependencies = [
 name = "modelcraft-field"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "serde",
  "serde_json",
@@ -2765,7 +2763,7 @@ dependencies = [
  "craft-image-codecs",
  "craft-mesh",
  "craft-zip",
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-anim",
  "modelcraft-mesh",
  "modelcraft-ops",
@@ -2781,7 +2779,7 @@ dependencies = [
 name = "modelcraft-hair"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-sim",
@@ -2796,7 +2794,7 @@ dependencies = [
 name = "modelcraft-mesh"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "serde",
  "serde_json",
@@ -2807,7 +2805,7 @@ dependencies = [
 name = "modelcraft-ops"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-mesh",
  "proptest",
  "serde",
@@ -2824,14 +2822,14 @@ dependencies = [
  "craft-mcmat",
  "craft-render-core",
  "craft-render-gpu",
- "glam 0.30.10",
+ "glam 0.33.12",
  "log",
  "modelcraft-hair",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-scene",
  "modelcraft-sim",
- "pollster 0.4.0",
+ "pollster",
  "proptest",
  "rayon",
  "wgpu",
@@ -2841,7 +2839,7 @@ dependencies = [
 name = "modelcraft-scene"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-anim",
  "modelcraft-clone",
  "modelcraft-field",
@@ -2862,7 +2860,7 @@ name = "modelcraft-script"
 version = "0.1.0"
 dependencies = [
  "craft-atomic",
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-engine",
  "proptest",
  "rhai",
@@ -2874,7 +2872,7 @@ dependencies = [
 name = "modelcraft-sculpt"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-mesh",
  "modelcraft-ops",
  "proptest",
@@ -2887,7 +2885,7 @@ dependencies = [
 name = "modelcraft-sim"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "proptest",
  "rapier3d",
  "serde",
@@ -2899,7 +2897,7 @@ dependencies = [
 name = "modelcraft-uv"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-mesh",
  "modelcraft-ops",
  "proptest",
@@ -2912,7 +2910,7 @@ dependencies = [
 name = "modelcraft-uvpack"
 version = "0.1.0"
 dependencies = [
- "glam 0.30.10",
+ "glam 0.33.12",
  "modelcraft-mesh",
  "modelcraft-ops",
  "proptest",
@@ -3214,6 +3212,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-uniform-type-identifiers 0.3.2",
 ]
 
 [[package]]
@@ -3432,7 +3431,7 @@ dependencies = [
  "objc2-link-presentation",
  "objc2-quartz-core 0.2.2",
  "objc2-symbols",
- "objc2-uniform-type-identifiers",
+ "objc2-uniform-type-identifiers 0.2.2",
  "objc2-user-notifications",
 ]
 
@@ -3457,6 +3456,16 @@ dependencies = [
  "block2 0.5.1",
  "objc2 0.5.3",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "objc2-uniform-type-identifiers"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7902ac02859fc1f7045f8b598c63f1ae0cc7efeaa06a9bc9f3d9a3c955974fa4"
+dependencies = [
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -3738,12 +3747,6 @@ dependencies = [
  "rustix 1.1.6",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "pollster"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "pollster"
@@ -4093,9 +4096,9 @@ dependencies = [
 
 [[package]]
 name = "rfd"
-version = "0.17.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20dafead71c16a34e1ff357ddefc8afc11e7d51d6d2b9fbd07eaa48e3e540220"
+checksum = "c4b9d4857b10297ffb0f64cae711e983a7aeaee561848d56d429d3858bd8ed93"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
@@ -4106,8 +4109,9 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
+ "objc2-uniform-type-identifiers 0.3.2",
  "percent-encoding",
- "pollster 0.4.0",
+ "pollster",
  "raw-window-handle",
  "wasm-bindgen",
  "wasm-bindgen-futures",
