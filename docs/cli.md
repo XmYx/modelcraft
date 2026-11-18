@@ -216,6 +216,9 @@ applications and map edits give the same result from the window, a script or the
 | `apply` | `id`, `brush`, `symmetry?`, `center?` [x, y, z], `direction?` [x, y, z]: one dab, over the whole groom when `center` is left out; `direction` is the comb movement |
 | `map` | `id`, `map` (mask, density), `edit`: `fill` + `value` · `invert` · `clear` · `paint` + `center`, `radius`, `value`, `strength`, `falloff` |
 
+`modelcraft-cli render` and the Render View include hair: the object's base colour is the hair colour
+and its roughness the fibre roughness (CPU path tracer only; the GPU one declines hair).
+
 The mask (1 where brushes act fully, 0 where they never touch a guide) and the density (where
 `regrow` puts guides) are values on the emitter's vertices. Limits (checked before allocating):
 200,000 guides, 5,000,000 hairs, 64 points per strand and 40 million points per operation, 50,000
