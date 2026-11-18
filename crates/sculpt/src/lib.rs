@@ -16,6 +16,7 @@ pub mod detail;
 pub mod groups;
 pub mod live;
 pub mod preset;
+pub mod project;
 pub mod stroke;
 
 use glam::Vec3;
