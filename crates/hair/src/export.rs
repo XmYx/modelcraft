@@ -29,7 +29,7 @@ pub struct CurveExport<'a> {
 }
 
 fn pad4(v: &mut Vec<u8>, with: u8) {
-    while v.len() % 4 != 0 {
+    while !v.len().is_multiple_of(4) {
         v.push(with);
     }
 }
@@ -41,7 +41,7 @@ pub fn to_glb(export: &CurveExport, name: &str, transform: Mat4) -> Result<Vec<u
         return Err(HairError::OutOfRange { what: "points per strand", min: 2.0, max: 256.0, found: pps as f64 });
     }
     let n = export.points.len();
-    if n == 0 || n % pps != 0 {
+    if n == 0 || !n.is_multiple_of(pps) {
         return Err(HairError::LengthMismatch { what: "curve points", expected: n.div_ceil(pps).max(1) * pps, found: n });
     }
     if n > MAX_EXPORT_POINTS {

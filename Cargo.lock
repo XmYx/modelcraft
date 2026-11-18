@@ -2663,6 +2663,7 @@ dependencies = [
  "modelcraft-scene",
  "modelcraft-script",
  "modelcraft-sculpt",
+ "modelcraft-sim",
  "rfd",
  "serde",
  "serde_json",
@@ -2700,6 +2701,7 @@ dependencies = [
  "modelcraft-scene",
  "modelcraft-script",
  "modelcraft-sculpt",
+ "modelcraft-sim",
  "serde_json",
  "wgpu",
 ]
