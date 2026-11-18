@@ -98,6 +98,14 @@ on the UI thread and is bounded by the limits below, so a runaway script cannot 
 for more than the time limit; Undo reverts what it did. Unsaved edits are never discarded without
 a prompt (New, Open and choosing a file ask first).
 
+**Unsaved text.** The window keeps what you typed. A moment (1.5 s) after the text last changed,
+and when the app exits, an unsaved script is written to `<state folder>/modelcraft/recovery/scripts/script-draft.json`
+(one file replaced atomically, with the file it belongs to); saving, emptying or discarding the
+text removes it. At the next start the text comes back as unsaved changes, on its file when that
+still exists (the file itself is untouched until you save), and the window opens with a note.
+Texts over 4 MiB are not kept (the status line says so once). The file format and its checks are
+`modelcraft_script::draft`; damaged or foreign files are ignored.
+
 **Files.** The scripts folder is `<user data folder>/modelcraft/scripts`. Its `*.rhai` files and
 one level of subfolders become the Scripts menu (the first comment line is the tooltip); the
 `quick` subfolder becomes the Quick Scripts strip under the tool options; `startup.rhai` runs once
