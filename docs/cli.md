@@ -225,6 +225,8 @@ samples per second.
 | `--depth N` | Bounces, default 12 |
 | `--device auto\|cpu\|gpu` | `auto` uses a hardware GPU when there is one and falls back to the CPU; `gpu` fails if it cannot |
 | `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
+| `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
+| `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |
