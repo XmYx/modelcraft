@@ -225,6 +225,7 @@ impl Scene {
             }
             i += step;
         }
+        self.reindex();
         let _ = self.edit(id);
         if let Some(p) = parent {
             let _ = self.edit(p);

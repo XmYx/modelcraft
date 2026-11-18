@@ -1004,6 +1004,10 @@ fn ruler(app: &mut ModelApp, ui: &mut egui::Ui, axis: &Axis, rows: &[Row]) {
         }
     }
     if resp.has_focus() {
+        // Left and Right belong to the ruler while it has focus. Without this filter egui's
+        // spatial focus navigation also takes the arrow press and hands focus to the next
+        // widget on that side, which only shows once another pane sits beside the ruler.
+        ui.memory_mut(|m| m.set_focus_lock_filter(resp.id, egui::EventFilter { horizontal_arrows: true, ..Default::default() }));
         if let Some(m) = focused_shortcuts(ui, false) {
             undo_redo(app, ui.ctx(), &m);
         }
@@ -1190,6 +1194,8 @@ fn key_widget(
     }
     let mut moved = None;
     if resp.has_focus() {
+        // The arrows move between keys here; keep egui's own focus navigation out of it.
+        ui.memory_mut(|m| m.set_focus_lock_filter(resp.id, egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, ..Default::default() }));
         moved = focused_shortcuts(ui, true);
         ui.input_mut(|i| {
             for (key, dr, dk) in [(egui::Key::ArrowLeft, 0, -1), (egui::Key::ArrowRight, 0, 1), (egui::Key::ArrowUp, -1, 0), (egui::Key::ArrowDown, 1, 0)] {
