@@ -1,7 +1,10 @@
 //! The hardware ray-query backend against the software traversal, and the fallback to software.
 
+#[cfg(feature = "hw-ray-query")]
 use craft_render_core::integrator::IntegratorSettings;
-use craft_render_core::{RenderSettings, relative_mse, scenes};
+#[cfg(feature = "hw-ray-query")]
+use craft_render_core::relative_mse;
+use craft_render_core::{RenderSettings, scenes};
 
 use crate::tests::gpu;
 use crate::{GpuOptions, GpuRenderer};

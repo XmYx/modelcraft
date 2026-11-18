@@ -962,6 +962,7 @@ pub(crate) mod tests {
 
     /// The GPU for a test, or `None` (with a note) on machines without an adapter.
     /// The turn to hold while a test opens a device of its own.
+    #[cfg(feature = "hw-ray-query")]
     pub(crate) fn gpu_turn() -> std::sync::MutexGuard<'static, ()> {
         ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner())
     }
