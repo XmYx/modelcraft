@@ -17,5 +17,6 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 modelcraft-ops = { workspace = true }
 proptest = { workspace = true }

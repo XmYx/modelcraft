@@ -22,6 +22,7 @@ pub mod anim;
 pub mod attr;
 pub mod constraint;
 mod eval;
+pub mod hair;
 pub mod pick;
 pub mod point_deform;
 pub mod rig;
@@ -590,6 +591,11 @@ pub enum ObjectKind {
         #[serde(default)]
         target: Option<ObjectId>,
     },
+    /// Hair growing from its parent mesh: guide curves, how render hairs are made from them, and
+    /// the maps that steer growth and grooming ([`hair`]).
+    Hair {
+        hair: Arc<hair::HairData>,
+    },
     /// A simulation driving its parent mesh: settings, and the cache the last bake produced
     /// ([`sim`]).
     Sim {
@@ -609,6 +615,7 @@ impl ObjectKind {
             ObjectKind::Skin { .. } => "Skin",
             ObjectKind::PointDeformer { deformer } => deformer.type_name(),
             ObjectKind::Cloner { .. } => "Clone generator",
+            ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
         }
     }
@@ -649,6 +656,7 @@ impl Object {
         let src = match &self.kind {
             ObjectKind::Mesh { source: Source::Mesh { mesh }, .. } => mesh.heap_bytes(),
             ObjectKind::Skin { skin } => skin.heap_bytes(),
+            ObjectKind::Hair { hair } => hair.heap_bytes(),
             ObjectKind::Sim { sim } => sim.heap_bytes(),
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
@@ -775,6 +783,7 @@ impl Scene {
         self.anim.repair(|id| ids.contains(&id));
         self.constraints.repair(|id| ids.contains(&id));
         rig::repair(&mut self);
+        hair::repair(&mut self);
         sim::repair(&mut self);
         point_deform::repair(&mut self);
         self.sets.truncate(MAX_SETS);
@@ -1030,6 +1039,7 @@ impl Scene {
         match self.get(parent).map(|p| &p.kind) {
             Some(ObjectKind::SmoothCage { .. }) => true,
             Some(ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            Some(ObjectKind::Sim { .. }) => self.is_particles(parent) && self.generator_input(parent) == Some(id),
             _ => false,
         }
     }

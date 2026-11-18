@@ -1042,12 +1042,21 @@ name = "craft-render-core"
 version = "0.1.0"
 dependencies = [
  "craft-render-bvh",
+ "craft-render-denoise",
  "craft-render-guide",
  "craft-texture",
  "glam 0.30.10",
  "proptest",
  "rayon",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-render-denoise"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rayon",
 ]
 
 [[package]]
@@ -2647,6 +2656,7 @@ dependencies = [
  "log",
  "modelcraft-engine",
  "modelcraft-formats",
+ "modelcraft-hair",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-render",
@@ -2719,6 +2729,7 @@ dependencies = [
  "modelcraft-clone",
  "modelcraft-field",
  "modelcraft-formats",
+ "modelcraft-hair",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-scene",
@@ -2736,7 +2747,7 @@ dependencies = [
 name = "modelcraft-field"
 version = "0.1.0"
 dependencies = [
- "glam",
+ "glam 0.30.10",
  "proptest",
  "serde",
  "serde_json",
@@ -2814,6 +2825,7 @@ dependencies = [
  "log",
  "modelcraft-mesh",
  "modelcraft-scene",
+ "modelcraft-sim",
  "pollster 0.4.0",
  "proptest",
  "rayon",
@@ -2828,6 +2840,7 @@ dependencies = [
  "modelcraft-anim",
  "modelcraft-clone",
  "modelcraft-field",
+ "modelcraft-hair",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-sim",
@@ -2861,6 +2874,7 @@ dependencies = [
  "modelcraft-ops",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

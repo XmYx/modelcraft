@@ -1165,6 +1165,7 @@ impl Document {
             },
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
+            Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
@@ -1332,7 +1333,9 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } | ObjectKind::Sim { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
+                || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
                 || !self.scene.visible(id)
             {
                 continue;

@@ -24,6 +24,7 @@ modelcraft-cli bench --groups --polys 1000000 # patch, visibility, region, shell
 modelcraft-cli render scene.modelcraft -o out.png --samples 128   # path-traced image
 modelcraft-cli uv scene.modelcraft            # UV islands and distortion of every mesh object
 modelcraft-cli uv-bench --segments 64         # unwrap a sphere: time and distortion
+modelcraft-cli hair-bench --strands 1000000   # grow guides and interpolate hairs: time and memory
 modelcraft-cli uv-bench --method both --cut meridian --relax 15   # LSCM against ABF, then relax
 modelcraft-cli uv-pack-bench --islands 200    # pack random islands: time and utilisation
 ```
@@ -59,7 +60,7 @@ Object ids are numbers (`info` prints them).
 | `remove_selection_set` | `index` |
 | `import` | `path` (.glb, .gltf, .obj, .stl, .ply, .fbx, .3mf, .usda), `up?` (auto, y, z), `scale?` (metres per file unit) |
 | `end_sculpt` | — |
-| `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge. Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |
+| `sculpt_stroke` | `id`, `stroke` {brush {kind, radius, strength, falloff, stamp, invert, symmetry {x,y,z}, hardness? (0..1), stroke? ({mode: spaced, dots, spray {scatter}, trail {leash}, drag}), spacing? (brush radii), live_detail? (edge length: split the triangles under the brush down to it)}, dabs [{center, view_dir, pressure, grab_delta, scale?}]}. Kinds: draw, clay, smooth, inflate, grab, pinch, flatten, crease, mask, pull, plateau, trim, fill, polish, buildup, surface_grab, gouge, slide, bulge, rotate, elastic_move, scrape. `symmetry` also takes radial (copies around an axis, 2 to 64) and radial_axis (0 X, 1 Y, 2 Z). Stamps: {kind: none, noise {scale}, rings {count}, square, image {alpha: dots, scales, cracks, weave, pores, star, stripes, hex; turn}} |
 | `sculpt_mask` | `id`, `op`: clear, fill, invert, blur, sharpen, grow, shrink, hollows, ridges, occlusion, {patch: {triangle}} |
 | `sculpt_groups` | `id`, `op`: {by_normal: {angle}} (degrees) · by_uv_island · by_part · from_mask. Makes patches on the mesh being sculpted |
 | `sculpt_visibility` | `id`, `op`: show_all · invert · hide_masked · hide_unmasked · {hide_patch: {triangle}} · {show_patch: {triangle}} · {isolate: {triangle}}. Hidden faces stay in the mesh; picking and brushes skip them |
@@ -111,8 +112,23 @@ frame, so moving objects, deformed meshes and baked rigid bodies all work; a clo
 its colliders back. A cloth is baked on its own (`bake` on it), and a cloth baked earlier is a
 collider for the next. Edits to the colliders do not mark a cloth's cache stale.
 
-`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`
-and `sim-bench cloth` measure a bake.
+`particles` (`add` with `kind: "particles"`, under the emitter object) is a particle system shown as
+instances. Its settings (`kind` with `type: "particles"`): `emitter` (`point` at the object's
+origin, `surface` of the parent mesh, `volume` inside it), `rate` per second and `burst` at the start
+frame, `lifetime` and `speed` with their `_variation`, `direction` (`normal`, `fixed` with
+`fixed_direction`, `random`) and a `spread` cone in degrees, `inherit` (the emitter's own speed),
+`gravity`, `drag` (against the air, or the `wind` with its `turbulence`), a `noise_*` acceleration
+field, `attractors` (`attract` or `vortex`, `position`, `strength`, `radius`, `axis`), `collide`
+with `bounciness` and `friction` (against every other visible mesh, or `collide_with`),
+`capacity` (the slots of the pool: the most alive at once), and the drawn `size` with
+`size_variation`. A pool slot is one point of the cache and a dead slot is stored as NaN. The cache is
+in world space, so moving the system's own object does not move the particles. The system shows its
+pool as instances of the first mesh inside it, or of a small sphere; the system object's own
+material colours them. The viewport and the path-traced render draw the instances; up to 10,000
+are drawn at once.
+
+`modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`,
+`sim-bench cloth` and `sim-bench particles` measure a bake.
 
 ### Animation
 
@@ -183,6 +199,27 @@ lets them write in `--out-dir`).
 
 Errors print as `file:line:column: message` and give a non-zero exit status. Commands the script
 ran before an error stay applied in memory but nothing is saved.
+
+### Hair
+
+One command, `hair`, with the operation in `op`: `{"cmd":"hair","op":"add","mesh":3}`. Hair is an
+object under the mesh it grows from. Every operation is one undo step; strokes, numeric brush
+applications and map edits give the same result from the window, a script or the journal.
+
+| `op` | Fields |
+|---|---|
+| `add` | `mesh`, `grow?` (`amount` {`Count`: n} or {`PerUnitArea`: d}, `length`, `length_jitter`, `points_per_strand`, `seed`, `lean`, `lean_toward`, `bend`), `interp?` (`amount`, `blend` (`Barycentric` or {`Nearest`: {`k`}}), `points_per_strand?`, `length_jitter`, `clump`, `frizz`, `width`), `name?`; without them: 1,000 guides a tenth of the mesh's diagonal long and 20,000 hairs |
+| `remove` | `id` |
+| `regrow` | `id`, `grow?`: grow the guides again, following the density map; grooming is lost |
+| `set_render` | `id`, `interp` |
+| `stroke` | `id`, `stroke`: `brush` {`kind` (comb, cut, length, puff, smooth, clump, frizz), `radius`, `strength`, `falloff`, `invert`, `cut_length`, `frequency`, `seed`}, `symmetry` {`x`, `y`, `z`}, `dabs` [{`center`, `normal`, `delta`, `pressure`}] in the emitter's space |
+| `apply` | `id`, `brush`, `symmetry?`, `center?` [x, y, z], `direction?` [x, y, z]: one dab, over the whole groom when `center` is left out; `direction` is the comb movement |
+| `map` | `id`, `map` (mask, density), `edit`: `fill` + `value` · `invert` · `clear` · `paint` + `center`, `radius`, `value`, `strength`, `falloff` |
+
+The mask (1 where brushes act fully, 0 where they never touch a guide) and the density (where
+`regrow` puts guides) are values on the emitter's vertices. Limits (checked before allocating):
+200,000 guides, 5,000,000 hairs, 64 points per strand and 40 million points per operation, 50,000
+dabs per stroke.
 
 ```
 modelcraft-cli macro-script <commands.jsonl|project.journal> [--name NAME] [-o <out.rhai>]
@@ -266,6 +303,7 @@ samples per second.
 | `--guiding`, `--splitting` | Learn where light comes from and send part of the paths that way; end or multiply paths by what they are expected to add to their pixel. Both render on the CPU (`auto` falls back to it), keep the expected image and help rooms lit indirectly from 64 samples up ([performance.md](performance.md)) |
 | `--restir unbiased\|viewport` | Resample the direct light at the first surface (ReSTIR DI on the light tree), on the CPU and the GPU. `unbiased` keeps the expected image (for finals; about 3.5× lower error at equal samples on the many-light benchmark, at 2–3× the time per sample); `viewport` adds reuse between passes, which cleans the first few passes fastest but is up to a few percent darker and stops improving ([performance.md](performance.md)) |
 | `--restir-candidates N`, `--restir-neighbors N` | Light samples per pixel and pass (default 8) and neighbouring pixels merged (default 4) |
+| `--denoise [svgf\|nfor]` | Filter the noise out: `nfor` (default; regression on the two half renderings, for finals) or `svgf` (the interactive filter). A `.exr` then holds the filtered image as R, G, B and the original as `noisy.R/G/B`. On `render-bench` it also reports the error after the filter and the filter's time ([performance.md](performance.md)) |
 | `--yaw DEG --pitch DEG --fov DEG --ortho` | The camera, which always frames the whole scene |
 | `--exposure EV` | Brightness in stops |
 | `--sky R,G,B`, `--no-ground` | A uniform sky instead of the studio light; no ground plane |

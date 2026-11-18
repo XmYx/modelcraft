@@ -94,6 +94,19 @@ the same run at 0.26–0.47 ms, so read these as upper bounds).
 Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
 captured at the first dab, so its row there measures almost nothing.
 
+## Rotate, Elastic move and Scrape (`modelcraft-cli bench --polys 1000000 --dabs 200`)
+
+Measured 2026-11-18 on the same 2,007,372-triangle quad sphere, radius 0.08, X symmetry on, load
+average about 20 on 24 threads. Draw on this run, for comparison: 0.36 ms mean, 0.62 ms p95.
+
+| Brush | Dab mean | Dab p95 | Vertices a stroke touched | Notes |
+|---|---|---|---|---|
+| Rotate | 0.02 ms | 0.04 ms | 798 | Moves what the first dab caught |
+| Elastic move | 2.9 ms | 3.7 ms | 99,926 | Reaches three brush radii, so nine times the surface of a plain dab |
+| Scrape | 0.87 ms | 1.1 ms | 9,404 | |
+
+Radial copies cost one more dab per copy: six copies of a Draw dab take six times a Draw dab.
+
 ## 12.6 M triangles (`modelcraft-cli bench --polys 10000000 --dabs 200`)
 
 Measured 2026-11-17 with the machine's load average near 30 on 24 threads (other builds), so
@@ -459,6 +472,55 @@ Read honestly:
   many lights (a long depth-1 render: CPU, 48×48, 10 seeds, 16 spp, relMSE 0.31 plain against 0.12
   with M=16); it needs the following passes to be cheap for the whole picture to gain.
 
+### Denoising (`--denoise svgf|nfor`)
+
+`craft-render-denoise` filters a render with its own feature images (albedo, normal, depth, variance;
+the film now also keeps the sum of its odd-numbered samples, so a second, independent half rendering
+is available on the CPU and the GPU). Both filters divide the picture by its albedo first (not where
+the albedo is nearly black, so emitters are left alone).
+
+- **SVGF** (Schied et al. 2017) for the interactive view: reprojection of the previous frame's
+  result through the motion image, variance tracking, five à-trous wavelet passes whose luminance
+  edge-stopping follows the variance (the variance is the median over 3×3, so the edge of a light does
+  not switch the stop off for its neighbours). It is the Render View's filter while passes arrive. A-SVGF's
+  gradient-based adaptive history is not implemented.
+- **NFOR-class regression** (Bitterli et al. 2016) for finals: first-order regression on normal, depth and
+  screen position over a 17×17 window, weighted by the variance-aware distance of 3×3 colour patches and a
+  soft same-surface test, each half rendering filtered with the weights of the other, the two averaged. It
+  is the Render View's filter on the finished picture. Without the paper's second stage; fireflies are not
+  treated separately.
+
+256×256, five seeds, `modelcraft-cli render-bench --device gpu --denoise svgf|nfor`, reference 4096 spp
+(mean relMSE, before; after). The CPU films are the same samples, so the errors are the same to the digits
+shown (checked on cornell and studio); the filters run on the CPU in both cases (24 threads, load average 16 to 40
+from other builds, so times are upper bounds).
+
+| Scene | relMSE raw, 1 / 4 / 16 / 64 spp | SVGF after | NFOR after |
+|---|---|---|---|
+| cornell | 0.2203 / 0.0543 / 0.0137 / 0.0035 | 0.0703 / 0.012 / 0.0016 / 0.0005 | 0.0703 / 0.0367 / 0.0015 / 0.0003 |
+| materials | 4.939 / 0.805 / 0.1275 / 0.0493 | 1.78 / 0.6877 / 0.0944 / 0.0406 | 1.78 / 0.0398 / 0.0157 / 0.0055 |
+| interior | 0.2459 / 0.0464 / 0.0185 / 0.2193 | 0.0842 / 0.0445 / 0.0154 / 0.2182 | 0.0842 / 0.0016 / 0.0007 / 0.0018 |
+| night-street | 6.793 / 1.009 / 0.2622 / 0.072 | 2.511 / 0.778 / 0.1955 / 0.0563 | 2.511 / 0.6951 / 0.0995 / 0.019 |
+| studio | 0.3259 / 0.0806 / 0.0205 / 0.0052 | 0.1157 / 0.0313 / 0.0058 / 0.0015 | 0.1157 / 0.0138 / 0.0042 / 0.0013 |
+| showcase | 2.452 / 0.6923 / 0.1657 / 0.0494 | 0.4998 / 0.5623 / 0.0559 / 0.0196 | 0.4998 / 0.0325 / 0.0123 / 0.0052 |
+
+Filter time per 256×256 image: SVGF 31 to 53 ms, NFOR 210 to 700 ms (it needs two samples; with one, `nfor`
+falls back to SVGF, which is why the 1 spp columns match).
+
+Read honestly:
+- NFOR lowers the error 2.6 to 125× from 4 spp up (cornell 1.5× at 4 spp, 9 to 14× from 16 spp; interior at
+  64 spp, where a few bright paths ruled the raw error, 0.219 → 0.0018). SVGF lowers it 3 to 9× at 1 spp and
+  1.0 to 3.5× from 4 spp up, least on materials, interior and night-street, whose noise is a few very bright samples
+  that a variance-guided filter keeps.
+- Both are biased, and measure against the unfiltered reference. The picture's mean brightness stays within 8 % (the test's bound) on three scenes at 16 spp; on the
+  Cornell box the SVGF mean differed from the raw one by 0.1 %.
+- Temporal reuse: a still camera, eight frames of 2 samples on the Cornell box, 0.060 filtered alone → 0.030 with the
+  history. With the camera moving 0.4 pixel per frame the history is found through the motion vectors but resampling it
+  blurs it: 0.052 alone against 0.078 with history (raw 0.102). Frame-to-frame reuse under motion therefore does not
+  pay yet; a sharper resampling filter is the next step.
+- No GPU filter yet: the filters run on the CPU, at 31 ms (SVGF) for 65 k pixels, which scales to about 0.5 s
+  at 1080p on this machine; a compute-shader à-trous pass is the way to a viewport frame budget.
+
 **What these numbers do not say.** They are not a comparison with V-Ray or Arnold: neither can be
 run here, and no published figure of theirs uses these scenes. The CPU path is a scalar binary BVH
 without SIMD packets or wide nodes, so it is certainly slower per ray than their tuned kernels; the
@@ -763,6 +825,27 @@ sheet pinned only at two corners stretches most of all. The 40,401-vertex row sh
 effect worse; raising iterations or substeps is the lever, at proportional cost. Self collision adds
 about 5.6 ms per substep at 10,000 vertices. Collision cost is per vertex near a collider: the
 box test culls the rest.
+
+**Particles** (`sim-bench particles`, our own solver, one thread): a surface emitter of 2,048
+triangles fills a pool of N slots at N per second over the run, 120 frames at 24 fps and 2 substeps
+(60 frames for the last row); particles live 2× the run, so none die. Per frame includes the births,
+the forces and the write of the whole pool into the cache (12 bytes a slot). Collisions are a floor
+and a sphere of 2,304 triangles, swept; "forces" is turbulent wind, noise acceleration and an
+attractor with drag. The load average was about 25.
+
+| Particles (slots) | Extras | Solve | Per frame | Per substep | Cache |
+|---|---|---|---|---|---|
+| 10,000 | none | 24 ms | 0.20 ms | 0.10 ms | 14 MiB |
+| 100,000 | none | 198 ms | **1.65 ms** | 0.83 ms | 137 MiB |
+| 100,000 | collisions | 3.24 s | **27.0 ms** | 13.5 ms | 137 MiB |
+| 100,000 | collisions and forces | 8.97 s | 74.7 ms | 37.4 ms | 137 MiB |
+| 500,000 | collisions (60 frames) | 7.25 s | 120.9 ms | 60.4 ms | 343 MiB |
+
+A 100,000-particle system runs at about 600 frames a second without collisions and 37 with them, so
+it plays back from a cache, not live; the cache is the cost (137 MiB for 120 frames), which is why
+the byte budget exists. Collisions cost 135 ns a particle a substep; the noise field (three value
+noises per particle) is most of the "forces" row. Display is capped at 10,000 instances at a time
+(the clone limit), whatever the pool holds.
 
 ## How the numbers stay low
 

@@ -314,6 +314,8 @@ pub enum Command {
     Anim(crate::anim::AnimCommand),
     /// Joints and skins: `{"cmd":"rig","op":"add_joint",…}` ([`crate::rig::RigCommand`]).
     Rig(crate::rig::RigCommand),
+    /// Hair and grooming: `{"cmd":"hair","op":"add","mesh":3}` ([`crate::hair::HairCommand`]).
+    Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
 }
@@ -479,6 +481,7 @@ impl Command {
             Command::Redo => "Redo".into(),
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
+            Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
         }
     }
