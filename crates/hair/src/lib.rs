@@ -8,8 +8,6 @@
 //!   guides, either by barycentric weights over the three nearest guides or by inverse-distance
 //!   weights over the nearest `k`, with clumping toward the guide, frizz noise, per-strand width
 //!   and a root-to-tip taper.
-//! - [`apply_stroke`]: grooming brushes (comb, cut, length, puff, smooth, clump, frizz) as plain-data
-//!   [`Stroke`]s of [`Dab`]s, with symmetry and a per-vertex mask, which is what makes them commands.
 //! - [`Limits`]: hard caps on guide counts, strand counts, points per strand and total memory, checked
 //!   before anything is allocated.
 //!
@@ -24,7 +22,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-mod brush;
 mod guides;
 mod interp;
 mod kdtree;
@@ -32,11 +29,8 @@ mod rng;
 mod surface;
 
 #[cfg(test)]
-mod brush_tests;
-#[cfg(test)]
 mod tests;
 
-pub use brush::{Brush, BrushKind, Dab, MAX_DABS, Stroke, StrokeReport, Symmetry, apply_dabs, apply_stroke, paint_map};
 pub use guides::{Amount, GrowSpec, Guides, grow_guides};
 pub use interp::{Blend, Clump, Frizz, HairCurves, InterpSpec, Width, interpolate};
 pub use kdtree::MAX_K;

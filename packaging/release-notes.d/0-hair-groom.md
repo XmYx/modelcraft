@@ -1,1 +1,0 @@
-- Hair: grow guide hairs on a mesh (Hair ▸ Add Hair) and groom them with comb, cut, length, puff, smooth, clump and frizz brushes by dragging over the surface, or by typing values in Properties; symmetry, a mask, regrowing and undo are included. Hair is saved with the project and scriptable through the `hair` command.

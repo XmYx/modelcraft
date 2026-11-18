@@ -1,1 +1,0 @@
-- Falloff fields: add a Sphere, Box, Linear or Noise Falloff Field inside a deformer and the deformer acts only where the field is strong. Shape the fade with the remap curve, combine several fields, and see the field outlined in the viewport.

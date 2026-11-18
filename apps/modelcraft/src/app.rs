@@ -213,8 +213,6 @@ pub struct ModelApp {
     pub recovery_dir: Option<PathBuf>,
     /// The Animation panel: playback, key selection, views.
     pub anim: crate::anim_ui::AnimUi,
-    /// Hair grooming: brush, symmetry, the stroke in progress.
-    pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
     /// The allow-agents preference.
     pub allow_agents: bool,
@@ -253,8 +251,6 @@ impl ModelApp {
             crate::agents::start(&mut app, &cc.egui_ctx);
         }
         app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
-        let drafts = app.recovery_dir.as_ref().map(|d| d.join("scripts"));
-        crate::script_recover::init(&mut app, drafts);
         crate::script_ui::startup(&mut app);
         app
     }
@@ -336,7 +332,6 @@ impl ModelApp {
             autosave_at: None,
             recovery_dir: None,
             anim: Default::default(),
-            groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
             uv: Default::default(),
@@ -699,7 +694,6 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
-            Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
@@ -754,21 +748,6 @@ impl ModelApp {
                 }
                 None => self.status = tl!("Select a mesh to deform"),
             },
-            AddField(kind) => {
-                // Into the selected deformer, or the deformer a selected field already sits in.
-                let scene = &self.doc.scene;
-                let target = self.active().and_then(|a| match scene.get(a).map(|o| (&o.kind, o.parent)) {
-                    Some((ObjectKind::Deformer { .. }, _)) => Some(a),
-                    Some((ObjectKind::Field { .. }, Some(p))) => Some(p),
-                    _ => None,
-                });
-                match target {
-                    Some(target) => {
-                        self.run(Command::AddField { kind: kind.into(), target });
-                    }
-                    None => self.status = tl!("Select a deformer for the falloff field"),
-                }
-            }
             AddCloner(kind) => {
                 // The selected mesh (or smooth cage) becomes the source; with none, a small cube is made.
                 let input = self
@@ -884,7 +863,6 @@ impl ModelApp {
             ScriptWindow => crate::script_ui::toggle(self),
             ScriptRun => crate::script_ui::run_editor(self, false),
             ScriptRunSelection => crate::script_ui::run_editor(self, true),
-            ScriptRecord => crate::script_macro::toggle(self),
             MeshTool(t) => crate::mesh_tools::run(self, t),
             RadialMenu => crate::radial::open(self, ctx),
             Preferences => crate::prefs_ui::open(self),
@@ -1222,7 +1200,6 @@ impl eframe::App for ModelApp {
     }
 
     fn on_exit(&mut self) {
-        crate::script_recover::flush(self);
         self.store_prefs();
         if let Some(store) = &mut self.prefs {
             let _ = store.flush();
@@ -1251,7 +1228,6 @@ impl ModelApp {
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
         crate::script_ui::tick(self);
-        crate::script_recover::tick(self, &ctx);
         crate::panels::menu_bar(self, ui);
         crate::panels::toolbar(self, ui);
         crate::panels::tool_options(self, ui);

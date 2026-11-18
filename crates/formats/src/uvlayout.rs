@@ -29,39 +29,9 @@ fn check(mesh: &PolyMesh) -> Result<()> {
     Ok(())
 }
 
-/// Where UDIM tile `(column, row)` starts in stored UV space (v grows downwards, so the rows of
-/// tiles go up by going negative): subtracting this from a UV gives its place in the tile.
-fn tile_origin(column: u32, row: u32) -> glam::Vec2 {
-    glam::Vec2::new(column as f32, -(row as f32))
-}
-
-/// Whether the face's UVs are centred in tile `(column, row)`.
-fn face_in_tile(mesh: &PolyMesh, f: u32, origin: glam::Vec2) -> bool {
-    let (mut sum, mut n) = (glam::Vec2::ZERO, 0.0f32);
-    for h in mesh.face_half_edges(f) {
-        sum += mesh.uv(h);
-        n += 1.0;
-    }
-    // The tile of a point is `(floor u, floor (1 − v))`, so a tile owns `u` in `[0, 1)` and `v` in `(0, 1]`.
-    n > 0.0 && {
-        let c = sum / n - origin;
-        c.x.floor() == 0.0 && (1.0 - c.y).floor() == 0.0
-    }
-}
-
 /// The layout as an SVG document of `size` × `size` pixels: a frame for the unit square and one
 /// closed outline per face.
 pub fn svg(mesh: &PolyMesh, size: u32) -> Result<String> {
-    svg_in(mesh, size, glam::Vec2::ZERO, false)
-}
-
-/// The same for UDIM tile `(column, row)` (see `modelcraft-uvpack`: tile 1001 is `(0, 0)`, 1011 is
-/// `(0, 1)`): only the faces whose UVs are centred in the tile, drawn at their place in it.
-pub fn svg_tile(mesh: &PolyMesh, size: u32, column: u32, row: u32) -> Result<String> {
-    svg_in(mesh, size, tile_origin(column, row), true)
-}
-
-fn svg_in(mesh: &PolyMesh, size: u32, origin: glam::Vec2, only_tile: bool) -> Result<String> {
     check(mesh)?;
     let size = size.clamp(16, MAX_LAYOUT_SIZE);
     let mut out = String::with_capacity(256 + mesh.face_count() * 64);
@@ -72,12 +42,9 @@ fn svg_in(mesh: &PolyMesh, size: u32, origin: glam::Vec2, only_tile: bool) -> Re
     let _ = writeln!(out, "<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\" fill=\"none\" stroke=\"#808080\" stroke-width=\"{w}\"/>");
     let _ = writeln!(out, "<g fill=\"none\" stroke=\"#000000\" stroke-width=\"{w}\" stroke-linejoin=\"round\">");
     for f in 0..mesh.face_count() as u32 {
-        if only_tile && !face_in_tile(mesh, f, origin) {
-            continue;
-        }
         let mut d = String::new();
         for (i, h) in mesh.face_half_edges(f).enumerate() {
-            let uv = mesh.uv(h) - origin;
+            let uv = mesh.uv(h);
             let _ = write!(d, "{}{:.6} {:.6}", if i == 0 { "M" } else { " L" }, uv.x, uv.y);
         }
         if !d.is_empty() {
@@ -92,15 +59,6 @@ fn svg_in(mesh: &PolyMesh, size: u32, origin: glam::Vec2, only_tile: bool) -> Re
 /// The layout as RGBA pixels (`size` × `size`, black one-pixel outlines on a transparent
 /// background), row by row from the top.
 pub fn raster(mesh: &PolyMesh, size: u32) -> Result<(u32, Vec<u8>)> {
-    raster_in(mesh, size, glam::Vec2::ZERO, false)
-}
-
-/// [`raster`] of UDIM tile `(column, row)` (see [`svg_tile`]).
-pub fn raster_tile(mesh: &PolyMesh, size: u32, column: u32, row: u32) -> Result<(u32, Vec<u8>)> {
-    raster_in(mesh, size, tile_origin(column, row), true)
-}
-
-fn raster_in(mesh: &PolyMesh, size: u32, origin: glam::Vec2, only_tile: bool) -> Result<(u32, Vec<u8>)> {
     check(mesh)?;
     let size = size.clamp(16, MAX_LAYOUT_SIZE);
     let n = size as usize;
@@ -124,10 +82,7 @@ fn raster_in(mesh: &PolyMesh, size: u32, origin: glam::Vec2, only_tile: bool) ->
         if budget == 0 {
             break;
         }
-        if only_tile && !face_in_tile(mesh, f, origin) {
-            continue;
-        }
-        let pts: Vec<glam::Vec2> = mesh.face_half_edges(f).map(|h| (mesh.uv(h) - origin) * s).collect();
+        let pts: Vec<glam::Vec2> = mesh.face_half_edges(f).map(|h| mesh.uv(h) * s).collect();
         for (i, a) in pts.iter().enumerate() {
             let b = pts.get((i + 1) % pts.len()).copied().unwrap_or(*a);
             // Walk the segment one pixel at a time along its longer axis (bounded by the picture).
@@ -145,15 +100,7 @@ fn raster_in(mesh: &PolyMesh, size: u32, origin: glam::Vec2, only_tile: bool) ->
 
 /// The layout as PNG bytes (see [`raster`]).
 pub fn png(mesh: &PolyMesh, size: u32) -> Result<Vec<u8>> {
-    encode_png(raster(mesh, size)?)
-}
-
-/// [`png`] of UDIM tile `(column, row)` (see [`svg_tile`]).
-pub fn png_tile(mesh: &PolyMesh, size: u32, column: u32, row: u32) -> Result<Vec<u8>> {
-    encode_png(raster_tile(mesh, size, column, row)?)
-}
-
-fn encode_png((size, px): (u32, Vec<u8>)) -> Result<Vec<u8>> {
+    let (size, px) = raster(mesh, size)?;
     let image = Image::from_raw(size, size, ChannelLayout::Rgba, SampleType::U8, px).map_err(|e| FormatError::Malformed(e.to_string()))?;
     craft_image_codecs::encode(&image, Format::Png, &EncodeOptions::default()).map_err(|e| FormatError::Malformed(e.to_string()))
 }
@@ -218,39 +165,5 @@ mod tests {
         let (_, px) = raster(&m, 128).unwrap();
         let drawn = px.chunks(4).filter(|p| p[3] == 255).count();
         assert!(drawn > 500, "six islands of outlines: {drawn}");
-    }
-
-    #[test]
-    fn tile_pictures_show_only_the_faces_centred_in_the_tile() {
-        // Two faces: one in tile 1001 (the unit square), one in 1012 (u 1..2, v -1..0 stored).
-        let m = Primitive::Plane { width: 2.0, depth: 2.0, segments: 2 }.build().unwrap();
-        let mut uvs = m.corner_uvs().to_vec();
-        for c in 0..m.corner_count() as u32 {
-            let f = m.face_of(c);
-            let base = if f == 0 {
-                Vec2::ZERO
-            } else if f == 1 {
-                Vec2::new(1.0, -1.0)
-            } else {
-                Vec2::new(4.0, 4.0)
-            };
-            uvs[c as usize] = base + Vec2::new(0.25 + 0.1 * (c % 2) as f32, 0.25 + 0.1 * ((c / 2) % 2) as f32);
-        }
-        let mut m = m;
-        m.set_uvs(&uvs).unwrap();
-        let in_tile = |svg: &str| svg.lines().filter(|l| l.starts_with("<path d=\"")).count();
-        assert_eq!(in_tile(&svg_tile(&m, 64, 0, 0).unwrap()), 1);
-        assert_eq!(in_tile(&svg_tile(&m, 64, 1, 1).unwrap()), 1);
-        assert_eq!(in_tile(&svg_tile(&m, 64, 5, 5).unwrap()), 0);
-        // The face drawn in tile (1, 1) sits at its place within that tile, not at u = 1.25.
-        let text = svg_tile(&m, 64, 1, 1).unwrap();
-        let path = text.lines().find(|l| l.starts_with("<path d=\"")).unwrap();
-        let first: Vec<f32> = path.trim_start_matches("<path d=\"M").split([' ', 'L']).filter(|t| !t.is_empty()).take(2).map(|t| t.parse().unwrap()).collect();
-        assert!(first.iter().all(|v| (0.2..0.5).contains(v)), "{first:?}");
-        // Pictures of a tile and of a tile with nothing in it are both valid PNGs, differing in what they draw.
-        let (_, a) = raster_tile(&m, 64, 0, 0).unwrap();
-        let (_, b) = raster_tile(&m, 64, 5, 5).unwrap();
-        assert!(a.chunks(4).any(|p| p[3] == 255) && !b.chunks(4).any(|p| p[3] == 255));
-        assert_eq!(&png_tile(&m, 64, 1, 1).unwrap()[..4], b"\x89PNG");
     }
 }

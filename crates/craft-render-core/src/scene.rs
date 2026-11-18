@@ -74,6 +74,12 @@ impl Scene {
         self.positions.len()
     }
 
+    /// Answer ray queries (and, on the GPU, trace) with the compressed 8-wide form of the
+    /// hierarchy. `false`, and nothing changes, when the tree does not fit that form.
+    pub fn enable_wide_bvh(&mut self) -> bool {
+        self.accel.enable_wide()
+    }
+
     /// Geometry and shading data at a hit of `ray`.
     #[inline]
     pub fn surface(&self, hit: &Hit, ray: &Ray) -> Option<Surface> {

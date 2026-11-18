@@ -1,1 +1,0 @@
-- Rigid-body dynamics: give meshes active or passive rigid-body settings, constrain them with fixed, hinge and point joints, and bake the fall to a cache that plays on the timeline (commands only; the panel follows).
