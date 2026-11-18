@@ -91,6 +91,10 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   stiffness given as a natural frequency so a setting means the same on a coarse and a fine mesh,
   vertex-versus-triangle collisions with continuous crossing tests, friction and the collider's own
   motion, optional self collision by a spatial hash, wind with turbulence from a seeded value noise.
+  Particles are a fixed pool: slots fill in ascending order from one seeded generator, a slot is a
+  cache point (NaN when dead), forces and swept triangle collisions run per substep, and the system
+  evaluates to `Instances`, the clone generator's own type, so the viewport, the export and the
+  path tracer draw it through the paths clones already use.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.

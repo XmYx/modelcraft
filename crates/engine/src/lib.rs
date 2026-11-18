@@ -57,6 +57,8 @@ mod rig_tests;
 #[cfg(test)]
 mod sim_cloth_tests;
 #[cfg(test)]
+mod sim_particle_tests;
+#[cfg(test)]
 mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;

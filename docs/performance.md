@@ -515,6 +515,27 @@ effect worse; raising iterations or substeps is the lever, at proportional cost.
 about 5.6 ms per substep at 10,000 vertices. Collision cost is per vertex near a collider: the
 box test culls the rest.
 
+**Particles** (`sim-bench particles`, our own solver, one thread): a surface emitter of 2,048
+triangles fills a pool of N slots at N per second over the run, 120 frames at 24 fps and 2 substeps
+(60 frames for the last row); particles live 2× the run, so none die. Per frame includes the births,
+the forces and the write of the whole pool into the cache (12 bytes a slot). Collisions are a floor
+and a sphere of 2,304 triangles, swept; "forces" is turbulent wind, noise acceleration and an
+attractor with drag. The load average was about 25.
+
+| Particles (slots) | Extras | Solve | Per frame | Per substep | Cache |
+|---|---|---|---|---|---|
+| 10,000 | none | 24 ms | 0.20 ms | 0.10 ms | 14 MiB |
+| 100,000 | none | 198 ms | **1.65 ms** | 0.83 ms | 137 MiB |
+| 100,000 | collisions | 3.24 s | **27.0 ms** | 13.5 ms | 137 MiB |
+| 100,000 | collisions and forces | 8.97 s | 74.7 ms | 37.4 ms | 137 MiB |
+| 500,000 | collisions (60 frames) | 7.25 s | 120.9 ms | 60.4 ms | 343 MiB |
+
+A 100,000-particle system runs at about 600 frames a second without collisions and 37 with them, so
+it plays back from a cache, not live; the cache is the cost (137 MiB for 120 frames), which is why
+the byte budget exists. Collisions cost 135 ns a particle a substep; the noise field (three value
+noises per particle) is most of the "forces" row. Display is capped at 10,000 instances at a time
+(the clone limit), whatever the pool holds.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have

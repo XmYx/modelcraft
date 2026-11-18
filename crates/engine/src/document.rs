@@ -1109,7 +1109,9 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } | ObjectKind::Sim { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
+                || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
                 || !self.scene.visible(id)
             {
                 continue;
