@@ -357,7 +357,7 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
             edit::fill_hole(m, *edge)
         }
         StepOp::Mirror { axis, weld } => edit::mirror(m, *axis as usize, *weld),
-        StepOp::Unwrap { seams, angle, pins, auto_cut, margin } => {
+        StepOp::Unwrap { seams, angle, pins, auto_cut, margin, method } => {
             use modelcraft_uv::{Pin, SeamSet, UnwrapOptions};
             let mut set = SeamSet::from_vertex_pairs(seams);
             set.retain_existing(m);
@@ -365,7 +365,7 @@ pub fn run_step(m: &PolyMesh, op: &StepOp) -> Result<PolyMesh, OpError> {
                 set.mark_by_angle(m, *a);
             }
             let pins = pins.iter().map(|p| Pin { corner: p.corner, uv: glam::Vec2::from(p.uv) }).collect();
-            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1) };
+            let opts = UnwrapOptions { pins, auto_cut: *auto_cut, layout: true, margin: margin.clamp(0.0, 0.1), method: *method };
             modelcraft_uv::unwrap_mesh(m, &set, &opts).map(|(mesh, _)| mesh).map_err(|e| OpError::Invalid(e.to_string()))
         }
         StepOp::Seams { .. } => Ok(m.clone()),

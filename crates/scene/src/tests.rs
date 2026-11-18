@@ -228,7 +228,7 @@ fn unwrap_step_writes_uvs_that_later_steps_keep() {
     let mut ev = Evaluator::new();
     let id = s.add("Cube", cube_kind(), None).unwrap();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-        steps.push(Step { id: 1, enabled: true, op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01 } });
+        steps.push(Step { id: 1, enabled: true, op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01, method: Default::default() } });
         steps.push(Step { id: 2, enabled: true, op: StepOp::Subdivide { levels: 1 } });
     }
     let e = ev.evaluate(&s, id);
@@ -258,6 +258,7 @@ fn unwrap_step_with_stale_input_is_skipped() {
                 pins: vec![UvPin { corner: 9999, uv: [0.0, 0.0] }],
                 auto_cut: true,
                 margin: 5.0,
+                method: Default::default(),
             },
         });
     }

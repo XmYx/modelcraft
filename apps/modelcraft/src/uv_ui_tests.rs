@@ -483,3 +483,27 @@ fn a_mesh_without_uvs_gets_them_from_a_projection() {
     h.run();
     h.get_by_label_contains("UV canvas, 1 faces");
 }
+
+#[test]
+fn the_angle_based_solver_is_a_menu_entry_and_a_choice_in_the_toolbar() {
+    let mut h = editor("Sphere");
+    h.get_by_role_and_label(Role::ComboBox, "Unwrap solver");
+    palette(&mut h, "Unwrap UVs (Angle-Based)");
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::Unwrap { method: modelcraft_engine::scene::UnwrapMethod::Abf, .. })), "{s:?}");
+    let id = h.state().selection[0];
+    let app = h.state_mut();
+    let scene = app.doc.scene.clone();
+    let out = app.doc.eval.steps_output(&scene, id, usize::MAX);
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    assert!(out.mesh.corner_uvs().iter().all(|u| u.is_finite() && u.min_element() >= -1e-4 && u.max_element() <= 1.0 + 1e-4));
+    // The toolbar choice decides what the plain Unwrap button and shortcut do.
+    h.state_mut().uv.unwrap_method = modelcraft_engine::scene::UnwrapMethod::Abf;
+    h.get_by_label_contains("UV canvas").focus();
+    h.run();
+    h.key_press(Key::U);
+    h.run();
+    let s = steps(&h);
+    assert!(matches!(s.last(), Some(StepOp::Unwrap { method: modelcraft_engine::scene::UnwrapMethod::Abf, .. })), "{s:?}");
+    assert_eq!(s.iter().filter(|o| matches!(o, StepOp::Unwrap { .. })).count(), 2);
+}

@@ -33,6 +33,7 @@ pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
+pub use modelcraft_uv::UnwrapMethod;
 pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
 
@@ -322,6 +323,9 @@ pub enum StepOp {
         /// Margin around and between islands, as a fraction of the unit square.
         #[serde(default = "default_margin")]
         margin: f32,
+        /// The solver for each island: least-squares conformal or angle-based flattening.
+        #[serde(default)]
+        method: UnwrapMethod,
     },
     /// Pack the islands the UVs already form into the unit square: `margin` between them as a
     /// fraction of the square, optional rotation, and an even texel density.

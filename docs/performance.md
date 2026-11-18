@@ -311,6 +311,48 @@ Preconditioned conjugate gradients on the same system stalled (residual 1.7e-5 a
 iterations at 64×32), which is why the solver is direct; conjugate gradients remain as the
 fallback above 24 M factor entries.
 
+### Angle-based flattening (ABF) against LSCM (`uv-bench --method both`)
+
+`UnwrapMethod::Abf` solves for the angles of the flat triangles (Sheffer and de Sturler 2001) with
+the reduced Newton system of ABF++ (Sheffer et al. 2005): per iteration one sparse Cholesky
+factorisation of two unknowns per interior vertex, then a least-squares fit of triangles of those
+angles (the LSCM system) for the positions. Convergence is a constraint residual below 1e-8; an island
+that does not reach it is flattened by LSCM and `IslandReport::abf_fell_back` says so. Same machine
+and release build as above (loaded). Angle error is in degrees against the surface; area RMS is the
+RMS of the log area ratio, so 0 means one scale everywhere. All unwraps have 0 flipped triangles.
+
+Sphere with one pole-to-pole seam (`--shape sphere --cut meridian`): one interior everywhere else,
+the hard case for an angle-preserving map.
+
+| Sphere | Solver | Time | Newton iterations | Mean / max angle error | Max stretch | Area RMS (log) |
+|---|---|---|---|---|---|---|
+| 64×32 (1,986 vertices) | LSCM | 11 ms | | 2.18° / 9.78° | 1.489 | 0.98 |
+| | ABF | 43 ms | 3 | 2.55° / 6.76° | 1.208 | 1.35 |
+| 256×128 (32,514 vertices) | LSCM | 661 ms | | 0.55° / 5.04° | 1.217 | 1.01 |
+| | ABF | 3,938 ms | 3 | 0.67° / 2.08° | 1.051 | 1.45 |
+
+ABF has the smaller worst-case angle and stretch error and the larger mean angle error and area
+distortion: it minimises the relative squared deviation of angles (and spreads the curvature of
+the surface evenly), where LSCM minimises the conformal energy. It is 4 to 6 times slower here
+(three factorisations and a reconstruction, against one solve).
+
+The same shapes with the automatic cut (`--cut auto`, which gives a closed shape a branching cut;
+most vertices are then on the boundary, where angles are free):
+
+| Shape (segments 64) | Solver | Time | Mean / max angle error | Area RMS (log) |
+|---|---|---|---|---|
+| Sphere | LSCM | 10 ms | 0.14° / 0.43° | 0.49 |
+| | ABF | 15 ms | 0.11° / 0.19° | 0.008 |
+| Round cube | LSCM | 5 ms | 0.34° / 1.92° | 2.07 |
+| | ABF | 9 ms | 0.20° / 0.97° | 0.044 |
+| Torus | LSCM | 11 ms | 0.23° / 0.78° | 4.84 |
+| | ABF | 12 ms | 0.18° / 0.69° | 0.024 |
+
+Developable shapes (a tube cut along a line, a cone cut along a generatrix) are already feasible
+angle sets: ABF takes 0 Newton iterations and both solvers are exact (angle error and area RMS
+below 1e-4). The tests also check that ABF's energy never exceeds LSCM's on the sphere, round cube
+and torus (`abf_is_closer_to_the_surface_angles_than_lscm_on_curved_islands`).
+
 ## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
 
 Random rectangular islands (fixed seed, sides 0.05 to 1.55, even texel density), packed into the

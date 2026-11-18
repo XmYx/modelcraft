@@ -21,6 +21,8 @@
 use glam::{DVec2, DVec3, Vec2};
 use modelcraft_mesh::PolyMesh;
 
+use crate::UnwrapMethod;
+use crate::abf::{AbfProblem, AbfReport};
 use crate::charts::{Charts, Island, face_triangles};
 use crate::cholesky::{Factor, nested_dissection};
 use crate::sparse::{BlockCsr, solve_cg};
@@ -51,6 +53,16 @@ pub struct IslandReport {
     pub fallback: bool,
     /// The island has user pins and keeps its place and scale.
     pub pinned: bool,
+    /// The angle-based solve, when one was asked for. If it did not converge the island was
+    /// flattened by LSCM instead (see [`IslandReport::abf_fell_back`]).
+    pub abf: Option<AbfReport>,
+}
+
+impl IslandReport {
+    /// ABF was asked for but did not converge, so the island was flattened by LSCM.
+    pub fn abf_fell_back(&self) -> bool {
+        self.abf.is_some_and(|a| !a.converged)
+    }
 }
 
 pub(crate) struct Solved {
@@ -82,6 +94,26 @@ pub(crate) fn local_frame(p: [DVec3; 3]) -> Option<([DVec2; 3], f64)> {
     Some(([DVec2::ZERO, DVec2::new(e1.dot(x), 0.0), DVec2::new(e2.dot(x), e2.dot(y))], area))
 }
 
+/// The three angles of a triangle given by its local 2D corners.
+pub(crate) fn corner_angles(q: &[DVec2; 3]) -> [f64; 3] {
+    let at = |i: usize| {
+        let (u, v) = (q[(i + 1) % 3] - q[i], q[(i + 2) % 3] - q[i]);
+        u.perp_dot(v).abs().atan2(u.dot(v))
+    };
+    [at(0), at(1), at(2)]
+}
+
+/// A triangle with the given angles, whose first edge has the length of the first edge of `q`:
+/// the corners in a local frame and the area. `None` for angles that do not make a triangle.
+fn shape_from_angles(q: &[DVec2; 3], a: [f64; 3]) -> Option<([DVec2; 3], f64)> {
+    let l01 = q[0].distance(q[1]);
+    // Law of sines: |p0 p2| / sin(angle at 1) = |p0 p1| / sin(angle at 2).
+    let l02 = l01 * a[1].sin() / a[2].sin();
+    let q2 = DVec2::new(a[0].cos(), a[0].sin()) * l02;
+    let area = 0.5 * l01 * q2.y;
+    (l01 > 0.0 && l02.is_finite() && area.is_finite() && area > 0.0).then_some(([DVec2::ZERO, DVec2::new(l01, 0.0), q2], area))
+}
+
 fn planar(p: &[DVec3], tris: &[Tri]) -> Vec<DVec2> {
     // Area-weighted normal of the island; project onto the plane it defines.
     let mut n = DVec3::ZERO;
@@ -97,23 +129,30 @@ fn planar(p: &[DVec3], tris: &[Tri]) -> Vec<DVec2> {
 }
 
 /// Solve one island. `user_pins` are `(UV vertex, uv)` pairs; the island keeps them.
-pub(crate) fn solve_island(mesh: &PolyMesh, charts: &Charts, island: &Island, user_pins: &[(u32, DVec2)]) -> Solved {
+pub(crate) fn solve_island(mesh: &PolyMesh, charts: &Charts, island: &Island, user_pins: &[(u32, DVec2)], method: UnwrapMethod) -> Solved {
     let nloc = island.vertices.len();
     let local = |uvv: u32| island.vertices.binary_search(&uvv).unwrap_or(NO);
     let pos3: Vec<DVec3> = island.vertices.iter().map(|v| mesh.position(charts.vertex_source.get(*v as usize).copied().unwrap_or(0)).as_dvec3()).collect();
 
     let mut tris: Vec<Tri> = Vec::with_capacity(island.faces.len() * 2);
+    // Vertices of a triangle that was skipped: their wheel of triangles is not closed.
+    let mut gap = vec![false; nloc];
     let mut buf = Vec::new();
     for &f in &island.faces {
         buf.clear();
         face_triangles(mesh, f, &mut buf);
         for t in &buf {
             let l = [0, 1, 2].map(|k| local(charts.corner_vertex.get(t[k] as usize).copied().unwrap_or(0)));
-            if l.contains(&NO) || l[0] == l[1] || l[1] == l[2] || l[0] == l[2] {
-                continue;
-            }
-            if let Some((q, area)) = local_frame([pos3[l[0]], pos3[l[1]], pos3[l[2]]]) {
+            let valid = !(l.contains(&NO) || l[0] == l[1] || l[1] == l[2] || l[0] == l[2]);
+            let frame = if valid { local_frame([pos3[l[0]], pos3[l[1]], pos3[l[2]]]) } else { None };
+            if let Some((q, area)) = frame {
                 tris.push(Tri { l, q, area });
+            } else {
+                for v in l {
+                    if let Some(g) = gap.get_mut(v) {
+                        *g = true;
+                    }
+                }
             }
         }
     }
@@ -126,6 +165,7 @@ pub(crate) fn solve_island(mesh: &PolyMesh, charts: &Charts, island: &Island, us
         converged: true,
         fallback: false,
         pinned: false,
+        abf: None,
     };
     let fallback = |report: IslandReport, tris: &[Tri]| {
         let mut r = report;
@@ -160,6 +200,24 @@ pub(crate) fn solve_island(mesh: &PolyMesh, charts: &Charts, island: &Island, us
         }
         u
     };
+    if method == UnwrapMethod::Abf {
+        let interior: Vec<bool> = (0..nloc).map(|l| used[l] && !on_boundary[l] && !gap[l]).collect();
+        let (angles, abf_report) = crate::abf::solve(&AbfProblem {
+            tris: &tris.iter().map(|t| t.l).collect::<Vec<_>>(),
+            angles: &tris.iter().map(|t| corner_angles(&t.q)).collect::<Vec<_>>(),
+            interior: &interior,
+            coords: &pos3.iter().map(|p| p.to_array()).collect::<Vec<_>>(),
+        });
+        report.abf = Some(abf_report);
+        if let (Some(angles), true) = (angles, abf_report.converged) {
+            for (t, a) in tris.iter_mut().zip(&angles) {
+                if let Some((q, area)) = shape_from_angles(&t.q, *a) {
+                    t.q = q;
+                    t.area = area;
+                }
+            }
+        }
+    }
     let any_boundary = on_boundary.iter().zip(&used).any(|(b, u)| *b && *u);
     let candidate = |l: usize| used[l] && (!any_boundary || on_boundary[l]);
 
