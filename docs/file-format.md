@@ -50,7 +50,7 @@ re-normalised. Weights are JSON for now, not a blob.
 frames), `frame` (the current frame), `auto_key` and `tracks`: `{target, path, curve}` with
 `curve.keys` = `[{t, v, interp?, tangent?, in_slope?, out_slope?, in_weight?, out_weight?}]`
 sorted by `t` (frames), plus `pre` / `post` extrapolation. A track's `layer` (left out for the
-base, 0) names an entry of `layers`: `{id, name, mode (add | override), weight, mute}`, bottom
+base, 0) names an entry of `layers`: `{id, name, mode (add | override), weight, mute, solo?, lock?, weight_curve?}`, bottom
 first; `active_layer` is the layer keys go to. Defaults are left out. The attribute
 `path` grammar is in [cli.md](cli.md#animation). On load, non-finite keys are dropped, keys are
 sorted and de-duplicated, counts are capped (2²⁰ keys per curve, 200 000 tracks) and tracks on

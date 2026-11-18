@@ -35,10 +35,12 @@ pub enum RigAction {
     AddCluster,
     StackEarlier,
     StackLater,
+    PlaceJoints,
+    PaintWeights,
 }
 
 impl RigAction {
-    pub const ALL: [RigAction; 25] = [
+    pub const ALL: [RigAction; 27] = [
         RigAction::AddJoint,
         RigAction::OrientJoints,
         RigAction::MirrorJoints,
@@ -64,6 +66,8 @@ impl RigAction {
         RigAction::AddCluster,
         RigAction::StackEarlier,
         RigAction::StackLater,
+        RigAction::PlaceJoints,
+        RigAction::PaintWeights,
     ];
 
     pub fn label(self) -> String {
@@ -93,6 +97,8 @@ impl RigAction {
             RigAction::AddCluster => tl!("Add Cluster from Vertices"),
             RigAction::StackEarlier => tl!("Move Deformer Earlier"),
             RigAction::StackLater => tl!("Move Deformer Later"),
+            RigAction::PlaceJoints => tl!("Place Joints by Clicking"),
+            RigAction::PaintWeights => tl!("Paint Skin Weights"),
         }
     }
 
@@ -123,6 +129,8 @@ impl RigAction {
             RigAction::AddCluster => "rig.add_cluster",
             RigAction::StackEarlier => "rig.stack_earlier",
             RigAction::StackLater => "rig.stack_later",
+            RigAction::PlaceJoints => "rig.place_joints",
+            RigAction::PaintWeights => "rig.paint_weights",
         }
     }
 
@@ -236,6 +244,7 @@ pub fn act(app: &mut ModelApp, a: RigAction) {
         | RigAction::AddCluster
         | RigAction::StackEarlier
         | RigAction::StackLater => crate::deform_ui::act(app, a),
+        RigAction::PlaceJoints | RigAction::PaintWeights => crate::rig_tools::act(app, a),
         _ => crate::constraint_ui::act(app, a),
     }
 }
@@ -280,5 +289,6 @@ pub fn bone_lines(app: &ModelApp) -> Vec<([f32; 3], [f32; 3], [f32; 4])> {
     }
     out.extend(crate::constraint_ui::guide_lines(app));
     out.extend(crate::deform_ui::lattice_lines(app));
+    out.extend(crate::rig_tools::weight_lines(app));
     out
 }

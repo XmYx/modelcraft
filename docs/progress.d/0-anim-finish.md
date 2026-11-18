@@ -1,0 +1,1 @@
+| 2026-11-18 | Animation and rigging finishing pass: key box selection, copy and paste; Curve Editor value zoom; ghosts; animation layer solo, lock, keyed weights and reordering; a viewport weight brush; placing joints by clicking and picking joints by their bones |
