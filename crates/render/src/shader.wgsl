@@ -29,7 +29,8 @@ struct VOut {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) mask: f32,
-    @location(3) patch_id: f32,
+    // Flat: a triangle takes the patch of its first vertex, so shared vertices do not blend ids.
+    @location(3) @interpolate(flat) patch_id: f32,
 };
 
 @vertex

@@ -1,0 +1,1 @@
+| 2026-11-18 | Patches and visibility while sculpting: patches by angle, UV island, part and from the mask; hide, show, isolate and invert; rectangle and lasso tools that mask or hide, with a by-numbers dialog; clip and trim by a plane; an occlusion mask; shells from the mask. Side panels no longer grow a few pixels every frame |

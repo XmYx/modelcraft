@@ -197,6 +197,8 @@ pub struct ModelApp {
     pub stroke: Option<crate::viewport::StrokeInput>,
     pub show_wire: bool,
     pub show_patches: bool,
+    /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
+    pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
     pub shot: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
@@ -315,6 +317,7 @@ impl ModelApp {
             stroke: None,
             show_wire: true,
             show_patches: false,
+            sculpt_groups: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
             shot: Default::default(),
@@ -683,6 +686,7 @@ impl ModelApp {
             }
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
+            Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
@@ -1240,6 +1244,9 @@ impl ModelApp {
         if crate::uv_ui::keys(self, ctx) {
             return;
         }
+        if crate::sculpt_groups_ui::escape(self, ctx) {
+            return;
+        }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 self.palette = None;
@@ -1253,8 +1260,7 @@ impl ModelApp {
         if self.prefs_window.open {
             return;
         }
-        let redo_y =
-            !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y)));
+        let redo_y = !ctx.text_edit_focused() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y)));
         for a in crate::keys::dispatch(self, ctx) {
             self.act(ctx, a);
         }

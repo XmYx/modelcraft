@@ -56,6 +56,7 @@ const CORE: &[&str] = &[
     "craft-render-bvh",
     "craft-render-core",
     "craft-render-gpu",
+    "craft-render-guide",
 ];
 
 fn layers() -> Result<(), String> {
