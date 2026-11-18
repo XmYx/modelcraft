@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod bench_cmd;
+mod hair_cmd;
 mod render_cmd;
 mod script_cmd;
 
@@ -58,7 +59,13 @@ Commands:
 ";
 
 fn usage() -> String {
-    format!("{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n", script_cmd::USAGE, render_cmd::USAGE, bench_cmd::USAGE)
+    format!(
+        "{USAGE}\nScripts (docs/scripting.md):\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n",
+        script_cmd::USAGE,
+        render_cmd::USAGE,
+        bench_cmd::USAGE,
+        hair_cmd::USAGE
+    )
 }
 
 fn main() -> ExitCode {
@@ -266,6 +273,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             mcp::serve(backend)
         }
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
+        "hair-bench" => hair_cmd::bench(a),
         "uv-bench" => uv_bench(flag(a, "--segments").and_then(|v| v.parse().ok()).unwrap_or(64)),
         "bench" => bench(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000), flag(a, "--dabs").and_then(|v| v.parse().ok()).unwrap_or(400)),
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),

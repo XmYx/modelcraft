@@ -311,6 +311,27 @@ Preconditioned conjugate gradients on the same system stalled (residual 1.7e-5 a
 iterations at 64×32), which is why the solver is direct; conjugate gradients remain as the
 fallback above 24 M factor entries.
 
+## Hair (`modelcraft-cli hair-bench`)
+
+Guides grown on a 128×64 UV sphere (16,128 triangles, area 12.56), then render hairs blended from
+them by the nearest four guides (`knn`) or the three-guide barycentric rule (`bary`). All 24 cores,
+release build, `modelcraft-cli hair-bench --strands N [--blend bary --clump A --frizz A --points P]`.
+The machine was shared with other builds (load average 50–58 on 24 cores) when these were taken, so
+treat them as pessimistic.
+
+| Strands × points | Guides | Blend, extras | Interpolation | Strands per second | Memory held |
+|---|---|---|---|---|---|
+| 100,000 × 8 | 5,000 | knn | 102 ms | 0.98 M | 12 MB |
+| 1,000,000 × 8 | 5,000 | knn | 467 ms | 2.14 M | 120 MB |
+| 1,000,000 × 8 | 5,000 | bary, clump 0.5, frizz 0.1 | 653 ms | 1.53 M | 120 MB |
+| 1,000,000 × 16 | 5,000 | knn | 614 ms | 1.63 M | 216 MB |
+
+Growing 5,000 guides takes 20–30 ms. Memory is 12 bytes per point plus 24 bytes per strand (root and
+two widths); `modelcraft_hair::estimate_bytes` matches the measured size exactly. Hard caps (checked
+before allocating): 200,000 guides, 5,000,000 strands, 64 points per strand and 40 million points
+per operation by default; no caller can raise them past 1,000,000 guides, 20,000,000 strands, 256
+points per strand and 200 million points.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have
