@@ -358,10 +358,7 @@ fn apply_modifiers(scene: &Scene, id: ObjectId, seed: u32, set: &mut modelcraft_
     for m in scene.clone_modifiers(id) {
         let Some(o) = scene.get(m) else { continue };
         let ObjectKind::CloneModifier { modifier, target } = &o.kind else { continue };
-        let point = match target.filter(|t| *t != id && scene.get(*t).is_some()) {
-            Some(t) => Some(to_generator.transform_point3(scene.world_matrix(t).w_axis.truncate())),
-            None => None,
-        };
+        let point = target.filter(|t| *t != id && scene.get(*t).is_some()).map(|t| to_generator.transform_point3(scene.world_matrix(t).w_axis.truncate()));
         if modifier.needs_target() && point.is_none() {
             problems.push(format!("{} needs a target object: choose one in the Properties panel", o.name));
             continue;
