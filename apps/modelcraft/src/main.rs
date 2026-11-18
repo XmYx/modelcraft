@@ -38,6 +38,9 @@ mod hair_ui_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
+mod modifier_ui;
+#[cfg(test)]
+mod modifier_ui_tests;
 mod object_manager;
 mod organize_ui;
 mod panels;
@@ -70,6 +73,7 @@ mod shelf;
 mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
+mod snap_ui;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

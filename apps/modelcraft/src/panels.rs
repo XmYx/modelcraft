@@ -10,7 +10,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, PRIMITIVES};
+use crate::actions::{self, Action, CLONERS, DEFORMERS, FIELDS, MODIFIERS, PRIMITIVES};
 use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::dock::Move;
 use crate::theme;
@@ -110,6 +110,9 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for c in CLONERS {
                     action_button(app, ui, Action::AddCloner(c));
                 }
+                for m in MODIFIERS {
+                    action_button(app, ui, Action::AddCloneModifier(m));
+                }
             });
             ui.menu_button(tl!("Mesh"), |ui| {
                 for a in [
@@ -170,6 +173,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 ] {
                     action_button(app, ui, a);
                 }
+                crate::snap_ui::menu(app, ui);
                 ui.checkbox(&mut app.show_wire, tl!("Wireframe on Selection"));
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
                 ui.menu_button(tl!("Navigation"), |ui| {
@@ -512,6 +516,18 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, t.gamma_multiply(0.5)));
             p.circle_filled(c, 2.5, t);
         }
+        ObjectKind::CloneModifier { .. } => {
+            // Three squares that grow: a change that ramps along the clones.
+            let o = Color32::from_rgb(240, 170, 90);
+            for (dx, s) in [(-4.0, 2.0), (0.0, 3.0), (4.0, 4.0)] {
+                p.rect_stroke(
+                    egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(s, s)),
+                    0.0,
+                    egui::Stroke::new(1.0, o),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
         ObjectKind::Cloner { .. } => {
             // Three small squares: one source, many clones.
             let o = Color32::from_rgb(240, 170, 90);
@@ -659,6 +675,9 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         ObjectKind::Field { field } => {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
+        }
+        ObjectKind::CloneModifier { modifier, target } => {
+            egui::CollapsingHeader::new(tl!("Clone Modifier")).default_open(true).show(ui, |ui| crate::modifier_ui::fields(app, ui, id, *modifier, *target));
         }
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
