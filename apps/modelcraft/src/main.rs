@@ -67,6 +67,8 @@ mod script_macro_ui_tests;
 mod script_recover;
 #[cfg(test)]
 mod script_recover_ui_tests;
+#[cfg(test)]
+mod script_run_ui_tests;
 mod script_ui;
 #[cfg(test)]
 mod script_undo_ui_tests;

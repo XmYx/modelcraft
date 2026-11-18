@@ -206,15 +206,9 @@ pub fn run_script(doc: &mut Document, o: &Opts, project: Option<&str>, quiet: bo
     Ok(report)
 }
 
-/// The report as one JSON object.
+/// The report as one JSON object (the same as `script.run` answers on the control channel).
 pub fn report_json(r: &RunReport) -> serde_json::Value {
-    let output: Vec<serde_json::Value> = r
-        .lines
-        .iter()
-        .map(|l| serde_json::json!({ "kind": match l.kind { LineKind::Print => "print", LineKind::Debug => "debug", LineKind::Warning => "warning" }, "text": l.text, "line": l.line }))
-        .collect();
-    let error = r.error.as_ref().map(|e| serde_json::json!({ "file": e.file, "line": e.line, "column": e.column, "message": e.message }));
-    serde_json::json!({ "ok": r.error.is_none(), "value": r.value, "output": output, "commands": r.commands, "operations": r.operations, "seconds": r.elapsed.as_secs_f64(), "error": error })
+    modelcraft_script::channel::report_json(r)
 }
 
 pub fn run(a: &[String], load: fn(&str) -> Result<Document, String>, save: fn(&mut Document, &str) -> Result<(), String>) -> Result<(), String> {
