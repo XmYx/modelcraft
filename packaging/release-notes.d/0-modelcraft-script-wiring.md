@@ -1,0 +1,1 @@
+- Scripts can add their own commands to the Scripts menu (under "Scripted Tools") and react to selection, scene, frame and project changes.

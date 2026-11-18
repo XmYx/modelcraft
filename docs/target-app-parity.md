@@ -557,10 +557,10 @@ Weight: 5
 | Machine control channel and MCP server | M | D | M | stdio, a token-authenticated loopback socket in the window and in `modelcraft-cli serve` (craft-control), `modelcraft-cli call`, and an MCP server (`modelcraft-cli mcp`, `--app` drives the window) |
 | Every UI action is a serializable command | M | X | S | The same `Command`s drive UI, CLI, journal and tests |
 | Script editor with a console | C M | D | M | The Scripts window: highlighting, run script or selection, output with errors linked to their line, files on disk, startup script ([scripting.md](scripting.md)) |
-| User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder; no scripted tool registration or recorded macros yet |
+| User tools, shelves and recorded macros | C M Z | P | M | The Scripts menu and the Quick Scripts strip run the scripts in a folder, and a script can register its own menu commands (`register_tool`); recorded macros are not built |
 | Script editor with a console | C M | M | M | |
 | User tools, shelves and recorded macros | C M Z | P | M | Any command can sit on the Quick Bar; no recorded macros or user-written tools yet |
-| Event callbacks (scene changed, selection changed) | C M | M | M | |
+| Event callbacks (scene changed, selection changed) | C M | D | M | `on_selection_changed`, `on_scene_changed`, `on_scene_loaded` and `on_frame_changed` in scripts; the app reports them once per frame, never during a drag or stroke ([scripting.md](scripting.md)) |
 | Plugin SDK for native extensions | C M Z | M | L | |
 | Running scripts written for the references' own APIs (MEL, ZScript, vendor Python modules) | C M Z | O | XL | Proprietary scripting dialects and object models; our own scripting rows count instead |
 
