@@ -16,6 +16,7 @@ modelcraft-anim = { path = "crates/anim" }
 modelcraft-sim = { path = "crates/sim" }
 modelcraft-mesh = { path = "crates/mesh" }
 modelcraft-ops = { path = "crates/ops" }
+modelcraft-field = { path = "crates/field" }
 modelcraft-clone = { path = "crates/clone" }
 modelcraft-scene = { path = "crates/scene" }
 modelcraft-sculpt = { path = "crates/sculpt" }
@@ -48,6 +49,9 @@ craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11
 craft-control = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
 craft-mcp-server = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
 craft-fonts-build = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }
+
+# physics (Apache-2.0): rigid bodies and joints
+rapier3d = { version = "0.36", default-features = false, features = ["dim3", "f32", "std", "enhanced-determinism"] }
 
 # foundation
 rhai = { version = "1.27", default-features = false, features = ["std", "serde", "metadata"] }

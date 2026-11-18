@@ -94,6 +94,19 @@ the same run at 0.26–0.47 ms, so read these as upper bounds).
 Surface grab is not in the table: the bench moves the brush centre while a grab keeps what it
 captured at the first dab, so its row there measures almost nothing.
 
+## Rotate, Elastic move and Scrape (`modelcraft-cli bench --polys 1000000 --dabs 200`)
+
+Measured 2026-11-18 on the same 2,007,372-triangle quad sphere, radius 0.08, X symmetry on, load
+average about 20 on 24 threads. Draw on this run, for comparison: 0.36 ms mean, 0.62 ms p95.
+
+| Brush | Dab mean | Dab p95 | Vertices a stroke touched | Notes |
+|---|---|---|---|---|
+| Rotate | 0.02 ms | 0.04 ms | 798 | Moves what the first dab caught |
+| Elastic move | 2.9 ms | 3.7 ms | 99,926 | Reaches three brush radii, so nine times the surface of a plain dab |
+| Scrape | 0.87 ms | 1.1 ms | 9,404 | |
+
+Radial copies cost one more dab per copy: six copies of a Draw dab take six times a Draw dab.
+
 ## 12.6 M triangles (`modelcraft-cli bench --polys 10000000 --dabs 200`)
 
 Measured 2026-11-17 with the machine's load average near 30 on 24 threads (other builds), so
@@ -639,6 +652,40 @@ The energy is the fit energy of that mode, and a relaxation that would raise it 
 On a 8×8 grid whose interior vertices were knocked about by up to 0.015 of its width, 60 iterations
 bring the maximum angle error from 17.3° to 4e-5° (`relax_restores_a_jittered_grid_to_an_isometry`).
 
+### UV transfer (`uv-transfer-bench --segments N`)
+
+An unwrapped sphere of N×N/2 quads gives its UVs to a sphere 1.5 times finer (so every target
+corner lies on or just off the source surface), by closest point on the triangles of the source
+(uniform grid, expanding shells). Same machine and release build as above.
+
+| Source / target faces | Target corners | Per island | Plain | Mean distance to the source |
+|---|---|---|---|---|
+| 512 / 1,152 | 4,512 | 10 ms | 6 ms | 4.4e-3 |
+| 8,192 / 18,432 | 73,344 | 171 ms | 159 ms | 2.7e-4 |
+| 14,450 / 32,385 | 129,030 | 539 ms | 487 ms | 1.7e-4 |
+| 31,250 / 70,125 | 279,750 | 1,188 ms | 937 ms | 7.6e-5 |
+
+About 4 microseconds a corner, growing slowly with size. Per island costs one more lookup per face
+(the anchor). The distance is the gap between the two tessellations of the sphere, not an error of
+the search: a mesh gets its own UVs back to 1e-4 (`a_mesh_gets_its_own_uvs_back`).
+
+### UDIM packing (`uv-pack-bench --islands N --tiles T`)
+
+The same random rectangles as above, dealt to T tiles largest first, packed per tile with MaxRects
+and brought to the common smallest scale, so the texel density is the same in every tile. Same
+machine and release build.
+
+| Islands | Tiles | Rotation | Time | Common scale (one tile: 200 islands 0.154) | Utilisation per tile |
+|---|---|---|---|---|---|
+| 200 | 1 | fit | 63 ms | 0.154 | 84.8 % |
+| 200 | 4 | none / fit | 22 / 16 ms | 0.308 / 0.313 | 84.9 % / 87.5 % |
+| 1,000 | 4 | none / fit | 417 / 457 ms | 0.138 / 0.139 | 81.9 % / 83.5 % |
+| 1,000 | 16 | none / fit | 82 / 90 ms | 0.278 / 0.282 | 83.3 % / 86.2 % |
+
+Four tiles double the linear scale of one, as they should (the areas are four times larger), and
+dealing by area keeps the tiles within a fraction of a percent of each other. Packing many small
+sets is faster than one large one because MaxRects work grows faster than linearly with islands.
+
 ## UV packing (engine, `modelcraft-cli uv-pack-bench --islands N`)
 
 Random rectangular islands (fixed seed, sides 0.05 to 1.55, even texel density), packed into the
@@ -683,6 +730,73 @@ two widths); `modelcraft_hair::estimate_bytes` matches the measured size exactly
 before allocating): 200,000 guides, 5,000,000 strands, 64 points per strand and 40 million points
 per operation by default; no caller can raise them past 1,000,000 guides, 20,000,000 strands, 256
 points per strand and 200 million points.
+
+## Simulation
+
+Measured 2026-11-18, release build, one thread (every solver here runs single-threaded and
+deterministically), on the same 24-thread machine while other workstreams built on it (load average
+about 40), so treat the times as pessimistic. Reproduce with `modelcraft-cli sim-bench <kind> …`.
+
+**Rigid bodies** (`sim-bench rigid`, Rapier 0.36 with `enhanced-determinism`): N unit boxes
+spread over a grid at several heights drop onto a ground plane, 120 frames at 24 fps, 4 substeps per
+frame (480 solver steps), box colliders as convex hulls, 8 points cached per body.
+
+| Bodies | Solve, 120 frames | Per frame | Per step | Asleep at the end | Cache |
+|---|---|---|---|---|---|
+| 100 | 19 ms | 0.16 ms | 0.040 ms | 100 | 1.1 MiB |
+| 1,000 | 198 ms | 1.65 ms | 0.41 ms | 1,000 | 11 MiB |
+| 4,000 (the most one world holds) | 2.45 s | 20.4 ms | 5.1 ms | 3,888 | 44 MiB |
+
+The time per body grows from 1.6 µs per frame at 1,000 bodies to 5 µs at 4,000: the bodies of the
+4,000 case actually collide with each other (a denser pile), which the 1,000 case mostly does not.
+
+**Cloth** (`sim-bench cloth`, our own XPBD solver, one thread): a flat square sheet two metres
+across over a UV sphere of 2,304 triangles, 60 frames at 24 fps, the load average about 18 on the
+24 threads. Constraints are stretch on every edge, shear on the quad diagonals and a dihedral bend
+per interior edge (about six per vertex). "Stretch" is the relative change of an edge from its
+rest length at the last frame: mean, 99th percentile and largest.
+
+| Vertices | Setup | Substeps × iterations | Extras | Solve, 60 frames | Per frame | Per substep | Stretch mean / p99 / max |
+|---|---|---|---|---|---|---|---|
+| 1,089 | 0.4 ms | 8 × 2 | sphere | 1.10 s | 18.3 ms | 2.3 ms | 0.014 / 0.064 / 0.10 |
+| 10,201 | 5 ms | 8 × 2 | none (free fall) | 1.25 s | **20.8 ms** | 2.6 ms | 0 |
+| 10,201 | 4 ms | 8 × 2 | two corners pinned, hanging | 1.63 s | 27.1 ms | 3.4 ms | 0.052 / 0.37 / 6.2 |
+| 10,201 | 6 ms | 8 × 2 | sphere | 4.20 s | **70.0 ms** | 8.7 ms | 0.073 / 0.44 / 0.94 |
+| 10,201 | 6 ms | 8 × 2 | sphere and self collision | 6.87 s | 114.5 ms | 14.3 ms | 0.071 / 0.41 / 2.9 |
+| 10,201 | 4 ms | 16 × 4 | sphere | 11.49 s | 191.4 ms | 12.0 ms | 0.013 / 0.068 / 0.31 |
+| 40,401 | 16 ms | 8 × 2 | sphere | 8.62 s | 143.7 ms | 18.0 ms | 0.35 / 2.5 / 5.0 |
+
+A 10,000-vertex cloth costs about 21 ms a frame to simulate free, and 70 ms draped over a sphere
+at the default 8 substeps and 2 iterations; it does not run in real time, which is why simulations
+are baked. About 29 ns per constraint projection. The stretch columns are the honest limit of the
+method: with 16 iterations per frame, information crosses at most 16 edges, so a 100 × 100 sheet
+stretches where it is pulled (a quarter of its edges by more than 7 % over the sphere); 64
+iterations per frame bring the worst edge to 31 % and the 99th percentile to 6.8 %. A hanging
+sheet pinned only at two corners stretches most of all. The 40,401-vertex row shows the same
+effect worse; raising iterations or substeps is the lever, at proportional cost. Self collision adds
+about 5.6 ms per substep at 10,000 vertices. Collision cost is per vertex near a collider: the
+box test culls the rest.
+
+**Particles** (`sim-bench particles`, our own solver, one thread): a surface emitter of 2,048
+triangles fills a pool of N slots at N per second over the run, 120 frames at 24 fps and 2 substeps
+(60 frames for the last row); particles live 2× the run, so none die. Per frame includes the births,
+the forces and the write of the whole pool into the cache (12 bytes a slot). Collisions are a floor
+and a sphere of 2,304 triangles, swept; "forces" is turbulent wind, noise acceleration and an
+attractor with drag. The load average was about 25.
+
+| Particles (slots) | Extras | Solve | Per frame | Per substep | Cache |
+|---|---|---|---|---|---|
+| 10,000 | none | 24 ms | 0.20 ms | 0.10 ms | 14 MiB |
+| 100,000 | none | 198 ms | **1.65 ms** | 0.83 ms | 137 MiB |
+| 100,000 | collisions | 3.24 s | **27.0 ms** | 13.5 ms | 137 MiB |
+| 100,000 | collisions and forces | 8.97 s | 74.7 ms | 37.4 ms | 137 MiB |
+| 500,000 | collisions (60 frames) | 7.25 s | 120.9 ms | 60.4 ms | 343 MiB |
+
+A 100,000-particle system runs at about 600 frames a second without collisions and 37 with them, so
+it plays back from a cache, not live; the cache is the cost (137 MiB for 120 frames), which is why
+the byte budget exists. Collisions cost 135 ns a particle a substep; the noise field (three value
+noises per particle) is most of the "forces" row. Display is capped at 10,000 instances at a time
+(the clone limit), whatever the pool holds.
 
 ## How the numbers stay low
 

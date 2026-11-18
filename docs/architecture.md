@@ -5,7 +5,7 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 | Layer | Crate | What it holds | Depends on |
 |---|---|---|---|
 | L0 | `modelcraft-anim` | Keyed curves (stepped, linear, Bézier with automatic clamped tangents and weighted handles), extrapolation, baking, the scene clock and playback | glam |
-| L0 | `modelcraft-sim` | The simulation kernel: a fixed-step solver loop with substeps (`Solver`, `bake`), the bounded `FrameCache` that plays back by scene frame and converts to a `.mcpc` point cache, seeded `Rng`, cancel and progress hooks, the simulation object's settings | glam |
+| L0 | `modelcraft-sim` | The simulation kernel: a fixed-step solver loop with substeps (`Solver`, `bake`), the bounded `FrameCache` that plays back by scene frame and converts to a `.mcpc` point cache, seeded `Rng`, cancel and progress hooks, the simulation object's settings, rigid bodies and joints | glam, rapier3d |
 | L0 | `modelcraft-mesh` | `PolyMesh`: validated half-edge mesh, per-corner UVs, patches, polygon-list (de)serialisation | glam |
 | L1 | `modelcraft-ops` | Parametric primitives, polygon edits (extrude, inset, bevel, loop cut, merge, weld, delete, move, flip, triangulate), smooth-cage subdivision, deformers | mesh |
 | L1 | `modelcraft-uv` | Seams, islands, automatic cuts into discs, LSCM unwrap with pins (sparse Cholesky, nested dissection; conjugate gradients as fallback), island layout, distortion measures | mesh |
@@ -78,7 +78,23 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
   first or last frame held outside it). Baking runs a `Solver` over the frame range on fixed steps
   from a seed, so a run is repeatable bit for bit; frame count, substeps, steps, points and cache
   bytes are all capped, and a bake can be cancelled between frames. The cache is saved in the
-  project as a `.mcpc` blob, not in the JSON.
+  project as a `.mcpc` blob, not in the JSON. A bake is three parts (`modelcraft_engine::sim_bake`):
+  `prepare` reads the scene into plain data, `BakeJob::run` simulates (on any thread, with progress
+  and cancelling), and the `bake` command stores the result as caches in one undo step. Rigid
+  bodies are one world: baking any rigid body bakes all of them together, and each active body's
+  cache is its mesh's points in the mesh's own space. Their dynamics run on Rapier 0.36
+  (Apache-2.0, pure Rust; chosen over an own impulse solver for its convex hull, triangle-mesh
+  and joint support, sleeping and continuous collision detection) built without threads and with
+  `enhanced-determinism`, so a bake repeats bit for bit; the cloth and particle solvers are our own.
+  Cloth is XPBD (Macklin, Müller and Chentanez 2016, with the small-steps idea of 2019): stretch on
+  every edge, shear on quad diagonals, the dihedral bending constraint of Müller et al. 2007,
+  stiffness given as a natural frequency so a setting means the same on a coarse and a fine mesh,
+  vertex-versus-triangle collisions with continuous crossing tests, friction and the collider's own
+  motion, optional self collision by a spatial hash, wind with turbulence from a seeded value noise.
+  Particles are a fixed pool: slots fill in ascending order from one seeded generator, a slot is a
+  cache point (NaN when dead), forces and swept triangle collisions run per substep, and the system
+  evaluates to `Instances`, the clone generator's own type, so the viewport, the export and the
+  path tracer draw it through the paths clones already use.
 - **Sculpt**: entering sculpting adds (or reuses) a `Sculpt` step holding positions and mask for every
   vertex of its input. The session works on a `SculptMesh` and syncs back into the step on save,
   export, workspace change or any scene command.

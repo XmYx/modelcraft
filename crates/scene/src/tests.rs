@@ -118,6 +118,42 @@ fn picking_hits_the_front_face() {
     assert!(pick::pick_edge(&m, &r).is_some());
 }
 
+#[test]
+fn falloff_fields_limit_where_a_deformer_acts() {
+    let mut s = Scene::new();
+    let mut ev = Evaluator::new();
+    let cube = s.add("Cube", cube_kind(), None).unwrap();
+    let base = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    let twist = s.add("Twist", ObjectKind::Deformer { deformer: Deformer::Twist { angle: 90.0 } }, Some(cube)).unwrap();
+    let full = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    assert_ne!(base, full);
+    // A sphere field at the top of the cube (y = +1): the bottom stays, the top moves.
+    let mut sphere = Field::default_of("sphere").unwrap();
+    sphere.shape = modelcraft_field::Shape::Sphere { radius: 1.8, inner: 0.0 };
+    let field = s.add("Sphere field", ObjectKind::Field { field: sphere }, Some(twist)).unwrap();
+    s.edit(field).unwrap().transform.translation = Vec3::new(0.0, 1.0, 0.0);
+    assert_eq!(s.field_stack(twist).len(), 1);
+    let limited = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    for (i, p) in base.iter().enumerate() {
+        if p.y < -0.5 {
+            assert_eq!(limited[i], *p, "outside the field, unchanged");
+        }
+    }
+    assert!(base.iter().zip(&limited).any(|(a, b)| a != b), "inside the field, still deformed");
+    assert_ne!(limited, full);
+    // Moving the field re-evaluates through the cache; hiding it removes the falloff.
+    s.edit(field).unwrap().transform.translation = Vec3::new(0.0, -1.0, 0.0);
+    let moved = ev.evaluate(&s, cube).mesh.positions().to_vec();
+    assert_ne!(moved, limited);
+    s.edit(field).unwrap().visible = false;
+    assert_eq!(ev.evaluate(&s, cube).mesh.positions(), &full[..]);
+    // A field outside a deformer is just data; a field alone evaluates to nothing.
+    assert_eq!(ev.evaluate(&s, field).mesh.face_count(), 0);
+    // Save and load keep it.
+    let back: Scene = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(back.get(field).unwrap().kind, s.get(field).unwrap().kind);
+}
+
 fn cloner_scene(kind: &str) -> (Scene, ObjectId, ObjectId) {
     let mut s = Scene::new();
     let gen_id = s.add("Clones", ObjectKind::Cloner { cloner: Cloner::default_of(kind).unwrap(), target: None }, None).unwrap();
@@ -231,7 +267,15 @@ fn unwrap_step_writes_uvs_that_later_steps_keep() {
         steps.push(Step {
             id: 1,
             enabled: true,
-            op: StepOp::Unwrap { seams: vec![], angle: Some(30.0), pins: vec![], auto_cut: true, margin: 0.01, method: Default::default() },
+            op: StepOp::Unwrap {
+                seams: vec![],
+                angle: Some(30.0),
+                pins: vec![],
+                auto_cut: true,
+                margin: 0.01,
+                method: Default::default(),
+                from_patches: false,
+            },
         });
         steps.push(Step { id: 2, enabled: true, op: StepOp::Subdivide { levels: 1 } });
     }
@@ -263,6 +307,7 @@ fn unwrap_step_with_stale_input_is_skipped() {
                 auto_cut: true,
                 margin: 5.0,
                 method: Default::default(),
+                from_patches: false,
             },
         });
     }
@@ -316,7 +361,11 @@ fn pack_and_project_steps_write_uvs() {
     let id = s.add("Cube", cube_kind(), None).unwrap();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
         steps.push(Step { id: 1, enabled: true, op: StepOp::ProjectUvs { projection: Projection::Box, fit: Fit::Uniform, faces: vec![] } });
-        steps.push(Step { id: 2, enabled: true, op: StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform } });
+        steps.push(Step {
+            id: 2,
+            enabled: true,
+            op: StepOp::PackUvs { margin: 0.01, rotation: Rotation::Fit, density: Density::Uniform, tiles: 1, texel_density: None },
+        });
     }
     let e = ev.evaluate(&s, id);
     assert!(e.errors.is_empty(), "{:?}", e.errors);

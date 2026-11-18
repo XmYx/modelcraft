@@ -7,7 +7,7 @@ use modelcraft_formats::exchange::{self, Item, Kind};
 use modelcraft_formats::{FormatError, journal, project, uvlayout};
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Evaluator, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
+use modelcraft_scene::{Cloner, Evaluator, Field, ObjectId, ObjectKind, Scene, SceneError, SculptLayer, Source, Step, StepOp};
 use modelcraft_sculpt::{BrushSettings, Dab, SculptMesh};
 
 use crate::command::{Command, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome};
@@ -59,6 +59,8 @@ pub struct Document {
     /// Changed since the last save.
     pub dirty: bool,
     pub sculpt: Option<SculptSession>,
+    /// What the user does, while a macro is being recorded.
+    recorder: Option<crate::record::Recorder>,
     journal: Option<journal::Journal>,
     replaying: bool,
     /// Open undo groups ([`Document::begin_group`]), innermost last.
@@ -75,6 +77,8 @@ pub struct Document {
     pub history_note: Option<String>,
     /// Counts the changes made in this session (control clients watch it).
     pub revision: u64,
+    /// A bake that ran elsewhere, waiting for the `bake` command to store it ([`Document::store_bake`]).
+    pub(crate) sim_ready: Option<crate::sim_bake::BakeResult>,
 }
 
 /// Default bound on the history a save stores: 256 MiB of commands.
@@ -96,6 +100,7 @@ impl Document {
             dirty: false,
             sculpt: None,
             journal: None,
+            recorder: None,
             replaying: false,
             groups: Vec::new(),
             pending_recovery: 0,
@@ -104,6 +109,7 @@ impl Document {
             history_max_bytes: DEFAULT_HISTORY_MAX_BYTES,
             history_note: None,
             revision: 0,
+            sim_ready: None,
         }
     }
 
@@ -432,14 +438,100 @@ impl Document {
         let cmd = Command::SculptStroke { id, stroke };
         self.undo.push(UndoEntry::Sculpt { label: cmd.label(), cmd: Box::new(cmd.clone()), id, change });
         self.log(&cmd);
+        if let Some(rec) = self.recorder.as_mut().filter(|r| !r.paused) {
+            rec.push(crate::record::Recorded {
+                label: None,
+                commands: vec![crate::record::RecordedCommand { command: cmd.clone(), created: Vec::new() }],
+                undoable: true,
+            });
+        }
         self.dirty = true;
         self.revision += 1;
     }
 
     // ---- execution ----
 
-    /// Run a command: apply it, record undo, write the journal.
+    /// Run a command: apply it, record undo, write the journal (and the macro recording, if one
+    /// is running).
     pub fn execute(&mut self, cmd: Command) -> Result<Outcome, EngineError> {
+        if self.recorder.as_ref().is_none_or(|r| r.paused) {
+            return self.execute_command(cmd);
+        }
+        let before = self.undo_mark();
+        let in_group = !self.groups.is_empty();
+        let frame = self.scene.anim.frame;
+        let saved = cmd.clone();
+        let result = self.execute_command(cmd);
+        if let Ok(out) = &result {
+            self.record(saved, out.created.clone(), before, in_group, frame);
+        }
+        result
+    }
+
+    // ---- macro recording ----
+
+    /// Start recording what is executed from now on (see [`crate::record`]).
+    pub fn start_recording(&mut self) {
+        self.recorder = Some(crate::record::Recorder::new(self.scene.anim.frame));
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Steps recorded so far.
+    pub fn recording_steps(&self) -> usize {
+        self.recorder.as_ref().map_or(0, |r| r.len())
+    }
+
+    /// Stop recording and hand back the record.
+    pub fn stop_recording(&mut self) -> Option<crate::record::Recorder> {
+        self.recorder.take()
+    }
+
+    /// Record nothing while `paused` (for changes the user did not make, such as callbacks).
+    pub fn pause_recording(&mut self, paused: bool) {
+        if let Some(r) = &mut self.recorder {
+            r.paused = paused;
+        }
+    }
+
+    fn record(&mut self, cmd: Command, created: Vec<ObjectId>, before: usize, in_group: bool, frame: f64) {
+        use crate::record::{Recorded, RecordedCommand};
+        let made = self.undo_mark() > before;
+        let now = self.scene.anim.frame;
+        let Some(rec) = self.recorder.as_mut() else { return };
+        let single =
+            |command: Command, created: Vec<ObjectId>, undoable: bool| Recorded { label: None, commands: vec![RecordedCommand { command, created }], undoable };
+        match &cmd {
+            Command::Undo => rec.undo(),
+            Command::Redo => rec.redo(),
+            Command::Anim(crate::anim::AnimCommand::SetTime { .. }) => {
+                rec.note_frame(now);
+                if !in_group {
+                    rec.push(single(cmd, created, false));
+                }
+            }
+            _ => {
+                if in_group {
+                    rec.in_group(cmd, created);
+                    return;
+                }
+                // The frame is part of the state a command may depend on: note it first.
+                if rec.frame() != frame {
+                    rec.note_frame(frame);
+                    rec.push(single(Command::Anim(crate::anim::AnimCommand::SetTime { frame }), Vec::new(), false));
+                }
+                if made {
+                    rec.push(single(cmd, created, true));
+                } else if matches!(cmd, Command::BeginSculpt { .. } | Command::EndSculpt) {
+                    rec.push(single(cmd, created, false));
+                }
+            }
+        }
+    }
+
+    fn execute_command(&mut self, cmd: Command) -> Result<Outcome, EngineError> {
         // Scrubbing is not journaled; record the frame before a command that may depend on it.
         if !self.replaying && self.scene.anim.frame != self.journal_frame && !matches!(cmd, Command::Anim(crate::anim::AnimCommand::SetTime { .. })) {
             self.journal_frame = self.scene.anim.frame;
@@ -790,6 +882,7 @@ impl Document {
             | Command::SetCageLevels { id, .. }
             | Command::SetDeformer { id, .. }
             | Command::AddStep { id, .. }
+            | Command::TransferUvs { id, .. }
             | Command::SetStep { id, .. }
             | Command::EnableStep { id, .. }
             | Command::RemoveStep { id, .. }
@@ -857,6 +950,14 @@ impl Document {
                 let name = self.scene.unique_name(&title(kind));
                 out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
             }
+            Command::AddField { kind, target } => {
+                let field = Field::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown field {kind:?}")))?;
+                if !matches!(self.scene.get(*target).map(|o| &o.kind), Some(ObjectKind::Deformer { .. })) {
+                    return invalid("falloff fields go inside a deformer");
+                }
+                let name = self.scene.unique_name(&format!("{} field", title(kind)));
+                out.created.push(self.scene.add(name, ObjectKind::Field { field }, Some(*target))?);
+            }
             Command::Delete { ids } => {
                 for id in ids {
                     if self.scene.get(*id).is_none() {
@@ -920,6 +1021,10 @@ impl Document {
                 ObjectKind::Deformer { deformer: d } => *d = *deformer,
                 _ => return invalid("not a deformer"),
             },
+            Command::SetField { id, field } => match &mut self.scene.edit(*id)?.kind {
+                ObjectKind::Field { field: f } => *f = field.sanitized(),
+                _ => return invalid("not a falloff field"),
+            },
             Command::SetCloner { id, cloner, target } => {
                 if target.is_some_and(|t| t == *id || self.scene.get(t).is_none()) {
                     return invalid("the target must be another object in the scene");
@@ -942,6 +1047,39 @@ impl Document {
                 let sid = self.scene.fresh_id();
                 self.mesh_steps(*id)?.push(Step { id: sid, enabled: true, op: op.clone() });
                 let e = self.eval.evaluate(&self.scene, *id);
+                out.warnings.extend(e.errors.iter().map(|e| e.message.clone()));
+            }
+            Command::TransferUvs { id, source, max_distance, per_island } => {
+                let (id, source) = (*id, *source);
+                if source == id {
+                    return invalid("an object cannot take UVs from itself");
+                }
+                if max_distance.is_some_and(|d| !(d.is_finite() && d >= 0.0)) {
+                    return invalid("the distance limit must be a number, zero or more");
+                }
+                let from = self.eval.evaluate(&self.scene, source).mesh;
+                if !matches!(self.scene.get(source).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) || !from.has_uvs() {
+                    return invalid("the source must be a mesh object with UVs");
+                }
+                let to = self.eval.evaluate(&self.scene, id).mesh;
+                if !matches!(self.scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) || to.face_count() == 0 {
+                    return invalid("the target must be a mesh object with faces");
+                }
+                // The source in the space of the target, and the distance limit from world units into it.
+                let (world_to, world_from) = (self.scene.world_matrix(id), self.scene.world_matrix(source));
+                let to_target = world_to.inverse() * world_from;
+                let mut moved = (*from).clone();
+                moved.map_positions(|_, p| to_target.transform_point3(p));
+                let scale = world_to.transform_vector3(glam::Vec3::X).length().max(1e-12);
+                let opts = modelcraft_uv::TransferOptions { max_distance: max_distance.map(|d| d / scale), per_island: *per_island };
+                let (uvs, report) = modelcraft_uv::transfer_uvs(&moved, &to, &opts).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                let sid = self.scene.fresh_id();
+                let uvs: Vec<[f32; 2]> = uvs.iter().map(|u| u.to_array()).collect();
+                self.mesh_steps(id)?.push(Step { id: sid, enabled: true, op: StepOp::SetUvs { uvs: std::sync::Arc::new(uvs) } });
+                if report.too_far > 0 {
+                    out.warnings.push(format!("{} of {} corners were further than the distance limit and kept their UVs", report.too_far, report.corners));
+                }
+                let e = self.eval.evaluate(&self.scene, id);
                 out.warnings.extend(e.errors.iter().map(|e| e.message.clone()));
             }
             Command::SetStep { id, index, op } => {
@@ -1044,6 +1182,7 @@ impl Document {
             Command::Batch { commands, .. } => self.apply_batch(commands, 0, &mut out)?,
             Command::Rig(r) => crate::rig::apply(self, r, &mut out)?,
             Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
+            Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
@@ -1119,10 +1258,20 @@ impl Document {
                 self.undo_once();
             }
             self.undo.clear_redo();
+            if self.groups.is_empty()
+                && let Some(rec) = self.recorder.as_mut()
+            {
+                rec.close_group(&g.label, false, false);
+            }
             return made;
         }
         if made > 1 && self.groups.is_empty() {
             self.fold_last(made, &g.label);
+        }
+        if self.groups.is_empty()
+            && let Some(rec) = self.recorder.as_mut()
+        {
+            rec.close_group(&g.label, true, made > 0);
         }
         made
     }
@@ -1201,7 +1350,9 @@ impl Document {
         for (id, _) in order {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
-                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } | ObjectKind::Sim { .. })
+                || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
+                || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
                 || !self.scene.renders(id)
             {
                 continue;
@@ -1333,6 +1484,52 @@ impl Document {
         let mesh = self.eval.evaluate(&self.scene, id).mesh;
         let bytes = if ext == "svg" { uvlayout::svg(&mesh, size)?.into_bytes() } else { uvlayout::png(&mesh, size)? };
         craft_atomic_write(path, &bytes)
+    }
+
+    /// Write one layout picture per UDIM tile the mesh's UVs lie in, named `stem.1001.ext`,
+    /// `stem.1002.ext`, … next to `path`'s stem (`path` has the `.svg` or `.png` extension).
+    /// Returns the files written; a mesh whose UVs lie in no tile writes none and is an error.
+    pub fn export_uv_layout_udim(&mut self, path: &Path, object: Option<ObjectId>, size: u32) -> Result<Vec<std::path::PathBuf>, EngineError> {
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if ext != "svg" && ext != "png" {
+            return Err(EngineError::Invalid("export the UV layout to .svg or .png".into()));
+        }
+        self.sync_sculpt();
+        let id = match object {
+            Some(id) => id,
+            None => {
+                let ids: Vec<ObjectId> = self.scene.tree_order().into_iter().map(|(id, _)| id).collect();
+                ids.into_iter()
+                    .find(|id| {
+                        matches!(self.scene.get(*id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }))
+                            && self.scene.visible(*id)
+                            && self.eval.evaluate(&self.scene, *id).mesh.has_uvs()
+                    })
+                    .ok_or_else(|| EngineError::Invalid("no visible mesh has UVs".into()))?
+            }
+        };
+        if self.scene.get(id).is_none() {
+            return Err(EngineError::Invalid(format!("no object {}", id.0)));
+        }
+        let mesh = self.eval.evaluate(&self.scene, id).mesh;
+        let tiles = modelcraft_uvpack::udim_tiles(&mesh);
+        if tiles.is_empty() {
+            return Err(EngineError::Invalid("the UVs lie in no UDIM tile (1001 to 1100)".into()));
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("uv-layout").to_string();
+        let mut written = Vec::with_capacity(tiles.len());
+        for number in tiles {
+            let Some((column, row)) = modelcraft_uvpack::tile_of_number(number) else { continue };
+            let bytes = if ext == "svg" {
+                uvlayout::svg_tile(&mesh, size, column as u32, row as u32)?.into_bytes()
+            } else {
+                uvlayout::png_tile(&mesh, size, column as u32, row as u32)?
+            };
+            let file = path.with_file_name(format!("{stem}.{number}.{ext}"));
+            craft_atomic_write(&file, &bytes)?;
+            written.push(file);
+        }
+        Ok(written)
     }
 
     /// Total triangles of everything visible (for the status bar).

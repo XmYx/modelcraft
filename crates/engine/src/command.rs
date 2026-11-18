@@ -2,7 +2,7 @@
 
 use modelcraft_ops::deform::Deformer;
 use modelcraft_ops::primitives::Primitive;
-use modelcraft_scene::{Cloner, Material, ObjectId, StepOp, Transform};
+use modelcraft_scene::{Cloner, Field, Material, ObjectId, StepOp, Transform};
 use modelcraft_sculpt::Stroke;
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +107,12 @@ pub enum Command {
         kind: String,
         target: ObjectId,
     },
+    /// Add a falloff field (`sphere`, `box`, `linear`, `noise`) inside a deformer; the deformer
+    /// then acts only where the field is.
+    AddField {
+        kind: String,
+        target: ObjectId,
+    },
     Delete {
         ids: Vec<ObjectId>,
     },
@@ -144,6 +150,11 @@ pub enum Command {
     SetDeformer {
         id: ObjectId,
         deformer: Deformer,
+    },
+    /// Change a falloff field's shape, remap curve and blend mode.
+    SetField {
+        id: ObjectId,
+        field: Field,
     },
     /// Change a clone generator's layout and seed, and the target object of the surface and
     /// vertices layouts.
@@ -253,6 +264,19 @@ pub enum Command {
         id: ObjectId,
         thickness: f32,
     },
+    /// Give the mesh object `id` the UVs of the mesh object `source`: each corner takes the UV at
+    /// the closest point of the source's surface (in world space, so the objects may sit
+    /// anywhere), as a history step on `id`. `max_distance` is in world units; corners further
+    /// than that keep their UV. With `per_island` (the default) a face is looked up on one source
+    /// island only, so it never straddles a source seam.
+    TransferUvs {
+        id: ObjectId,
+        source: ObjectId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_distance: Option<f32>,
+        #[serde(default = "yes")]
+        per_island: bool,
+    },
     /// Move the vertices of the mesh being sculpted onto the surface of another object, no
     /// further than `reach` (in the sculpted object's units; a tenth of its size when left out).
     SculptProject {
@@ -293,6 +317,8 @@ pub enum Command {
     /// Tags, layers, user attributes, presets, pivots and instances:
     /// `{"cmd":"organize","op":"set_tag",…}` ([`crate::organize::OrganizeCommand`]).
     Organize(crate::organize::OrganizeCommand),
+    /// Hair and grooming: `{"cmd":"hair","op":"add","mesh":3}` ([`crate::hair::HairCommand`]).
+    Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
 }
@@ -305,6 +331,10 @@ fn two() -> u32 {
     2
 }
 
+fn yes() -> bool {
+    true
+}
+
 /// Command names with a one-line description (for `modelcraft-cli commands` and the agent channel).
 pub const COMMANDS: &[(&str, &str)] = &[
     ("add_primitive", "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent?"),
@@ -312,6 +342,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round) under target"),
+    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the deformer target"),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -322,6 +353,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_primitive", "Change a primitive's parameters: id, primitive"),
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
+    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
@@ -351,6 +383,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("sculpt_clip", "Move what lies on the normal's side of a plane onto it: id, point, normal"),
     ("sculpt_extract", "New object from the masked faces as a closed shell: id, thickness"),
+    ("transfer_uvs", "Give a mesh the UVs of another by closest-point lookup, as a history step: id, source, max_distance?, per_island?"),
     ("sculpt_project", "Move the sculpted mesh onto the surface of another object, as far as the mask allows: id, source, reach?"),
     ("sculpt_detail", "Step up or down a detail level, keeping the sculpted detail: id, op (up, down)"),
     (
@@ -377,6 +410,7 @@ impl Command {
             Command::AddSmoothCage { .. } => "Add smooth cage".into(),
             Command::AddCloner { kind, .. } => format!("Add {kind} clones"),
             Command::AddDeformer { kind, .. } => format!("Add {kind}"),
+            Command::AddField { kind, .. } => format!("Add {kind} field"),
             Command::Delete { .. } => "Delete".into(),
             Command::Duplicate { .. } => "Duplicate".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -387,6 +421,7 @@ impl Command {
             Command::SetPrimitive { .. } => "Primitive settings".into(),
             Command::SetCageLevels { .. } => "Smooth cage levels".into(),
             Command::SetDeformer { .. } => "Deformer settings".into(),
+            Command::SetField { .. } => "Field settings".into(),
             Command::SetCloner { .. } => "Clone settings".into(),
             Command::AddStep { op, .. } => op.name().into(),
             Command::SetStep { op, .. } => format!("Edit {}", op.name()),
@@ -441,6 +476,7 @@ impl Command {
             Command::SculptClip { .. } => "Clip to plane".into(),
             Command::SculptExtract { .. } => "Extract shell".into(),
             Command::SculptProject { .. } => "Project detail".into(),
+            Command::TransferUvs { .. } => "Transfer UVs".into(),
             Command::AddMesh { .. } => "Add mesh".into(),
             Command::SetPositions { .. } => "Set positions".into(),
             Command::Batch { label, .. } => label.clone().filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Batch".into()),
@@ -449,6 +485,7 @@ impl Command {
             Command::Anim(a) => a.label(),
             Command::Rig(r) => r.label(),
             Command::Organize(o) => o.label(),
+            Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
         }
     }
