@@ -139,6 +139,7 @@ mod tests {
                 selected: false,
                 show_mask: false,
                 patch_tint: false,
+                uv_checker: false,
                 roughness: 0.5,
             }]
         } else {

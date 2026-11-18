@@ -19,6 +19,8 @@ pub const MAX_RENDER_STRANDS: usize = 1_000_000;
 pub fn add_hair(builder: &mut SceneBuilder, scene: &Scene, eval: &mut Evaluator) -> Result<(), SceneError> {
     for o in scene.objects().iter().filter(|o| scene.visible(o.id)) {
         let (ObjectKind::Hair { hair }, Some(emitter)) = (&o.kind, o.parent) else { continue };
+        // A baked hair is drawn as it is at the scene's current frame.
+        let hair = hair.at_frame(scene.anim.frame);
         let mesh = eval.evaluate(scene, emitter).mesh;
         let wanted = hair.strand_count(&mesh).min(MAX_RENDER_STRANDS);
         if wanted == 0 {

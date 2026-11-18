@@ -270,6 +270,8 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 **U1**: craft-mesh-ops `unwrap_uvs` (craft-libs #1233) is still open and is a projection-chart unwrap on triangle slices, not a conformal solver, so ModelCraft carries its own UI-free `modelcraft-uv` crate (seams, automatic cuts, LSCM with pins, distortion measures) written to move to craft-libs; the editor and packing follow. TextureCraft auto-unwraps meshes without UVs today, and the Paint workspace only shows patches and hands off through GLB, so **U3** vertex colour painting is the cheapest real painting step.
 
+**Note for the render stream (UV checker in the viewport):** `modelcraft_render::buffers::MeshVertex` gained a `uv: [f32; 2]` (32 to 40 bytes, attribute 4, filled per corner by `mesh_data`, zero for shared-vertex sculpt data), `DrawItem`/`DrawSpec` gained `uv_checker`, and `flags.z == 2` in `shader.wgsl` selects the checker (1 is the patch tint). Anything that builds a `MeshVertex` or a `DrawItem` by hand needs the new field.
+
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|
 | **U1** UV editor, seams, unwrap, packing, checker and distortion display | 5 | 62.5 | 1.70 | 26 | — |
