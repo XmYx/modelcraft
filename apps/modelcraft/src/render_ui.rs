@@ -75,6 +75,7 @@ pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
             .into_iter()
             .chain(RenderAction::ALL.map(crate::actions::Action::Render))
             .chain(crate::bake_ui::BakeAction::ALL.map(crate::actions::Action::Bake))
+            .chain(crate::matgraph_ui::MatAction::ALL.map(crate::actions::Action::Material))
         {
             let b = egui::Button::new(a.label()).shortcut_text(a.shortcut_text(app));
             if ui.add(b).clicked() {

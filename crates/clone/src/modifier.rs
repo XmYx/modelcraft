@@ -13,15 +13,32 @@
 //! | `step`   | a ramp along the clone order, optionally cut into steps                      |
 //! | `delay`  | 0 to 1 over time, starting later for each clone (time based)                 |
 //! | `target` | how close the clone is to a target point; also pulls and turns toward it     |
+//! | `formula`| a formula over `i`, `n`, `t` (`i / (n - 1)`), `x`, `y`, `z` and `time`          |
+//!
+//! A formula is parsed once per run and its work is capped at [`MAX_FORMULA_WORK`] steps (clones
+//! times formula nodes); over the cap, or when it does not parse, the modifier changes nothing and
+//! [`Modifier::problem`] says why.
 //!
 //! Several modifiers apply one after the other, in order. Everything is total and bounded: every
 //! parameter is sanitized first, so hostile numbers give finite transforms, and the number of
 //! clones never changes.
 
 use glam::{EulerRot, Mat4, Quat, Vec3};
+use modelcraft_anim::expr::Expr;
 use serde::{Deserialize, Serialize};
 
 use crate::{Axis, CloneSet, MAX_DEG, MAX_LEN, MIN_SCALE};
+
+/// Most steps one formula modifier takes in one run: the clones times the nodes of its formula.
+pub const MAX_FORMULA_WORK: usize = 1 << 21;
+/// The names a formula modifier reads.
+pub const FORMULA_NAMES: &[&str] = &["i", "n", "t", "x", "y", "z", "time"];
+/// A formula factor is kept within this many times the change.
+const MAX_FORMULA_FACTOR: f64 = 10.0;
+
+fn default_formula() -> String {
+    "sin(t * tau + time * 2) * 0.5 + 0.5".into()
+}
 
 /// Longest time span a modifier accepts, in seconds.
 const MAX_SECONDS: f32 = 3600.0;
@@ -104,7 +121,7 @@ fn default_pull() -> f32 {
 }
 
 /// What a modifier does to the factor.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum Mode {
     /// The same change for every clone.
@@ -166,9 +183,16 @@ pub enum Mode {
         #[serde(default)]
         reach: f32,
     },
+    /// The factor is a formula over the clone: `i` (its index), `n` (the count), `t` (`i / (n -
+    /// 1)`, 0 to 1), `x`, `y`, `z` (where it sits in the generator) and `time` (seconds). The
+    /// value is kept within -10 to 10; a clone where it gives no number gets no change.
+    Formula {
+        #[serde(default = "default_formula")]
+        expr: String,
+    },
 }
 
-pub const MODES: &[&str] = &["plain", "random", "noise", "step", "delay", "target"];
+pub const MODES: &[&str] = &["plain", "random", "noise", "step", "delay", "target", "formula"];
 
 impl Mode {
     pub fn default_of(kind: &str) -> Option<Mode> {
@@ -179,6 +203,7 @@ impl Mode {
             "step" => Mode::Step { steps: 0, ease: Ease::Linear, reverse: false },
             "delay" => Mode::Delay { start: 0.0, stagger: 0.05, duration: 0.5, ease: Ease::Smooth, reverse: false },
             "target" => Mode::Target { pull: 0.5, aim: true, aim_axis: Axis::Z, reach: 0.0 },
+            "formula" => Mode::Formula { expr: default_formula() },
             _ => return None,
         })
     }
@@ -191,12 +216,13 @@ impl Mode {
             Mode::Step { .. } => "step",
             Mode::Delay { .. } => "delay",
             Mode::Target { .. } => "target",
+            Mode::Formula { .. } => "formula",
         }
     }
 }
 
 /// One clone modifier.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Modifier {
     #[serde(flatten)]
     pub mode: Mode,
@@ -263,11 +289,20 @@ impl Modifier {
 
     /// True when the result depends on the animation time.
     pub fn is_time_dependent(&self) -> bool {
-        match self.mode {
+        match &self.mode {
             Mode::Delay { .. } => true,
-            Mode::Noise { speed, .. } => speed != Vec3::ZERO,
+            Mode::Noise { speed, .. } => *speed != Vec3::ZERO,
+            // A text scan, not a parse: this runs on every cache-key check and every paint.
+            Mode::Formula { expr } => modelcraft_anim::expr::mentions(expr, "time"),
             _ => false,
         }
+    }
+
+    /// Why the modifier would change nothing over `clones` clones: a formula that does not parse,
+    /// reads a name the mode does not know, or needs more than [`MAX_FORMULA_WORK`] steps.
+    pub fn problem(&self, clones: usize) -> Option<String> {
+        let Mode::Formula { expr } = &self.mode else { return None };
+        formula_of(expr, clones).err()
     }
 
     pub fn needs_target(&self) -> bool {
@@ -277,6 +312,7 @@ impl Modifier {
     /// Every number brought into its range; non-finite numbers become the default.
     pub fn sanitized(self) -> Modifier {
         let mode = match self.mode {
+            Mode::Formula { expr } => Mode::Formula { expr: expr.chars().take(modelcraft_anim::expr::MAX_SOURCE).collect() },
             Mode::Plain => Mode::Plain,
             Mode::Random { seed, signed } => Mode::Random { seed, signed },
             Mode::Noise { seed, frequency, octaves, speed, signed } => Mode::Noise {
@@ -312,8 +348,15 @@ impl Modifier {
 
     /// Change every clone of `set`. The count, the order and the indices stay as they are.
     pub fn apply(&self, set: &mut CloneSet, ctx: &Context) {
-        let m = self.sanitized();
+        let m = self.clone().sanitized();
         let n = set.instances.len();
+        let formula = match &m.mode {
+            Mode::Formula { expr } => match formula_of(expr, n) {
+                Ok(e) => Some(e),
+                Err(_) => return,
+            },
+            _ => None,
+        };
         let target = ctx.target.filter(|t| t.is_finite());
         let time = if ctx.time.is_finite() { ctx.time.clamp(-1.0e7, 1.0e7) } else { 0.0 };
         if m.needs_target() && target.is_none() {
@@ -329,14 +372,15 @@ impl Modifier {
             if k == 0.0 {
                 continue;
             }
-            let f = m.factors(i, n, t, ctx.seed, time, target);
+            let f = m.factors(i, n, t, ctx.seed, time, target, formula.as_ref());
             let amount = |v: f32| v * k;
             let mut pos = t + m.position * f.position * amount(1.0);
             let turn = m.rotation * f.rotation * amount(1.0);
             let mut rot = q * Quat::from_euler(EulerRot::XYZ, turn.x.to_radians(), turn.y.to_radians(), turn.z.to_radians());
             let grow = if m.uniform_scale { Vec3::splat(m.scale.x) * f.scale } else { m.scale * f.scale };
             let size = (s * (Vec3::ONE + grow * amount(1.0)).max(Vec3::splat(MIN_SCALE))).max(Vec3::splat(MIN_SCALE));
-            if let (Mode::Target { pull, aim, aim_axis, .. }, Some(goal)) = (m.mode, target) {
+            if let (Mode::Target { pull, aim, aim_axis, .. }, Some(goal)) = (&m.mode, target) {
+                let (pull, aim, aim_axis) = (*pull, *aim, *aim_axis);
                 let near = k * f.target;
                 pos = pos.lerp(goal, (pull * near).clamp(0.0, 1.0));
                 if aim {
@@ -361,9 +405,25 @@ impl Modifier {
         }
     }
 
-    fn factors(&self, i: usize, n: usize, p: Vec3, ctx_seed: u32, time: f32, target: Option<Vec3>) -> Factors {
+    #[allow(clippy::too_many_arguments)]
+    fn factors(&self, i: usize, n: usize, p: Vec3, ctx_seed: u32, time: f32, target: Option<Vec3>, formula: Option<&Expr>) -> Factors {
         let i32_ = i as u32;
         match self.mode {
+            Mode::Formula { .. } => {
+                let Some(e) = formula else { return Factors::all(0.0) };
+                let t = if n <= 1 { 1.0 } else { i as f64 / (n - 1) as f64 };
+                let v = e.eval(&|name| match name {
+                    "i" => Some(i as f64),
+                    "n" => Some(n as f64),
+                    "t" => Some(t),
+                    "x" => Some(f64::from(p.x)),
+                    "y" => Some(f64::from(p.y)),
+                    "z" => Some(f64::from(p.z)),
+                    "time" => Some(f64::from(time)),
+                    _ => None,
+                });
+                Factors::all(v.map_or(0.0, |v| v.clamp(-MAX_FORMULA_FACTOR, MAX_FORMULA_FACTOR) as f32))
+            }
             Mode::Plain => Factors::all(1.0),
             Mode::Random { seed, signed } => {
                 let s = seed ^ ctx_seed.rotate_left(16);
@@ -423,6 +483,19 @@ impl Modifier {
             }
         }
     }
+}
+
+/// Parse a formula and check it may run over `clones` clones.
+fn formula_of(expr: &str, clones: usize) -> Result<Expr, String> {
+    let e = Expr::parse(expr).map_err(|e| format!("its formula does not work: {e}"))?;
+    if let Some(v) = e.variables().iter().find(|v| !FORMULA_NAMES.contains(&v.as_str())) {
+        return Err(format!("its formula reads {v:?}, which a clone modifier does not know"));
+    }
+    let work = clones.saturating_mul(e.cost());
+    if work > MAX_FORMULA_WORK {
+        return Err(format!("its formula needs {work} steps over {clones} clones, more than the {MAX_FORMULA_WORK} allowed"));
+    }
+    Ok(e)
 }
 
 /// The factor each channel gets for one clone.

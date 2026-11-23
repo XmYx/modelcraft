@@ -20,6 +20,7 @@ modelcraft-clone = { workspace = true }
 modelcraft-hair = { workspace = true }
 modelcraft-sculpt = { workspace = true }
 modelcraft-spline = { workspace = true }
+modelcraft-matgraph = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

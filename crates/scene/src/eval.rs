@@ -440,6 +440,16 @@ fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
         }
         key = h;
     }
+    // A formula deformer that reads the time or the frame changes with the frame.
+    if is_mesh
+        && scene
+            .children(id)
+            .iter()
+            .any(|c| matches!(scene.get(*c).map(|o| &o.kind), Some(ObjectKind::Deformer { deformer, .. }) if deformer.is_time_dependent()))
+    {
+        key = (key ^ scene.anim.frame.to_bits()).wrapping_mul(0x0100_0000_01b3);
+        key = (key ^ scene.anim.time.fps.to_bits()).wrapping_mul(0x0100_0000_01b3);
+    }
     if matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
         // A clone modifier also depends on its target object, and on the time when it is animated.
         let mut h = key;
@@ -505,6 +515,10 @@ fn apply_modifiers(scene: &Scene, id: ObjectId, seed: u32, set: &mut modelcraft_
             {
                 stack.push(f.transform.matrix().inverse() * to_modifier, field.clone());
             }
+        }
+        if let Some(problem) = modifier.problem(set.instances.len()) {
+            problems.push(format!("{} was skipped: {problem}", o.name));
+            continue;
         }
         let weight = |p: Vec3| stack.weight(p);
         modifier.apply(set, &modelcraft_clone::Context { seed, time: seconds, target: point, weight: &weight });

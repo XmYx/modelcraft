@@ -115,12 +115,12 @@ pub enum Command {
         #[serde(default = "default_axis")]
         axis: u32,
     },
-    /// Add a deformer (`bend`, `twist`, `taper`, `ripple`, `round`) under a mesh.
+    /// Add a deformer (`bend`, `twist`, `taper`, `ripple`, `round`, … `formula`) under a mesh.
     AddDeformer {
         kind: String,
         target: ObjectId,
     },
-    /// Add a clone modifier (`plain`, `random`, `noise`, `step`, `delay`, `target`) inside a clone
+    /// Add a clone modifier (`plain`, `random`, `noise`, `step`, `delay`, `target`, `formula`) inside a clone
     /// generator.
     AddCloneModifier {
         kind: String,
@@ -403,7 +403,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
     ("add_array", "Add an array generator (linear, radial) around input?: real copies joined into one mesh"),
     ("add_symmetry", "Add a symmetry generator around input? mirrored across axis (0 X, 1 Y, 2 Z)"),
-    ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap) under target"),
+    (
+        "add_deformer",
+        "Add a deformer (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap, formula) under target",
+    ),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_clone_modifier", "Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner"),
     (

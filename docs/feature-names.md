@@ -28,7 +28,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Disc, Polygon, Tube, Capsule, Pyramid, Tetrahedron, Octahedron, Dodecahedron, Icosahedron, Landscape (primitives); Hole radius, Feature scale | disc, n-gon, tube, capsule, pyramid, platonic solid and landscape primitives | Geometry words and plain nouns | Use |
-| Bulge, Squash, Smooth, Delta Smooth, Displace, Shrink Wrap (deformers); Reach, Fit to parent, Within box | bulge, squash-and-stretch, smoothing, delta smoothing, displacement and shrink-wrap deformers; limited / unlimited / within-box modes | Generic geometry words; Reach describes how far the effect goes | Use |
+| Bulge, Squash, Smooth, Delta Smooth, Displace, Shrink Wrap, Formula (deformers); Reach, Fit to parent, Within box; Move along | bulge, squash-and-stretch, smoothing, delta smoothing, displacement, shrink-wrap and formula deformers; limited / unlimited / within-box modes; the formula deformer's direction | Generic geometry words; Reach describes how far the effect goes | Use |
 | Radial, Cylinder, Cone, Capsule, Torus, Random, Formula (falloff fields); Falloff layers, Switched on, Opacity | radial, cylinder, cone, capsule, torus, random and formula fields; the field-layer list with its enable switch and opacity | Geometry words and plain descriptions; the formula field uses the expression language of the animation crate | Use |
 | Connect, Thicken, Reduce, Boolean (generators); Union, Subtract, Intersect; Join distance, Thickness, Grow, Keep, Operation | joining, solidify, polygon reduction and boolean generators | Plain geometry words; the reference product's generator names are not used as labels beyond these generic verbs | Use |
 | Round (deformer) | spherify | Generic | Use |
@@ -74,7 +74,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Cloth, Pin, Stretch, Shear, Bend, Thickness, Self Collision, Wind, Turbulence | cloth simulation settings | Generic physical terms; no reference product's cloth module or setting names | Use |
 | Simulation, Cache, Bake, Clear Cache, Start Frame, Substeps, Seed | simulation caches and bake commands | Generic words; the references' dynamics and cache product names are not used as labels | Use |
 | Hair, Guides, Strands, Density, Clump, Frizz, Comb, Cut, Length, Puff, Smooth (hair tools) | the references' curve-hair and fur systems, their guide and brush names | Plain English words; no reference product, module or brush name (with trademarks or prefixes) is used | Use |
-| Clone Modifier; modes Plain, Random, Noise, Step, Delay, Target; Move, Turn, Grow, Tint, Strength | effectors and their parameter tabs | "Effector" is the reference's term, so it is not used; "Shader" is called Noise because that is what the mode is, and "Time" is covered by Delay | Use |
+| Clone Modifier; modes Plain, Random, Noise, Step, Delay, Target, Formula; Move, Turn, Grow, Tint, Strength | effectors and their parameter tabs | "Effector" is the reference's term, so it is not used; "Shader" is called Noise because that is what the mode is, and "Time" is covered by Delay | Use |
 
 Names deliberately **not** used as labels: the reference products' names and their branded features
 (their remesher, sculpt-mesh, layer and brush product names, object/attribute manager names,

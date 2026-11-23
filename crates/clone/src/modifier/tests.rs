@@ -386,6 +386,7 @@ proptest! {
             Mode::Target { aim_axis, .. } => Mode::Target { pull: p1, aim: true, aim_axis, reach: p2 },
             Mode::Random { .. } => Mode::Random { seed, signed: seed % 2 == 0 },
             Mode::Plain => Mode::Plain,
+            Mode::Formula { .. } => Mode::Formula { expr: format!("x * {} + sin(time * {}) / (i - {})", p1, p2, seed % 7) },
         };
         let mut set = row(count);
         let expected = set.len();
@@ -398,7 +399,7 @@ proptest! {
         }
         // Sanitizing is idempotent and the result round-trips through JSON.
         let s = m.sanitized();
-        prop_assert_eq!(s.sanitized(), s);
+        prop_assert_eq!(s.clone().sanitized(), s.clone());
         let json = serde_json::to_string(&s).expect("json");
         let back: Modifier = serde_json::from_str(&json).expect("back");
         prop_assert_eq!(back, s);
@@ -444,5 +445,57 @@ proptest! {
         for i in 0..count as usize {
             prop_assert!(b.instances[i].matrix.w_axis.y >= a.instances[i].matrix.w_axis.y - 1e-5);
         }
+    }
+}
+
+#[test]
+fn a_formula_gives_each_clone_its_factor() {
+    // Factor `i`: clone i moves up by i times the change (0.5 by default).
+    let mut m = made("formula");
+    m.mode = Mode::Formula { expr: "i".into() };
+    let mut set = row(5);
+    m.apply(&mut set, &ctx(0.0, None));
+    for i in 0..5 {
+        assert!((pos(&set, i).y - 0.5 * i as f32).abs() < 1e-5, "{i}: {}", pos(&set, i));
+    }
+    // `t`, `n`, the place and the time; the factor is kept within -10 to 10.
+    m.mode = Mode::Formula { expr: "t * n + x * 0 + time".into() };
+    assert!(m.is_time_dependent());
+    let mut set = row(3);
+    m.apply(&mut set, &ctx(1.0, None));
+    assert!((pos(&set, 2).y - 0.5 * 4.0).abs() < 1e-5, "t = 1, n = 3, time = 1");
+    m.mode = Mode::Formula { expr: "1000".into() };
+    assert!(!m.is_time_dependent());
+    let mut set = row(2);
+    m.apply(&mut set, &ctx(0.0, None));
+    assert!((pos(&set, 0).y - 5.0).abs() < 1e-4, "clamped to 10 times 0.5");
+    // Where the formula gives no number, that clone is left alone.
+    m.mode = Mode::Formula { expr: "1 / (i - 1)".into() };
+    let mut set = row(3);
+    m.apply(&mut set, &ctx(0.0, None));
+    assert_eq!(pos(&set, 1).y, 0.0);
+    assert!((pos(&set, 0).y + 0.5).abs() < 1e-5);
+}
+
+#[test]
+fn a_formula_over_its_work_cap_or_with_unknown_names_changes_nothing() {
+    let long = format!("1{}", "+1".repeat(250));
+    let cost = Expr::parse(&long).unwrap().cost();
+    let mut m = made("formula");
+    m.mode = Mode::Formula { expr: long };
+    let fits = MAX_FORMULA_WORK / cost;
+    assert!(fits < crate::MAX_CLONES, "the cap must bind within the clone limit");
+    assert!(m.problem(fits).is_none());
+    assert!(m.problem(fits + 1).is_some_and(|p| p.contains("steps")));
+    let mut set = row((fits + 1) as u32);
+    let before: Vec<Vec3> = (0..set.len()).map(|i| pos(&set, i)).collect();
+    m.apply(&mut set, &ctx(0.0, None));
+    assert!((0..set.len()).all(|i| pos(&set, i) == before[i]), "nothing ran");
+    for bad in ["frame", "@2.translate.x", "(", ""] {
+        m.mode = Mode::Formula { expr: bad.into() };
+        assert!(m.problem(3).is_some(), "{bad:?}");
+        let mut set = row(3);
+        m.apply(&mut set, &ctx(0.0, None));
+        assert_eq!(pos(&set, 2), Vec3::new(2.0, 0.0, 0.0), "{bad:?}");
     }
 }

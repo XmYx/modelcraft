@@ -5,7 +5,8 @@
 //! (`rig op=set_expression`), so it is ordered with the other constraints, guarded against
 //! cycles, capped in work, solved once per frame change, saved in the project and undone like
 //! any command. The field then shows the formula as text; typing a plain number there removes
-//! the formula and sets the value, and an empty field removes it and keeps the value.
+//! the formula and sets the value (one undo step), and an empty field removes it and keeps the
+//! value.
 //!
 //! A formula that does not parse stays in the field with its error, marked by a frame and a `!`
 //! (and in the field's accessible description), until it is fixed or Escape drops it. A formula
@@ -213,12 +214,18 @@ pub fn set(app: &mut ModelApp, id: ObjectId, path: &str, expr: &str) -> bool {
     ok
 }
 
-/// Remove the formula on `path` (if any) and set the attribute to `value`.
+/// Remove the formula on `path` (if any) and set the attribute to `value`, as one undo step.
 pub fn replace_with_value(app: &mut ModelApp, id: ObjectId, path: &str, value: f64) -> bool {
-    if app.doc.scene.constraints.formula(id, path).is_some() && !set(app, id, path, "") {
-        return false;
+    let set_value = Command::Anim(AnimCommand::SetAttr { id, path: path.to_string(), value });
+    if app.doc.scene.constraints.formula(id, path).is_none() {
+        return app.run(set_value);
     }
-    app.run(Command::Anim(AnimCommand::SetAttr { id, path: path.to_string(), value }))
+    let remove = Command::Rig(RigCommand::SetExpression { target: id, path: path.to_string(), expr: String::new() });
+    let ok = app.run(Command::Batch { label: Some(tl!("Replace formula with a number")), commands: vec![remove, set_value] });
+    if ok {
+        app.status = crate::tlf!("Formula removed from {attribute}", attribute = crate::anim_ui::attr_label(path));
+    }
+    ok
 }
 
 #[cfg(test)]

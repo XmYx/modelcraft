@@ -201,7 +201,7 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::add_smooth_cage` | Add a smooth cage generator around input? with levels |
 | `cmd::add_array` | Add an array generator (linear, radial) around input?: real copies joined into one mesh |
 | `cmd::add_symmetry` | Add a symmetry generator around input? mirrored across axis (0 X, 1 Y, 2 Z) |
-| `cmd::add_deformer` | Add a deformer (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap) under target |
+| `cmd::add_deformer` | Add a deformer (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap, formula) under target |
 | `cmd::add_cloner` | Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input |
 | `cmd::add_clone_modifier` | Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner |
 | `cmd::add_field` | Add a falloff field (sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random, formula) inside the target deformer or clone modifier |

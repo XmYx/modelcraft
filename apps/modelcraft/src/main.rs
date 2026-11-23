@@ -52,6 +52,9 @@ mod field_ui_tests;
 mod formula_field;
 #[cfg(test)]
 mod formula_field_tests;
+mod formula_modes_ui;
+#[cfg(test)]
+mod formula_modes_ui_tests;
 mod generator_ui;
 #[cfg(test)]
 mod generator_ui_tests;
@@ -66,6 +69,9 @@ mod key_marker;
 mod key_marker_tests;
 mod keys;
 mod material_ui;
+mod matgraph_ui;
+#[cfg(test)]
+mod matgraph_ui_tests;
 mod mesh_tools;
 mod modeling_ui;
 #[cfg(test)]

@@ -2728,6 +2728,7 @@ name = "modelcraft-clone"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-anim",
  "modelcraft-mesh",
  "proptest",
  "serde",
@@ -2812,6 +2813,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "modelcraft-matgraph"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "modelcraft-mesh"
 version = "0.1.0"
 dependencies = [
@@ -2827,6 +2838,7 @@ name = "modelcraft-ops"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-anim",
  "modelcraft-field",
  "modelcraft-mesh",
  "modelcraft-spline",
@@ -2850,6 +2862,7 @@ dependencies = [
  "glam 0.30.10",
  "log",
  "modelcraft-hair",
+ "modelcraft-matgraph",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-scene",
@@ -2869,6 +2882,7 @@ dependencies = [
  "modelcraft-clone",
  "modelcraft-field",
  "modelcraft-hair",
+ "modelcraft-matgraph",
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-sculpt",

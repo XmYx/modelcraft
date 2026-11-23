@@ -809,7 +809,9 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
         }
         ObjectKind::CloneModifier { modifier, target } => {
-            egui::CollapsingHeader::new(tl!("Clone Modifier")).default_open(true).show(ui, |ui| crate::modifier_ui::fields(app, ui, id, *modifier, *target));
+            egui::CollapsingHeader::new(tl!("Clone Modifier"))
+                .default_open(true)
+                .show(ui, |ui| crate::modifier_ui::fields(app, ui, id, modifier.clone(), *target));
             crate::field_layers_ui::list(app, ui, id);
         }
         ObjectKind::Cloner { cloner, target } => {
@@ -818,7 +820,7 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Deformer { deformer, limits, target } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind()))
                 .default_open(true)
-                .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
+                .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, deformer.clone(), *limits, *target));
             crate::field_layers_ui::list(app, ui, id);
         }
         ObjectKind::Light { light } => {
@@ -840,6 +842,10 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             | ObjectKind::Instance { .. }
     ) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
+            if obj.material.graph.is_some() {
+                // The graph's surface node decides these where it renders; say so where they are.
+                ui.label(RichText::new(tl!("This material has a node graph: its surface node sets the render's colour, metallic, roughness and emission. Edit them in Material Nodes.")).color(theme::TEXT_DIM));
+            }
             let mut m = obj.material.clone();
             let mut rgb = [m.base_color[0], m.base_color[1], m.base_color[2]];
             ui.horizontal(|ui| {
@@ -1242,6 +1248,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::render_ui::show(app, ctx);
     crate::bake_ui::show(app, ctx);
     crate::scene_nodes_ui::show(app, ctx);
+    crate::matgraph_ui::show(app, ctx);
     crate::picture_viewer::show(app, ctx);
     crate::script_ui::show(app, ctx);
     crate::plugin_ui::show(app, ctx);
