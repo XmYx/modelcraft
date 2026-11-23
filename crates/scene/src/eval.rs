@@ -183,28 +183,12 @@ impl Evaluator {
         let result = match &obj.kind {
             ObjectKind::Mesh { .. } => {
                 let mut e = self.steps_output(scene, id, usize::MAX);
-                let deformers: Vec<(Mat4, crate::Deformer, crate::FieldStack)> = scene
-                    .children(id)
-                    .into_iter()
-                    .filter_map(|c| scene.get(c))
-                    .filter(|c| c.visible)
-                    .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.local_matrix().inverse(), *deformer, scene.field_stack(c.id))),
-                        _ => None,
-                    })
-                    .collect();
-                if !deformers.is_empty() {
-                    let mut m = (*e.mesh).clone();
-                    for (to_local, d, fields) in deformers {
-                        if fields.is_empty() {
-                            d.apply(&mut m, to_local);
-                        } else {
-                            d.apply_weighted(&mut m, to_local, &|p| fields.weight(p));
-                        }
-                    }
-                    e.mesh = Arc::new(m);
+                // The shrink-wrap targets of the deformer stack, evaluated first.
+                let mut targets = crate::rig::Targets::new();
+                for t in crate::rig::stack_targets(scene, id) {
+                    targets.insert(t, self.evaluate_depth(scene, t, depth + 1).mesh);
                 }
-                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
+                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh, &targets);
                 if let Some(m) = skinned {
                     e.mesh = Arc::new(m);
                 }
@@ -358,6 +342,15 @@ fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
 /// target sits relative to it, which the subtree revision does not cover.
 fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
     let mut key = scene.deep_rev(id);
+    // A shrink-wrap also depends on its target object and on where it sits relative to the mesh.
+    let is_mesh = matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }));
+    for t in if is_mesh { crate::rig::stack_targets(scene, id) } else { Vec::new() } {
+        let mut h = key ^ scene.deep_rev(t).rotate_left(29);
+        for f in target_frame(scene, id, t).to_cols_array() {
+            h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);
+        }
+        key = h;
+    }
     if matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
         // A clone modifier also depends on its target object, and on the time when it is animated.
         let mut h = key;

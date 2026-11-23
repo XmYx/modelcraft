@@ -223,10 +223,9 @@ Limits of what exists:
   number; when the scripting crate lands they can call into it instead of growing.
 - Deformer stack (owned by the animation and rigging stream: blend shapes, lattice / FFD,
   clusters; the parametric deformers such as bend, shear, wrap and spline wrap belong to the
-  procedural-modeling stream): the stack deformers and skins run in child order *after* the
-  parametric deformers, whose loop in `eval.rs` this stream did not touch. One order for both
-  kinds needs that loop to hand its deformers to `rig::apply_stack`; until then a bend always
-  runs before a lattice. Lattice control points and cluster weights are edited by number and by
+  procedural-modeling stream): the parametric deformers (bend, shear, bulge, shrink-wrap…) now
+  run inside `rig::apply_stack`, in child order with the stack deformers and skins, so a bend and
+  a lattice have one order that `move_in_stack` changes. Lattice control points and cluster weights are edited by number and by
   command, not picked or painted in the viewport; a lattice only moves points inside its box;
   blend-shape targets are made from another mesh and are not edited in place; shape offsets are
   saved as JSON, not as a blob.
