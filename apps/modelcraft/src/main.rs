@@ -1,6 +1,6 @@
 //! ModelCraft desktop app.
 //!
-//! Usage: `modelcraft [--demo model|sculpt] [--workspace …] [--quad] [--screenshot <file.png>]
+//! Usage: `modelcraft [--demo model|sculpt] [--workspace …] [--quad] [--screenshot <file.png>] [--screenshot-state <name>]
 //! [--bench-viewport <frames>] [file]`; `--help` prints the options.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
@@ -80,6 +80,7 @@ mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;
 mod shelf;
+mod shot_state;
 mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
