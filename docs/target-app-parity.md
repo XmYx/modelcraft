@@ -195,7 +195,7 @@ Weight: 4
 | Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | P | S | Disc (with a hole), polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron and icosahedron are Create-menu primitives with editable parameters and UVs; the helix waits for splines |
 | Extruded 3D text | C M | M | M | |
 | Terrain / landscape generator | C | D | M | Seeded fractal-noise height field: size, height, segments, feature scale, octaves and seed in Properties; no erosion or sculpt-in-place yet |
-| Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
+| Extrude, lathe, loft and sweep generators from splines | C M | D | L | Extrude (axis, steps, caps, holes from nested splines), revolve (any angle, caps, axis points shared), loft (aligned sections, smooth or straight, caps) and sweep (rotation-minimizing frame, end scale, twist, roll, caps) as live generators over spline children, with UVs, undo, commands, export and nesting inside other generators |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |
 | Live polygon reduction generator | C | M | M | |
@@ -209,8 +209,8 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Spline primitives: circle, rectangle, arc, star, helix, text outline | C M | M | M | |
-| Pen tool: Bézier and B-spline drawing and point editing | C M | M | M | |
+| Spline primitives: circle, rectangle, arc, star, helix, text outline | C M | P | M | Circle (ellipse), rectangle (rounded corners), star, n-side, arc (open, chord, pie) and helix (or spiral) on any of three planes, each with a Properties page and a choice of fixed, uniform or adaptive intermediate points; no text outline yet (3D text builds on the shared spline type) |
+| Pen tool: Bézier and B-spline drawing and point editing | C M | P | M | A pen (click adds a point, drag pulls out a smooth handle, click the first point to close, Enter, Backspace, Escape), points and handles drawn on the selected spline and dragged in the view's plane, double-click inserts, Delete removes, a Properties list of points with numeric fields and handle modes; a curve's type switches between polyline, Bézier and B-spline; the pen draws Bézier curves; no snapping and no rectangle selection of points |
 | Spline operations: chamfer, offset, outline, 2D booleans | C M | M | M | |
 | Objects placed or bent along a spline | C M | M | M | |
 | NURBS curves: degree, knots, weighted control points | M | M | L | |

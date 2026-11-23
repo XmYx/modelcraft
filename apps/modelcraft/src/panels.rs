@@ -555,6 +555,14 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
                 p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
             }
         }
+        ObjectKind::SplineGenerator { .. } => {
+            // A profile and the surface it makes.
+            let g = Color32::from_rgb(130, 210, 120);
+            p.circle_stroke(c + egui::vec2(0.0, -3.5), 2.5, egui::Stroke::new(1.2, g));
+            p.line_segment([c + egui::vec2(-2.5, -3.5), c + egui::vec2(-4.0, 4.5)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(2.5, -3.5), c + egui::vec2(4.0, 4.5)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(-4.0, 4.5), c + egui::vec2(4.0, 4.5)], egui::Stroke::new(1.0, g));
+        }
         ObjectKind::Spline { .. } => {
             // A curve with a handle.
             let k = Color32::from_rgb(130, 200, 240);
@@ -753,6 +761,11 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
         }
+        ObjectKind::SplineGenerator { generator } => {
+            egui::CollapsingHeader::new(crate::spline_gen_ui::kind_label(generator.kind()))
+                .default_open(true)
+                .show(ui, |ui| crate::spline_gen_ui::fields(app, ui, id, generator));
+        }
         ObjectKind::Spline { source, tess } => {
             egui::CollapsingHeader::new(tl!("Spline")).default_open(true).show(ui, |ui| crate::spline_ui::fields(app, ui, id, source, *tess));
         }
@@ -776,7 +789,12 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
     }
     if matches!(
         obj.kind,
-        ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Instance { .. }
+        ObjectKind::Mesh { .. }
+            | ObjectKind::SmoothCage { .. }
+            | ObjectKind::Array { .. }
+            | ObjectKind::Symmetry { .. }
+            | ObjectKind::SplineGenerator { .. }
+            | ObjectKind::Instance { .. }
     ) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
             let mut m = obj.material.clone();

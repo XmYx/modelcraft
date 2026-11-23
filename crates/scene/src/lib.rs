@@ -30,6 +30,7 @@ pub mod rig;
 mod rle;
 pub mod sim;
 pub mod snap;
+pub mod spline_gen;
 pub mod splines;
 pub mod variants;
 
@@ -51,6 +52,7 @@ use serde::{Deserialize, Serialize};
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
 pub use eval::{Evaluated, Evaluator, Instances, StepError};
 pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
+pub use spline_gen::SplineGen;
 pub use splines::{SplineEval, SplineSource};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
@@ -645,6 +647,11 @@ pub enum ObjectKind {
         #[serde(default)]
         tess: Tessellation,
     },
+    /// Shows a surface made from the splines inside it: extrude, revolve, loft or sweep
+    /// ([`spline_gen`]).
+    SplineGenerator {
+        generator: SplineGen,
+    },
 }
 
 impl ObjectKind {
@@ -666,6 +673,7 @@ impl ObjectKind {
             ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
             ObjectKind::Spline { .. } => "Spline",
+            ObjectKind::SplineGenerator { .. } => "Spline generator",
         }
     }
 }
@@ -1170,7 +1178,14 @@ impl Scene {
     pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
         self.children(id).into_iter().find(|c| {
             self.get(*c).is_some_and(|o| {
-                matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                matches!(
+                    o.kind,
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             })
         })
     }
@@ -1242,6 +1257,8 @@ impl Scene {
     }
 }
 
+#[cfg(test)]
+mod spline_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

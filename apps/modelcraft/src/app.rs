@@ -259,6 +259,8 @@ pub struct ModelApp {
     pub anim: crate::anim_ui::AnimUi,
     /// The Simulation panel: the bake in progress.
     pub sim: crate::sim_ui::SimUi,
+    /// The pen tool and the selected spline points ([`crate::spline_pen`]).
+    pub spline: crate::spline_pen::SplineUi,
     /// Hair grooming: brush, symmetry, the stroke in progress.
     pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
@@ -417,6 +419,7 @@ impl ModelApp {
             recovery_dir: None,
             anim: Default::default(),
             sim: Default::default(),
+            spline: Default::default(),
             groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
@@ -640,7 +643,13 @@ impl ModelApp {
         self.active().filter(|id| {
             matches!(
                 self.doc.scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         })
     }
@@ -805,6 +814,10 @@ impl ModelApp {
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
+                // Selected spline points go first; with none selected it deletes objects as before.
+                if crate::spline_pen::delete_points(self) {
+                    return;
+                }
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
                     let op = match self.mode {
@@ -1441,6 +1454,9 @@ impl ModelApp {
             return;
         }
         if crate::sculpt_groups_ui::escape(self, ctx) {
+            return;
+        }
+        if crate::spline_pen::keys(self, ctx) {
             return;
         }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {

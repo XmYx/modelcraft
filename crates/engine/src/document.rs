@@ -836,7 +836,13 @@ impl Document {
         if let Some(i) = input
             && !matches!(
                 self.scene.get(i).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         {
             return invalid("a generator needs a mesh or another generator as its input");
@@ -1084,6 +1090,11 @@ impl Document {
                     && (self.scene.get(*t).is_none() || Some(*t) == mesh || *t == *id || mesh.is_some_and(|m| self.scene.subtree(m).contains(t)))
                 {
                     return invalid("the target must be another object, not the mesh being deformed or anything inside it");
+                }
+                if let (Some(t), Some(m)) = (target, mesh)
+                    && modelcraft_scene::rig::target_reaches(&self.scene, *t, m)
+                {
+                    return invalid("that target is itself shrink-wrapped to this mesh: the wraps would form a loop");
                 }
                 match &mut self.scene.edit(*id)?.kind {
                     ObjectKind::Deformer { deformer: d, limits: l, target: tg } => {

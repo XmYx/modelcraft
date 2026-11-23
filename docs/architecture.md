@@ -37,6 +37,12 @@ ModelCraft is a Cargo workspace of UI-free core crates with the app on top.
 - **Scene**: a flat list of objects in tree order. A mesh object = source (primitive parameters or a
   stored mesh) + steps (`StepOp`). A smooth cage subdivides its first mesh child; deformer children
   bend their parent. Revisions come from one process-wide counter.
+- **Splines**: a spline is an object (`ObjectKind::Spline`) with no mesh: a primitive's numbers or
+  edited points (`modelcraft_spline::Spline`), and a tessellation mode; the evaluator caches the
+  tessellated curve per object (`Evaluator::spline`). A spline generator
+  (`ObjectKind::SplineGenerator`: extrude, revolve, loft, sweep, in `modelcraft_ops::spline_gen`)
+  shows a mesh built from the splines inside it; its cache key covers its children, so moving a
+  point re-evaluates it, and it nests inside arrays, symmetries and other generators like a mesh.
 - **Evaluation**: `Evaluator::steps_output` caches the output of every step; when an object changes it
   compares the new step list with the cached one and re-runs only from the first difference. Final
   meshes (with deformers and cages) are cached by a combined revision of the subtree. A step whose
