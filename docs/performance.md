@@ -1041,9 +1041,14 @@ overlap, so the number of pairs tested grows with the length of the intersection
 | 65,024 | 195 ms | 1,466 | 11,435 | 97,834 |
 | 261,120 | 927 ms | 2,930 | 22,612 | 387,416 |
 
-Limits that bound the work and memory (`boolean::Limits`): 2,000,000 triangles in either input,
-40,000,000 overlapping pairs, 60,000,000 grid entries, and 4,000,000,000 triangle evaluations of the
-winding number for parts no cut reaches. Each is covered by a test that exceeds it.
+Limits that bound the work and memory (`boolean::Limits`). The editor uses `Limits::interactive()`:
+300,000 triangles per input, 1,000,000 overlapping pairs, 4,000,000 grid entries, 60,000,000 grid
+cells and entries walked, and 60,000,000 triangle evaluations of the winding number for parts no
+cut reaches; a run that passes one stops with an error at once. `Limits::batch()` allows 2,000,000
+triangles, 40,000,000 pairs and 4,000,000,000 evaluations for runs nobody waits on. A result that is
+not closed is retried at most twice (each attempt has the same caps), and a boolean object folds at
+most 16 meshes. Each limit is covered by a test that exceeds it; triangulating one cut piece is
+capped at 60,000,000 segment and point tests.
 
 ## How the numbers stay low
 

@@ -55,6 +55,9 @@ pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag,
 pub use spline_gen::SplineGen;
 pub use splines::{SplineEval, SplineSource};
 
+/// Most inputs a generator reads, however many children it has (the command refuses more; this
+/// holds for a file or a reparenting that made more).
+pub const MAX_GENERATOR_INPUTS: usize = 1_000;
 /// Deepest object nesting the scene accepts (hostile files, cycles).
 pub const MAX_DEPTH: usize = 64;
 /// Most objects in one scene.
@@ -1200,7 +1203,7 @@ impl Scene {
     /// that joins them, the first one for the others.
     pub fn generator_inputs(&self, id: ObjectId, generator: &generator::Generator) -> Vec<ObjectId> {
         let all = self.children(id).into_iter().filter(|c| self.get(*c).is_some_and(|o| o.kind.makes_geometry()));
-        if generator.takes_many() { all.collect() } else { all.take(1).collect() }
+        if generator.takes_many() { all.take(MAX_GENERATOR_INPUTS).collect() } else { all.take(1).collect() }
     }
 
     pub fn visible(&self, id: ObjectId) -> bool {

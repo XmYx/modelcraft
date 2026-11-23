@@ -143,6 +143,7 @@ pub(crate) fn arrange(a: &Solid, b: &Solid, base: u32, limits: &Limits) -> Resul
         }
     }
     let mut stamp = vec![u32::MAX; b.tris.len()];
+    let mut visits: u64 = 0;
     let mut vertex_of: HashMap<(Side, u32, u32), u32> = HashMap::new();
     for ta in 0..a.tris.len() as u32 {
         let abox = &a.boxes[ta as usize];
@@ -150,10 +151,20 @@ pub(crate) fn arrange(a: &Solid, b: &Solid, base: u32, limits: &Limits) -> Resul
             continue;
         }
         let r = grid.range(abox.0, abox.1);
+        // The cells a box covers are known before they are walked: charge them first.
+        let cells = ((r[0].1 - r[0].0 + 1) * (r[1].1 - r[1].0 + 1) * (r[2].1 - r[2].0 + 1)) as u64;
+        visits = visits.saturating_add(cells);
+        if visits > limits.max_grid_visits {
+            return Err(BoolError::TooLarge("the triangles are too long and thin to find their overlaps within the limit".into()));
+        }
         for x in r[0].0..=r[0].1 {
             for y in r[1].0..=r[1].1 {
                 for z in r[2].0..=r[2].1 {
                     let Some(list) = grid.cells.get(&grid.key(x, y, z)) else { continue };
+                    visits = visits.saturating_add(list.len() as u64);
+                    if visits > limits.max_grid_visits {
+                        return Err(BoolError::TooLarge("the triangles are too long and thin to find their overlaps within the limit".into()));
+                    }
                     for &tb in list {
                         if stamp[tb as usize] == ta {
                             continue;

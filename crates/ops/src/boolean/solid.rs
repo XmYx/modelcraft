@@ -112,10 +112,12 @@ impl Solid {
             let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
             let n = (b - a).cross(c - a);
             let len = n.length();
-            if len <= 0.0 || !len.is_finite() {
-                return Err(BoolError::Invalid(format!("{name} has a triangle with no area")));
+            if !len.is_finite() {
+                return Err(BoolError::Invalid(format!("{name} has a triangle with a position that is too large")));
             }
-            normals.push(n / len);
+            // A triangle with no area (collinear corners, left by an earlier boolean or a
+            // triangulation) has no normal: it can take part as long as nothing cuts it.
+            normals.push(if len > 0.0 { n / len } else { DVec3::ZERO });
         }
         Ok(Solid { pos, tris, uvs, patches: m.patches.clone(), tri_edges, edge_ends, normals, ipts: Vec::new(), boxes: Vec::new() })
     }

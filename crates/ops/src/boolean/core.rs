@@ -125,6 +125,9 @@ fn run(a: &TriMesh, b: &TriMesh, op: BoolOp, limits: &Limits, nudge: f64, attemp
                     (seg.ends[0], seg.ends[1], seg.tri[1 - side.index()])
                 })
                 .collect();
+            if solid.normals[t as usize] == DVec3::ZERO {
+                return Err(BoolError::Inconsistent("a triangle with no area is crossed by the other mesh".into()));
+            }
             for piece in cut_triangle(corners, solid.normals[t as usize], &chains, &segments, &pos)? {
                 recs.push(Rec { side, tri: t, piece, inside: None });
             }
@@ -277,6 +280,7 @@ fn run(a: &TriMesh, b: &TriMesh, op: BoolOp, limits: &Limits, nudge: f64, attemp
             }
         }
     }
+    collapse_coincident(&mut out);
     check_closed(&out)?;
     Ok(Outcome { mesh: out, stats })
 }
@@ -323,6 +327,46 @@ fn uv_at(solid: &Solid, t: usize, parent: &[u32; 3], v: u32, p: DVec3, uvs: &[[V
     let s = (w0 + w1 + w2).max(1e-300);
     let (w0, w1, w2) = ((w0 / s) as f32, (w1 / s) as f32, (w2 / s) as f32);
     c[0] * w0 + c[1] * w1 + c[2] * w2
+}
+
+/// Two crossing vertices that land on exactly the same point (a cut passing through a mesh's
+/// edge) leave triangles with a side of no length, which have no normal for the next operation.
+/// Such a pair is made one vertex, which drops those triangles and keeps the surface closed.
+fn collapse_coincident(m: &mut TriMesh) {
+    for _ in 0..m.tris.len().min(64) {
+        let mut merge: Option<(u32, u32)> = None;
+        for t in &m.tris {
+            for k in 0..3 {
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                if a != b && m.positions.get(a as usize).is_some_and(|p| Some(p) == m.positions.get(b as usize)) {
+                    merge = Some((a, b));
+                    break;
+                }
+            }
+            if merge.is_some() {
+                break;
+            }
+        }
+        let Some((keep, gone)) = merge else { return };
+        let mut kept: Vec<usize> = Vec::with_capacity(m.tris.len());
+        for (i, t) in m.tris.iter_mut().enumerate() {
+            for v in t.iter_mut() {
+                if *v == gone {
+                    *v = keep;
+                }
+            }
+            if t[0] != t[1] && t[1] != t[2] && t[0] != t[2] {
+                kept.push(i);
+            }
+        }
+        let tris: Vec<[u32; 3]> = kept.iter().map(|i| m.tris[*i]).collect();
+        let patches: Vec<u32> = kept.iter().map(|i| m.patches[*i]).collect();
+        if let Some(u) = &mut m.uvs {
+            *u = kept.iter().map(|i| u[*i]).collect();
+        }
+        m.tris = tris;
+        m.patches = patches;
+    }
 }
 
 /// Every directed edge of the result must meet its opposite exactly once.

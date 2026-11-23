@@ -3,10 +3,11 @@
 //! The crossing vertices on the triangle's edges and inside it, and the segments between them,
 //! make a planar graph; its faces are the pieces the triangle falls into, some with closed loops
 //! inside them as holes. Each piece is triangulated by ear clipping (after bridging its holes to
-//! its outline; D. Eberly, "Triangulation by Ear Clipping", Geometric Tools, 2002). Topology
-//! never depends on the floating-point geometry: when the geometry cannot decide an ear, the
-//! least bad corner is clipped, so the pieces always tile the triangle's outline and the result
-//! stays watertight.
+//! its outline; D. Eberly, "Triangulation by Ear Clipping", Geometric Tools, 2002, within a work
+//! budget: a piece that needs more is an error). The graph's faces are found by sorting edges by
+//! angle in floating point, so the shared crossing vertices make the result closed only as long as
+//! that sort agrees with the exact decisions; `check_closed` in the caller is what guarantees the
+//! result is watertight, and a result that is not is an error or a retry, never returned.
 
 use std::collections::HashMap;
 
@@ -233,7 +234,10 @@ pub(crate) fn cut_triangle(
         for h in cycles[f].hes.iter().chain(face_holes[f].iter().flat_map(|h| cycles[*h].hes.iter())) {
             piece.edges.push(DirEdge { from: nodes[hes[*h].from], to: nodes[hes[*h].to], kind: hes[*h].kind });
         }
-        for t in triangulate(&p2, &outline, &hole_rings) {
+        let Some(tris) = triangulate(&p2, &outline, &hole_rings) else {
+            return Err(BoolError::TooLarge("a cut triangle has too many holes or corners to retriangulate within the limit".into()));
+        };
+        for t in tris {
             piece.tris.push([nodes[t[0]], nodes[t[1]], nodes[t[2]]]);
         }
         pieces.push(piece);

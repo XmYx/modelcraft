@@ -197,7 +197,7 @@ Weight: 4
 | Terrain / landscape generator | C | D | M | Seeded fractal-noise height field: size, height, segments, feature scale, octaves and seed in Properties; no erosion or sculpt-in-place yet |
 | Extrude, lathe, loft and sweep generators from splines | C M | D | L | Extrude (axis, steps, caps, holes from nested splines), revolve (any angle, caps, axis points shared), loft (aligned sections, smooth or straight, caps) and sweep (rotation-minimizing frame, end scale, twist, roll, caps) as live generators over spline children, with UVs, undo, commands, export and nesting inside other generators |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
-| Boolean generator (live, nested) | C M Z | D | L | Union, subtract and intersect of the meshes inside a Boolean object, folded in order; closed manifold inputs only; exact edge-through-triangle decisions with symbolic perturbation, so shared planes and touching faces resolve; UVs and patches survive along the cut; a Connect or another Boolean inside works as an input |
+| Boolean generator (live, nested) | C M Z | D | L | Union, subtract and intersect of the meshes inside a Boolean object, folded in order; closed manifold inputs only; exact edge-through-triangle decisions with symbolic perturbation, so shared planes and touching faces resolve; UVs and patches survive along the cut; a Connect or another Boolean inside works as an input; the editor's caps are interactive (300 thousand triangles per input) and an over-limit boolean is an error |
 | Live polygon reduction generator | C | D | M | A Reduce object keeps a share of its input's triangles (quadric error metric, UV seams and patch lines held) and follows it when it changes |
 | Volume mesher: combine shapes as distance fields, then mesh | C | M | L | |
 | Metaballs | C M | M | M | |
@@ -251,7 +251,7 @@ Weight: 9
 | Smooth and relax vertices | C M Z | M | S | Sculpt smooth brush only |
 | Mirror modeling with a welded seam | C M Z | D | S | Mirror X/Y/Z step, keeps UVs |
 | Live symmetric component editing | C M Z | M | M | |
-| Mesh booleans | C M Z | D | L | As a live Boolean object (Create menu, command `procedural add_generator boolean`); baking is Collapse; no per-face-selection booleans or boolean of open meshes |
+| Mesh booleans | C M Z | P | L | As a live Boolean object (Create menu, command `procedural add_generator boolean`); a generator cannot be baked into a mesh yet (Collapse and the component tools refuse it); no per-face-selection booleans, no booleans of open meshes |
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
 | Custom normals: harden, average, weighted by face area | C M | M | M | |

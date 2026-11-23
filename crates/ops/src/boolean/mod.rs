@@ -9,7 +9,9 @@
 //! the cuts, or by a winding number where no cut reaches ([`core`]).
 //!
 //! The inputs must be closed, manifold and not self-intersecting; anything else is reported as
-//! an error, as is a result that does not close. Nothing here panics on odd input: sizes are
+//! an error, as is a result that does not close (open, empty, non-finite and degenerate input is
+//! detected; a mesh that intersects itself is not, and gives a result that is closed but wrong).
+//! Nothing here panics on odd input: sizes are
 //! limited by [`Limits`] and the work is bounded by them.
 //!
 //! Sources: Edelsbrunner and Mücke, "Simulation of Simplicity" (1990) for the perturbation;
@@ -93,11 +95,35 @@ pub struct Limits {
     pub max_grid_entries: usize,
     /// Most triangle evaluations of the winding number.
     pub max_winding_work: u64,
+    /// Most grid cells walked and entries scanned while finding overlapping pairs.
+    pub max_grid_visits: u64,
 }
 
 impl Default for Limits {
+    /// The caps for interactive use: an over-limit boolean answers with an error within a
+    /// second or so instead of making the program wait. A boolean on the screen runs once per
+    /// change of an input, at most three times over when a result has to be retried, so these
+    /// are the caps of one attempt.
     fn default() -> Self {
-        Limits { max_triangles: 2_000_000, max_pairs: 40_000_000, max_grid_entries: 60_000_000, max_winding_work: 4_000_000_000 }
+        Limits::interactive()
+    }
+}
+
+impl Limits {
+    /// Caps sized for a run in the editor (a 260 thousand triangle pair takes about a second).
+    pub fn interactive() -> Limits {
+        Limits { max_triangles: 300_000, max_pairs: 1_000_000, max_grid_entries: 4_000_000, max_winding_work: 60_000_000, max_grid_visits: 60_000_000 }
+    }
+
+    /// Large caps for a batch run that nobody is waiting on (the command line, a script).
+    pub fn batch() -> Limits {
+        Limits {
+            max_triangles: 2_000_000,
+            max_pairs: 40_000_000,
+            max_grid_entries: 60_000_000,
+            max_winding_work: 4_000_000_000,
+            max_grid_visits: 4_000_000_000,
+        }
     }
 }
 

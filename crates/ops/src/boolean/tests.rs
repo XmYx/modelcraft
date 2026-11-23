@@ -95,12 +95,9 @@ fn boxes_that_share_a_face_plane_or_touch_resolve_without_gaps() {
     // Side by side, sharing a whole face: the union is a 4 × 2 × 2 slab.
     let a = cube(Vec3::splat(2.0), Vec3::ZERO);
     let b = cube(Vec3::splat(2.0), Vec3::new(2.0, 0.0, 0.0));
-    let u = combine(&a, &b, BoolOp::Union);
-    // Either a closed result with the right volume, or a reported error: never an open mesh.
-    if let Ok(u) = u {
-        assert!(closed(&u));
-        assert!((vol(&u) - 16.0).abs() < 1e-3, "{}", vol(&u));
-    }
+    let u = combine(&a, &b, BoolOp::Union).expect("boxes that share a whole face");
+    assert!(closed(&u));
+    assert!((vol(&u) - 16.0).abs() < 1e-3, "{}", vol(&u));
     // Sharing the top plane but overlapping: a stepped union.
     let c = cube(Vec3::new(2.0, 1.0, 2.0), Vec3::new(1.0, 0.5, 0.0));
     let u = combine(&a, &c, BoolOp::Union).expect("overlapping boxes that share a plane");
@@ -151,11 +148,6 @@ fn bad_input_is_reported_not_crashed_on() {
     let mut nan = to_tris(&a);
     nan.positions[0] = Vec3::NAN;
     assert!(matches!(boolean(&to_tris(&a), &nan, BoolOp::Union, &Limits::default()), Err(BoolError::Invalid(_))));
-    let mut flat = to_tris(&a);
-    let p = flat.positions[flat.tris[0][0] as usize];
-    flat.positions[flat.tris[0][1] as usize] = p;
-    flat.positions[flat.tris[0][2] as usize] = p;
-    assert!(boolean(&to_tris(&a), &flat, BoolOp::Union, &Limits::default()).is_err());
     let mut bad_index = to_tris(&a);
     bad_index.tris[0][0] = 9999;
     assert!(matches!(boolean(&to_tris(&a), &bad_index, BoolOp::Union, &Limits::default()), Err(BoolError::Invalid(_))));
@@ -165,6 +157,10 @@ fn bad_input_is_reported_not_crashed_on() {
     let few_pairs = Limits { max_pairs: 0, ..Limits::default() };
     let b = ball(1.2, Vec3::ZERO);
     assert!(matches!(boolean(&to_tris(&a), &to_tris(&b), BoolOp::Union, &few_pairs), Err(BoolError::TooLarge(_))));
+    let no_grid = Limits { max_grid_entries: 0, ..Limits::default() };
+    assert!(matches!(boolean(&to_tris(&a), &to_tris(&b), BoolOp::Union, &no_grid), Err(BoolError::TooLarge(_))));
+    let no_visits = Limits { max_grid_visits: 1, ..Limits::default() };
+    assert!(matches!(boolean(&to_tris(&a), &to_tris(&b), BoolOp::Union, &no_visits), Err(BoolError::TooLarge(_))));
     let no_winding = Limits { max_winding_work: 0, ..Limits::default() };
     let far = cube(Vec3::splat(1.0), Vec3::new(10.0, 0.0, 0.0));
     assert!(matches!(boolean(&to_tris(&a), &to_tris(&far), BoolOp::Union, &no_winding), Err(BoolError::TooLarge(_))));
@@ -407,4 +403,40 @@ fn boolean_timings() {
         assert!(closed(&m));
         assert!(stats.triangle_pairs < tris, "only the part that touches is examined");
     }
+}
+
+#[test]
+fn the_default_caps_are_interactive_and_the_batch_ones_are_larger() {
+    let (i, b) = (Limits::default(), Limits::batch());
+    assert!(i.max_triangles <= 300_000 && i.max_winding_work <= 100_000_000 && i.max_pairs <= 2_000_000);
+    assert!(b.max_triangles > i.max_triangles && b.max_pairs > i.max_pairs && b.max_winding_work > i.max_winding_work);
+    // A mesh over the interactive cap is refused at once, and accepted under the batch caps.
+    let big = placed(Primitive::Sphere { radius: 1.0, segments: 800, rings: 400 }, Vec3::ZERO, Quat::IDENTITY);
+    let small = ball(0.5, Vec3::new(0.2, 0.0, 0.0));
+    assert!(to_tris(&big).tris.len() > i.max_triangles);
+    let start = std::time::Instant::now();
+    assert!(matches!(boolean(&to_tris(&big), &to_tris(&small), BoolOp::Union, &i), Err(BoolError::TooLarge(_))));
+    assert!(start.elapsed() < std::time::Duration::from_millis(500), "an over-limit boolean answers quickly");
+    assert!(boolean(&to_tris(&big), &to_tris(&small), BoolOp::Union, &b).is_ok());
+}
+
+/// A plate with a grid of round holes cut through it: hundreds of holes in each cut face. The
+/// volume is the plate's less the holes', so a wrong triangulation of a piece shows up.
+#[test]
+fn a_plate_with_a_grid_of_holes_has_the_right_volume() {
+    let plate = cube(Vec3::new(10.0, 1.0, 10.0), Vec3::ZERO);
+    let mut acc = plate.clone();
+    let mut hole_volume = 0.0;
+    for i in 0..6 {
+        for j in 0..6 {
+            let at = Vec3::new(-4.0 + i as f32 * 1.6, 0.0, -4.0 + j as f32 * 1.6);
+            let pin = placed(Primitive::Cylinder { radius: 0.5, height: 3.0, sides: 20, rings: 1, caps: true }, at, Quat::IDENTITY);
+            // Each pin is a 20-sided prism through the 1-thick plate.
+            hole_volume += 0.5 * 20.0 * 0.25 * (std::f64::consts::TAU / 20.0).sin() * 1.0;
+            acc = combine(&acc, &pin, BoolOp::Subtract).unwrap();
+        }
+    }
+    assert!(closed(&acc));
+    acc.validate().unwrap();
+    assert!((vol(&acc) - (100.0 - hole_volume)).abs() < 1e-2, "{} vs {}", vol(&acc), 100.0 - hole_volume);
 }

@@ -30,6 +30,9 @@ pub enum Generator {
     Boolean { op: BoolOp },
 }
 
+/// Most meshes one boolean folds together (each fold is a whole boolean).
+pub const MAX_BOOLEAN_INPUTS: usize = 16;
+
 /// The generator names, in menu order.
 pub const KINDS: &[&str] = &["connect", "thicken", "reduce", "boolean"];
 
@@ -98,10 +101,21 @@ impl Generator {
                 if inputs.len() < 2 {
                     return Err(OpError::Invalid("a boolean needs two meshes inside it".into()));
                 }
-                for b in &inputs[1..] {
-                    acc = boolean::combine(&acc, b, op)?;
+                if inputs.len() > MAX_BOOLEAN_INPUTS {
+                    return Err(OpError::Invalid(format!("a boolean combines at most {MAX_BOOLEAN_INPUTS} meshes")));
                 }
-                Ok((acc, Vec::new()))
+                let mut notes = Vec::new();
+                for b in &inputs[1..] {
+                    let (m, stats) = boolean::combine_with(&acc, b, op, &boolean::Limits::interactive())?;
+                    if stats.attempt > 0 && notes.is_empty() {
+                        notes.push(
+                            "some faces of the two meshes lie in one plane; the second was moved by a hair to resolve them, so the result is not exact"
+                                .to_string(),
+                        );
+                    }
+                    acc = m;
+                }
+                Ok((acc, notes))
             }
         }
     }

@@ -126,6 +126,6 @@ fn a_boolean_around_two_selected_meshes_follows_them_and_its_operation_is_a_comb
     });
     assert_ne!(faces(&mut h, id), before);
     h.run();
-    // The problems of a result are shown, not hidden.
+    // The face count is shown in Properties (problems of a result are listed below it).
     h.get_by_label_contains("faces");
 }
