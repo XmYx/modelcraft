@@ -69,8 +69,19 @@ pub struct Evaluator {
     finals: HashMap<ObjectId, (u64, Evaluated)>,
     /// Evaluated spline objects ([`crate::splines`]).
     pub(crate) splines: crate::splines::SplineCache,
+    /// Mesh objects being evaluated now, outermost first: a shrink-wrap target that is already
+    /// among them is a loop, and is read undeformed instead of recursing.
+    active: Vec<ObjectId>,
+    /// Results that depended on cutting a loop. They hold only for the evaluation in progress
+    /// (they depend on where it started), so they are kept apart from `finals` and dropped when
+    /// the next top-level evaluation begins.
+    scratch: HashMap<ObjectId, (u64, Evaluated)>,
+    /// How many loops have been cut so far (tells a result whether it depended on one).
+    cycle_hits: u64,
     /// Count of step evaluations performed (tests and stats).
     pub runs: u64,
+    /// Count of objects evaluated from scratch (not answered from a cache), for tests of bounds.
+    pub evaluations: u64,
 }
 
 impl Evaluator {
@@ -173,6 +184,10 @@ impl Evaluator {
         if depth > crate::MAX_DEPTH {
             return Evaluated::default();
         }
+        if depth == 0 {
+            self.scratch.clear();
+            self.active.clear();
+        }
         // A skinned mesh also depends on where its joints are.
         let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id) ^ crate::sim::sim_key(scene, id);
         if let Some((k, e)) = self.finals.get(&id)
@@ -180,13 +195,34 @@ impl Evaluator {
         {
             return e.clone();
         }
+        if let Some((k, e)) = self.scratch.get(&id)
+            && *k == key
+        {
+            return e.clone();
+        }
+        let hits_before = self.cycle_hits;
+        self.evaluations += 1;
         let result = match &obj.kind {
             ObjectKind::Mesh { .. } => {
                 let mut e = self.steps_output(scene, id, usize::MAX);
-                // The shrink-wrap targets of the deformer stack, evaluated first.
+                // The shrink-wrap targets of the deformer stack, evaluated first. A target that
+                // is being evaluated already (a loop of wraps) is read undeformed.
                 let mut targets = crate::rig::Targets::new();
+                self.active.push(id);
                 for t in crate::rig::stack_targets(scene, id) {
-                    targets.insert(t, self.evaluate_depth(scene, t, depth + 1).mesh);
+                    if self.active.contains(&t) {
+                        self.cycle_hits += 1;
+                        targets.insert(t, self.steps_output(scene, t, usize::MAX).mesh);
+                    } else {
+                        targets.insert(t, self.evaluate_depth(scene, t, depth + 1).mesh);
+                    }
+                }
+                self.active.pop();
+                if self.cycle_hits != hits_before {
+                    e.warnings.push(StepError {
+                        step: usize::MAX,
+                        message: "shrink-wrap targets form a loop; where it closes, the target is used as it is before its own deformers".into(),
+                    });
                 }
                 let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh, &targets);
                 if let Some(m) = skinned {
@@ -298,7 +334,11 @@ impl Evaluator {
             | ObjectKind::Spline { .. }
             | ObjectKind::Hair { .. } => Evaluated::default(),
         };
-        self.finals.insert(id, (key, result.clone()));
+        if self.cycle_hits == hits_before {
+            self.finals.insert(id, (key, result.clone()));
+        } else {
+            self.scratch.insert(id, (key, result.clone()));
+        }
         result
     }
 }
@@ -345,7 +385,7 @@ fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
     let mut key = scene.deep_rev(id);
     // A shrink-wrap also depends on its target object and on where it sits relative to the mesh.
     let is_mesh = matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }));
-    for t in if is_mesh { crate::rig::stack_targets(scene, id) } else { Vec::new() } {
+    for t in if is_mesh { crate::rig::target_closure(scene, id) } else { Vec::new() } {
         let mut h = key ^ scene.deep_rev(t).rotate_left(29);
         for f in target_frame(scene, id, t).to_cols_array() {
             h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);

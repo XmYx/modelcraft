@@ -1091,6 +1091,11 @@ impl Document {
                 {
                     return invalid("the target must be another object, not the mesh being deformed or anything inside it");
                 }
+                if let (Some(t), Some(m)) = (target, mesh)
+                    && modelcraft_scene::rig::target_reaches(&self.scene, *t, m)
+                {
+                    return invalid("that target is itself shrink-wrapped to this mesh: the wraps would form a loop");
+                }
                 match &mut self.scene.edit(*id)?.kind {
                     ObjectKind::Deformer { deformer: d, limits: l, target: tg } => {
                         *d = *deformer;
