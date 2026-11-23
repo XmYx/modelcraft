@@ -227,7 +227,7 @@ Weight: 9
 |---|---|---|---|---|
 | Vertex, edge, face modes; click and box select | C M | D | S | 1–4, Ctrl+A, Shift adds |
 | Loop, ring, grow and shrink selection | C M | D | S | Alt+L / double-click, Alt+R, Ctrl+= / Ctrl+- |
-| Soft selection (falloff around the selection) | C M Z | M | M | |
+| Soft selection (falloff around the selection) | C M Z | D | M | Move, rotate and scale (gizmo or Transform by Numbers) pull the vertices around the selection by a radius and a remap curve, recorded in the Move step; weights show as colour on the vertices; radius by field or Alt+[ / Alt+]. Euclidean distance (not along the surface) |
 | Extrude faces (region) | C M Z | D | S | Options page with live preview: distance, offset, rows on the walls, seeded variation, caps on or off, region or each face on its own |
 | Extrude edges and vertices; extrude along a curve | C M | P | M | Border edges of an open mesh extrude outwards and up (Extrude Edges step); extruding a vertex is not possible (no loose edges in a polygon mesh), and no extrusion along a curve |
 | Inset faces | C M | D | S | Per face |
@@ -250,7 +250,7 @@ Weight: 9
 | Shell / solidify (give thickness) | C M Z | M | S | |
 | Smooth and relax vertices | C M Z | M | S | Sculpt smooth brush only |
 | Mirror modeling with a welded seam | C M Z | D | S | Mirror X/Y/Z step, keeps UVs |
-| Live symmetric component editing | C M Z | M | M | |
+| Live symmetric component editing | C M Z | D | M | Mirrors move, rotate and scale across X, Y or Z (Shift+Y cycles), matching vertices by position within a tolerance; recorded in the Move step; works with soft selection. Meshes that are not symmetric keep the unmatched vertices as they are |
 | Mesh booleans | C M Z | M | L | |
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
