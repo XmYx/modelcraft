@@ -265,4 +265,41 @@ mod tests {
         // Per-vertex average of a uniform mesh.
         assert!(vertex_colors(&painted).iter().all(|c| *c == [1.0, 0.0, 0.0, 1.0]));
     }
+
+    #[test]
+    fn decimate_keeps_the_colours_it_had() {
+        let ball = Primitive::Sphere { radius: 1.0, segments: 24, rings: 16 }.build().unwrap();
+        let painted = stroke(&ball, &[Vec3::Y], &red(1.2, 1.0), &linear).unwrap();
+        let known: Vec<[f32; 4]> = painted.corner_colors().to_vec();
+        let out = crate::decimate::decimate(&painted, 0.3).unwrap();
+        assert!(out.has_colors());
+        out.validate().unwrap();
+        assert!(out.triangle_count() < painted.triangle_count());
+        // Every colour on the result was on the input (corners are kept, not invented).
+        assert!(out.corner_colors().iter().all(|c| known.contains(c)));
+        // The top is still red, the bottom still white.
+        let at = |m: &PolyMesh, y: f32| (0..m.corner_count() as u32).filter(|h| (m.position(m.origin(*h)).y - y).abs() < 0.05).map(|h| m.color(h)).next();
+        assert!(at(&out, 1.0).is_none_or(|c| c[1] < 0.5));
+        assert!(at(&out, -1.0).is_none_or(|c| c == WHITE));
+    }
+
+    #[test]
+    fn a_polygon_list_with_some_colours_gets_white_for_the_rest() {
+        use modelcraft_mesh::Polygon;
+        let pos = vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(1.0, 1.0, 0.0)];
+        let mut a = Polygon::new(vec![0, 1, 2]);
+        a.colors = Some(vec![[1.0, 0.0, 0.0, 1.0]; 3]);
+        let b = Polygon::new(vec![1, 3, 2]);
+        let m = PolyMesh::build(pos, vec![a, b]).unwrap().0;
+        m.validate().unwrap();
+        assert_eq!(m.corner_colors().iter().filter(|c| **c == WHITE).count(), 3);
+        assert_eq!(m.corner_colors().iter().filter(|c| **c == [1.0, 0.0, 0.0, 1.0]).count(), 3);
+        // Through JSON (the project file) and back.
+        let json = serde_json::to_string(&m).unwrap();
+        let back: PolyMesh = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.corner_colors(), m.corner_colors());
+        // A mesh with no colours writes none.
+        let plain = Primitive::Plane { width: 1.0, depth: 1.0, segments: 1 }.build().unwrap();
+        assert!(!serde_json::to_string(&plain).unwrap().contains("colors"));
+    }
 }

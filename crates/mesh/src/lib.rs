@@ -746,7 +746,12 @@ impl PolyMesh {
 
     /// Estimated heap size in bytes (for memory budgets).
     pub fn heap_bytes(&self) -> usize {
-        self.positions.len() * 16 + self.he_origin.len() * 24 + self.he_uv.len() * 8 + self.he_color.len() * 16 + self.face_he.len() * 8 + self.edge_he.len() * 4
+        self.positions.len() * 16
+            + self.he_origin.len() * 24
+            + self.he_uv.len() * 8
+            + self.he_color.len() * 16
+            + self.face_he.len() * 8
+            + self.edge_he.len() * 4
     }
 }
 

@@ -94,7 +94,16 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        State { rgba: [0xE5, 0x5B, 0x5B, 0xFF], radius: 0.4, strength: 0.6, erase: false, falloff: Falloff::Smooth, brush: false, stroke: None, hex: String::new() }
+        State {
+            rgba: [0xE5, 0x5B, 0x5B, 0xFF],
+            radius: 0.4,
+            strength: 0.6,
+            erase: false,
+            falloff: Falloff::Smooth,
+            brush: false,
+            stroke: None,
+            hex: String::new(),
+        }
     }
 }
 
@@ -184,7 +193,8 @@ pub fn input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, view: usi
         return true;
     }
     let Some(cam) = app.views.get(view).map(|v| v.camera) else { return false };
-    let down = resp.dragged_by(egui::PointerButton::Primary) || resp.drag_started_by(egui::PointerButton::Primary) || resp.clicked_by(egui::PointerButton::Primary);
+    let down =
+        resp.dragged_by(egui::PointerButton::Primary) || resp.drag_started_by(egui::PointerButton::Primary) || resp.clicked_by(egui::PointerButton::Primary);
     if down && let Some(at) = resp.interact_pointer_pos() {
         let mesh = app.doc.eval.steps_output(&app.doc.scene, id, usize::MAX).mesh;
         let w = app.doc.scene.world_matrix(id);
@@ -327,7 +337,9 @@ pub fn pane(app: &mut ModelApp, ui: &mut egui::Ui) {
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Falloff"));
-        for (f, name) in [(Falloff::Smooth, tl!("Smooth")), (Falloff::Linear, tl!("Linear")), (Falloff::Sharp, tl!("Sharp")), (Falloff::Constant, tl!("Constant"))] {
+        for (f, name) in
+            [(Falloff::Smooth, tl!("Smooth")), (Falloff::Linear, tl!("Linear")), (Falloff::Sharp, tl!("Sharp")), (Falloff::Constant, tl!("Constant"))]
+        {
             let r = ui.radio_value(&mut p.falloff, f, name.clone());
             set_name(ui, &r, crate::tlf!("Paint falloff: {shape}", shape = name));
         }

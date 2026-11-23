@@ -2850,6 +2850,7 @@ dependencies = [
  "modelcraft-hair",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-sculpt",
  "modelcraft-sim",
  "modelcraft-uv",
  "modelcraft-uvpack",

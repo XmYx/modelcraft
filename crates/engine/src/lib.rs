@@ -68,6 +68,8 @@ mod hair_tests;
 #[cfg(test)]
 mod organize_tests;
 #[cfg(test)]
+mod paint_tests;
+#[cfg(test)]
 mod procedural_tests;
 #[cfg(test)]
 mod rig_tests;
@@ -79,7 +81,5 @@ mod sim_particle_tests;
 mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;
-#[cfg(test)]
-mod paint_tests;
 #[cfg(test)]
 mod uv_udim_tests;

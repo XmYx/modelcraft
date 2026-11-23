@@ -144,7 +144,14 @@ fn the_cutting_steps_round_trip_and_run() {
 #[test]
 fn the_paint_steps_round_trip_and_default_cleanly() {
     let ops = [
-        StepOp::PaintStroke { points: vec![Vec3::X, Vec3::Y], radius: 0.5, strength: 0.7, color: [1.0, 0.5, 0.0, 1.0], erase: true, falloff: modelcraft_sculpt::brush::Falloff::Sharp },
+        StepOp::PaintStroke {
+            points: vec![Vec3::X, Vec3::Y],
+            radius: 0.5,
+            strength: 0.7,
+            color: [1.0, 0.5, 0.0, 1.0],
+            erase: true,
+            falloff: modelcraft_sculpt::brush::Falloff::Sharp,
+        },
         StepOp::FillColor { color: [0.2, 0.3, 0.4, 1.0], verts: vec![1, 2] },
         StepOp::FillColor { color: [0.2, 0.3, 0.4, 1.0], verts: vec![] },
     ];
@@ -159,7 +166,14 @@ fn the_paint_steps_round_trip_and_default_cleanly() {
     let s: Step = serde_json::from_str(r#"{"id":4,"op":"paint_stroke","points":[[0,0,0]],"radius":1.0,"strength":0.5,"color":[1,0,0,1]}"#).unwrap();
     assert!(matches!(s.op, StepOp::PaintStroke { erase: false, .. }));
     // Evaluated: a stroke gives the mesh colours, and a stale fill is a step error.
-    let (sc, mut ev, id) = cube_scene(StepOp::PaintStroke { points: vec![Vec3::ZERO], radius: 5.0, strength: 1.0, color: [1.0, 0.0, 0.0, 1.0], erase: false, falloff: modelcraft_sculpt::brush::Falloff::Constant });
+    let (sc, mut ev, id) = cube_scene(StepOp::PaintStroke {
+        points: vec![Vec3::ZERO],
+        radius: 5.0,
+        strength: 1.0,
+        color: [1.0, 0.0, 0.0, 1.0],
+        erase: false,
+        falloff: modelcraft_sculpt::brush::Falloff::Constant,
+    });
     let e = ev.evaluate(&sc, id);
     assert!(e.errors.is_empty() && e.mesh.has_colors());
     assert!(e.mesh.corner_colors().iter().all(|c| *c == [1.0, 0.0, 0.0, 1.0]));
