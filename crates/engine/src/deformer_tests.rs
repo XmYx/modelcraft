@@ -261,3 +261,41 @@ fn shapes_run_before_the_skin_and_everything_survives_a_save() {
     assert_eq!(e.errors.len(), 2, "the stale shape and the stale cluster say so: {:?}", e.errors);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn formula_deformers_and_clone_modifiers_follow_the_frame_by_command() {
+    let mut d = Document::new();
+    let id = cube(&mut d, "Box");
+    let def = run(&mut d, &format!(r#"{{"cmd":"add_deformer","kind":"formula","target":{}}}"#, id.0)).created[0];
+    // Lift every point by the time in seconds along the deformer's Y axis.
+    run(&mut d, &format!(r#"{{"cmd":"set_deformer","id":{},"deformer":{{"kind":"formula","expr":"time","along":"y","amount":1}}}}"#, def.0));
+    d.scene.anim.time.fps = 24.0;
+    d.set_frame(0.0);
+    assert!((top(&points(&mut d, id)) - 1.0).abs() < 1e-5);
+    d.set_frame(48.0);
+    assert!((top(&points(&mut d, id)) - 3.0).abs() < 1e-5, "two seconds later the evaluation follows");
+    // A formula that reads what a deformer does not know is refused only at evaluation: the
+    // mesh stays and the error says why.
+    run(&mut d, &format!(r#"{{"cmd":"set_deformer","id":{},"deformer":{{"kind":"formula","expr":"frame + nothing"}}}}"#, def.0));
+    let e = d.eval.evaluate(&d.scene, id);
+    assert!(e.errors.iter().any(|e| e.message.contains("nothing")), "{:?}", e.errors);
+    assert!((e.mesh.positions().iter().map(|p| p.y).fold(f32::MIN, f32::max) - 1.0).abs() < 1e-5);
+    // Undo goes back to the working formula.
+    d.execute(Command::Undo).unwrap();
+    assert!((top(&points(&mut d, id)) - 3.0).abs() < 1e-5);
+
+    // A clone modifier in formula mode: clone i rises by i * time * 0.5.
+    let clones = d.execute(Command::AddCloner { kind: "linear".into(), input: None }).unwrap().created[0];
+    let m = d.execute(Command::AddCloneModifier { kind: "formula".into(), cloner: clones }).unwrap().created[0];
+    run(&mut d, &format!(r#"{{"cmd":"set_clone_modifier","id":{},"modifier":{{"mode":"formula","expr":"i * time","position":[0,0.5,0]}}}}"#, m.0));
+    let heights = |d: &mut Document| -> Vec<f32> {
+        let e = d.eval.evaluate(&d.scene, clones);
+        e.instances.as_ref().map(|i| i.clones.instances.iter().map(|c| c.matrix.w_axis.y).collect()).unwrap_or_default()
+    };
+    d.set_frame(24.0);
+    let h1 = heights(&mut d);
+    assert!(h1.len() >= 3 && (h1[2] - h1[0] - 1.0).abs() < 1e-4, "{h1:?}");
+    d.set_frame(72.0);
+    let h3 = heights(&mut d);
+    assert!((h3[2] - h3[0] - 3.0).abs() < 1e-4, "{h3:?}");
+}

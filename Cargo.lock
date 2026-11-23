@@ -2728,6 +2728,7 @@ name = "modelcraft-clone"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-anim",
  "modelcraft-mesh",
  "proptest",
  "serde",
@@ -2827,6 +2828,7 @@ name = "modelcraft-ops"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-anim",
  "modelcraft-field",
  "modelcraft-mesh",
  "modelcraft-spline",

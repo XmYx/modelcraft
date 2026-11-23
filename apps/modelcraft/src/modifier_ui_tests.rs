@@ -117,7 +117,7 @@ fn the_mode_combo_switches_modes_by_keyboard_and_shows_that_modes_fields() {
     h.run();
     h.run();
     let m = h.state().selection[0];
-    assert!(matches!(h.state().doc.scene.get(m).unwrap().kind, ObjectKind::CloneModifier { modifier, .. } if matches!(modifier.mode, Mode::Delay { .. })));
+    assert!(matches!(&h.state().doc.scene.get(m).unwrap().kind, ObjectKind::CloneModifier { modifier, .. } if matches!(modifier.mode, Mode::Delay { .. })));
     h.get_by_role_and_label(Role::SpinButton, "Duration (seconds)");
     h.get_by_role_and_label(Role::SpinButton, "Delay per clone (seconds)");
     assert!(h.get_by_role_and_label(Role::ComboBox, "Mode").is_focused(), "focus returns to the combo");
@@ -200,11 +200,11 @@ fn the_target_mode_asks_for_a_target_and_the_combo_works_by_keyboard() {
     let ys = heights(&mut h);
     assert!(ys.iter().all(|y| (*y - 2.5).abs() < 0.3), "{ys:?}");
     // The command refuses the generator itself and a stale object.
-    let modifier = match h.state().doc.scene.get(m).unwrap().kind {
-        ObjectKind::CloneModifier { modifier, .. } => modifier,
+    let modifier = match &h.state().doc.scene.get(m).unwrap().kind {
+        ObjectKind::CloneModifier { modifier, .. } => modifier.clone(),
         _ => unreachable!(),
     };
-    assert!(h.state_mut().doc.execute(Command::SetCloneModifier { id: m, modifier, target: Some(gen_id) }).is_err());
+    assert!(h.state_mut().doc.execute(Command::SetCloneModifier { id: m, modifier: modifier.clone(), target: Some(gen_id) }).is_err());
     assert!(h.state_mut().doc.execute(Command::SetCloneModifier { id: m, modifier, target: Some(ObjectId(9999)) }).is_err());
 }
 
