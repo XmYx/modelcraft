@@ -23,6 +23,8 @@ pub enum SplineAction {
     Add(&'static str),
     /// Turn the selected primitive spline into editable points.
     MakeEditable,
+    /// The pen tool: click to add points, drag to pull out handles.
+    Pen,
 }
 
 pub fn kind_label(kind: &str) -> String {
@@ -43,6 +45,7 @@ impl SplineAction {
         let mut v: Vec<SplineAction> = KINDS.iter().map(|k| SplineAction::Add(k)).collect();
         v.push(SplineAction::Add("empty"));
         v.push(SplineAction::MakeEditable);
+        v.push(SplineAction::Pen);
         v
     }
 
@@ -50,6 +53,7 @@ impl SplineAction {
         match self {
             SplineAction::Add(k) => crate::tlf!("Add {shape} Spline", shape = kind_label(k)),
             SplineAction::MakeEditable => tl!("Make Spline Editable"),
+            SplineAction::Pen => tl!("Pen Tool"),
         }
     }
 
@@ -57,11 +61,15 @@ impl SplineAction {
         match self {
             SplineAction::Add(k) => format!("spline.add.{k}"),
             SplineAction::MakeEditable => "spline.make_editable".into(),
+            SplineAction::Pen => "spline.pen".into(),
         }
     }
 
     pub fn default_binding(self) -> Option<&'static str> {
-        None
+        match self {
+            SplineAction::Pen => Some("Model: Shift+P"),
+            _ => None,
+        }
     }
 }
 
@@ -70,6 +78,7 @@ pub fn act(app: &mut ModelApp, a: SplineAction) {
         SplineAction::Add(kind) => {
             app.run(Command::Spline(SplineCommand::Add { kind: kind.into(), parent: None, name: None }));
         }
+        SplineAction::Pen => crate::spline_pen::toggle_pen(app),
         SplineAction::MakeEditable => match app.active().filter(|id| app.doc.scene.is_spline(*id)) {
             Some(id) => {
                 app.run(Command::Spline(SplineCommand::MakeEditable { id }));
@@ -82,7 +91,7 @@ pub fn act(app: &mut ModelApp, a: SplineAction) {
 pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.menu_button(tl!("Spline"), |ui| {
         for a in SplineAction::all() {
-            if a == SplineAction::MakeEditable {
+            if a == SplineAction::MakeEditable || a == SplineAction::Pen {
                 ui.separator();
             }
             let action = crate::actions::Action::Spline(a);
@@ -170,6 +179,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, source: &Spli
         SplineSource::Primitive { primitive } => primitive_fields(app, ui, id, *primitive, tess),
         SplineSource::Curve { spline } => {
             ui.label(crate::tlf!("{segments} segments, {points} points", segments = spline.segments.len(), points = spline.knot_count()));
+            crate::spline_points_ui::section(app, ui, id);
         }
     }
     tess_fields(app, ui, id, tess, source);

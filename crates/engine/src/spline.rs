@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use modelcraft_scene::splines::SplineSource;
 use modelcraft_scene::{ObjectId, ObjectKind, SceneError, Spline, SplinePrimitive, Tessellation};
+use modelcraft_spline::SplineEdit;
 use serde::{Deserialize, Serialize};
 
 use crate::command::Outcome;
@@ -34,6 +35,9 @@ pub enum SplineCommand {
     MakeEditable { id: ObjectId },
     /// Replace the curve with this one (segments, knots, handles); a primitive becomes editable.
     SetCurve { id: ObjectId, spline: Spline },
+    /// Edit the points: add, move, set a handle, insert, remove, close, change the curve type
+    /// ([`SplineEdit`]). A primitive becomes editable points first.
+    Edit { id: ObjectId, edit: SplineEdit },
 }
 
 /// The `op` names of the `spline` command with one-line descriptions.
@@ -43,7 +47,24 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_tessellation", "Change the curve's tessellation: id, tess {mode: fixed {steps} | uniform {length} | adaptive {tolerance, angle_deg}}"),
     ("make_editable", "Turn a primitive spline into editable points and handles: id"),
     ("set_curve", "Replace the curve: id, spline {segments [{kind (linear, bezier, b_spline), closed, knots [{pos, tan_in, tan_out, mode}]}]}"),
+    (
+        "edit",
+        "Edit the points of a spline: id, edit {edit: append {segment, knot, kind?} | move_knots {moves [{at {segment, knot}, pos}]} | translate {knots, by} | set_handle {at, side (in, out), offset} | set_mode {at, mode (free, aligned, mirrored, auto)} | set_kind {segment, kind} | set_closed {segment, closed} | insert {segment, u} | remove {knots} | add_segment {segment} | remove_segment {segment}}",
+    ),
 ];
+
+fn edit_label(e: &SplineEdit) -> &'static str {
+    match e {
+        SplineEdit::Append { .. } => "Add spline point",
+        SplineEdit::MoveKnots { .. } | SplineEdit::Translate { .. } => "Move spline points",
+        SplineEdit::SetHandle { .. } | SplineEdit::SetMode { .. } => "Spline handle",
+        SplineEdit::SetKind { .. } => "Spline curve type",
+        SplineEdit::SetClosed { .. } => "Open or close spline",
+        SplineEdit::Insert { .. } => "Insert spline point",
+        SplineEdit::Remove { .. } => "Delete spline points",
+        SplineEdit::AddSegment { .. } | SplineEdit::RemoveSegment { .. } => "Spline curves",
+    }
+}
 
 impl SplineCommand {
     pub fn label(&self) -> String {
@@ -53,6 +74,7 @@ impl SplineCommand {
             SplineCommand::SetTessellation { .. } => "Spline tessellation".into(),
             SplineCommand::MakeEditable { .. } => "Make spline editable".into(),
             SplineCommand::SetCurve { .. } => "Edit spline".into(),
+            SplineCommand::Edit { edit, .. } => edit_label(edit).into(),
         }
     }
 
@@ -63,7 +85,8 @@ impl SplineCommand {
             SplineCommand::SetPrimitive { id, .. }
             | SplineCommand::SetTessellation { id, .. }
             | SplineCommand::MakeEditable { id }
-            | SplineCommand::SetCurve { id, .. } => Some(*id),
+            | SplineCommand::SetCurve { id, .. }
+            | SplineCommand::Edit { id, .. } => Some(*id),
         }
     }
 }
@@ -116,6 +139,14 @@ pub fn apply(doc: &mut Document, cmd: &SplineCommand, out: &mut Outcome) -> Resu
                 _ => return invalid("not a spline"),
             }
         }
+        SplineCommand::Edit { id, edit } => match &mut doc.scene.edit(*id)?.kind {
+            ObjectKind::Spline { source, .. } => {
+                let mut spline = (*source.spline()).clone();
+                spline.apply(edit).map_err(|e| EngineError::Invalid(e.to_string()))?;
+                *source = SplineSource::Curve { spline: Arc::new(spline) };
+            }
+            _ => return invalid("not a spline"),
+        },
     }
     Ok(())
 }

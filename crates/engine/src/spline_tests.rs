@@ -181,3 +181,48 @@ fn curves_are_left_out_of_exports_and_the_scene_still_exports() {
     assert!(p.metadata().unwrap().len() > 100);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn edit_commands_change_points_as_single_undo_steps_and_refuse_bad_ones() {
+    use modelcraft_spline::{KnotMove, KnotRef, Side, SplineEdit};
+    let mut d = Document::new();
+    let id = add(&mut d, "empty");
+    let at = |k| KnotRef { segment: 0, knot: k };
+    for (i, p) in [Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0)].into_iter().enumerate() {
+        let before = d.undo.len();
+        d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::Append { segment: 0, knot: Knot::new(p), kind: CurveKind::Bezier } })).unwrap();
+        assert_eq!((d.undo.len(), d.eval.spline(&d.scene, id).unwrap().spline.knot_count()), (before + 1, i + 1));
+    }
+    d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::SetHandle { at: at(1), side: Side::Out, offset: Vec3::new(0.0, 0.5, 0.0) } })).unwrap();
+    d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::MoveKnots { moves: vec![KnotMove { at: at(2), pos: Vec3::new(5.0, 0.0, 0.0) }] } })).unwrap();
+    let s = d.eval.spline(&d.scene, id).unwrap().spline.clone();
+    assert_eq!((s.segments[0].knots[1].tan_out, s.segments[0].knots[2].pos), (Vec3::new(0.0, 0.5, 0.0), Vec3::new(5.0, 0.0, 0.0)));
+    // A bad edit is an error and no undo step.
+    let n = d.undo.len();
+    for edit in [
+        SplineEdit::Remove { knots: vec![at(9)] },
+        SplineEdit::MoveKnots { moves: vec![KnotMove { at: at(0), pos: Vec3::NAN }] },
+        SplineEdit::SetClosed { segment: 4, closed: true },
+    ] {
+        assert!(d.execute(Command::Spline(S::Edit { id, edit })).is_err());
+    }
+    assert_eq!(d.undo.len(), n);
+    // On a primitive the first edit makes it editable; Undo brings the primitive back.
+    let circle = add(&mut d, "circle");
+    d.execute(Command::Spline(S::Edit { id: circle, edit: SplineEdit::Translate { knots: vec![at(0)], by: Vec3::new(1.0, 0.0, 0.0) } })).unwrap();
+    assert!(matches!(d.scene.get(circle).unwrap().kind, ObjectKind::Spline { source: SplineSource::Curve { .. }, .. }));
+    d.execute(Command::Undo).unwrap();
+    assert!(matches!(d.scene.get(circle).unwrap().kind, ObjectKind::Spline { source: SplineSource::Primitive { .. }, .. }));
+    // Locked, and on something that is not a spline.
+    d.execute(Command::SetLocked { ids: vec![id], locked: true }).unwrap();
+    let e = d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::SetClosed { segment: 0, closed: true } })).unwrap_err().to_string();
+    assert!(e.contains("locked"), "{e}");
+    let cube = d.execute(Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }).unwrap().created[0];
+    assert!(d.execute(Command::Spline(S::Edit { id: cube, edit: SplineEdit::SetClosed { segment: 0, closed: true } })).is_err());
+    // JSON as a user would write it.
+    let mut d2 = Document::new();
+    let c2 = add(&mut d2, "empty");
+    let j = format!(r#"{{"cmd":"spline","op":"edit","id":{},"edit":{{"edit":"append","segment":0,"knot":{{"pos":[1,2,3]}}}}}}"#, c2.0);
+    d2.execute(serde_json::from_str(&j).unwrap()).unwrap();
+    assert_eq!(d2.eval.spline(&d2.scene, c2).unwrap().spline.segments[0].knots[0].pos, Vec3::new(1.0, 2.0, 3.0));
+}

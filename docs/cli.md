@@ -130,6 +130,32 @@ are drawn at once.
 `modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`,
 `sim-bench cloth` and `sim-bench particles` measure a bake.
 
+### Splines
+
+One command, `spline`, with the operation in `op`: `{"cmd":"spline","op":"add","kind":"circle"}`.
+A spline is an object that has no surface: it is drawn as a curve, and the generators below take
+splines as children. `add` makes one: `kind` is `circle`, `rectangle`, `star`, `n_side`, `arc` or
+`helix` (a primitive whose numbers `set_primitive` changes: `{"kind":"star","points":5,"inner":0.45,"outer":1,"plane":"xy"}`;
+`plane` is `xy`, `yz` or `zx`, the axis the shape faces), or `empty` (a curve with no points, to
+draw into). `set_tessellation` sets how many points the curve gets between its knots: `{"mode":"fixed","steps":8}`,
+`{"mode":"uniform","length":0.1}` or `{"mode":"adaptive","tolerance":0.01,"angle_deg":12}`.
+`make_editable` turns a primitive into points and handles; `set_curve` replaces the curve
+(`spline.segments[]`, each with `kind` linear, bezier or b_spline, `closed` and `knots[]` of
+`{pos, tan_in, tan_out, mode}`; handles are offsets from `pos`, `mode` is free, aligned, mirrored
+or auto).
+
+`edit` changes the points with one `edit` object (an undo step each; a primitive becomes editable
+first): `{"cmd":"spline","op":"edit","id":3,"edit":{"edit":"append","segment":0,"knot":{"pos":[1,0,0]}}}`.
+The edits are `append` (a point at the end of a segment; `segment` equal to the number of segments
+starts a new one; `kind?`), `move_knots` (`moves [{at:{segment,knot}, pos}]`), `translate`
+(`knots`, `by`), `set_handle` (`at`, `side` in or out, `offset`), `set_mode`, `set_kind`,
+`set_closed`, `insert` (`segment`, `u`: one unit per piece of curve; the shape is kept), `remove`
+(`knots`; a segment left empty goes), `add_segment` and `remove_segment`. A failed edit changes
+nothing. A spline may have 1,024 segments and 100,000 points, and a curve is cut into at most
+1,000,000 points when it is tessellated; numbers that are not finite are refused.
+
+`modelcraft-cli commands` lists the operations as `spline op=…`.
+
 ### Animation
 
 One command, `anim`, with the operation in `op`: `{"cmd":"anim","op":"set_key",…}`.

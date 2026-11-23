@@ -209,8 +209,8 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Spline primitives: circle, rectangle, arc, star, helix, text outline | C M | M | M | |
-| Pen tool: Bézier and B-spline drawing and point editing | C M | M | M | |
+| Spline primitives: circle, rectangle, arc, star, helix, text outline | C M | P | M | Circle (ellipse), rectangle (rounded corners), star, n-side, arc (open, chord, pie) and helix (or spiral) on any of three planes, each with a Properties page and a choice of fixed, uniform or adaptive intermediate points; no text outline yet (3D text builds on the shared spline type) |
+| Pen tool: Bézier and B-spline drawing and point editing | C M | P | M | A pen (click adds a point, drag pulls out a smooth handle, click the first point to close, Enter, Backspace, Escape), points and handles drawn on the selected spline and dragged in the view's plane, double-click inserts, Delete removes, a Properties list of points with numeric fields and handle modes; a curve's type switches between polyline, Bézier and B-spline; the pen draws Bézier curves; no snapping and no rectangle selection of points |
 | Spline operations: chamfer, offset, outline, 2D booleans | C M | M | M | |
 | Objects placed or bent along a spline | C M | M | M | |
 | NURBS curves: degree, knots, weighted control points | M | M | L | |
