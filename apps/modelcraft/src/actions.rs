@@ -692,7 +692,8 @@ impl Action {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             Organize(_) => "Organize",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGenerator(_) | AddGroup => "Create",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGenerator(_)
+            | AddGroup => "Create",
             Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) | Cut(_) => {
                 "Mesh"
             }
