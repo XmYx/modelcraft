@@ -1,0 +1,1 @@
+| 2026-11-23 | A reusable node editor: nodes and ports in the accessibility tree, keyboard and mouse linking with loop checks, pan and zoom, a searchable node browser, node and link caps checked before an edit, edits applied through the host's undo; Scene Nodes shows the scene's objects as nodes and parents them by links |

@@ -156,6 +156,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::NextPanel,
                     Action::CoordinatePanel,
                     Action::VariantsPanel,
+                    Action::SceneNodes,
                     Action::IconPalettes,
                     Action::RadialMenu,
                     Action::RenderView,
@@ -1246,6 +1247,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::render_view::show(app, ctx);
     crate::render_ui::show(app, ctx);
     crate::bake_ui::show(app, ctx);
+    crate::scene_nodes_ui::show(app, ctx);
     crate::matgraph_ui::show(app, ctx);
     crate::picture_viewer::show(app, ctx);
     crate::script_ui::show(app, ctx);

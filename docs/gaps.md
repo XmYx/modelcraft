@@ -283,7 +283,7 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 
 ## Scripting and node graph
 
-Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1 is in except recorded macros: the language (Rhai, see [scripting.md](scripting.md)), the object-model and headless APIs, the Scripts window, callbacks and scripted tools. The node view (**G3**) shows the dependency graph the evaluator already has.
+Every action is already a serializable command, so **G1** binds a language to an existing surface rather than building one; the language must be Rust-native and on the licence allowlist. The control socket (craft-control) and the MCP server (craft-mcp-server) are in (G2, done). G1 is in except recorded macros: the language (Rhai, see [scripting.md](scripting.md)), the object-model and headless APIs, the Scripts window, callbacks and scripted tools. The node view (**G3**) shows the dependency graph the evaluator already has. The node editor itself is in (`apps/modelcraft/src/node_editor.rs`, reusable and independent of what the nodes mean), with Scene Nodes as its first host: objects and their parents. Still to come on it: the material graph on the canvas (it uses cards and link lists today), the attribute graph (stream X), nodes for transforms, maths and effects, the dependency graph itself as a view, node groups, and a positions store that is saved with the project (scene node positions are view state now).
 
 | Item | Rows | Hours | Gain (points) | Rank | Needs |
 |---|---|---|---|---|---|

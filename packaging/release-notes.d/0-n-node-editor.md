@@ -1,0 +1,1 @@
+- Scene Nodes (View menu or Ctrl+K): the scene's objects as nodes; link one object's Children to another's Parent to put it underneath, add primitives and groups from the node browser (Shift+A), and do all of it from the keyboard.
