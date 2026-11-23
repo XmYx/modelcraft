@@ -19,6 +19,7 @@ modelcraft-uvpack = { workspace = true }
 modelcraft-clone = { workspace = true }
 modelcraft-hair = { workspace = true }
 modelcraft-matgraph = { workspace = true }
+modelcraft-spline = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

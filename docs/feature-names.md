@@ -28,6 +28,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Disc, Polygon, Tube, Capsule, Pyramid, Tetrahedron, Octahedron, Dodecahedron, Icosahedron, Landscape (primitives); Hole radius, Feature scale | disc, n-gon, tube, capsule, pyramid, platonic solid and landscape primitives | Geometry words and plain nouns | Use |
+| Radial, Cylinder, Cone, Capsule, Torus, Random, Formula (falloff fields); Falloff layers, Switched on, Opacity | radial, cylinder, cone, capsule, torus, random and formula fields; the field-layer list with its enable switch and opacity | Geometry words and plain descriptions; the formula field uses the expression language of the animation crate | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |
 | Transform by Numbers | numeric transform dialogs | Generic phrase | Use |
@@ -88,3 +89,4 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Point Light, Spot Light, Area Light, Sun Light, Dome Light; Camera; Look Through; Render Through This Camera | light and camera objects, viewing through a camera, the camera a render uses | Generic lighting and photography words; the reference products' object names avoided | Use |
 | Render Settings, Picture Viewer, Frame Queue, Passes, Region | render settings and render queue windows, the picture viewer, multi-pass output, render region | Generic words for what they do; the reference products' window names avoided | Use |
 | Bake Maps; Cage distance, Ray distance; Cavity | map baking, bake cages, cavity maps | Generic words for what they do; the reference products' bake dialog and map names avoided | Use |
+| Spline; Circle, Rectangle, Star, N-Side, Arc, Helix (spline kinds); Intermediate points, Fixed steps, Uniform length, Adaptive, Tolerance, Largest turn (tessellation) | spline objects and their primitives | Plain geometry words; the references' "Points", "Intermediate points" and primitive names are generic nouns, no product term (such as their object type name) is used as a label | Use |

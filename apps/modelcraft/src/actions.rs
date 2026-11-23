@@ -99,6 +99,7 @@ pub enum Action {
     Render(crate::render_ui::RenderAction),
     Bake(crate::bake_ui::BakeAction),
     Material(crate::matgraph_ui::MatAction),
+    Spline(crate::spline_ui::SplineAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -214,6 +215,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::render_ui::RenderAction::ALL.map(Render));
     v.extend(crate::bake_ui::BakeAction::ALL.map(Bake));
     v.extend(crate::matgraph_ui::MatAction::ALL.map(Material));
+    v.extend(crate::spline_ui::SplineAction::all().into_iter().map(Spline));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -423,6 +425,7 @@ impl Action {
             Render(a) => a.label(),
             Bake(a) => a.label(),
             Material(a) => a.label(),
+            Spline(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -538,6 +541,7 @@ impl Action {
             Render(a) => a.id(),
             Bake(a) => a.id(),
             Material(a) => a.id(),
+            Spline(a) => return a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
@@ -641,6 +645,7 @@ impl Action {
             Sim(a) => return a.default_binding(),
             Stage(a) => return a.default_binding(),
             Render(a) => return a.default_binding(),
+            Spline(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
@@ -670,6 +675,7 @@ impl Action {
             Render(_) => "Render",
             Bake(_) => "UV",
             Material(_) => "Render",
+            Spline(_) => "Spline",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",

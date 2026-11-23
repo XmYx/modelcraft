@@ -4,6 +4,7 @@
 use egui::RichText;
 use glam::{Mat4, Vec3};
 use modelcraft_engine::Command;
+use modelcraft_engine::animation::expr::Expr;
 use modelcraft_engine::field::{BLENDS, Blend, CURVE_PRESETS, Curve, Field, MAX_OCTAVES, SHAPES, Shape};
 use modelcraft_engine::scene::{ObjectId, ObjectKind, Scene};
 
@@ -17,11 +18,18 @@ pub fn shape_label(kind: &str) -> String {
         "box" => tl!("Box"),
         "linear" => tl!("Linear"),
         "noise" => tl!("Noise"),
+        "radial" => tl!("Radial"),
+        "cylinder" => tl!("Cylinder"),
+        "cone" => tl!("Cone"),
+        "capsule" => tl!("Capsule"),
+        "torus" => tl!("Torus"),
+        "random" => tl!("Random"),
+        "formula" => tl!("Formula"),
         _ => kind.to_string(),
     }
 }
 
-fn blend_label(b: &str) -> String {
+pub(crate) fn blend_label(b: &str) -> String {
     match b {
         "multiply" => tl!("Multiply"),
         "add" => tl!("Add"),
@@ -59,6 +67,7 @@ fn labelled_combo(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debu
 pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field) {
     let mut q = field.clone();
     let mut drags: Vec<egui::Response> = Vec::new();
+    let mut text_edit: Option<egui::Response> = None;
     let mut discrete = false;
 
     labelled_combo(ui, ("field-shape", id.0), tl!("Shape"), shape_label(q.kind()), |ui| {
@@ -100,6 +109,52 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
                 drags.push(r);
             });
         }
+        Shape::Radial { angle, inner } => {
+            ui.horizontal(|ui| drags.push(drag(ui, angle, 0.5, 1.0..=360.0, tl!("Sweep angle"))));
+            ui.horizontal(|ui| drags.push(drag(ui, inner, 0.01, 0.0..=0.999, tl!("Full strength inside"))));
+        }
+        Shape::Cylinder { radius, height, inner } | Shape::Cone { radius, height, inner } => {
+            ui.horizontal(|ui| drags.push(drag(ui, radius, 0.01, 0.0001..=100_000.0, tl!("Radius"))));
+            ui.horizontal(|ui| drags.push(drag(ui, height, 0.01, 0.0001..=100_000.0, tl!("Height"))));
+            ui.horizontal(|ui| drags.push(drag(ui, inner, 0.01, 0.0..=0.999, tl!("Full strength inside"))));
+        }
+        Shape::Capsule { radius, length, inner } => {
+            ui.horizontal(|ui| drags.push(drag(ui, radius, 0.01, 0.0001..=100_000.0, tl!("Radius"))));
+            ui.horizontal(|ui| drags.push(drag(ui, length, 0.01, 0.0..=100_000.0, tl!("Length"))));
+            ui.horizontal(|ui| drags.push(drag(ui, inner, 0.01, 0.0..=0.999, tl!("Full strength inside"))));
+        }
+        Shape::Torus { radius, tube, inner } => {
+            ui.horizontal(|ui| drags.push(drag(ui, radius, 0.01, 0.0001..=100_000.0, tl!("Ring radius"))));
+            ui.horizontal(|ui| drags.push(drag(ui, tube, 0.01, 0.0001..=100_000.0, tl!("Tube radius"))));
+            ui.horizontal(|ui| drags.push(drag(ui, inner, 0.01, 0.0..=0.999, tl!("Full strength inside"))));
+        }
+        Shape::Random { scale, seed } => {
+            ui.horizontal(|ui| drags.push(drag(ui, scale, 0.01, -100_000.0..=100_000.0, tl!("Cells per unit"))));
+            ui.horizontal(|ui| {
+                ui.label(tl!("Seed"));
+                let r = ui.add(egui::DragValue::new(seed).speed(0.2));
+                set_name(ui, &r, tl!("Seed"));
+                drags.push(r);
+            });
+        }
+        Shape::Formula { expr } => {
+            ui.horizontal(|ui| {
+                ui.label(tl!("Formula"));
+                let r = ui.add(egui::TextEdit::singleline(expr).desired_width(180.0));
+                set_name(ui, &r, tl!("Formula"));
+                text_edit = Some(r);
+            });
+            let ok = Expr::parse(expr).is_ok();
+            ui.label(
+                RichText::new(if ok {
+                    tl!("Uses x, y, z and r (distance from the origin); 1 is full strength.")
+                } else {
+                    tl!("This formula cannot be read; the field weighs nothing.")
+                })
+                .color(theme::TEXT_DIM)
+                .small(),
+            );
+        }
     }
 
     labelled_combo(ui, ("field-blend", id.0), tl!("Combine with earlier fields"), blend_label(q.blend.name()), |ui| {
@@ -130,6 +185,9 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
         picked
     });
     let r = ui.checkbox(&mut q.remap.invert, tl!("Invert"));
+    discrete |= r.changed();
+    ui.horizontal(|ui| drags.push(drag(ui, &mut q.opacity, 0.01, 0.0..=1.0, tl!("Opacity"))));
+    let r = ui.checkbox(&mut q.enabled, tl!("Field enabled"));
     discrete |= r.changed();
     ui.horizontal(|ui| drags.push(drag(ui, &mut q.remap.strength, 0.01, 0.0..=1.0, tl!("Strength"))));
 
@@ -170,7 +228,22 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, field: &Field
         }
     });
 
-    if q != *field && discrete {
+    if let Some(r) = &text_edit {
+        // A formula previews while typing and becomes one undo step when the box loses focus.
+        if r.changed() {
+            if app.prop_snapshot.is_none() {
+                app.prop_snapshot = Some(Box::new(app.doc.scene.clone()));
+            }
+            if let Ok(o) = app.doc.scene.edit(id) {
+                o.kind = ObjectKind::Field { field: q.clone() };
+            }
+        } else if r.lost_focus()
+            && let Some(snapshot) = app.prop_snapshot.take()
+        {
+            app.doc.scene = *snapshot;
+            app.run(Command::SetField { id, field: q.clone() });
+        }
+    } else if q != *field && discrete {
         app.run(Command::SetField { id, field: q });
     } else if let Some(r) = drags.iter().find(|r| r.changed() || r.drag_stopped()) {
         commit_edit(app, r, |o| o.kind = ObjectKind::Field { field: q.clone() }, || Command::SetField { id, field: q.clone() }, id);
@@ -219,6 +292,68 @@ pub fn outline(scene: &Scene, id: ObjectId) -> Vec<(Vec3, Vec3)> {
             let h = (0.5 / scale.abs().max(1e-3)).min(5.0);
             cuboid(&mut seg, Vec3::splat(-h), Vec3::splat(h));
         }
+        Shape::Radial { angle, .. } => {
+            let half = angle.to_radians() * 0.5;
+            circle(&mut seg, 1, 1.0);
+            for a in [half, -half] {
+                seg.push((Vec3::ZERO, Vec3::new(a.cos(), 0.0, -a.sin())));
+            }
+        }
+        Shape::Cylinder { radius, height, .. } => {
+            for y in [-height * 0.5, height * 0.5] {
+                let mut ring = Vec::new();
+                circle(&mut ring, 1, radius);
+                seg.extend(ring.into_iter().map(|(a, b)| (a + Vec3::Y * y, b + Vec3::Y * y)));
+            }
+            for k in 0..4 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_2;
+                let p = Vec3::new(a.cos() * radius, 0.0, a.sin() * radius);
+                seg.push((p - Vec3::Y * height * 0.5, p + Vec3::Y * height * 0.5));
+            }
+        }
+        Shape::Cone { radius, height, .. } => {
+            let mut ring = Vec::new();
+            circle(&mut ring, 1, radius);
+            seg.extend(ring.into_iter().map(|(a, b)| (a - Vec3::Y * height * 0.5, b - Vec3::Y * height * 0.5)));
+            for k in 0..4 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_2;
+                seg.push((Vec3::new(a.cos() * radius, -height * 0.5, a.sin() * radius), Vec3::Y * height * 0.5));
+            }
+        }
+        Shape::Capsule { radius, length, .. } => {
+            for y in [-length * 0.5, length * 0.5] {
+                let mut ring = Vec::new();
+                circle(&mut ring, 1, radius);
+                seg.extend(ring.into_iter().map(|(a, b)| (a + Vec3::Y * y, b + Vec3::Y * y)));
+                (0..2).for_each(|axis| {
+                    let mut c = Vec::new();
+                    circle(&mut c, axis * 2, radius);
+                    seg.extend(c.into_iter().map(|(a, b)| (a + Vec3::Y * y, b + Vec3::Y * y)));
+                });
+            }
+            for k in 0..4 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_2;
+                let p = Vec3::new(a.cos() * radius, 0.0, a.sin() * radius);
+                seg.push((p - Vec3::Y * length * 0.5, p + Vec3::Y * length * 0.5));
+            }
+        }
+        Shape::Torus { radius, tube, .. } => {
+            for r in [radius + tube, (radius - tube).max(0.0)] {
+                circle(&mut seg, 1, r);
+            }
+            for k in 0..4 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_2;
+                let c = Vec3::new(a.cos() * radius, 0.0, a.sin() * radius);
+                let mut ring = Vec::new();
+                circle(&mut ring, if k % 2 == 0 { 2 } else { 0 }, tube);
+                seg.extend(ring.into_iter().map(|(p, q)| (p + c, q + c)));
+            }
+        }
+        Shape::Random { scale, .. } => {
+            let h = (0.5 / scale.abs().max(1e-3)).min(5.0);
+            cuboid(&mut seg, Vec3::splat(-h), Vec3::splat(h));
+        }
+        Shape::Formula { .. } => cuboid(&mut seg, Vec3::splat(-1.0), Vec3::splat(1.0)),
     }
     seg.into_iter().map(|(a, b)| (w.transform_point3(a), w.transform_point3(b))).collect()
 }
