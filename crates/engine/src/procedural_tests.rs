@@ -430,16 +430,22 @@ fn a_boolean_generator_is_live_closed_and_keeps_its_inputs_editable() {
     let mut d = Document::new();
     let a = add(&mut d, "cube");
     let b = add(&mut d, "sphere");
-    d.execute(Command::SetTransform { id: b, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(0.6, 0.2, 0.0), ..Default::default() } }).unwrap();
+    d.execute(Command::SetTransform { id: b, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(0.6, 0.2, 0.0), ..Default::default() } })
+        .unwrap();
     let g = d.execute(Command::Procedural(crate::ProceduralCommand::AddGenerator { kind: "boolean".into(), inputs: vec![a, b] })).unwrap().created[0];
     let carved = d.eval.evaluate(&d.scene, g);
     assert!(carved.errors.is_empty(), "{:?}", carved.errors);
     assert!((0..carved.mesh.edge_count() as u32).all(|e| !carved.mesh.is_boundary_edge(e)), "closed");
     // The sphere moves away: the cube is whole again.
-    d.execute(Command::SetTransform { id: b, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(20.0, 0.0, 0.0), ..Default::default() } }).unwrap();
+    d.execute(Command::SetTransform { id: b, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(20.0, 0.0, 0.0), ..Default::default() } })
+        .unwrap();
     assert_eq!(d.eval.evaluate(&d.scene, g).mesh.face_count(), 12 * 1, "a cube of two triangles a side, untouched");
     // Union keeps both; intersection of two apart is nothing.
-    d.execute(Command::Procedural(crate::ProceduralCommand::SetGenerator { id: g, generator: Generator::Boolean { op: modelcraft_ops::boolean::BoolOp::Intersect } })).unwrap();
+    d.execute(Command::Procedural(crate::ProceduralCommand::SetGenerator {
+        id: g,
+        generator: Generator::Boolean { op: modelcraft_ops::boolean::BoolOp::Intersect },
+    }))
+    .unwrap();
     assert_eq!(d.eval.evaluate(&d.scene, g).mesh.face_count(), 0);
     d.execute(Command::Undo).unwrap();
     assert_eq!(d.eval.evaluate(&d.scene, g).mesh.face_count(), 12);

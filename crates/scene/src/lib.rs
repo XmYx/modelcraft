@@ -663,7 +663,15 @@ impl ObjectKind {
     /// Whether the object makes a mesh a generator can take as an input: a mesh, a smooth cage,
     /// an array, a symmetry or another procedural generator.
     pub fn makes_geometry(&self) -> bool {
-        matches!(self, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Generator { .. } | ObjectKind::SplineGenerator { .. })
+        matches!(
+            self,
+            ObjectKind::Mesh { .. }
+                | ObjectKind::SmoothCage { .. }
+                | ObjectKind::Array { .. }
+                | ObjectKind::Symmetry { .. }
+                | ObjectKind::Generator { .. }
+                | ObjectKind::SplineGenerator { .. }
+        )
     }
 
     pub fn type_name(&self) -> &'static str {

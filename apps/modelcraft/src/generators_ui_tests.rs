@@ -120,8 +120,10 @@ fn a_boolean_around_two_selected_meshes_follows_them_and_its_operation_is_a_comb
     assert_ne!(joined, carved, "union and subtraction make different meshes");
     // Moving the sphere out changes the result: it is live.
     let before = joined;
-    h.state_mut()
-        .run(modelcraft_engine::Command::SetTransform { id: ball, transform: modelcraft_engine::scene::Transform { translation: glam::Vec3::new(10.0, 0.0, 0.0), ..Default::default() } });
+    h.state_mut().run(modelcraft_engine::Command::SetTransform {
+        id: ball,
+        transform: modelcraft_engine::scene::Transform { translation: glam::Vec3::new(10.0, 0.0, 0.0), ..Default::default() },
+    });
     assert_ne!(faces(&mut h, id), before);
     h.run();
     // The problems of a result are shown, not hidden.

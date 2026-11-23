@@ -17,9 +17,9 @@
 //! Winding Numbers" (2013) for the winding number idea; Zhou, Grinspun, Zorin and Jacobson,
 //! "Mesh Arrangements for Solid Geometry" (2016) for the overall arrangement approach.
 
+mod arrange;
 pub mod core;
 pub mod exact;
-mod arrange;
 mod faces;
 mod solid;
 

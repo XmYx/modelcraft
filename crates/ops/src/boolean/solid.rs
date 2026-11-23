@@ -76,7 +76,9 @@ impl Solid {
                         }
                         Some(e) => {
                             if e.2 >= 2 || e.1 == forward {
-                                return Err(BoolError::Open(format!("{name} is not a closed, consistently wound surface (an edge is shared by the wrong faces)")));
+                                return Err(BoolError::Open(format!(
+                                    "{name} is not a closed, consistently wound surface (an edge is shared by the wrong faces)"
+                                )));
                             }
                             e.2 += 1;
                             e.0
@@ -138,7 +140,10 @@ impl Solid {
             .iter()
             .map(|t| {
                 let (a, b, c) = (self.ipts[t[0] as usize].c, self.ipts[t[1] as usize].c, self.ipts[t[2] as usize].c);
-                ([a[0].min(b[0]).min(c[0]), a[1].min(b[1]).min(c[1]), a[2].min(b[2]).min(c[2])], [a[0].max(b[0]).max(c[0]), a[1].max(b[1]).max(c[1]), a[2].max(b[2]).max(c[2])])
+                (
+                    [a[0].min(b[0]).min(c[0]), a[1].min(b[1]).min(c[1]), a[2].min(b[2]).min(c[2])],
+                    [a[0].max(b[0]).max(c[0]), a[1].max(b[1]).max(c[1]), a[2].max(b[2]).max(c[2])],
+                )
             })
             .collect();
         Ok(())

@@ -72,7 +72,8 @@ pub fn check_unlocked(doc: &Document, cmd: &ProceduralCommand) -> Result<(), Eng
 pub fn apply(doc: &mut Document, cmd: &ProceduralCommand, out: &mut Outcome) -> Result<(), EngineError> {
     match cmd {
         ProceduralCommand::AddGenerator { kind, inputs } => {
-            let generator = Generator::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown generator {kind:?}; use one of {}", generator::KINDS.join(", "))))?;
+            let generator = Generator::default_of(kind)
+                .ok_or_else(|| EngineError::Invalid(format!("unknown generator {kind:?}; use one of {}", generator::KINDS.join(", "))))?;
             if inputs.len() > MAX_INPUTS {
                 return invalid(format!("a generator takes at most {MAX_INPUTS} inputs"));
             }
@@ -110,10 +111,10 @@ pub fn apply(doc: &mut Document, cmd: &ProceduralCommand, out: &mut Outcome) -> 
 }
 
 /// The meshes a generator made without inputs works on.
-fn add_defaults(doc: &mut Document, gen: ObjectId, kind: &str) -> Result<(), EngineError> {
+fn add_defaults(doc: &mut Document, parent: ObjectId, kind: &str) -> Result<(), EngineError> {
     let add = |doc: &mut Document, name: &str, primitive: Primitive, at: Vec3| -> Result<(), EngineError> {
         let unique = doc.scene.unique_name(name);
-        let id = doc.scene.add(unique, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(gen))?;
+        let id = doc.scene.add(unique, ObjectKind::Mesh { source: Source::Primitive { primitive }, steps: vec![] }, Some(parent))?;
         if at != Vec3::ZERO {
             doc.scene.edit(id)?.transform = Transform { translation: at, ..Transform::default() };
         }

@@ -66,7 +66,13 @@ fn find(p: &mut [usize], mut x: usize) -> usize {
 /// Cut one triangle. `corners` are the global vertex ids of its corners in winding order,
 /// `chains[k]` the crossing vertices along the edge from corner `k` to corner `k + 1` in that
 /// order, and `segments` the cut segments `(end, end, other triangle)` inside it.
-pub(crate) fn cut_triangle(corners: [u32; 3], normal: DVec3, chains: &[Vec<u32>; 3], segments: &[(u32, u32, u32)], pos: &dyn Fn(u32) -> DVec3) -> Result<Vec<Piece>, BoolError> {
+pub(crate) fn cut_triangle(
+    corners: [u32; 3],
+    normal: DVec3,
+    chains: &[Vec<u32>; 3],
+    segments: &[(u32, u32, u32)],
+    pos: &dyn Fn(u32) -> DVec3,
+) -> Result<Vec<Piece>, BoolError> {
     // The outline, in order.
     let mut ring: Vec<u32> = Vec::new();
     for k in 0..3 {
@@ -160,10 +166,13 @@ pub(crate) fn cut_triangle(corners: [u32; 3], normal: DVec3, chains: &[Vec<u32>;
                 return Err(BoolError::Inconsistent("a cut triangle's faces do not close".into()));
             }
         }
-        let area = list.iter().map(|h| {
-            let (a, b) = (p2[hes[*h].from], p2[hes[*h].to]);
-            a.x * b.y - b.x * a.y
-        }).sum::<f64>()
+        let area = list
+            .iter()
+            .map(|h| {
+                let (a, b) = (p2[hes[*h].from], p2[hes[*h].to]);
+                a.x * b.y - b.x * a.y
+            })
+            .sum::<f64>()
             * 0.5;
         cycles.push(Cycle { hes: list, area, comp: 0 });
     }
@@ -209,10 +218,8 @@ pub(crate) fn cut_triangle(corners: [u32; 3], normal: DVec3, chains: &[Vec<u32>;
     let mut face_holes: Vec<Vec<usize>> = vec![Vec::new(); cycles.len()];
     for h in &holes {
         let probe = p2[hes[cycles[*h].hes[0]].from];
-        let best = faces
-            .iter()
-            .filter(|f| cycles[**f].comp != cycles[*h].comp && inside(**f, probe))
-            .min_by(|a, b| cycles[**a].area.total_cmp(&cycles[**b].area));
+        let best =
+            faces.iter().filter(|f| cycles[**f].comp != cycles[*h].comp && inside(**f, probe)).min_by(|a, b| cycles[**a].area.total_cmp(&cycles[**b].area));
         match best {
             Some(f) => face_holes[*f].push(*h),
             None => return Err(BoolError::Inconsistent("a loop on a triangle lies in no face".into())),

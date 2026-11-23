@@ -87,7 +87,13 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, generator: &G
         app.run(Command::Procedural(ProceduralCommand::SetGenerator { id, generator: q }));
     } else if let Some(r) = drags.iter().find(|r| r.changed() || r.drag_stopped()) {
         let g = q.clone();
-        commit_edit(app, r, |o| o.kind = ObjectKind::Generator { generator: g.clone() }, || Command::Procedural(ProceduralCommand::SetGenerator { id, generator: q.clone() }), id);
+        commit_edit(
+            app,
+            r,
+            |o| o.kind = ObjectKind::Generator { generator: g.clone() },
+            || Command::Procedural(ProceduralCommand::SetGenerator { id, generator: q.clone() }),
+            id,
+        );
     }
     let e = app.doc.eval.evaluate(&app.doc.scene, id);
     ui.label(crate::tlf!("{count} faces", count = e.mesh.face_count()));

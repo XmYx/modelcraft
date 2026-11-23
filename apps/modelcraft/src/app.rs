@@ -639,7 +639,14 @@ impl ModelApp {
         self.active().filter(|id| {
             matches!(
                 self.doc.scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Generator { .. } | ObjectKind::SplineGenerator { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::Generator { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         })
     }
@@ -869,7 +876,8 @@ impl ModelApp {
                 let scene = &self.doc.scene;
                 let takes_many = modelcraft_engine::scene::generator::Generator::default_of(kind).is_some_and(|g| g.takes_many());
                 let makes = |id: &ObjectId| scene.get(*id).is_some_and(|o| o.kind.makes_geometry()) && !scene.is_cage_input(*id);
-                let mut inputs: Vec<ObjectId> = if takes_many { self.selection.iter().copied().filter(makes).collect() } else { self.active().filter(makes).into_iter().collect() };
+                let mut inputs: Vec<ObjectId> =
+                    if takes_many { self.selection.iter().copied().filter(makes).collect() } else { self.active().filter(makes).into_iter().collect() };
                 inputs.dedup();
                 self.run(Command::Procedural(modelcraft_engine::ProceduralCommand::AddGenerator { kind: kind.into(), inputs }));
             }

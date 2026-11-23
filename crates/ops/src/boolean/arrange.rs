@@ -35,14 +35,11 @@ impl Side {
     }
 }
 
-/// A crossing vertex: an edge of one mesh through a triangle of the other.
+/// A crossing vertex: an edge of one mesh through a triangle of the other (named by that pair
+/// in `vertex_of`; only where it lies is kept).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CrossVertex {
     pub pos: DVec3,
-    /// The mesh the edge belongs to (the triangle belongs to the other).
-    pub edge_side: Side,
-    pub edge: u32,
-    pub tri: u32,
 }
 
 /// One piece of the intersection curve: the segment where triangle `tri[0]` of A meets triangle
@@ -98,7 +95,13 @@ pub(crate) fn arrange(a: &Solid, b: &Solid, base: u32, limits: &Limits) -> Resul
     let (blo, bhi) = bounds(b);
     let lo = [alo[0].max(blo[0]), alo[1].max(blo[1]), alo[2].max(blo[2])];
     let hi = [ahi[0].min(bhi[0]), ahi[1].min(bhi[1]), ahi[2].min(bhi[2])];
-    let mut out = Arrangement { verts: Vec::new(), segments: Vec::new(), edge_points: [HashMap::new(), HashMap::new()], tri_segments: [HashMap::new(), HashMap::new()], pairs_tested: 0 };
+    let mut out = Arrangement {
+        verts: Vec::new(),
+        segments: Vec::new(),
+        edge_points: [HashMap::new(), HashMap::new()],
+        tri_segments: [HashMap::new(), HashMap::new()],
+        pairs_tested: 0,
+    };
     if lo.iter().zip(&hi).any(|(l, h)| l > h) {
         return Ok(out);
     }
@@ -109,10 +112,14 @@ pub(crate) fn arrange(a: &Solid, b: &Solid, base: u32, limits: &Limits) -> Resul
     if b_tris.is_empty() {
         return Ok(out);
     }
-    let avg = b_tris.iter().map(|t| {
-        let bx = &b.boxes[*t as usize];
-        (0..3).map(|k| bx.1[k] - bx.0[k]).max().unwrap_or(1)
-    }).sum::<i64>() / b_tris.len() as i64;
+    let avg = b_tris
+        .iter()
+        .map(|t| {
+            let bx = &b.boxes[*t as usize];
+            (0..3).map(|k| bx.1[k] - bx.0[k]).max().unwrap_or(1)
+        })
+        .sum::<i64>()
+        / b_tris.len() as i64;
     let span = (0..3).map(|k| hi[k] - lo[k] + 1).max().unwrap_or(1);
     let cell = avg.max(span / 100).max(1);
     let dims = [(hi[0] - lo[0]) / cell + 1, (hi[1] - lo[1]) / cell + 1, (hi[2] - lo[2]) / cell + 1];
@@ -175,7 +182,15 @@ pub(crate) fn arrange(a: &Solid, b: &Solid, base: u32, limits: &Limits) -> Resul
     Ok(out)
 }
 
-fn test_pair(a: &Solid, b: &Solid, ta: u32, tb: u32, base: u32, out: &mut Arrangement, vertex_of: &mut HashMap<(Side, u32, u32), u32>) -> Result<(), BoolError> {
+fn test_pair(
+    a: &Solid,
+    b: &Solid,
+    ta: u32,
+    tb: u32,
+    base: u32,
+    out: &mut Arrangement,
+    vertex_of: &mut HashMap<(Side, u32, u32), u32>,
+) -> Result<(), BoolError> {
     let pa = a.tri_pts(ta as usize);
     let pb = b.tri_pts(tb as usize);
     let mut found: Vec<u32> = Vec::with_capacity(2);
@@ -194,7 +209,7 @@ fn test_pair(a: &Solid, b: &Solid, ta: u32, tb: u32, base: u32, out: &mut Arrang
                 None => {
                     let (pos, s) = crossing_position(solid, other, e0, e1, other_tri);
                     let id = base + out.verts.len() as u32;
-                    out.verts.push(CrossVertex { pos, edge_side: side, edge, tri: other_tri });
+                    out.verts.push(CrossVertex { pos });
                     out.edge_points[side.index()].entry(edge).or_default().push((s, id));
                     vertex_of.insert(key, id);
                     id

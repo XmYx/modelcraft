@@ -360,7 +360,8 @@ fn a_mesh_against_itself_or_a_copy_never_leaves_an_open_surface() {
 fn a_torus_through_a_sphere_makes_a_genus_one_cut() {
     let torus = placed(Primitive::Torus { radius: 1.0, tube: 0.4, segments: 32, sides: 16 }, Vec3::ZERO, Quat::IDENTITY);
     let b = ball(1.0, Vec3::ZERO);
-    let (i, u, s) = (combine(&torus, &b, BoolOp::Intersect).unwrap(), combine(&torus, &b, BoolOp::Union).unwrap(), combine(&torus, &b, BoolOp::Subtract).unwrap());
+    let (i, u, s) =
+        (combine(&torus, &b, BoolOp::Intersect).unwrap(), combine(&torus, &b, BoolOp::Union).unwrap(), combine(&torus, &b, BoolOp::Subtract).unwrap());
     for m in [&i, &u, &s] {
         assert!(closed(m));
         m.validate().unwrap();
@@ -388,14 +389,21 @@ fn big_meshes_finish_quickly_and_report_their_work() {
 /// print every row (`cargo test -p modelcraft-ops boolean_timings -- --nocapture`).
 #[test]
 fn boolean_timings() {
-    let sizes: &[(u32, u32)] = if std::env::var_os("MODELCRAFT_BOOLEAN_BENCH").is_some() { &[(64, 32), (128, 64), (256, 128), (512, 256)] } else { &[(64, 32)] };
+    let sizes: &[(u32, u32)] =
+        if std::env::var_os("MODELCRAFT_BOOLEAN_BENCH").is_some() { &[(64, 32), (128, 64), (256, 128), (512, 256)] } else { &[(64, 32)] };
     for &(segs, rings) in sizes {
         let a = placed(Primitive::Sphere { radius: 1.0, segments: segs, rings }, Vec3::ZERO, Quat::IDENTITY);
         let b = placed(Primitive::Sphere { radius: 1.0, segments: segs, rings }, Vec3::new(0.7, 0.2, 0.1), Quat::from_rotation_x(0.3));
         let tris = to_tris(&a).tris.len();
         let start = std::time::Instant::now();
         let (m, stats) = combine_with(&a, &b, BoolOp::Union, &Limits::default()).unwrap();
-        eprintln!("{tris} triangles each: {:?} total ({} crossings, {} pairs tested, {} result faces)", start.elapsed(), stats.crossings, stats.triangle_pairs, m.face_count());
+        eprintln!(
+            "{tris} triangles each: {:?} total ({} crossings, {} pairs tested, {} result faces)",
+            start.elapsed(),
+            stats.crossings,
+            stats.triangle_pairs,
+            m.face_count()
+        );
         assert!(closed(&m));
         assert!(stats.triangle_pairs < tris, "only the part that touches is examined");
     }
