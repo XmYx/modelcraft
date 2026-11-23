@@ -33,8 +33,8 @@ pub mod sim;
 pub mod snap;
 pub mod spline_gen;
 pub mod splines;
-pub mod variants;
 pub mod stage;
+pub mod variants;
 
 use std::sync::Arc;
 
