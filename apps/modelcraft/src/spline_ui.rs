@@ -25,6 +25,8 @@ pub enum SplineAction {
     MakeEditable,
     /// The pen tool: click to add points, drag to pull out handles.
     Pen,
+    /// A generator (`extrude`, `revolve`, `loft`, `sweep`) around the selected splines.
+    AddGenerator(&'static str),
 }
 
 pub fn kind_label(kind: &str) -> String {
@@ -46,6 +48,7 @@ impl SplineAction {
         v.push(SplineAction::Add("empty"));
         v.push(SplineAction::MakeEditable);
         v.push(SplineAction::Pen);
+        v.extend(modelcraft_engine::scene::spline_gen::KINDS.iter().map(|k| SplineAction::AddGenerator(k)));
         v
     }
 
@@ -54,6 +57,7 @@ impl SplineAction {
             SplineAction::Add(k) => crate::tlf!("Add {shape} Spline", shape = kind_label(k)),
             SplineAction::MakeEditable => tl!("Make Spline Editable"),
             SplineAction::Pen => tl!("Pen Tool"),
+            SplineAction::AddGenerator(k) => crate::tlf!("Add {kind}", kind = crate::spline_gen_ui::kind_label(k)),
         }
     }
 
@@ -62,6 +66,7 @@ impl SplineAction {
             SplineAction::Add(k) => format!("spline.add.{k}"),
             SplineAction::MakeEditable => "spline.make_editable".into(),
             SplineAction::Pen => "spline.pen".into(),
+            SplineAction::AddGenerator(k) => format!("spline.add_generator.{k}"),
         }
     }
 
@@ -79,6 +84,10 @@ pub fn act(app: &mut ModelApp, a: SplineAction) {
             app.run(Command::Spline(SplineCommand::Add { kind: kind.into(), parent: None, name: None }));
         }
         SplineAction::Pen => crate::spline_pen::toggle_pen(app),
+        SplineAction::AddGenerator(kind) => {
+            let inputs: Vec<ObjectId> = app.selection.iter().copied().filter(|id| app.doc.scene.is_spline(*id)).collect();
+            app.run(Command::Spline(SplineCommand::AddGenerator { kind: kind.into(), inputs }));
+        }
         SplineAction::MakeEditable => match app.active().filter(|id| app.doc.scene.is_spline(*id)) {
             Some(id) => {
                 app.run(Command::Spline(SplineCommand::MakeEditable { id }));
@@ -91,7 +100,7 @@ pub fn act(app: &mut ModelApp, a: SplineAction) {
 pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.menu_button(tl!("Spline"), |ui| {
         for a in SplineAction::all() {
-            if a == SplineAction::MakeEditable || a == SplineAction::Pen {
+            if a == SplineAction::MakeEditable || matches!(a, SplineAction::Pen | SplineAction::AddGenerator("extrude")) {
                 ui.separator();
             }
             let action = crate::actions::Action::Spline(a);

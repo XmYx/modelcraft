@@ -222,6 +222,7 @@ impl Evaluator {
                 }
             }
             ObjectKind::Array { array } => self.generate(scene, id, depth, |m| array.build(m)),
+            ObjectKind::SplineGenerator { generator } => self.spline_generate(scene, id, generator),
             ObjectKind::Symmetry { axis, weld } => self.generate(scene, id, depth, |m| edit::mirror(m, *axis as usize, *weld)),
             ObjectKind::Cloner { cloner, target } => {
                 let mut errors = Vec::new();

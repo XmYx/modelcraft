@@ -639,7 +639,13 @@ impl ModelApp {
         self.active().filter(|id| {
             matches!(
                 self.doc.scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         })
     }

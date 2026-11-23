@@ -99,6 +99,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
                         | ObjectKind::SmoothCage { .. }
                         | ObjectKind::Array { .. }
                         | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
                         | ObjectKind::Cloner { .. }
                         | ObjectKind::Instance { .. }
                 )
