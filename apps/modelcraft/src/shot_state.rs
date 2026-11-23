@@ -20,9 +20,10 @@ pub enum ShotState {
     Shortcuts,
     Palette,
     Layers,
+    Statistics,
 }
 
-pub const ALL: [ShotState; 9] = [
+pub const ALL: [ShotState; 10] = [
     ShotState::Timeline,
     ShotState::CurveEditor,
     ShotState::RenderView,
@@ -32,6 +33,7 @@ pub const ALL: [ShotState; 9] = [
     ShotState::Shortcuts,
     ShotState::Palette,
     ShotState::Layers,
+    ShotState::Statistics,
 ];
 
 impl ShotState {
@@ -46,6 +48,7 @@ impl ShotState {
             ShotState::Shortcuts => "shortcuts",
             ShotState::Palette => "palette",
             ShotState::Layers => "layers",
+            ShotState::Statistics => "statistics",
         }
     }
 
@@ -87,6 +90,8 @@ pub fn apply(app: &mut ModelApp, ctx: &egui::Context, s: ShotState) {
         ShotState::Shortcuts => app.act(ctx, Action::KeyboardShortcuts),
         ShotState::Palette => app.act(ctx, Action::Palette),
         ShotState::Layers => app.act(ctx, Action::Organize(crate::organize_ui::Op::Layers)),
+        // The overlay is a per-view option, not part of the saved layout.
+        ShotState::Statistics => app.views.iter_mut().for_each(|v| v.options.stats = true),
     }
 }
 
@@ -137,6 +142,7 @@ mod tests {
                 ShotState::Shortcuts => app.shortcuts_state.is_some(),
                 ShotState::Palette => app.palette.is_some(),
                 ShotState::Layers => app.organize.layers_open,
+                ShotState::Statistics => app.views.iter().all(|v| v.options.stats),
             };
             assert!(open, "{s:?} opens its window");
             assert!(!app.doc.dirty, "{s:?} leaves the document unchanged");
