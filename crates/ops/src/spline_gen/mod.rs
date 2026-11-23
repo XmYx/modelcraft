@@ -205,7 +205,7 @@ pub fn fill(curves: &[Polyline]) -> OpResult {
         return Err(OpError::Invalid("filling needs a closed curve".into()));
     }
     let normal = extrude_dir(&cs, Axis::Auto);
-    orient(&mut cs, normal);
+    orient(&mut cs, normal)?;
     let mut positions: Vec<Vec3> = Vec::new();
     let mut rings: Vec<Vec<u32>> = Vec::new();
     for c in &cs {
