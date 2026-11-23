@@ -292,7 +292,8 @@ impl Modifier {
         match &self.mode {
             Mode::Delay { .. } => true,
             Mode::Noise { speed, .. } => *speed != Vec3::ZERO,
-            Mode::Formula { expr } => Expr::parse(expr).is_ok_and(|e| e.variables().iter().any(|v| v == "time")),
+            // A text scan, not a parse: this runs on every cache-key check and every paint.
+            Mode::Formula { expr } => modelcraft_anim::expr::mentions(expr, "time"),
             _ => false,
         }
     }
@@ -407,7 +408,7 @@ impl Modifier {
     #[allow(clippy::too_many_arguments)]
     fn factors(&self, i: usize, n: usize, p: Vec3, ctx_seed: u32, time: f32, target: Option<Vec3>, formula: Option<&Expr>) -> Factors {
         let i32_ = i as u32;
-        match self.mode.clone() {
+        match self.mode {
             Mode::Formula { .. } => {
                 let Some(e) = formula else { return Factors::all(0.0) };
                 let t = if n <= 1 { 1.0 } else { i as f64 / (n - 1) as f64 };
