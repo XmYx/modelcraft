@@ -64,7 +64,9 @@ fn every_new_deformer_is_in_the_palette_and_names_its_controls() {
 fn a_bulge_amount_edits_through_accessibility_with_one_undo_step_and_moves_the_mesh() {
     let mut h = harness();
     h.run();
-    palette(&mut h, "Add Cylinder");
+    // A sphere has points at every height; a cylinder with one ring only has its two ends, which
+    // a bulge leaves alone.
+    palette(&mut h, "Add Sphere");
     let mesh = h.state().selection[0];
     palette(&mut h, "Add Bulge Deformer");
     let before = {
