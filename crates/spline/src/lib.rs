@@ -25,6 +25,7 @@
 mod apply;
 mod curve;
 pub mod edit;
+pub mod modify;
 mod path;
 pub mod primitives;
 mod tess;
@@ -37,6 +38,8 @@ pub use tess::{MODES, Polyline, Tessellation, tessellate_pieces};
 
 #[cfg(test)]
 mod apply_tests;
+#[cfg(test)]
+mod modify_tests;
 #[cfg(test)]
 mod prim_tests;
 #[cfg(test)]

@@ -72,6 +72,9 @@ mod modifier_ui;
 mod modifier_ui_tests;
 mod object_manager;
 mod organize_ui;
+mod paint_ui;
+#[cfg(test)]
+mod paint_ui_tests;
 mod panels;
 mod picture_viewer;
 mod plugin_ui;
@@ -124,6 +127,8 @@ mod soft_ui_tests;
 mod spline_gen_ui;
 #[cfg(test)]
 mod spline_gen_ui_tests;
+#[cfg(test)]
+mod spline_ops_ui_tests;
 mod spline_pen;
 #[cfg(test)]
 mod spline_pen_ui_tests;

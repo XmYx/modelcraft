@@ -182,5 +182,17 @@ pub fn section(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
                 crate::spline_pen::delete_points(app);
             }
         });
+        // Corners: cut the chosen points with a straight or a round edge of this size.
+        ui.horizontal(|ui| {
+            let mut size = app.spline.corner;
+            crate::panels::drag(ui, &mut size, 0.01, 0.0001..=1.0e6, tl!("Corner size"));
+            app.spline.corner = size.max(0.0001);
+            if ui.button(tl!("Chamfer Points")).clicked() {
+                crate::spline_ui::act(app, crate::spline_ui::SplineAction::Chamfer);
+            }
+            if ui.button(tl!("Fillet Points")).clicked() {
+                crate::spline_ui::act(app, crate::spline_ui::SplineAction::Fillet);
+            }
+        });
     });
 }
