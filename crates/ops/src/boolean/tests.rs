@@ -383,16 +383,20 @@ fn big_meshes_finish_quickly_and_report_their_work() {
     assert!(took < std::time::Duration::from_secs(20), "{took:?}");
 }
 
-/// Reproduces the numbers in `docs/performance.md`: `cargo test -p modelcraft-ops boolean_timings -- --ignored --nocapture`.
+/// The timings in `docs/performance.md`: two spheres of 4 thousand triangles are checked on every
+/// run; set `MODELCRAFT_BOOLEAN_BENCH=1` to also run the 16, 65 and 261 thousand triangle sizes and
+/// print every row (`cargo test -p modelcraft-ops boolean_timings -- --nocapture`).
 #[test]
-#[ignore = "prints timings for docs/performance.md; run by hand"]
 fn boolean_timings() {
-    for (segs, rings) in [(64u32, 32u32), (128, 64), (256, 128), (512, 256)] {
+    let sizes: &[(u32, u32)] = if std::env::var_os("MODELCRAFT_BOOLEAN_BENCH").is_some() { &[(64, 32), (128, 64), (256, 128), (512, 256)] } else { &[(64, 32)] };
+    for &(segs, rings) in sizes {
         let a = placed(Primitive::Sphere { radius: 1.0, segments: segs, rings }, Vec3::ZERO, Quat::IDENTITY);
         let b = placed(Primitive::Sphere { radius: 1.0, segments: segs, rings }, Vec3::new(0.7, 0.2, 0.1), Quat::from_rotation_x(0.3));
         let tris = to_tris(&a).tris.len();
         let start = std::time::Instant::now();
         let (m, stats) = combine_with(&a, &b, BoolOp::Union, &Limits::default()).unwrap();
         eprintln!("{tris} triangles each: {:?} total ({} crossings, {} pairs tested, {} result faces)", start.elapsed(), stats.crossings, stats.triangle_pairs, m.face_count());
+        assert!(closed(&m));
+        assert!(stats.triangle_pairs < tris, "only the part that touches is examined");
     }
 }

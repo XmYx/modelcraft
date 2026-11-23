@@ -1027,7 +1027,7 @@ a script that needs less than an earlier one in the list shows +0. There is no a
 | mesh vertices in a loop | +0 MiB (stopped by the geometry budget) | 0.29 s |
 | all seven together | +203 MiB | |
 
-## Mesh booleans (`cargo test -p modelcraft-ops boolean_timings -- --ignored --nocapture`)
+## Mesh booleans (`MODELCRAFT_BOOLEAN_BENCH=1 cargo test -p modelcraft-ops boolean_timings -- --nocapture`)
 
 Union of two UV spheres of the same size, one moved by (0.7, 0.2, 0.1) and tilted, run on a shared
 machine under load (single thread, optimized test profile, 2026-11-23). The work follows the part
