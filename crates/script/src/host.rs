@@ -221,6 +221,7 @@ impl Shared {
             | Command::Organize(_)
             | Command::Hair(_)
             | Command::Sim(_)
+            | Command::Spline(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
             | Command::AddCloneModifier { .. }
