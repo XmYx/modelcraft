@@ -1,0 +1,1 @@
+- Any keyable number in Properties can hold a formula: type `=` and a formula such as `=sin(time) * 2` or `=@Lever.rotate.z / 2`. Errors and loops show in the field; type a number to go back to a plain value.
