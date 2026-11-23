@@ -654,7 +654,7 @@ fn falloff_field_commands_limit_a_deformer_and_undo() {
     // Fields only go inside deformers; unknown kinds fail without a trace.
     let n = d.undo.len();
     assert!(d.execute(Command::AddField { kind: "sphere".into(), target: cube }).is_err());
-    assert!(d.execute(Command::AddField { kind: "cone".into(), target: twist }).is_err());
+    assert!(d.execute(Command::AddField { kind: "hyperboloid".into(), target: twist }).is_err());
     assert!(d.execute(Command::SetField { id: twist, field: modelcraft_scene::Field::default_of("box").unwrap() }).is_err());
     assert_eq!(d.undo.len(), n);
 }

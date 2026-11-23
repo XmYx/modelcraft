@@ -292,8 +292,8 @@ Weight: 4
 | Collision deformer | C | M | M | |
 | Explode / shatter deformer | C | M | S | |
 | Deformer weights painted per vertex | C M | M | M | |
-| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear and noise fields with a remap curve; they weight the deformers they sit in; no radial or shader field |
-| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer, blended by multiply, add, subtract, smallest or largest, then remapped; no delay or freeze |
+| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random-cell and formula fields with a remap curve; they weight the deformers and clone modifiers they sit in; no shader field |
+| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer or clone modifier, blended by multiply, add, subtract, smallest or largest at an opacity, then remapped; a list in Properties with a switch, blend, opacity and keyboard reordering for each; no delay or freeze |
 
 ## Procedural cloning and effectors
 
