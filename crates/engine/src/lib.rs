@@ -70,6 +70,8 @@ mod hair_tests;
 #[cfg(test)]
 mod organize_tests;
 #[cfg(test)]
+mod procedural_tests;
+#[cfg(test)]
 mod rig_tests;
 #[cfg(test)]
 mod sim_cloth_tests;

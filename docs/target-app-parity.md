@@ -192,9 +192,9 @@ Weight: 4
 |---|---|---|---|---|
 | Cube, plane, sphere, cylinder, cone, torus | C M Z | D | S | With UVs and segments |
 | Rounded cube / quad sphere (cube-mapped) | C M Z | D | S | The sculpting base |
-| Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | M | S | |
+| Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | P | S | Disc (with a hole), polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron and icosahedron are Create-menu primitives with editable parameters and UVs; the helix waits for splines |
 | Extruded 3D text | C M | M | M | |
-| Terrain / landscape generator | C | M | M | |
+| Terrain / landscape generator | C | D | M | Seeded fractal-noise height field: size, height, segments, feature scale, octaves and seed in Properties; no erosion or sculpt-in-place yet |
 | Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |
@@ -487,7 +487,7 @@ Weight: 8
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Keyframe any attribute; auto key | C M | D | M | Every number an object stores has a path (transform, visibility, material, primitive, history-step and deformer parameters); stepped, linear and Bézier keys; auto-key keys changed transform channels and already-animated attributes in the same undo step |
+| Keyframe any attribute; auto key | C M | D | M | Every number an object stores has a path (transform, visibility, material, primitive, history-step and deformer parameters); stepped, linear and Bézier keys; auto-key keys changed transform channels and already-animated attributes in the same undo step; the Properties fields of the transform, material, primitive shape, deformer, clone and array parameters carry a key marker (not animated, animated, key on this frame; Enter or Space keys or un-keys, Shift shows the curve), with no marker yet on field, clone-modifier or physics fields, and none on material layers whose value is the default, which have no attribute path until they change |
 | Timeline: scrub, play, range | C M | D | M | Scene frame rate and range, whole-frame playback (once, loop, back and forth), next/previous key; the ruler is a keyboard slider |
 | Graph editor: curves, tangents, Bézier handles | C M | D | L | Curve Editor: automatic clamped, flat, free and split tangents, weighted handles, five extrapolation modes, numeric fields for every drag, box selection, copy and paste with tangents, a value axis fitted or set by hand (numbers, zoom in / out); no normalised view |
 | Dope sheet | C M | D | M | Key Sheet: select (click, box, all), move, scale, delete, copy and paste keys (at the current frame, onto another object) by pointer, keyboard or number; no summary rows |

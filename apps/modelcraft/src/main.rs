@@ -1,6 +1,6 @@
 //! ModelCraft desktop app.
 //!
-//! Usage: `modelcraft [--demo model|sculpt] [--workspace …] [--quad] [--screenshot <file.png>]
+//! Usage: `modelcraft [--demo model|sculpt] [--workspace …] [--quad] [--screenshot <file.png>] [--screenshot-state <name>]
 //! [--bench-viewport <frames>] [file]`; `--help` prints the options.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
@@ -41,6 +41,9 @@ mod gpu;
 mod hair_ui;
 #[cfg(test)]
 mod hair_ui_tests;
+mod key_marker;
+#[cfg(test)]
+mod key_marker_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
@@ -56,6 +59,8 @@ mod plugin_ui;
 mod plugin_ui_tests;
 mod prefs;
 mod prefs_ui;
+#[cfg(test)]
+mod procedural_ui_tests;
 mod radial;
 mod render_ui;
 #[cfg(test)]
@@ -87,6 +92,7 @@ mod sculpt_ui;
 #[cfg(test)]
 mod sculpt_ui_tests;
 mod shelf;
+mod shot_state;
 mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
