@@ -65,7 +65,7 @@ fn smooth_cage_and_deformers_follow_their_children() {
     assert_eq!(ev.evaluate(&s, cage).mesh.face_count(), 24);
     // A twist under the cube changes the cage's output too.
     let before = ev.evaluate(&s, cage).mesh.positions().to_vec();
-    s.add("Twist", ObjectKind::Deformer { deformer: Deformer::Twist { angle: 45.0 } }, Some(cube)).unwrap();
+    s.add("Twist", ObjectKind::Deformer { deformer: Deformer::Twist { angle: 45.0 }, limits: Default::default(), target: None }, Some(cube)).unwrap();
     let after = ev.evaluate(&s, cage).mesh.positions().to_vec();
     assert_ne!(before, after);
 }
@@ -181,7 +181,8 @@ fn falloff_fields_limit_where_a_deformer_acts() {
     let mut ev = Evaluator::new();
     let cube = s.add("Cube", cube_kind(), None).unwrap();
     let base = ev.evaluate(&s, cube).mesh.positions().to_vec();
-    let twist = s.add("Twist", ObjectKind::Deformer { deformer: Deformer::Twist { angle: 90.0 } }, Some(cube)).unwrap();
+    let twist =
+        s.add("Twist", ObjectKind::Deformer { deformer: Deformer::Twist { angle: 90.0 }, limits: Default::default(), target: None }, Some(cube)).unwrap();
     let full = ev.evaluate(&s, cube).mesh.positions().to_vec();
     assert_ne!(base, full);
     // A sphere field at the top of the cube (y = +1): the bottom stays, the top moves.

@@ -1,0 +1,1 @@
+| 2026-11-23 | Spline objects: Circle, Rectangle, Star, N-Side, Arc and Helix primitives with Properties pages (plane, sizes, closing), fixed / uniform / adaptive intermediate points, `spline` commands (`add`, `set_primitive`, `set_tessellation`, `make_editable`, `set_curve`), curves drawn and picked in the viewport, the Spline menu; evaluator cache; tests |

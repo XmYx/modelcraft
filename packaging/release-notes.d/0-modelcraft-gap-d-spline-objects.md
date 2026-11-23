@@ -1,0 +1,1 @@
+- Splines: the new Spline menu (and the command palette) adds Circle, Rectangle, Star, N-Side, Arc and Helix curves with sizes, plane and point density in Properties; click a curve to select it, Make Spline Editable turns it into points.

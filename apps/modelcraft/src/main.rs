@@ -27,9 +27,15 @@ mod coord_ui_tests;
 mod cut_ui;
 #[cfg(test)]
 mod cut_ui_tests;
+mod create_menu;
+#[cfg(test)]
+mod create_menu_tests;
 mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
+mod deformer_params_ui;
+#[cfg(test)]
+mod deformer_params_ui_tests;
 mod demo;
 mod display_modes;
 mod dock;
@@ -105,6 +111,16 @@ mod snap_ui;
 mod soft_ui;
 #[cfg(test)]
 mod soft_ui_tests;
+mod spline_gen_ui;
+#[cfg(test)]
+mod spline_gen_ui_tests;
+mod spline_pen;
+#[cfg(test)]
+mod spline_pen_ui_tests;
+mod spline_points_ui;
+mod spline_ui;
+#[cfg(test)]
+mod spline_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

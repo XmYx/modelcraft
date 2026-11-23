@@ -75,6 +75,7 @@ pub enum Action {
     NextPanel,
     TransformDialog,
     CoordinatePanel,
+    IconPalettes,
     About,
     SaveIncremental,
     SelectLoop,
@@ -95,6 +96,7 @@ pub enum Action {
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
     Sim(crate::sim_ui::SimAction),
+    Spline(crate::spline_ui::SplineAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -109,7 +111,7 @@ pub enum Action {
 }
 
 pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
-pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
+pub const DEFORMERS: &[&str] = modelcraft_engine::ops::deform::KINDS;
 /// The array layouts (`modelcraft_ops::array::KINDS`).
 pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 /// The falloff field shapes (`modelcraft_field::SHAPES`).
@@ -144,6 +146,9 @@ pub fn all() -> Vec<Action> {
         Workspace(crate::app::Workspace::Model),
         Workspace(crate::app::Workspace::Sculpt),
         Workspace(crate::app::Workspace::Paint),
+        Workspace(crate::app::Workspace::Uv),
+        Workspace(crate::app::Workspace::Animate),
+        Workspace(crate::app::Workspace::Groom),
         ModeObject,
         ModeVertex,
         ModeEdge,
@@ -202,6 +207,7 @@ pub fn all() -> Vec<Action> {
         Preferences,
         TransformDialog,
         CoordinatePanel,
+        IconPalettes,
         Palette,
         KeyboardShortcuts,
         NextPanel,
@@ -210,6 +216,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
     v.extend(crate::sim_ui::SimAction::ALL.map(Sim));
+    v.extend(crate::spline_ui::SplineAction::all().into_iter().map(Spline));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -247,6 +254,12 @@ pub fn deformer_label(d: &str) -> String {
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
         "shear" => tl!("Shear"),
+        "bulge" => tl!("Bulge"),
+        "squash" => tl!("Squash"),
+        "smooth" => tl!("Smooth"),
+        "delta_smooth" => tl!("Delta Smooth"),
+        "displace" => tl!("Displace"),
+        "shrink_wrap" => tl!("Shrink Wrap"),
         _ => d.to_string(),
     }
 }
@@ -330,6 +343,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => tl!("Model Workspace"),
             Workspace(crate::app::Workspace::Sculpt) => tl!("Sculpt Workspace"),
             Workspace(crate::app::Workspace::Paint) => tl!("Paint Workspace"),
+            Workspace(crate::app::Workspace::Uv) => tl!("UV Workspace"),
+            Workspace(crate::app::Workspace::Animate) => tl!("Animate Workspace"),
+            Workspace(crate::app::Workspace::Groom) => tl!("Groom Workspace"),
             ModeObject => tl!("Object Mode"),
             ModeVertex => tl!("Vertex Mode"),
             ModeEdge => tl!("Edge Mode"),
@@ -401,6 +417,7 @@ impl Action {
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             CoordinatePanel => tl!("Coordinates Panel"),
+            IconPalettes => tl!("Icon Palettes"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
             SelectLoop => tl!("Select Edge Loop"),
@@ -417,6 +434,7 @@ impl Action {
             Anim(a) => a.label(),
             Rig(a) => a.label(),
             Sim(a) => a.label(),
+            Spline(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -449,6 +467,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => "workspace.model",
             Workspace(crate::app::Workspace::Sculpt) => "workspace.sculpt",
             Workspace(crate::app::Workspace::Paint) => "workspace.paint",
+            Workspace(crate::app::Workspace::Uv) => "workspace.uv",
+            Workspace(crate::app::Workspace::Animate) => "workspace.animate",
+            Workspace(crate::app::Workspace::Groom) => "workspace.groom",
             ModeObject => "mode.object",
             ModeVertex => "mode.vertex",
             ModeEdge => "mode.edge",
@@ -530,11 +551,13 @@ impl Action {
             Anim(a) => a.id(),
             Rig(a) => a.id(),
             Sim(a) => a.id(),
+            Spline(a) => return a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             CoordinatePanel => "view.coordinates",
+            IconPalettes => "view.icon_palettes",
             About => "help.about",
         };
         s.to_string()
@@ -562,6 +585,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => "Cmd+1",
             Workspace(crate::app::Workspace::Sculpt) => "Cmd+2",
             Workspace(crate::app::Workspace::Paint) => "Cmd+3",
+            Workspace(crate::app::Workspace::Uv) => "Cmd+4",
+            Workspace(crate::app::Workspace::Animate) => "Cmd+5",
+            Workspace(crate::app::Workspace::Groom) => "Cmd+6",
             ModeObject => "Model: 1",
             ModeVertex => "Model: 2",
             ModeEdge => "Model: 3",
@@ -631,6 +657,7 @@ impl Action {
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
             Sim(a) => return a.default_binding(),
+            Spline(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
@@ -660,6 +687,7 @@ impl Action {
             Anim(_) => "Animate",
             Rig(_) => "Rig",
             Sim(_) => "Simulate",
+            Spline(_) => "Spline",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",

@@ -2737,6 +2737,7 @@ dependencies = [
  "modelcraft-scene",
  "modelcraft-sculpt",
  "modelcraft-sim",
+ "modelcraft-spline",
  "modelcraft-uv",
  "modelcraft-uvpack",
  "proptest",
@@ -2811,8 +2812,10 @@ dependencies = [
  "glam 0.30.10",
  "modelcraft-field",
  "modelcraft-mesh",
+ "modelcraft-spline",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -2851,6 +2854,7 @@ dependencies = [
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-sim",
+ "modelcraft-spline",
  "modelcraft-uv",
  "modelcraft-uvpack",
  "proptest",

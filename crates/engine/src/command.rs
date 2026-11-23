@@ -169,6 +169,15 @@ pub enum Command {
     SetDeformer {
         id: ObjectId,
         deformer: Deformer,
+        /// The box the deformer works over (unchanged when left out).
+        #[serde(default)]
+        limits: Option<modelcraft_ops::deform::Limits>,
+        /// The object a shrink-wrap pulls onto (unchanged when left out).
+        #[serde(default)]
+        target: Option<ObjectId>,
+        /// Take the target away.
+        #[serde(default)]
+        clear_target: bool,
     },
     SetArray {
         id: ObjectId,
@@ -357,6 +366,8 @@ pub enum Command {
     Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
+    /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
+    Spline(crate::spline::SplineCommand),
 }
 
 fn default_axis() -> u32 {
@@ -385,7 +396,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
     ("add_array", "Add an array generator (linear, radial) around input?: real copies joined into one mesh"),
     ("add_symmetry", "Add a symmetry generator around input? mirrored across axis (0 X, 1 Y, 2 Z)"),
-    ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear) under target"),
+    ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap) under target"),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_clone_modifier", "Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner"),
     (
@@ -401,7 +412,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_material", "Set base_color, metallic, roughness: id, material"),
     ("set_primitive", "Change a primitive's parameters: id, primitive"),
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
-    ("set_deformer", "Change a deformer's parameters: id, deformer"),
+    (
+        "set_deformer",
+        "Change a deformer's parameters, limits (mode limited / unlimited / within_box, fit_to_parent, size) or shrink-wrap target: id, deformer, limits?, target?, clear_target?",
+    ),
     ("set_array", "Change an array's layout, copies and steps: id, array"),
     ("set_symmetry", "Change a symmetry's axis and join distance: id, axis, weld"),
     ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend, opacity, enabled): id, field"),
@@ -545,6 +559,7 @@ impl Command {
             Command::Organize(o) => o.label(),
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
+            Command::Spline(c) => c.label(),
         }
     }
 }

@@ -836,7 +836,13 @@ impl Document {
         if let Some(i) = input
             && !matches!(
                 self.scene.get(i).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         {
             return invalid("a generator needs a mesh or another generator as its input");
@@ -894,6 +900,7 @@ impl Document {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
             Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::Spline(s) => return crate::spline::check_unlocked(self, s),
             Command::SetTransform { id, transform } => {
                 if let Some(o) = self.scene.get(*id)
                     && let Some(channel) = self.scene.protected_channel(*id, &o.transform, &transform.sanitized())
@@ -987,7 +994,7 @@ impl Document {
                     return invalid("deformers go under a mesh object");
                 }
                 let name = self.scene.unique_name(&title(kind));
-                out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
+                out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer, limits: Default::default(), target: None }, Some(*target))?);
             }
             Command::AddCloneModifier { kind, cloner } => {
                 let modifier = Modifier::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone modifier {kind:?}")))?;
@@ -1077,10 +1084,28 @@ impl Document {
                 }
                 _ => return invalid("not a symmetry generator"),
             },
-            Command::SetDeformer { id, deformer } => match &mut self.scene.edit(*id)?.kind {
-                ObjectKind::Deformer { deformer: d } => *d = *deformer,
-                _ => return invalid("not a deformer"),
-            },
+            Command::SetDeformer { id, deformer, limits, target, clear_target } => {
+                let mesh = self.scene.get(*id).and_then(|o| o.parent);
+                if let Some(t) = target
+                    && (self.scene.get(*t).is_none() || Some(*t) == mesh || *t == *id || mesh.is_some_and(|m| self.scene.subtree(m).contains(t)))
+                {
+                    return invalid("the target must be another object, not the mesh being deformed or anything inside it");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::Deformer { deformer: d, limits: l, target: tg } => {
+                        *d = *deformer;
+                        if let Some(new) = limits {
+                            *l = new.sanitized();
+                        }
+                        if *clear_target {
+                            *tg = None;
+                        } else if target.is_some() {
+                            *tg = *target;
+                        }
+                    }
+                    _ => return invalid("not a deformer"),
+                }
+            }
             Command::SetField { id, field } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::Field { field: f } => *f = field.sanitized(),
                 _ => return invalid("not a falloff field"),
@@ -1260,6 +1285,7 @@ impl Document {
             Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
+            Command::Spline(c) => crate::spline::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;
@@ -1427,6 +1453,8 @@ impl Document {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
                 || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                // A curve has no surface; the generators that use it export their mesh.
+                || matches!(o.kind, ObjectKind::Spline { .. })
                 // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
                 || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
                 || !self.scene.renders(id)
