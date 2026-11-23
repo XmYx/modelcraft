@@ -75,6 +75,12 @@ impl Report {
         self.total().row_score()
     }
 
+    /// The area that measures UI parity with the reference layout, when the map has one (its
+    /// heading starts with "UI parity").
+    pub fn ui(&self) -> Option<&Area> {
+        self.areas.iter().find(|a| a.name.starts_with("UI parity"))
+    }
+
     /// The Markdown block written between the `parity:` markers.
     pub fn block(&self) -> String {
         let t = self.total();
@@ -86,6 +92,9 @@ impl Report {
         let _ = writeln!(s, "| **Row parity**, (D + X + ½·P) / rows | **{:.1} %** | counted |", t.row_score());
         let _ = writeln!(s, "| **Weighted parity**, area weights × size-weighted rows | **{:.1} %** | counted |", self.weighted());
         let _ = writeln!(s, "| Size-weighted parity over all rows, no area weights | {:.1} % | counted |", t.effort_score());
+        if let Some(ui) = self.ui() {
+            let _ = writeln!(s, "| **UI parity**, rows of the reference-layout area | **{:.1} %** | counted |", ui.row_score());
+        }
         s.push('\n');
         s.push_str("| Area | Weight | Rows | D | X | P | M | Out | Row parity | Effort parity |\n");
         s.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
@@ -241,6 +250,29 @@ mod tests {
         assert!(score("## A\nWeight: x\n").is_err(), "bad weight");
         assert!(score("| a | C | D | S | |\n").is_err(), "row outside an area");
         assert!(score("nothing").is_err());
+    }
+
+    #[test]
+    fn ui_parity_is_the_row_score_of_the_ui_area() {
+        assert!(score(MAP).unwrap().ui().is_none());
+        assert!(!score(MAP).unwrap().block().contains("UI parity"), "no UI line without the area");
+        let map = format!(
+            "{MAP}\n## UI parity with the reference layout\n\nWeight: 2\n\n| Feature | Refs | Status | Size | Notes |\n|---|---|---|---|---|\n| f | C | D | S | |\n| g | C | P | M | |\n| h | C | M | L | |\n| i | C | O | S | vendor service |\n"
+        );
+        let r = score(&map).unwrap();
+        let ui = r.ui().unwrap();
+        assert_eq!(ui.rows(), 3, "the out-of-scope row is left out");
+        // (1 + 0.5 + 0) / 3
+        assert!((ui.row_score() - 50.0).abs() < 1e-9);
+        assert!(r.block().contains("| **UI parity**, rows of the reference-layout area | **50.0 %** | counted |"), "{}", r.block());
+    }
+
+    #[test]
+    fn the_map_in_the_repository_has_a_ui_area() {
+        let r = score(include_str!("../../docs/target-app-parity.md")).unwrap();
+        let ui = r.ui().unwrap();
+        assert!(ui.rows() >= 46, "{} UI rows", ui.rows());
+        assert!(r.block().contains("**UI parity**"));
     }
 
     #[test]

@@ -1,0 +1,1 @@
+| 2026-11-23 | UI parity map: the parity map gains a "UI parity with the reference layout" area (46 rows in our own words, statuses checked in the code), and `cargo xtask parity` reports its row parity as UI parity |
