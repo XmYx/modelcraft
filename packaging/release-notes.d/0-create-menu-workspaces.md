@@ -1,0 +1,1 @@
+- The Create menu is grouped into submenus, View, Icon Palettes adds icon columns for tools and creating objects, and there are UV, Animate and Groom workspaces (Ctrl+4 to 6).
