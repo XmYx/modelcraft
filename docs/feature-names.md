@@ -27,6 +27,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Spaced, Dots, Spray, Trail, Drag out (stroke modes) | freehand, dots, spray, lazy-mouse and drag-rectangle strokes | Generic words; "lazy" naming avoided | Use |
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
+| Disc, Polygon, Tube, Capsule, Pyramid, Tetrahedron, Octahedron, Dodecahedron, Icosahedron, Landscape (primitives); Hole radius, Feature scale | disc, n-gon, tube, capsule, pyramid, platonic solid and landscape primitives | Geometry words and plain nouns | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |
 | Transform by Numbers | numeric transform dialogs | Generic phrase | Use |

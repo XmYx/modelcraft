@@ -57,7 +57,7 @@ changes the scene runs a command, so it is journaled and undoable, and `undo_gro
 
 ## Edit
 
-- `add_primitive(kind) -> id`: Add a primitive: cube, plane, sphere, round_cube, cylinder, cone or torus.
+- `add_primitive(kind) -> id`: Add a primitive: cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron or landscape.
 - `add_primitive(kind, name) -> id`: Add a primitive with a name (made unique when taken).
 - `add_group() -> id`: Add an empty group.
 - `add_group(name) -> id`: Add an empty group with a name.
@@ -196,7 +196,7 @@ fields of each command are in [cli.md](cli.md#commands).
 
 | Function | What it does |
 |---|---|
-| `cmd::add_primitive` | Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent? |
+| `cmd::add_primitive` | Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron, landscape), name?, parent? |
 | `cmd::add_group` | Add an empty group: name? |
 | `cmd::add_smooth_cage` | Add a smooth cage generator around input? with levels |
 | `cmd::add_array` | Add an array generator (linear, radial) around input?: real copies joined into one mesh |

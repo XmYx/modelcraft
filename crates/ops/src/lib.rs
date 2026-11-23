@@ -18,6 +18,7 @@ pub mod extrude;
 pub mod loopcut;
 pub mod patches;
 pub mod primitives;
+mod primitives_more;
 pub mod remesh;
 pub mod select;
 pub mod soft;

@@ -36,7 +36,7 @@ Object ids are numbers (`info` prints them).
 
 | `cmd` | Fields |
 |---|---|
-| `add_primitive` | `kind` (cube, plane, sphere, round_cube, cylinder, cone, torus), `name?`, `parent?` |
+| `add_primitive` | `kind` (cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron, landscape), `name?`, `parent?` |
 | `add_group` | `name?` |
 | `add_smooth_cage` | `input?`, `levels` (default 2) |
 | `add_deformer` | `kind` (bend, twist, taper, ripple, round), `target` |

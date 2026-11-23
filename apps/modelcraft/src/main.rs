@@ -21,6 +21,9 @@ mod clone_ui_tests;
 mod constraint_ui;
 #[cfg(test)]
 mod constraint_ui_tests;
+mod coord_ui;
+#[cfg(test)]
+mod coord_ui_tests;
 mod cut_ui;
 #[cfg(test)]
 mod cut_ui_tests;
@@ -61,6 +64,8 @@ mod plugin_ui;
 mod plugin_ui_tests;
 mod prefs;
 mod prefs_ui;
+#[cfg(test)]
+mod procedural_ui_tests;
 mod radial;
 mod render_view;
 mod rig_tools;
