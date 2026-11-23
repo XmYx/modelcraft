@@ -176,7 +176,7 @@ Weight: 5
 | Cached evaluation per step | M | D | S | `history_is_cached_and_reevaluated_from_the_change` |
 | Stale steps degrade gracefully | M | X | S | A step whose selection no longer fits is skipped and flagged, never fatal |
 | Generators as objects (cage of a child) | C | D | M | Smooth cage |
-| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace and shrink-wrap, in one stack order with blend shapes, lattices, clusters and skins |
+| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace, shrink-wrap and formula, in one stack order with blend shapes, lattices, clusters and skins |
 | Node view of the dependency graph | M | M | L | |
 | Connect any attribute to any other | M | P | M | A formula on any keyable number (`=@Lever.rotate.z`, typed into the field) or a driven key makes one attribute follow another, ordered and cycle-checked with the constraints; no wiring view and no vector or colour connections |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
@@ -285,7 +285,7 @@ Weight: 4
 | Ripple / wave, spherify | C M | D | S | Ripple, Round |
 | Lattice / free-form deformation | C M | P | M | A lattice of up to 8 cells per axis around a mesh, as one Bézier volume (the 1986 paper) or cell by cell, with a deformer stack order shared with clusters, blend shapes and skins (reorder by command); control points are moved by number and are keyable; the cage is drawn but its points are not picked in the viewport; clusters (weighted points following an object, with a soft radius) live in the same stack |
 | Wrap, shrink-wrap and surface deformers | C M | P | M | Shrink-wrap pulls the points onto a target object (nearest point, or along the deformer's Y axis) with an offset and the falloff fields as weights; no wrap to a cage and no surface deformer |
-| Noise and texture displacement deformer | C M | P | S | Displace along the normals by seeded fractal noise or by the falloff fields' weight; no texture maps |
+| Noise and texture displacement deformer | C M | P | S | Displace along the normals by seeded fractal noise or by the falloff fields' weight; a formula deformer moves points by a formula of their place, index and the time along the normal, an axis or away from the Y axis (parsed once, capped at 67 108 864 steps, re-evaluated when the frame changes); no texture maps |
 | Smooth, relax and delta-smoothing deformers | C M | P | M | Smooth (passes and strength, weighted by the fields) and delta smoothing, which smooths only what the deformers before it did; no separate volume-keeping relax |
 | Spline-driven deformation (curve warp, spline wrap) | C M | M | M | |
 | Wire, wrinkle and sculpt-object deformers | M | M | M | |
@@ -302,7 +302,7 @@ Weight: 5
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Cloner: linear, radial, grid, honeycomb, on-object modes | C M | P | L | Clones object: linear, radial, grid, scatter, surface and vertex layouts, seeded; no honeycomb or per-clone selections |
-| Effectors: plain, random, shader, step, delay, time, target, formula | C M | P | L | Clone modifiers: plain, random, noise (shader), step, delay (time based, follows the timeline) and target, each acting on position, rotation, scale and tint, stacked in order; no formula or mesh-sampled shader |
+| Effectors: plain, random, shader, step, delay, time, target, formula | C M | P | L | Clone modifiers: plain, random, noise (shader), step, delay (time based, follows the timeline) and target, and formula (a factor from the clone's index, count, place and the time; capped at 2 097 152 steps), each acting on position, rotation, scale and tint, stacked in order; no mesh-sampled shader |
 | Fields drive effectors | C | D | M | Falloff fields placed inside a clone modifier weigh each clone; several combine as in deformers |
 | Clone selections and weight maps | C | M | M | |
 | Instancing at scale (millions of points, render instances) | C M | P | M | Clones share one GPU mesh and one evaluated mesh; capped at 10,000 per generator, one draw call each |
@@ -400,11 +400,11 @@ Weight: 5
 | Per-object PBR material (base colour, metallic, roughness) | C M Z | D | S | glTF metallic-roughness core, exported to GLB |
 | Link a MaterialCraft `.mcmat` | | D | M | Stored and saved; the path tracer reads its base colour, roughness, metallic, normal, height and opacity maps (the viewport still shows the flat colour, counted under viewport textures) |
 | Full layered surface model (OpenPBR-class: coat, sheen, transmission, thin film) | C M R | P | L | The engine evaluates fuzz, coat, anisotropic metal with edge tint, dielectric with thin film, rough diffuse, rough transmission with absorption, emission and opacity on the CPU and the GPU (the same model in both, held together by tests), energy-checked by a furnace test; Properties exposes coat, sheen, transmission, index of refraction and emission; no nested dielectrics or dispersion |
-| Texture inputs: images, procedural noise, ramps, triplanar | C M R | P | L | Image maps for base colour, roughness, metalness, normal, height and opacity, bilinear, through a linked `.mcmat`; no mip filtering, procedural textures, ramps or triplanar, and no per-map controls in the app |
+| Texture inputs: images, procedural noise, ramps, triplanar | C M R | P | L | Image maps for base colour, roughness, metalness, normal, height and opacity, bilinear, through a linked `.mcmat`; procedural noise, ramps, mixes and picture nodes come from a material graph (see the node editor); no mip filtering or triplanar, and no per-map controls in the app |
 | Bump, normal and displacement inputs | C M R | P | M | Tangent-space normal maps and height bump in the path tracer (a test checks the lit result against the tilted normal); no displacement |
-| Node material editor | C M R | M | XL | Planned with MaterialCraft |
+| Node material editor | C M R | P | XL | `modelcraft-matgraph` and the Material Nodes window: a breadcrumb, a node picker with search, and a card per node with a thumbnail of what it makes, its settings and a list for each input that chooses the node feeding it (so linking needs no dragging); number, colour, noise (tiling fractal), ramp, mix, math, image and normal-map nodes into one surface node (base colour, metallic, roughness, emission, normal); the graph compiles to maps the path tracer reads on the CPU and the GPU (a test checks the two agree on a noise-driven roughness); loops, too many nodes and too deep a chain are refused; no wires drawn on a canvas, no node groups, no custom node kinds, no MaterialX |
 | Per-face / per-patch material assignment | C M Z | M | M | |
-| Material library and preset browser | C M R | M | M | |
+| Material library and preset browser | C M R | P | M | The Material Nodes window opens with a strip of every surface's material (colour and a graph marker; click to work on it) and Copy Material to Selection puts one onto others in one undo step; no named library that is kept across projects, no browser |
 | MaterialX import and export | M R | M | M | |
 
 ## Render engine: core

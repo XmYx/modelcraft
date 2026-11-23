@@ -7,8 +7,13 @@
 //! displacement also need the mesh's connections and normals, and shrink-wrapping a target
 //! surface, which a [`Context`] supplies. Falloff fields weigh them all through
 //! [`Context::weight`].
+//!
+//! The formula deformer moves each point by the value of a formula (the expression language of
+//! the animation crate) over where the point is and the time. It parses its formula once per
+//! evaluation and caps its work at [`MAX_FORMULA_WORK`] steps (points times formula nodes).
 
 use glam::{Mat4, Vec3};
+use modelcraft_anim::expr::Expr;
 use serde::{Deserialize, Serialize};
 
 use crate::PolyMesh;
@@ -18,6 +23,54 @@ use crate::bvh::TriBvh;
 pub const MAX_SMOOTH_ITERATIONS: u32 = 100;
 /// Most noise octaves a displacement adds up.
 pub const MAX_OCTAVES: u32 = 6;
+/// Most steps one formula deformer takes in one evaluation: the points times the nodes of its
+/// formula. A deformer over it leaves the mesh alone and says so ([`Deformer::problem`]).
+pub const MAX_FORMULA_WORK: usize = 1 << 26;
+
+/// The direction a formula deformer moves points along.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Along {
+    /// The surface normal at the point.
+    #[default]
+    Normal,
+    /// The deformer's own X, Y or Z axis.
+    X,
+    Y,
+    Z,
+    /// Away from the deformer's Y axis.
+    Radial,
+}
+
+impl Along {
+    pub const ALL: [Along; 5] = [Along::Normal, Along::X, Along::Y, Along::Z, Along::Radial];
+    pub fn id(self) -> &'static str {
+        match self {
+            Along::Normal => "normal",
+            Along::X => "x",
+            Along::Y => "y",
+            Along::Z => "z",
+            Along::Radial => "radial",
+        }
+    }
+}
+
+/// The time a deformer is evaluated at, for formulas.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Time {
+    pub frame: f64,
+    pub seconds: f64,
+}
+
+/// The names a formula deformer reads.
+pub const FORMULA_NAMES: &[&str] = &["x", "y", "z", "r", "t", "i", "n", "time", "frame"];
+
+fn default_formula() -> String {
+    "sin(y * 4 + time * 3) * 0.1".into()
+}
+fn one() -> f32 {
+    1.0
+}
 
 /// How far the deformation reaches along the deformer's box.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,7 +157,7 @@ pub enum WrapMode {
     Project,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Deformer {
     /// Bend around Z by `angle` degrees over the height.
@@ -135,9 +188,22 @@ pub enum Deformer {
     Displace { amplitude: f32, scale: f32, octaves: u32, seed: u32, source: DisplaceSource },
     /// Pull points onto the surface of the target object, keeping `offset` away from it.
     ShrinkWrap { mode: WrapMode, offset: f32 },
+    /// Move each point `amount` times the value of `expr` along `along`. The formula reads `x`,
+    /// `y`, `z` (the point in the deformer's frame), `r` (its distance from the deformer's
+    /// origin), `t` (its height through the box, 0 at the bottom and 1 at the top), `i` and `n`
+    /// (its index and the number of points), `time` (seconds) and `frame`.
+    Formula {
+        #[serde(default = "default_formula")]
+        expr: String,
+        #[serde(default)]
+        along: Along,
+        #[serde(default = "one")]
+        amount: f32,
+    },
 }
 
-pub const KINDS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear", "bulge", "squash", "smooth", "delta_smooth", "displace", "shrink_wrap"];
+pub const KINDS: &[&str] =
+    &["bend", "twist", "taper", "ripple", "round", "shear", "bulge", "squash", "smooth", "delta_smooth", "displace", "shrink_wrap", "formula"];
 
 impl Deformer {
     pub fn default_of(kind: &str) -> Option<Deformer> {
@@ -154,6 +220,7 @@ impl Deformer {
             "delta_smooth" => Deformer::DeltaSmooth { iterations: 5, strength: 0.5 },
             "displace" => Deformer::Displace { amplitude: 0.1, scale: 2.0, octaves: 3, seed: 1, source: DisplaceSource::Noise },
             "shrink_wrap" => Deformer::ShrinkWrap { mode: WrapMode::Closest, offset: 0.0 },
+            "formula" => Deformer::Formula { expr: default_formula(), along: Along::Normal, amount: 1.0 },
             _ => return None,
         })
     }
@@ -172,6 +239,42 @@ impl Deformer {
             Deformer::DeltaSmooth { .. } => "delta_smooth",
             Deformer::Displace { .. } => "displace",
             Deformer::ShrinkWrap { .. } => "shrink_wrap",
+            Deformer::Formula { .. } => "formula",
+        }
+    }
+
+    /// The deformer with its formula cut to the longest the expression language reads (the
+    /// numbers are cleaned where they are used).
+    pub fn sanitized(&self) -> Deformer {
+        match self {
+            Deformer::Formula { expr, along, amount } => {
+                Deformer::Formula { expr: expr.chars().take(modelcraft_anim::expr::MAX_SOURCE).collect(), along: *along, amount: finite(*amount) }
+            }
+            d => d.clone(),
+        }
+    }
+
+    /// Why the deformer would leave a mesh of `points` points alone: a formula that does not
+    /// parse or that needs more than [`MAX_FORMULA_WORK`] steps over that many points.
+    pub fn problem(&self, points: usize) -> Option<String> {
+        let Deformer::Formula { expr, .. } = self else { return None };
+        match Expr::parse(expr) {
+            Err(e) => Some(format!("its formula does not work: {e}")),
+            Ok(e) if points.saturating_mul(e.cost()) > MAX_FORMULA_WORK => {
+                Some(format!("its formula needs {} steps over {points} points, more than the {MAX_FORMULA_WORK} allowed", points.saturating_mul(e.cost())))
+            }
+            Ok(e) => {
+                e.variables().iter().find(|v| !FORMULA_NAMES.contains(&v.as_str())).map(|v| format!("its formula reads {v:?}, which a deformer does not know"))
+            }
+        }
+    }
+
+    /// Whether the result changes with the frame (a formula that reads the time or the frame).
+    pub fn is_time_dependent(&self) -> bool {
+        match self {
+            // A text scan, not a parse: this runs on every cache-key check.
+            Deformer::Formula { expr, .. } => modelcraft_anim::expr::mentions(expr, "time") || modelcraft_anim::expr::mentions(expr, "frame"),
+            _ => false,
         }
     }
 
@@ -190,7 +293,7 @@ impl Deformer {
     /// and values between blend. Falloff fields supply the weight.
     pub fn apply_weighted(&self, m: &mut PolyMesh, to_local: Mat4, weight: &dyn Fn(Vec3) -> f32) {
         let mut pts = m.positions().to_vec();
-        let cx = Context { to_local, limits: Limits::default(), weight, topology: Some(m), rest: None, target: None };
+        let cx = Context { to_local, limits: Limits::default(), weight, topology: Some(m), rest: None, target: None, time: Time::default() };
         self.apply_points(&mut pts, &cx);
         let _ = m.set_positions(&pts);
     }
@@ -200,11 +303,12 @@ impl Deformer {
         if !cx.to_local.is_finite() || cx.to_local.determinant().abs() < 1e-12 || pts.is_empty() {
             return;
         }
-        match *self {
-            Deformer::Smooth { iterations, strength } => smooth(pts, cx, iterations, strength, false),
-            Deformer::DeltaSmooth { iterations, strength } => smooth(pts, cx, iterations, strength, true),
-            Deformer::Displace { amplitude, scale, octaves, seed, source } => displace(pts, cx, amplitude, scale, octaves, seed, source),
-            Deformer::ShrinkWrap { mode, offset } => shrink_wrap(pts, cx, mode, offset),
+        match self {
+            Deformer::Smooth { iterations, strength } => smooth(pts, cx, *iterations, *strength, false),
+            Deformer::DeltaSmooth { iterations, strength } => smooth(pts, cx, *iterations, *strength, true),
+            Deformer::Displace { amplitude, scale, octaves, seed, source } => displace(pts, cx, *amplitude, *scale, *octaves, *seed, *source),
+            Deformer::ShrinkWrap { mode, offset } => shrink_wrap(pts, cx, *mode, *offset),
+            Deformer::Formula { expr, along, amount } => formula(pts, cx, expr, *along, *amount),
             _ => self.pointwise(pts, cx),
         }
     }
@@ -307,6 +411,8 @@ pub struct Context<'a> {
     pub rest: Option<&'a [Vec3]>,
     /// The surface a shrink-wrap pulls onto, already in the deformed mesh's space.
     pub target: Option<&'a TriBvh>,
+    /// The time, for formulas.
+    pub time: Time,
 }
 
 fn clean_weight(w: f32) -> f32 {
@@ -452,6 +558,76 @@ fn displace(pts: &mut [Vec3], cx: &Context, amplitude: f32, scale: f32, octaves:
     }
 }
 
+/// The formula deformer: see [`Deformer::Formula`]. A formula that does not parse or is over the
+/// work cap leaves the points alone; a point where it gives no number (a division by zero) stays.
+fn formula(pts: &mut [Vec3], cx: &Context, expr: &str, along: Along, amount: f32) {
+    let Ok(e) = Expr::parse(expr) else { return };
+    if pts.len().saturating_mul(e.cost()) > MAX_FORMULA_WORK || e.variables().iter().any(|v| !FORMULA_NAMES.contains(&v.as_str())) {
+        return;
+    }
+    let amount = finite(amount).clamp(-100_000.0, 100_000.0);
+    let normals: Vec<Vec3> = match (along, cx.topology) {
+        (Along::Normal, Some(m)) if m.vertex_count() == pts.len() => {
+            let mut tmp = m.clone();
+            if tmp.set_positions(pts).is_ok() { tmp.vertex_normals() } else { radial(pts) }
+        }
+        (Along::Normal, _) => radial(pts),
+        _ => Vec::new(),
+    };
+    let limits = cx.limits.sanitized();
+    let local: Vec<Vec3> = pts.iter().map(|p| cx.to_local.transform_point3(*p)).collect();
+    let (lo, hi) = if limits.fit_to_parent {
+        local.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), p| (a.min(*p), b.max(*p)))
+    } else {
+        (-limits.size * 0.5, limits.size * 0.5)
+    };
+    let h = (hi.y - lo.y).max(1e-6);
+    let back = cx.to_local.inverse();
+    let axis = |v: Vec3| back.transform_vector3(v).normalize_or_zero();
+    let (ax, ay, az) = (axis(Vec3::X), axis(Vec3::Y), axis(Vec3::Z));
+    let n = pts.len() as f64;
+    let (seconds, frame) = (finite64(cx.time.seconds), finite64(cx.time.frame));
+    for (i, p) in pts.iter_mut().enumerate() {
+        let Some(q) = local.get(i).copied() else { continue };
+        if limits.mode == LimitMode::WithinBox && !(q.cmpge(lo).all() && q.cmple(hi).all()) {
+            continue;
+        }
+        let w = clean_weight((cx.weight)(q));
+        if w == 0.0 {
+            continue;
+        }
+        let t = f64::from((q.y - lo.y) / h);
+        let value = e.eval(&|name| match name {
+            "x" => Some(f64::from(q.x)),
+            "y" => Some(f64::from(q.y)),
+            "z" => Some(f64::from(q.z)),
+            "r" => Some(f64::from(q.length())),
+            "t" => Some(t),
+            "i" => Some(i as f64),
+            "n" => Some(n),
+            "time" => Some(seconds),
+            "frame" => Some(frame),
+            _ => None,
+        });
+        let Ok(v) = value else { continue };
+        let dir = match along {
+            Along::Normal => normals.get(i).copied().unwrap_or(Vec3::ZERO),
+            Along::X => ax,
+            Along::Y => ay,
+            Along::Z => az,
+            Along::Radial => back.transform_vector3(Vec3::new(q.x, 0.0, q.z).normalize_or_zero()),
+        };
+        let moved = *p + dir * (v as f32 * amount * w);
+        if moved.is_finite() {
+            *p = moved;
+        }
+    }
+}
+
+fn finite64(v: f64) -> f64 {
+    if v.is_finite() { v.clamp(-1.0e9, 1.0e9) } else { 0.0 }
+}
+
 /// Directions away from the centre, for a mesh whose faces are not known.
 fn radial(pts: &[Vec3]) -> Vec<Vec3> {
     let c = pts.iter().copied().sum::<Vec3>() / pts.len().max(1) as f32;
@@ -567,7 +743,10 @@ mod tests {
     fn run(d: Deformer, m: &PolyMesh, limits: Limits) -> Vec<Vec3> {
         let mut pts = m.positions().to_vec();
         let one = |_: Vec3| 1.0;
-        d.apply_points(&mut pts, &Context { to_local: Mat4::IDENTITY, limits, weight: &one, topology: Some(m), rest: None, target: None });
+        d.apply_points(
+            &mut pts,
+            &Context { to_local: Mat4::IDENTITY, limits, weight: &one, topology: Some(m), rest: None, target: None, time: Time::default() },
+        );
         pts
     }
 
@@ -637,7 +816,15 @@ mod tests {
         let mut lifted = rest.clone();
         lifted[40].y += 1.0;
         let one = |_: Vec3| 1.0;
-        let cx = Context { to_local: Mat4::IDENTITY, limits: Limits::default(), weight: &one, topology: Some(&m), rest: Some(&rest), target: None };
+        let cx = Context {
+            to_local: Mat4::IDENTITY,
+            limits: Limits::default(),
+            weight: &one,
+            topology: Some(&m),
+            rest: Some(&rest),
+            target: None,
+            time: Time::default(),
+        };
         let mut out = lifted.clone();
         Deformer::DeltaSmooth { iterations: 3, strength: 0.5 }.apply_points(&mut out, &cx);
         assert!(out[40].y < 1.0 && out[40].y > 0.0, "the spike came down: {}", out[40].y);
@@ -659,7 +846,7 @@ mod tests {
     fn displacement_moves_along_normals_by_at_most_the_amplitude_and_is_seeded() {
         let m = Primitive::Sphere { radius: 1.0, segments: 16, rings: 8 }.build().unwrap();
         let d = Deformer::Displace { amplitude: 0.2, scale: 2.0, octaves: 3, seed: 5, source: DisplaceSource::Noise };
-        let out = run(d, &m, Limits::default());
+        let out = run(d.clone(), &m, Limits::default());
         let normals = m.vertex_normals();
         let mut moved = 0;
         for ((p, q), n) in m.positions().iter().zip(&out).zip(&normals) {
@@ -671,7 +858,7 @@ mod tests {
             }
         }
         assert!(moved > m.vertex_count() / 2);
-        assert!(run(d, &m, Limits::default()) == out, "the same seed gives the same result");
+        assert!(run(d.clone(), &m, Limits::default()) == out, "the same seed gives the same result");
         let other = Deformer::Displace { amplitude: 0.2, scale: 2.0, octaves: 3, seed: 6, source: DisplaceSource::Noise };
         assert!(run(other, &m, Limits::default()) != out);
         // From the fields: the weight is the height, so a weight of 1 everywhere lifts every
@@ -690,7 +877,15 @@ mod tests {
         let ball = Primitive::Sphere { radius: 0.5, segments: 16, rings: 8 }.build().unwrap();
         let one = |_: Vec3| 1.0;
         let mut pts = ball.positions().to_vec();
-        let cx = Context { to_local: Mat4::IDENTITY, limits: Limits::default(), weight: &one, topology: Some(&ball), rest: None, target: Some(&bvh) };
+        let cx = Context {
+            to_local: Mat4::IDENTITY,
+            limits: Limits::default(),
+            weight: &one,
+            topology: Some(&ball),
+            rest: None,
+            target: Some(&bvh),
+            time: Time::default(),
+        };
         Deformer::ShrinkWrap { mode: WrapMode::Closest, offset: 0.0 }.apply_points(&mut pts, &cx);
         assert!(pts.iter().all(|p| (p.abs().max_element() - 1.0).abs() < 1e-4), "every point is on the cube's surface");
         // An offset keeps them off it, outward.
@@ -725,9 +920,9 @@ mod tests {
         // Points above the box when it is smaller than the mesh.
         let small = Limits { mode: LimitMode::Limited, fit_to_parent: false, size: Vec3::new(2.0, 2.0, 2.0) };
         let top = m.positions().iter().position(|p| (p.y - 2.0).abs() < 1e-6 && p.x > 0.4).unwrap();
-        let limited = run(twist, &m, small);
-        let unlimited = run(twist, &m, Limits { mode: LimitMode::Unlimited, ..small });
-        let within = run(twist, &m, Limits { mode: LimitMode::WithinBox, ..small });
+        let limited = run(twist.clone(), &m, small);
+        let unlimited = run(twist.clone(), &m, Limits { mode: LimitMode::Unlimited, ..small });
+        let within = run(twist.clone(), &m, Limits { mode: LimitMode::WithinBox, ..small });
         let turned = |out: &[Vec3]| (angle_of(out[top]) - angle_of(m.position(top as u32))).to_degrees().abs();
         assert!((turned(&limited) - 90.0).abs() < 1e-2, "held at the end value: {}", turned(&limited));
         assert!(turned(&unlimited) > 130.0, "keeps turning: {}", turned(&unlimited));
@@ -737,7 +932,7 @@ mod tests {
         assert!((limited[inside] - unlimited[inside]).length() < 1e-5 && (limited[inside] - within[inside]).length() < 1e-5);
         assert!(limited[inside] != m.position(inside as u32));
         // Fitting to the mesh is the old behaviour.
-        let old = run(twist, &m, Limits::default());
+        let old = run(twist.clone(), &m, Limits::default());
         let mut reference = m.clone();
         twist.apply(&mut reference, Mat4::IDENTITY);
         assert!(old == reference.positions());
@@ -761,12 +956,74 @@ mod tests {
         prop_oneof![proptest::num::f32::ANY, -10.0f32..10.0, Just(f32::NAN), Just(f32::INFINITY), Just(0.0)]
     }
 
+    #[test]
+    fn the_formula_deformer_moves_points_by_its_value_along_the_chosen_direction() {
+        let m = cylinder();
+        // Along the deformer's Y axis by the point's own height: every point doubles its height.
+        let up = Deformer::Formula { expr: "y".into(), along: Along::Y, amount: 1.0 };
+        let out = run(up, &m, Limits::default());
+        for (p, q) in m.positions().iter().zip(&out) {
+            assert!((q.y - 2.0 * p.y).abs() < 1e-5 && (q.x - p.x).abs() < 1e-6 && (q.z - p.z).abs() < 1e-6, "{p} -> {q}");
+        }
+        // Along the normal by a constant: a sphere grows by exactly that much.
+        let ball = Primitive::Sphere { radius: 1.0, segments: 16, rings: 8 }.build().unwrap();
+        let grow = Deformer::Formula { expr: "0.25".into(), along: Along::Normal, amount: 1.0 };
+        let out = run(grow, &ball, Limits::default());
+        assert!(out.iter().all(|q| (q.length() - 1.25).abs() < 1e-3), "{:?}", out.first());
+        // `t` runs 0 to 1 up the box; radial moves away from the Y axis; amount scales.
+        let flare = Deformer::Formula { expr: "t".into(), along: Along::Radial, amount: 0.5 };
+        let out = run(flare, &m, Limits::default());
+        let top = m.positions().iter().position(|p| (p.y - 2.0).abs() < 1e-6 && p.x > 0.4).unwrap();
+        let bottom = m.positions().iter().position(|p| (p.y + 2.0).abs() < 1e-6 && p.x > 0.4).unwrap();
+        assert!((out[top].x - (m.position(top as u32).x + 0.5)).abs() < 1e-4);
+        assert!((out[bottom] - m.position(bottom as u32)).length() < 1e-6);
+        // The time moves it; a point where the formula gives no number stays.
+        let wave = Deformer::Formula { expr: "time".into(), along: Along::X, amount: 1.0 };
+        assert!(wave.is_time_dependent() && !Deformer::Formula { expr: "x".into(), along: Along::X, amount: 1.0 }.is_time_dependent());
+        let mut pts = m.positions().to_vec();
+        let one = |_: Vec3| 1.0;
+        let at = Time { frame: 48.0, seconds: 2.0 };
+        wave.apply_points(
+            &mut pts,
+            &Context { to_local: Mat4::IDENTITY, limits: Limits::default(), weight: &one, topology: Some(&m), rest: None, target: None, time: at },
+        );
+        assert!((pts[0].x - (m.position(0).x + 2.0)).abs() < 1e-5);
+        let odd = Deformer::Formula { expr: "1 / (i - 3)".into(), along: Along::Y, amount: 1.0 };
+        let out = run(odd, &m, Limits::default());
+        assert_eq!(out[3], m.position(3), "division by zero at point 3 leaves it");
+        assert!(out[4] != m.position(4));
+    }
+
+    #[test]
+    fn a_formula_deformer_over_its_work_cap_or_with_unknown_names_changes_nothing() {
+        let long = format!("1{}", "+1".repeat(250));
+        let cost = modelcraft_anim::expr::Expr::parse(&long).unwrap().cost();
+        let points = MAX_FORMULA_WORK / cost + 1;
+        let d = Deformer::Formula { expr: long, along: Along::Y, amount: 1.0 };
+        assert!(d.problem(points).is_some_and(|p| p.contains("steps")), "over the cap is a problem");
+        assert!(d.problem(points - 1).is_none(), "one point fewer fits");
+        let mut pts = vec![Vec3::ZERO; points];
+        let one = |_: Vec3| 1.0;
+        let cx = Context { to_local: Mat4::IDENTITY, limits: Limits::default(), weight: &one, topology: None, rest: None, target: None, time: Time::default() };
+        d.apply_points(&mut pts, &cx);
+        assert!(pts.iter().all(|p| *p == Vec3::ZERO), "nothing ran");
+        for bad in ["@1.translate.x", "self.translate.x", "1 +"] {
+            let d = Deformer::Formula { expr: bad.into(), along: Along::Y, amount: 1.0 };
+            assert!(d.problem(10).is_some(), "{bad}");
+            let mut pts = vec![Vec3::ONE; 10];
+            d.apply_points(&mut pts, &cx);
+            assert!(pts.iter().all(|p| *p == Vec3::ONE), "{bad}");
+        }
+        let huge = Deformer::Formula { expr: "x".repeat(100_000), along: Along::Y, amount: f32::NAN }.sanitized();
+        assert!(matches!(&huge, Deformer::Formula { expr, amount, .. } if expr.len() == modelcraft_anim::expr::MAX_SOURCE && *amount == 0.0));
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(96))]
         /// Whatever the numbers, a deformer leaves every point finite and the topology alone.
         #[test]
         fn any_deformer_with_any_numbers_keeps_points_finite(
-            kind in 0usize..12, a in any_f32(), b in any_f32(), n in any::<u32>(), seed in any::<u32>(),
+            kind in 0usize..13, a in any_f32(), b in any_f32(), n in any::<u32>(), seed in any::<u32>(),
             mode in 0usize..3, fit in any::<bool>(), size in any_f32(), w in any_f32(),
         ) {
             let m = Primitive::Sphere { radius: 1.0, segments: 8, rings: 6 }.build().unwrap();
@@ -782,14 +1039,15 @@ mod tests {
                 8 => Deformer::Smooth { iterations: n % 200, strength: a },
                 9 => Deformer::DeltaSmooth { iterations: n % 200, strength: a },
                 10 => Deformer::Displace { amplitude: a, scale: b, octaves: n, seed, source: if n % 2 == 0 { DisplaceSource::Noise } else { DisplaceSource::Field } },
-                _ => Deformer::ShrinkWrap { mode: if n % 2 == 0 { WrapMode::Closest } else { WrapMode::Project }, offset: a },
+                11 => Deformer::ShrinkWrap { mode: if n % 2 == 0 { WrapMode::Closest } else { WrapMode::Project }, offset: a },
+                _ => Deformer::Formula { expr: format!("x / (y - {b}) * {a} + i / n"), along: Along::ALL[n as usize % 5], amount: a },
             };
             let limits = Limits { mode: [LimitMode::Limited, LimitMode::Unlimited, LimitMode::WithinBox][mode], fit_to_parent: fit, size: Vec3::splat(size) };
             let target = TriBvh::from_mesh(&Primitive::Cube { size: Vec3::splat(1.5), segments: 1 }.build().unwrap(), Mat4::IDENTITY);
             let weight = move |_: Vec3| w;
             let mut pts = m.positions().to_vec();
             let rest = pts.clone();
-            d.apply_points(&mut pts, &Context { to_local: Mat4::IDENTITY, limits, weight: &weight, topology: Some(&m), rest: Some(&rest), target: Some(&target) });
+            d.apply_points(&mut pts, &Context { to_local: Mat4::IDENTITY, limits, weight: &weight, topology: Some(&m), rest: Some(&rest), target: Some(&target), time: Time::default() });
             prop_assert!(pts.iter().all(|p| p.is_finite()), "{d:?}");
             let mut out = m.clone();
             prop_assert!(out.set_positions(&pts).is_ok());

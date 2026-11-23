@@ -29,7 +29,7 @@ fn palette(h: &mut Harness<'static, ModelApp>, text: &str) {
 fn deformer(h: &Harness<'static, ModelApp>) -> (Deformer, modelcraft_engine::ops::deform::Limits, Option<ObjectId>) {
     let id = h.state().selection[0];
     match &h.state().doc.scene.get(id).unwrap().kind {
-        ObjectKind::Deformer { deformer, limits, target } => (*deformer, *limits, *target),
+        ObjectKind::Deformer { deformer, limits, target } => (deformer.clone(), *limits, *target),
         k => panic!("not a deformer: {k:?}"),
     }
 }

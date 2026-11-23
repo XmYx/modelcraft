@@ -1,0 +1,1 @@
+- A Formula deformer moves points by a formula of where they are and the time, and clone modifiers have a Formula mode: for example `sin(t * tau + time * 2)` ripples a row of clones.
