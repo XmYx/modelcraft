@@ -302,6 +302,12 @@ pub(crate) fn drag(ui: &mut egui::Ui, v: &mut f32, speed: f32, range: std::ops::
     r
 }
 
+/// [`drag`] with a key marker before it (see `key_marker`): `path` is the attribute it edits.
+pub(crate) fn drag_k(ui: &mut egui::Ui, path: &str, v: &mut f32, speed: f32, range: std::ops::RangeInclusive<f32>, name: String) -> egui::Response {
+    crate::key_marker::marker(ui, path, &name);
+    drag(ui, v, speed, range, name)
+}
+
 pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     egui::Panel::top("tool-options").frame(egui::Frame::NONE.fill(theme::PANEL).inner_margin(egui::Margin::symmetric(8, 3))).show(ui, |ui| {
@@ -670,7 +676,54 @@ pub(crate) fn vec3_row(ui: &mut egui::Ui, label: &str, v: &mut Vec3, speed: f32)
     out
 }
 
+/// The attribute paths of a three-number field.
+#[derive(Clone, Copy)]
+pub(crate) enum KeyPaths {
+    /// `<prefix>.x`, `<prefix>.y`, `<prefix>.z` (the transform).
+    Axes(&'static str),
+    /// `<prefix>.0`, `<prefix>.1`, `<prefix>.2` (a vector stored as a list).
+    Index(&'static str),
+}
+
+impl KeyPaths {
+    fn path(self, axis: usize) -> String {
+        match self {
+            KeyPaths::Axes(p) => format!("{p}.{}", ["x", "y", "z"][axis.min(2)]),
+            KeyPaths::Index(p) => format!("{p}.{}", axis.min(2)),
+        }
+    }
+}
+
+/// [`vec3_row`] with a key marker before each number, on a line under its label so the three
+/// numbers and their markers fit the panel.
+pub(crate) fn vec3_row_k(ui: &mut egui::Ui, label: &str, paths: KeyPaths, v: &mut Vec3, speed: f32) -> Vec<egui::Response> {
+    let mut out = Vec::new();
+    ui.vertical(|ui| {
+        ui.label(RichText::new(label).color(theme::TEXT_DIM));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            for (i, (axis, c, val)) in [("X", theme::AXIS_X, &mut v.x), ("Y", theme::AXIS_Y, &mut v.y), ("Z", theme::AXIS_Z, &mut v.z)].into_iter().enumerate()
+            {
+                let name = format!("{label} {axis}");
+                crate::key_marker::marker(ui, &paths.path(i), &name);
+                ui.label(RichText::new(axis).color(c).small());
+                let r = ui.add_sized([54.0, 18.0], egui::DragValue::new(val).speed(speed).max_decimals(3));
+                set_name(ui, &r, name);
+                out.push(r);
+            }
+        });
+    });
+    out
+}
+
 fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
+    let Some(id) = app.active() else { return properties_body(app, ui) };
+    crate::key_marker::begin(app, ui, id);
+    properties_body(app, ui);
+    crate::key_marker::end(app, ui);
+}
+
+fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let Some(id) = app.active() else {
         ui.label(RichText::new(tl!("Nothing selected.")).color(theme::TEXT_DIM));
@@ -688,12 +741,12 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
         let mut euler = t.euler_degrees();
         let per = app.unit.per_metre();
         let mut shown = t.translation * per;
-        let pos = vec3_row(ui, &tl!("Position"), &mut shown, 0.01);
+        let pos = vec3_row_k(ui, &tl!("Position"), KeyPaths::Axes("translate"), &mut shown, 0.01);
         if pos.iter().any(|r| r.changed()) {
             t.translation = shown / per;
         }
-        let rot = vec3_row(ui, &tl!("Rotation"), &mut euler, 0.5);
-        let scl = vec3_row(ui, &tl!("Scale"), &mut t.scale, 0.01);
+        let rot = vec3_row_k(ui, &tl!("Rotation"), KeyPaths::Axes("rotate"), &mut euler, 0.5);
+        let scl = vec3_row_k(ui, &tl!("Scale"), KeyPaths::Axes("scale"), &mut t.scale, 0.01);
         t.set_euler_degrees(euler);
         let t = t.sanitized();
         for r in pos.iter().chain(&rot).chain(&scl) {
@@ -771,14 +824,14 @@ fn properties(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
             let mut m2 = obj.material.clone();
             ui.horizontal(|ui| {
-                let r = drag(ui, &mut m2.metallic, 0.01, 0.0..=1.0, tl!("Metallic"));
+                let r = drag_k(ui, "material.metallic", &mut m2.metallic, 0.01, 0.0..=1.0, tl!("Metallic"));
                 let mm = m2.clone();
                 let batch = crate::object_manager::material_batch(app, id, mm.clone());
                 commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
             });
             let mut m3 = obj.material.clone();
             ui.horizontal(|ui| {
-                let r = drag(ui, &mut m3.roughness, 0.01, 0.0..=1.0, tl!("Roughness"));
+                let r = drag_k(ui, "material.roughness", &mut m3.roughness, 0.01, 0.0..=1.0, tl!("Roughness"));
                 let mm = m3.clone();
                 let batch = crate::object_manager::material_batch(app, id, mm.clone());
                 commit_edit(app, &r, |o| o.material = mm.clone(), || batch, id);
@@ -923,39 +976,39 @@ fn primitive_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, p: Prim
     };
     ui.horizontal_wrapped(|ui| match &mut q {
         Primitive::Cube { size, segments } => {
-            rs.extend(vec3_row(ui, &tl!("Size"), size, 0.01));
+            rs.extend(vec3_row_k(ui, &tl!("Size"), KeyPaths::Index("primitive.size"), size, 0.01));
             rs.push(int(ui, segments, 256, tl!("Segments")));
         }
         Primitive::Plane { width, depth, segments } => {
-            rs.push(drag(ui, width, 0.01, 0.001..=1e4, tl!("Width")));
-            rs.push(drag(ui, depth, 0.01, 0.001..=1e4, tl!("Depth")));
+            rs.push(drag_k(ui, "primitive.width", width, 0.01, 0.001..=1e4, tl!("Width")));
+            rs.push(drag_k(ui, "primitive.depth", depth, 0.01, 0.001..=1e4, tl!("Depth")));
             rs.push(int(ui, segments, 1024, tl!("Segments")));
         }
         Primitive::Sphere { radius, segments, rings } => {
-            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag_k(ui, "primitive.radius", radius, 0.01, 0.001..=1e4, tl!("Radius")));
             rs.push(int(ui, segments, 1024, tl!("Segments")));
             rs.push(int(ui, rings, 1024, tl!("Rings")));
         }
         Primitive::RoundCube { radius, segments } => {
-            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag_k(ui, "primitive.radius", radius, 0.01, 0.001..=1e4, tl!("Radius")));
             rs.push(int(ui, segments, 1024, tl!("Segments")));
         }
         Primitive::Cylinder { radius, height, sides, rings, caps } => {
-            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
-            rs.push(drag(ui, height, 0.01, 0.001..=1e4, tl!("Height")));
+            rs.push(drag_k(ui, "primitive.radius", radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag_k(ui, "primitive.height", height, 0.01, 0.001..=1e4, tl!("Height")));
             rs.push(int(ui, sides, 1024, tl!("Sides")));
             rs.push(int(ui, rings, 1024, tl!("Rings")));
             rs.push(ui.checkbox(caps, tl!("Caps")));
         }
         Primitive::Cone { radius, height, sides, caps } => {
-            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
-            rs.push(drag(ui, height, 0.01, 0.001..=1e4, tl!("Height")));
+            rs.push(drag_k(ui, "primitive.radius", radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag_k(ui, "primitive.height", height, 0.01, 0.001..=1e4, tl!("Height")));
             rs.push(int(ui, sides, 1024, tl!("Sides")));
             rs.push(ui.checkbox(caps, tl!("Caps")));
         }
         Primitive::Torus { radius, tube, segments, sides } => {
-            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
-            rs.push(drag(ui, tube, 0.01, 0.001..=1e4, tl!("Tube")));
+            rs.push(drag_k(ui, "primitive.radius", radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag_k(ui, "primitive.tube", tube, 0.01, 0.001..=1e4, tl!("Tube")));
             rs.push(int(ui, segments, 1024, tl!("Segments")));
             rs.push(int(ui, sides, 1024, tl!("Sides")));
         }
@@ -979,13 +1032,18 @@ fn deformer_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Defor
     let mut q = d;
     let r = ui
         .horizontal(|ui| match &mut q {
-            Deformer::Bend { angle } | Deformer::Twist { angle } => vec![drag(ui, angle, 0.5, -3600.0..=3600.0, tl!("Angle"))],
-            Deformer::Taper { amount } => vec![drag(ui, amount, 0.01, -10.0..=10.0, tl!("Amount"))],
+            Deformer::Bend { angle } | Deformer::Twist { angle } => vec![drag_k(ui, "deformer.angle", angle, 0.5, -3600.0..=3600.0, tl!("Angle"))],
+            Deformer::Taper { amount } => vec![drag_k(ui, "deformer.amount", amount, 0.01, -10.0..=10.0, tl!("Amount"))],
             Deformer::Ripple { amplitude, frequency } => {
-                vec![drag(ui, amplitude, 0.005, -10.0..=10.0, tl!("Amplitude")), drag(ui, frequency, 0.01, 0.0..=100.0, tl!("Frequency"))]
+                vec![
+                    drag_k(ui, "deformer.amplitude", amplitude, 0.005, -10.0..=10.0, tl!("Amplitude")),
+                    drag_k(ui, "deformer.frequency", frequency, 0.01, 0.0..=100.0, tl!("Frequency")),
+                ]
             }
-            Deformer::Round { amount } => vec![drag(ui, amount, 0.01, 0.0..=1.0, tl!("Amount"))],
-            Deformer::Shear { x, z } => vec![drag(ui, x, 0.01, -1000.0..=1000.0, tl!("Slide X")), drag(ui, z, 0.01, -1000.0..=1000.0, tl!("Slide Z"))],
+            Deformer::Round { amount } => vec![drag_k(ui, "deformer.amount", amount, 0.01, 0.0..=1.0, tl!("Amount"))],
+            Deformer::Shear { x, z } => {
+                vec![drag_k(ui, "deformer.x", x, 0.01, -1000.0..=1000.0, tl!("Slide X")), drag_k(ui, "deformer.z", z, 0.01, -1000.0..=1000.0, tl!("Slide Z"))]
+            }
         })
         .inner;
     if let Some(r) = r.iter().find(|r| r.changed() || r.drag_stopped()) {
