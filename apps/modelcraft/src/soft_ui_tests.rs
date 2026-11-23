@@ -160,3 +160,36 @@ fn weight_colours_run_from_blue_to_red() {
     assert_eq!(w[v as usize], 1.0);
     assert!(w.iter().filter(|x| **x > 0.0).count() > 1);
 }
+
+#[test]
+fn the_weights_are_worked_out_once_until_something_changes() {
+    let mut h = harness();
+    plane(&mut h);
+    let m = mesh(&mut h);
+    let v = vertex_at(&m, glam::Vec3::ZERO);
+    h.state_mut().components = [v].into_iter().collect();
+    h.state_mut().modeling.soft.enabled = true;
+    h.state_mut().modeling.soft.radius = 2.0;
+    // Many frames: one computation.
+    for _ in 0..10 {
+        h.run();
+    }
+    let n = h.state().modeling.soft_cache.computed;
+    assert_eq!(n, 1, "frames with nothing changed must not recompute");
+    for _ in 0..10 {
+        h.run();
+    }
+    assert_eq!(h.state().modeling.soft_cache.computed, n);
+    // The radius, the selection and the mesh each invalidate it.
+    h.state_mut().modeling.soft.radius = 3.0;
+    h.run();
+    assert_eq!(h.state().modeling.soft_cache.computed, n + 1);
+    let other = m.vertex_neighbors(v).next().unwrap();
+    h.state_mut().components = [v, other].into_iter().collect();
+    h.run();
+    assert_eq!(h.state().modeling.soft_cache.computed, n + 2);
+    let id = h.state().selection[0];
+    h.state_mut().run(modelcraft_engine::Command::AddStep { id, op: StepOp::move_vertices(vec![v], glam::Vec3::Y, glam::Quat::IDENTITY, glam::Vec3::ONE) });
+    h.run();
+    assert_eq!(h.state().modeling.soft_cache.computed, n + 3);
+}

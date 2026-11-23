@@ -99,6 +99,8 @@ impl PanelId {
 pub struct View {
     pub camera: Camera,
     pub preset: ViewPreset,
+    /// What the view's header menus changed for this view only.
+    pub options: crate::view_header::ViewOptions,
 }
 
 /// Parameters of the modeling operations, edited in the tool options bar.
@@ -321,10 +323,10 @@ impl ModelApp {
         crate::i18n::set_language(None);
         crate::theme::apply(ctx);
         let views = [
-            View { camera: Camera::default(), preset: ViewPreset::Perspective },
-            View { camera: Camera::preset(ViewPreset::Front), preset: ViewPreset::Front },
-            View { camera: Camera::preset(ViewPreset::Right), preset: ViewPreset::Right },
-            View { camera: Camera::preset(ViewPreset::Top), preset: ViewPreset::Top },
+            View { camera: Camera::default(), preset: ViewPreset::Perspective, options: Default::default() },
+            View { camera: Camera::preset(ViewPreset::Front), preset: ViewPreset::Front, options: Default::default() },
+            View { camera: Camera::preset(ViewPreset::Right), preset: ViewPreset::Right, options: Default::default() },
+            View { camera: Camera::preset(ViewPreset::Top), preset: ViewPreset::Top, options: Default::default() },
         ];
         let mut app = ModelApp {
             doc: Document::new(),
@@ -1055,7 +1057,12 @@ impl ModelApp {
     }
 
     fn set_view(&mut self, p: ViewPreset) {
-        let v = &mut self.views[self.active_view.min(3)];
+        self.set_view_of(self.active_view, p);
+    }
+
+    /// Give view `i` a preset camera, keeping what it looks at and how far away.
+    pub fn set_view_of(&mut self, i: usize, p: ViewPreset) {
+        let v = &mut self.views[i.min(3)];
         let (target, distance) = (v.camera.target, v.camera.distance);
         v.camera = Camera::preset(p);
         v.camera.target = target;

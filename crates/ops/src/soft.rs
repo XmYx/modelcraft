@@ -6,7 +6,7 @@
 //! origin of the mesh's space (X, Y or Z); vertices are matched with their mirror image by
 //! position, within a tolerance.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use glam::{Quat, Vec3};
 use modelcraft_field::Curve;
@@ -68,36 +68,77 @@ pub fn mirror_point(p: Vec3, axis: usize) -> Vec3 {
     q
 }
 
-/// A grid of positions for neighbour searches: cell size `cell`.
-struct Grid {
-    cell: f32,
-    cells: HashMap<(i32, i32, i32), Vec<u32>>,
+/// Most tree nodes one nearest-point query may visit. A query that runs out answers with the
+/// nearest point found so far (the work stays bounded whatever the point layout).
+pub const MAX_QUERY_NODES: usize = 4096;
+
+/// A kd-tree over points: nearest-point queries in about log n steps however large the search
+/// radius is and however the points are spread. Exactly coincident points are stored once.
+struct Kd {
+    nodes: Vec<(Vec3, u32)>,
 }
 
-impl Grid {
-    fn key(cell: f32, p: Vec3) -> (i32, i32, i32) {
-        let c = |x: f32| (x / cell).floor().clamp(-1e9, 1e9) as i32;
-        (c(p.x), c(p.y), c(p.z))
+impl Kd {
+    fn new(points: impl Iterator<Item = (u32, Vec3)>) -> Kd {
+        let mut nodes: Vec<(Vec3, u32)> = points.map(|(i, p)| (p, i)).collect();
+        // Stacked duplicates would make every query visit all of them: keep the lowest index.
+        nodes.sort_unstable_by(|a, b| a.0.to_array().map(f32::to_bits).cmp(&b.0.to_array().map(f32::to_bits)).then(a.1.cmp(&b.1)));
+        nodes.dedup_by(|b, a| a.0.to_array().map(f32::to_bits) == b.0.to_array().map(f32::to_bits));
+        Kd::build(&mut nodes, 0);
+        Kd { nodes }
     }
-    fn new(cell: f32, points: impl Iterator<Item = (u32, Vec3)>) -> Grid {
-        let mut cells: HashMap<(i32, i32, i32), Vec<u32>> = HashMap::new();
-        for (i, p) in points {
-            cells.entry(Grid::key(cell, p)).or_default().push(i);
+    fn build(s: &mut [(Vec3, u32)], depth: usize) {
+        if s.len() <= 1 {
+            return;
         }
-        Grid { cell, cells }
+        let axis = depth % 3;
+        let mid = s.len() / 2;
+        s.select_nth_unstable_by(mid, |a, b| a.0[axis].total_cmp(&b.0[axis]));
+        let (left, right) = s.split_at_mut(mid);
+        Kd::build(left, depth + 1);
+        Kd::build(right.get_mut(1..).unwrap_or(&mut []), depth + 1);
     }
-    /// The points in the 27 cells around `p`.
-    fn near(&self, p: Vec3) -> impl Iterator<Item = u32> + '_ {
-        let (x, y, z) = Grid::key(self.cell, p);
-        (-1..=1)
-            .flat_map(move |dx| (-1..=1).flat_map(move |dy| (-1..=1).map(move |dz| (x + dx, y + dy, z + dz))))
-            .flat_map(|k| self.cells.get(&k).into_iter().flatten().copied())
+    /// The nearest point closer than `bound`: `(distance, index)`. `work` counts nodes visited.
+    fn nearest(&self, p: Vec3, bound: f32, work: &mut usize) -> Option<(f32, u32)> {
+        let mut best = (bound, None);
+        let mut visited = 0usize;
+        Kd::search(&self.nodes, 0, p, &mut best, &mut visited);
+        *work += visited;
+        best.1.map(|i| (best.0, i))
+    }
+    fn search(s: &[(Vec3, u32)], depth: usize, p: Vec3, best: &mut (f32, Option<u32>), visited: &mut usize) {
+        if s.is_empty() || *visited >= MAX_QUERY_NODES || best.0 <= 0.0 {
+            return;
+        }
+        *visited += 1;
+        let axis = depth % 3;
+        let mid = s.len() / 2;
+        let Some(&(q, i)) = s.get(mid) else { return };
+        let d = q.distance(p);
+        if d < best.0 {
+            *best = (d, Some(i));
+        }
+        let diff = p[axis] - q[axis];
+        let (near, far) = if diff < 0.0 { (s.get(..mid), s.get(mid + 1..)) } else { (s.get(mid + 1..), s.get(..mid)) };
+        if let Some(n) = near {
+            Kd::search(n, depth + 1, p, best, visited);
+        }
+        if diff.abs() < best.0
+            && let Some(f) = far
+        {
+            Kd::search(f, depth + 1, p, best, visited);
+        }
     }
 }
 
 /// The weight of every vertex: 1 for the selected ones, the falloff for the others, 0 beyond the
 /// radius. Empty selection or a radius that is not a positive number gives only the selection.
 pub fn weights(m: &PolyMesh, selected: &[u32], soft: &Soft) -> Vec<f32> {
+    weights_counted(m, selected, soft).0
+}
+
+/// [`weights`] and the number of tree nodes visited (a measure of the work, for tests and budgets).
+pub fn weights_counted(m: &PolyMesh, selected: &[u32], soft: &Soft) -> (Vec<f32>, usize) {
     let n = m.vertex_count();
     let mut w = vec![0.0f32; n];
     let sel = clean_selection(selected, n);
@@ -106,25 +147,24 @@ pub fn weights(m: &PolyMesh, selected: &[u32], soft: &Soft) -> Vec<f32> {
             *x = 1.0;
         }
     }
+    let mut work = 0usize;
     if sel.is_empty() || !(soft.radius.is_finite() && soft.radius > 1e-9) || n > MAX_VERTICES {
-        return w;
+        return (w, work);
     }
     let r = soft.radius;
     let curve = soft.curve.compile();
-    let grid = Grid::new(r, sel.iter().map(|v| (*v, m.position(*v))));
+    let tree = Kd::new(sel.iter().map(|v| (*v, m.position(*v))));
     for v in 0..n as u32 {
         if w.get(v as usize).copied().unwrap_or(0.0) >= 1.0 {
             continue;
         }
-        let p = m.position(v);
-        let d = grid.near(p).map(|s| m.position(s).distance(p)).fold(f32::MAX, f32::min);
-        if d < r
+        if let Some((d, _)) = tree.nearest(m.position(v), r, &mut work)
             && let Some(x) = w.get_mut(v as usize)
         {
             *x = curve.eval(1.0 - d / r).clamp(0.0, 1.0);
         }
     }
-    w
+    (w, work)
 }
 
 /// For each vertex, the vertex at its mirror image (itself on the plane), if there is one.
@@ -135,15 +175,11 @@ pub fn partners(m: &PolyMesh, sym: &Symmetry) -> Vec<Option<u32>> {
     if n > MAX_VERTICES {
         return vec![None; n];
     }
-    let grid = Grid::new((tol * 4.0).max(1e-6), (0..n as u32).map(|v| (v, m.position(v))));
-    (0..n as u32)
-        .map(|v| {
-            let target = mirror_point(m.position(v), axis);
-            grid.near(target)
-                .filter(|c| m.position(*c).distance(target) <= tol)
-                .min_by(|a, b| m.position(*a).distance(target).total_cmp(&m.position(*b).distance(target)))
-        })
-        .collect()
+    let tree = Kd::new((0..n as u32).map(|v| (v, m.position(v))));
+    let mut work = 0usize;
+    // `nearest` looks for points strictly closer than the bound: widen it a hair for "within".
+    let bound = tol * (1.0 + 1e-6) + f32::MIN_POSITIVE;
+    (0..n as u32).map(|v| tree.nearest(mirror_point(m.position(v), axis), bound, &mut work).map(|(_, i)| i)).collect()
 }
 
 /// A transform applied about a pivot: scale, then rotate, then translate.
@@ -327,6 +363,39 @@ mod tests {
         let w = weights(&g, &[origin], &soft);
         let one_out = (0..g.vertex_count() as u32).find(|v| (g.position(*v) - Vec3::new(1.0, 0.0, 0.0)).length() < 1e-5).unwrap();
         assert!((w[one_out as usize] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_work_stays_bounded_for_a_huge_radius_and_a_huge_selection() {
+        // 90 000 vertices, half of them selected in a checkerboard, a radius a hundred times the
+        // mesh. A scan of the selected points per vertex would be 2e9 distance checks (22 000 per vertex);
+        // the tree needs about a hundred nodes per vertex and is capped at MAX_QUERY_NODES.
+        let g = Primitive::Plane { width: 300.0, depth: 300.0, segments: 299 }.build().unwrap();
+        let n = g.vertex_count();
+        let sel: Vec<u32> = (0..n as u32).filter(|v| v % 2 == 0).collect();
+        let t = std::time::Instant::now();
+        let (w, work) = weights_counted(&g, &sel, &Soft { radius: 30_000.0, curve: Curve::linear() });
+        assert_eq!(w.len(), n);
+        assert!(work <= n * 256, "{work} nodes visited for {n} vertices");
+        assert!(t.elapsed().as_secs() < 20);
+        // Every vertex is within reach of a selected one, so every weight is positive.
+        assert!(w.iter().all(|x| *x > 0.0));
+        // The same with all the selection stacked on one point (every selected vertex coincident).
+        let mut stacked = g.clone();
+        stacked.map_positions(|i, p| if i % 2 == 0 { Vec3::ZERO } else { p });
+        let (_, work) = weights_counted(&stacked, &sel, &Soft { radius: 30_000.0, curve: Curve::linear() });
+        assert!(work <= n * 256, "stacked: {work}");
+        // A tiny radius is cheap too.
+        let (_, work) = weights_counted(&g, &sel, &Soft { radius: 0.1, curve: Curve::linear() });
+        assert!(work <= n * 256);
+    }
+
+    #[test]
+    fn partner_search_stays_bounded_with_stacked_vertices() {
+        let mut g = grid();
+        g.map_positions(|i, p| if i % 3 == 0 { Vec3::new(1.0, 0.0, 1.0) } else { p });
+        let p = partners(&g, &Symmetry::new(0));
+        assert_eq!(p.len(), g.vertex_count());
     }
 
     #[test]

@@ -4,9 +4,12 @@
 //! stays editable and replays exactly. Vertices are drawn in colour by their weight while soft
 //! selection is on.
 
+use std::sync::Arc;
+
 use egui::Color32;
 use modelcraft_engine::field::{CURVE_PRESETS, Curve};
 use modelcraft_engine::ops::soft::{Soft, Symmetry};
+use modelcraft_engine::scene::ObjectId;
 
 use crate::app::{ModelApp, SelectMode};
 use crate::panels::{drag, set_name};
@@ -115,8 +118,40 @@ pub fn run(app: &mut ModelApp, op: Op) {
     }
 }
 
+/// What the cached weights were made from: the mesh (by identity: the evaluator hands out the
+/// same one until something changes it), the selection, the mode, the radius and the curve.
+#[derive(Clone, PartialEq)]
+pub struct CacheKey {
+    object: ObjectId,
+    mesh: usize,
+    mode: SelectMode,
+    selection: u64,
+    radius: u32,
+    curve: &'static str,
+}
+
+/// The weights worked out last, with what they were worked out from.
+#[derive(Default)]
+pub struct Cache {
+    key: Option<CacheKey>,
+    weights: Option<Arc<Vec<f32>>>,
+    /// How many times the weights were worked out (for tests: a frame that changes nothing must not).
+    pub computed: usize,
+}
+
+fn selection_hash(app: &ModelApp) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    app.components.len().hash(&mut h);
+    for c in &app.components {
+        c.hash(&mut h);
+    }
+    h.finish()
+}
+
 /// The weights of the vertices to draw, when soft selection is on and there is a selection.
-pub fn weights(app: &mut ModelApp) -> Option<Vec<f32>> {
+/// Cached: a frame in which nothing changed does no work beyond building the key.
+pub fn weights(app: &mut ModelApp) -> Option<Arc<Vec<f32>>> {
     let soft = app.modeling.soft.soft()?;
     if app.mode == SelectMode::Object || app.components.is_empty() {
         return None;
@@ -126,8 +161,23 @@ pub fn weights(app: &mut ModelApp) -> Option<Vec<f32>> {
     if m.vertex_count() > 200_000 {
         return None;
     }
+    let key = CacheKey {
+        object: id,
+        mesh: Arc::as_ptr(&m) as usize,
+        mode: app.mode,
+        selection: selection_hash(app),
+        radius: app.modeling.soft.radius.to_bits(),
+        curve: app.modeling.soft.curve,
+    };
+    if app.modeling.soft_cache.key.as_ref() == Some(&key)
+        && let Some(w) = &app.modeling.soft_cache.weights
+    {
+        return Some(w.clone());
+    }
     let verts = app.component_vertices();
-    Some(modelcraft_engine::ops::soft::weights(&m, &verts, &soft))
+    let w = Arc::new(modelcraft_engine::ops::soft::weights(&m, &verts, &soft));
+    app.modeling.soft_cache = Cache { key: Some(key), weights: Some(w.clone()), computed: app.modeling.soft_cache.computed + 1 };
+    Some(w)
 }
 
 /// The colour of a vertex dot by weight: blue far out, orange to red near the selection.
