@@ -530,6 +530,19 @@ fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Resul
             modelcraft_ops::cut::slice(m, &modelcraft_ops::cut::Slice { point: *point, normal: *normal, limits: Vec::new(), faces: faces.clone() })
         }
         StepOp::CutLine { a, b, view, front_only } => modelcraft_ops::cut::cut_line(m, *a, *b, *view, *front_only),
+        StepOp::PaintStroke { points, radius, strength, color, erase, falloff } => {
+            let brush = modelcraft_ops::paint::Brush {
+                radius: *radius,
+                strength: *strength,
+                color: *color,
+                mode: if *erase { modelcraft_ops::paint::Mode::Erase } else { modelcraft_ops::paint::Mode::Paint },
+            };
+            modelcraft_ops::paint::stroke(m, points, &brush, &|x| falloff.weight(x))
+        }
+        StepOp::FillColor { color, verts } => {
+            edit::check_selection(verts, nv, "vertex")?;
+            modelcraft_ops::paint::fill(m, verts, *color)
+        }
         StepOp::Connect { verts } => {
             edit::check_selection(verts, nv, "vertex")?;
             modelcraft_ops::cut::connect(m, verts)

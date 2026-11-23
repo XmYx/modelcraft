@@ -370,7 +370,7 @@ Weight: 6
 | Dynamic topology | Z | P | L | "Live detail": strokes split the triangles under the brush down to a detail size, with exact undo and journal replay. Splits only (no collapsing or edge flips yet); base detail level only; each split re-uploads the whole mesh to the GPU |
 | Voxel / even remesh | Z | D | L | "Even remesh": a history step that rebuilds a closed mesh as even quads; volume kept within 0.05 % (measured). Closed meshes only; loses UVs and patches |
 | Automatic quad retopology with guides and density | C M Z | M | XL | |
-| Decimation that keeps UVs and vertex colour | Z | P | L | "Decimate": a history step that keeps a share of the triangles by quadric error (Garland and Heckbert), holding open edges, UV seams and patch lines in place; every corner keeps a UV the input had. ModelCraft has no vertex colours yet, so none are carried; edges collapse onto an end point only (no best-fit position); no density painting |
+| Decimation that keeps UVs and vertex colour | Z | P | L | "Decimate": a history step that keeps a share of the triangles by quadric error (Garland and Heckbert), holding open edges, UV seams and patch lines in place; every corner keeps a UV and a vertex colour the input had; edges collapse onto an end point only (no best-fit position); no density painting |
 | Project detail from one mesh to another | M Z | D | M | "Project Detail": the mesh being sculpted moves onto the surface of another object, along its normals first and to the closest point otherwise, within a reach; the mask protects, one undo step. Works at any detail level |
 | Extract a shell from a mask | Z | D | S | A new object from the fully masked faces, thickened along the normals with a closed rim; the rim is not smoothed |
 | Close holes and make watertight | Z | P | S | Fill one hole at a time |
@@ -381,8 +381,8 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Paint workspace | C M Z | P | S | Patch view and export only |
-| Vertex colour painting | C M Z | M | M | |
+| Paint workspace | C M Z | P | S | Colour fields, swatches, hex, brush settings, fills and the vertex colour brush; patch view and GLB export; no texture painting or layers (hand-off to TextureCraft) |
+| Vertex colour painting | C M Z | D | M | Colour per face corner (`PolyMesh` keeps it through edits; new faces are white); brush with the sculpt falloffs, paint or erase, one history step per stroke that replays exactly; fills from the keyboard; shown tinting the object colour in the viewport; glTF `COLOR_0` written and read (one colour per vertex, so corners at one vertex are averaged); Decimate keeps each triangle's corner colours. No stamps or pressure yet |
 | Texture and PBR channel painting | C M Z | M | L | Hand-off to TextureCraft (GLB export) instead |
 | Projection painting from images and stencils | Z | M | M | |
 | Paint materials per region (material capture painting) | Z | M | M | |

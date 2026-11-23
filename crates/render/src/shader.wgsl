@@ -23,6 +23,7 @@ struct VIn {
     @location(2) mask: f32,
     @location(3) patch_id: f32,
     @location(4) uv: vec2<f32>,
+    @location(5) color: vec4<f32>,
 };
 
 struct VOut {
@@ -33,6 +34,8 @@ struct VOut {
     // Flat: a triangle takes the patch of its first vertex, so shared vertices do not blend ids.
     @location(3) @interpolate(flat) patch_id: f32,
     @location(4) uv: vec2<f32>,
+    // Vertex colour: tints the object colour (white when nothing was painted).
+    @location(5) color: vec4<f32>,
 };
 
 @vertex
@@ -46,6 +49,7 @@ fn vs_mesh(v: VIn) -> VOut {
     o.mask = v.mask;
     o.patch_id = v.patch_id;
     o.uv = v.uv;
+    o.color = v.color;
     return o;
 }
 
@@ -61,7 +65,7 @@ fn fs_mesh(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32
         n = -n;
     }
     let v = normalize(cam.eye.xyz - i.world);
-    var base = draw.color.rgb;
+    var base = draw.color.rgb * i.color.rgb;
     if (draw.flags.z > 1.5) {
         // UV checker: eight cells to the unit square, tinted along u (red) and v (green) so a
         // stretched or mirrored layout shows.

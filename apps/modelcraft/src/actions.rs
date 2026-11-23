@@ -111,6 +111,7 @@ pub enum Action {
     Organize(crate::organize_ui::Op),
     Cut(crate::cut_ui::Op),
     Soft(crate::soft_ui::Op),
+    Paint(crate::paint_ui::Op),
 }
 
 pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
@@ -176,6 +177,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::organize_ui::ALL.iter().map(|o| Organize(*o)));
     v.extend(crate::cut_ui::ALL.iter().map(|o| Cut(*o)));
     v.extend(crate::soft_ui::ALL.iter().map(|o| Soft(*o)));
+    v.extend(crate::paint_ui::ALL.iter().map(|o| Paint(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -420,6 +422,7 @@ impl Action {
             Organize(o) => o.label(),
             Cut(o) => o.label(),
             Soft(o) => o.label(),
+            Paint(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             CoordinatePanel => tl!("Coordinates Panel"),
@@ -555,6 +558,7 @@ impl Action {
             Organize(o) => o.id(),
             Cut(o) => o.id(),
             Soft(o) => o.id(),
+            Paint(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
@@ -677,6 +681,7 @@ impl Action {
             Uv(a) => return a.default_binding(),
             Cut(o) => return o.default_binding(),
             Soft(o) => return o.default_binding(),
+            Paint(o) => return o.default_binding(),
             _ => return None,
         })
     }
@@ -707,6 +712,7 @@ impl Action {
             Spline(_) => "Spline",
             Hair(_) => "Hair",
             Uv(_) => "UV",
+            Paint(_) => "Paint",
             _ => "View",
         }
     }

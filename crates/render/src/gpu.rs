@@ -24,7 +24,7 @@ pub struct GpuMesh {
 impl GpuMesh {
     pub fn new(device: &wgpu::Device, data: &MeshData) -> GpuMesh {
         let verts: &[MeshVertex] = if data.vertices.is_empty() {
-            &[MeshVertex { pos: [0.0; 3], normal: [0.0, 1.0, 0.0], mask: 0.0, patch: 0.0, uv: [0.0; 2] }]
+            &[MeshVertex { pos: [0.0; 3], normal: [0.0, 1.0, 0.0], mask: 0.0, patch: 0.0, uv: [0.0; 2], color: crate::buffers::WHITE }]
         } else {
             &data.vertices
         };
@@ -191,7 +191,7 @@ impl Renderer {
             bias: wgpu::DepthBiasState::default(),
         };
         let ms = wgpu::MultisampleState { count: SAMPLES, mask: !0, alpha_to_coverage_enabled: false };
-        let mesh_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32, 3 => Float32, 4 => Float32x2];
+        let mesh_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32, 3 => Float32, 4 => Float32x2, 5 => Float32x4];
         let line_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
         let mesh_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mesh pipeline"),

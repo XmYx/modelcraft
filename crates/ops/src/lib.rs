@@ -17,6 +17,7 @@ pub mod deform;
 pub mod edit;
 pub mod extrude;
 pub mod loopcut;
+pub mod paint;
 pub mod patches;
 pub mod primitives;
 mod primitives_more;

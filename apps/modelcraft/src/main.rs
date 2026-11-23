@@ -70,6 +70,9 @@ mod modifier_ui;
 mod modifier_ui_tests;
 mod object_manager;
 mod organize_ui;
+mod paint_ui;
+#[cfg(test)]
+mod paint_ui_tests;
 mod panels;
 mod picture_viewer;
 mod plugin_ui;

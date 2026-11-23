@@ -484,7 +484,9 @@ fn apply_drag(app: &ModelApp, scene: &mut Scene, t: Vec3, r: Quat, s: Vec3, pivo
 
 fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
     // A rig tool (placing joints, painting weights) takes the pointer while it is on.
-    if !is_nav(app, ui) && (crate::rig_tools::input(app, ui, resp, i, rect) || crate::cut_ui::input(app, ui, resp, i, rect)) {
+    if !is_nav(app, ui)
+        && (crate::rig_tools::input(app, ui, resp, i, rect) || crate::cut_ui::input(app, ui, resp, i, rect) || crate::paint_ui::input(app, ui, resp, i, rect))
+    {
         return;
     }
     // The pen tool and the points and handles of the selected spline.

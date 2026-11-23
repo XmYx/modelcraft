@@ -27,8 +27,11 @@ pub const MAX_POLYGON_CORNERS: usize = 4096;
 /// Upper bound on the elements of one mesh (vertices or faces).
 pub const MAX_ELEMENTS: usize = 50_000_000;
 
+/// Colour of a corner that was never painted.
+pub const WHITE: [f32; 4] = [1.0; 4];
+
 /// One polygon of a polygon list: vertex indices in counter-clockwise order, optional per-corner
-/// UVs (same length as `verts`) and a patch id.
+/// UVs and colours (same length as `verts`) and a patch id.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Polygon {
     pub verts: Vec<u32>,
@@ -36,14 +39,18 @@ pub struct Polygon {
     pub uvs: Option<Vec<Vec2>>,
     #[serde(default)]
     pub patch: u32,
+    /// Per-corner RGBA (linear, 0 to 1). A mesh keeps colours when any polygon has them; the
+    /// polygons without get white.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<Vec<[f32; 4]>>,
 }
 
 impl Polygon {
     pub fn new(verts: Vec<u32>) -> Self {
-        Polygon { verts, uvs: None, patch: 0 }
+        Polygon { verts, uvs: None, patch: 0, colors: None }
     }
     pub fn with_uvs(verts: Vec<u32>, uvs: Vec<Vec2>) -> Self {
-        Polygon { verts, uvs: Some(uvs), patch: 0 }
+        Polygon { verts, uvs: Some(uvs), patch: 0, colors: None }
     }
 }
 
@@ -89,6 +96,8 @@ pub struct PolyMesh {
     he_face: Vec<u32>,
     he_edge: Vec<u32>,
     he_uv: Vec<Vec2>,
+    /// Per half-edge RGBA like `he_uv`: empty when the mesh has no colours.
+    he_color: Vec<[f32; 4]>,
     face_he: Vec<u32>,
     face_patch: Vec<u32>,
     edge_he: Vec<u32>,
@@ -127,6 +136,7 @@ impl PolyMesh {
             }
         }
         let has_uvs = !polygons.is_empty() && polygons.iter().all(|p| p.uvs.as_ref().is_some_and(|u| u.len() == p.verts.len()));
+        let has_colors = polygons.iter().any(|p| p.colors.is_some());
         let nverts = positions.len();
 
         // 1. Clean each polygon: indices in range, no consecutive duplicates, no repeats.
@@ -137,6 +147,14 @@ impl PolyMesh {
                 continue;
             }
             let mut uvs = if has_uvs { poly.uvs.take().unwrap_or_default() } else { Vec::new() };
+            let mut colors = if has_colors {
+                match poly.colors.take() {
+                    Some(c) if c.len() == poly.verts.len() => c,
+                    _ => vec![WHITE; poly.verts.len()],
+                }
+            } else {
+                Vec::new()
+            };
             let mut i = 0;
             while poly.verts.len() >= 2 && i < poly.verts.len() {
                 let j = (i + 1) % poly.verts.len();
@@ -144,6 +162,9 @@ impl PolyMesh {
                     poly.verts.remove(j);
                     if j < uvs.len() {
                         uvs.remove(j);
+                    }
+                    if j < colors.len() {
+                        colors.remove(j);
                     }
                 } else {
                     i += 1;
@@ -156,6 +177,7 @@ impl PolyMesh {
                 continue;
             }
             poly.uvs = has_uvs.then_some(uvs);
+            poly.colors = has_colors.then_some(colors);
             clean.push(poly);
         }
 
@@ -178,6 +200,9 @@ impl PolyMesh {
                 poly.verts.reverse();
                 if let Some(u) = poly.uvs.as_mut() {
                     u.reverse();
+                }
+                if let Some(c) = poly.colors.as_mut() {
+                    c.reverse();
                 }
                 report.flipped += 1;
                 for e in edges_of(&poly.verts) {
@@ -212,6 +237,7 @@ impl PolyMesh {
             he_face: Vec::with_capacity(total_corners * 2),
             he_edge: Vec::new(),
             he_uv: Vec::new(),
+            he_color: Vec::new(),
             face_he: Vec::with_capacity(clean.len()),
             face_patch: Vec::with_capacity(clean.len()),
             edge_he: Vec::new(),
@@ -234,6 +260,9 @@ impl PolyMesh {
             }
             if has_uvs {
                 m.he_uv.extend(poly.uvs.iter().flatten().copied());
+            }
+            if has_colors {
+                m.he_color.extend(poly.colors.iter().flatten().copied());
             }
             m.face_he.push(first);
             m.face_patch.push(poly.patch);
@@ -262,6 +291,9 @@ impl PolyMesh {
             m.he_face.push(NONE);
             if has_uvs {
                 m.he_uv.push(Vec2::ZERO);
+            }
+            if has_colors {
+                m.he_color.push(WHITE);
             }
             set(&mut m.he_twin, h, b);
         }
@@ -329,6 +361,12 @@ impl PolyMesh {
         }
         if !self.he_uv.is_empty() && self.he_uv.len() != nh {
             return bad("UV array does not match the half-edges".into());
+        }
+        if !self.he_color.is_empty() && self.he_color.len() != nh {
+            return bad("colour array does not match the half-edges".into());
+        }
+        if self.he_color.iter().any(|c| c.iter().any(|x| !x.is_finite())) {
+            return bad("a colour is not a number".into());
         }
         if self.face_he.len() != self.face_patch.len() || self.vert_he.len() != self.positions.len() {
             return bad("face or vertex arrays differ in length".into());
@@ -445,6 +483,36 @@ impl PolyMesh {
     /// Remove the UVs.
     pub fn clear_uvs(&mut self) {
         self.he_uv = Vec::new();
+    }
+    pub fn has_colors(&self) -> bool {
+        !self.he_color.is_empty()
+    }
+    /// The colour of every corner, in corner order (empty when the mesh has no colours).
+    pub fn corner_colors(&self) -> &[[f32; 4]] {
+        self.he_color.get(..self.corner_count()).unwrap_or(&[])
+    }
+    /// The colour of a corner (white for a mesh without colours).
+    pub fn color(&self, h: u32) -> [f32; 4] {
+        self.he_color.get(idx(h)).copied().unwrap_or(WHITE)
+    }
+    /// Replace the colours: one per corner, in corner order. Non-finite values are rejected and
+    /// the mesh is left unchanged; values are clamped to 0..1.
+    pub fn set_colors(&mut self, corner_colors: &[[f32; 4]]) -> Result<(), MeshError> {
+        let n = self.corner_count();
+        if corner_colors.len() != n {
+            return Err(MeshError::Topology(format!("{} colours for {n} corners", corner_colors.len())));
+        }
+        if let Some(c) = corner_colors.iter().position(|c| c.iter().any(|x| !x.is_finite())) {
+            return Err(MeshError::NonFinite(c as u32));
+        }
+        let mut out: Vec<[f32; 4]> = corner_colors.iter().map(|c| c.map(|x| x.clamp(0.0, 1.0))).collect();
+        out.resize(self.he_origin.len(), WHITE);
+        self.he_color = out;
+        Ok(())
+    }
+    /// Remove the colours.
+    pub fn clear_colors(&mut self) {
+        self.he_color = Vec::new();
     }
     pub fn position(&self, v: u32) -> Vec3 {
         self.positions.get(idx(v)).copied().unwrap_or(Vec3::ZERO)
@@ -651,6 +719,7 @@ impl PolyMesh {
                 verts: self.face_vertices(f).collect(),
                 uvs: self.has_uvs().then(|| self.face_half_edges(f).map(|h| self.uv(h)).collect()),
                 patch: self.patch(f),
+                colors: self.has_colors().then(|| self.face_half_edges(f).map(|h| self.color(h)).collect()),
             })
             .collect()
     }
@@ -677,7 +746,12 @@ impl PolyMesh {
 
     /// Estimated heap size in bytes (for memory budgets).
     pub fn heap_bytes(&self) -> usize {
-        self.positions.len() * 16 + self.he_origin.len() * 24 + self.he_uv.len() * 8 + self.face_he.len() * 8 + self.edge_he.len() * 4
+        self.positions.len() * 16
+            + self.he_origin.len() * 24
+            + self.he_uv.len() * 8
+            + self.he_color.len() * 16
+            + self.face_he.len() * 8
+            + self.edge_he.len() * 4
     }
 }
 
