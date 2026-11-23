@@ -86,7 +86,7 @@ pub(crate) fn repair(scene: &mut Scene) {
         x.overrides.truncate(MAX_OVERRIDES);
         x.overrides.retain(|o| o.value.is_finite() && o.path.len() <= crate::attr::MAX_PATH && exists.contains(&o.object));
     }
-    v.next_id = v.next_id.max(v.list.iter().map(|x| x.id + 1).max().unwrap_or(0));
+    v.next_id = v.next_id.max(v.list.iter().map(|x| x.id.saturating_add(1)).max().unwrap_or(0));
     if v.active.is_some_and(|a| v.get(a).is_none()) {
         v.active = None;
     }
@@ -108,7 +108,9 @@ impl Scene {
             return invalid(format!("a scene holds at most {MAX_VARIANTS} variants"));
         }
         let id = self.variants.next_id;
-        self.variants.next_id += 1;
+        // An id that is already taken (a file can hold u32::MAX) is never handed out twice.
+        let Some(next) = id.checked_add(1).filter(|_| self.variants.get(id).is_none()) else { return invalid("no more variant ids") };
+        self.variants.next_id = next;
         let name = clean_name(name, &format!("Variant {}", id + 1));
         self.variants.list.push(Variant { id, name, overrides: Vec::new() });
         Ok(id)

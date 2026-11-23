@@ -242,3 +242,27 @@ fn a_file_with_too_many_overrides_is_cut_to_the_cap() {
     let s = s.repaired().unwrap();
     assert_eq!(s.variants.get(v).unwrap().overrides.len(), MAX_OVERRIDES, "cut to the cap, not applied past it");
 }
+
+#[test]
+fn ids_at_the_top_of_the_range_from_a_file_neither_overflow_nor_repeat() {
+    let mut d = Document::new();
+    cube(&mut d);
+    let mut json = serde_json::to_value(&d.scene).unwrap();
+    json["variants"] = serde_json::json!({"list": [{"id": u32::MAX, "name": "Last", "overrides": []}], "next_id": u32::MAX});
+    let s: Scene = serde_json::from_value(json).unwrap();
+    let mut s = s.repaired().unwrap();
+    assert_eq!(s.variants.list.len(), 1);
+    // The next id would be u32::MAX again, which is taken: refused, nothing repeated.
+    assert!(s.add_variant("one more").is_err());
+    assert_eq!(s.variants.list.len(), 1);
+    // The existing variant still switches and is removed by its own id.
+    s.switch_variant(Some(u32::MAX)).unwrap();
+    s.remove_variant(u32::MAX).unwrap();
+    assert!(s.variants.list.is_empty() && s.variants.active.is_none());
+    // A file whose next id is the last one: that id is used once, then ids run out cleanly.
+    let mut json = serde_json::to_value(&s).unwrap();
+    json["variants"] = serde_json::json!({"list": [], "next_id": u32::MAX - 1});
+    let mut s: Scene = serde_json::from_value::<Scene>(json).unwrap().repaired().unwrap();
+    assert_eq!(s.add_variant("a").unwrap(), u32::MAX - 1);
+    assert!(s.add_variant("b").is_err(), "the last id is not handed out: it could wrap");
+}
