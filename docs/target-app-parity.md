@@ -192,9 +192,9 @@ Weight: 4
 |---|---|---|---|---|
 | Cube, plane, sphere, cylinder, cone, torus | C M Z | D | S | With UVs and segments |
 | Rounded cube / quad sphere (cube-mapped) | C M Z | D | S | The sculpting base |
-| Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | M | S | |
+| Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | P | S | Disc (with a hole), polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron and icosahedron are Create-menu primitives with editable parameters and UVs; the helix waits for splines |
 | Extruded 3D text | C M | M | M | |
-| Terrain / landscape generator | C | M | M | |
+| Terrain / landscape generator | C | D | M | Seeded fractal-noise height field: size, height, segments, feature scale, octaves and seed in Properties; no erosion or sculpt-in-place yet |
 | Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |

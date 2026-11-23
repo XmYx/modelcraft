@@ -55,6 +55,8 @@ mod plugin_ui;
 mod plugin_ui_tests;
 mod prefs;
 mod prefs_ui;
+#[cfg(test)]
+mod procedural_ui_tests;
 mod radial;
 mod render_view;
 mod rig_tools;

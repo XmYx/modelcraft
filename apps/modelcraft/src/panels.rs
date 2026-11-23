@@ -983,6 +983,50 @@ fn primitive_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, p: Prim
             rs.push(int(ui, segments, 1024, tl!("Segments")));
             rs.push(int(ui, sides, 1024, tl!("Sides")));
         }
+        Primitive::Disc { radius, inner_radius, sides, rings } => {
+            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag(ui, inner_radius, 0.01, 0.0..=1e4, tl!("Hole radius")));
+            rs.push(int(ui, sides, 1024, tl!("Sides")));
+            rs.push(int(ui, rings, 1024, tl!("Rings")));
+        }
+        Primitive::Polygon { radius, sides } => {
+            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(int(ui, sides, 1024, tl!("Sides")));
+        }
+        Primitive::Tube { radius, inner_radius, height, sides, rings, caps } => {
+            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag(ui, inner_radius, 0.01, 0.0..=1e4, tl!("Inner radius")));
+            rs.push(drag(ui, height, 0.01, 0.001..=1e4, tl!("Height")));
+            rs.push(int(ui, sides, 1024, tl!("Sides")));
+            rs.push(int(ui, rings, 1024, tl!("Rings")));
+            rs.push(ui.checkbox(caps, tl!("Caps")));
+        }
+        Primitive::Capsule { radius, height, sides, rings } => {
+            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+            rs.push(drag(ui, height, 0.01, 0.001..=1e4, tl!("Height")));
+            rs.push(int(ui, sides, 1024, tl!("Sides")));
+            rs.push(int(ui, rings, 1024, tl!("Rings")));
+        }
+        Primitive::Pyramid { width, depth, height } => {
+            rs.push(drag(ui, width, 0.01, 0.001..=1e4, tl!("Width")));
+            rs.push(drag(ui, depth, 0.01, 0.001..=1e4, tl!("Depth")));
+            rs.push(drag(ui, height, 0.01, 0.001..=1e4, tl!("Height")));
+        }
+        Primitive::Platonic { radius, .. } => {
+            rs.push(drag(ui, radius, 0.01, 0.001..=1e4, tl!("Radius")));
+        }
+        Primitive::Landscape { width, depth, height, segments, seed, scale, octaves } => {
+            rs.push(drag(ui, width, 0.01, 0.001..=1e4, tl!("Width")));
+            rs.push(drag(ui, depth, 0.01, 0.001..=1e4, tl!("Depth")));
+            rs.push(drag(ui, height, 0.01, -1e4..=1e4, tl!("Height")));
+            rs.push(int(ui, segments, 1024, tl!("Segments")));
+            ui.label(tl!("Seed"));
+            let r = ui.add(egui::DragValue::new(seed));
+            set_name(ui, &r, tl!("Seed"));
+            rs.push(r);
+            rs.push(drag(ui, scale, 0.05, 0.01..=256.0, tl!("Feature scale")));
+            rs.push(int(ui, octaves, 8, tl!("Octaves")));
+        }
     });
     if let Some(r) = rs.iter().find(|r| r.changed() || r.drag_stopped()) {
         commit_edit(
