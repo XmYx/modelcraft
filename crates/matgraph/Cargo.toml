@@ -1,0 +1,19 @@
+[package]
+name = "modelcraft-matgraph"
+description = "ModelCraft material graphs: nodes (noise, ramp, mix, math, image, normal map) that compile to the maps of the render engine's layered surface, with loop and size limits"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

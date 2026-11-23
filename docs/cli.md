@@ -39,7 +39,7 @@ Object ids are numbers (`info` prints them).
 | `add_primitive` | `kind` (cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron, landscape), `name?`, `parent?` |
 | `add_group` | `name?` |
 | `add_smooth_cage` | `input?`, `levels` (default 2) |
-| `add_deformer` | `kind` (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap), `target` |
+| `add_deformer` | `kind` (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap, formula), `target` |
 | `delete` | `ids` |
 | `duplicate`, `collapse`, `begin_sculpt` | `id` |
 | `rename` | `id`, `name` |
@@ -50,6 +50,7 @@ Object ids are numbers (`info` prints them).
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
 | `set_deformer` | `id`, `deformer` {kind, …}, `limits?` {mode: limited / unlimited / within_box, fit_to_parent, size}, `target?`, `clear_target?` |
+| | A formula deformer is `{"kind":"formula","expr":"sin(y * 4 + time * 3) * 0.1","along":"normal","amount":1}`: `along` is normal, x, y, z or radial; the formula reads `x y z` (the point in the deformer's frame), `r`, `t` (height through the box, 0 to 1), `i`, `n`, `time`, `frame`. A clone modifier in formula mode is `{"mode":"formula","expr":"sin(t * tau + time * 2) * 0.5 + 0.5", …}` over `i n t x y z time`; `set_clone_modifier` sets it. Both parse their formula once per evaluation and stop (with an evaluation error) when it does not parse, reads another name, or needs more than their step cap (points or clones times formula nodes). |
 | `add_step` | `id`, `op`: {op: extrude, faces, distance, offset?, subdivisions?, variation?, seed?, caps?, individual?} · {op: extrude_edges, edges, distance, lift?} (border edges of an open mesh) · {op: inset, faces, amount} · {op: bevel, edges, width, segments? (1–16), profile? (flat, round, custom), tension?} · {op: bevel_vertices, verts, width} · {op: loop_cut, edge, cuts, offset?, symmetric?, profile?} · {op: slice_plane, point, normal, faces?} · {op: cut_line, a, b, view, front_only?} (a knife line between two points, along the direction looked in) · {op: connect, verts} · {op: add_polygon, points [{at: vertex, v} / {at: position, p} / {at: edge, a, b, t}], toward?} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale, soft? {radius, curve {points}}, symmetry? {axis (0 X, 1 Y, 2 Z), tolerance}} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin, method (lscm, abf), from_patches?} · {op: stitch_uvs, edges, align?, scale?} · {op: relax_uvs, corners, iterations, mode (rigid, conformal)} · {op: straighten_uvs, corners, strength} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform), tiles?, texel_density?} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) · {op: decimate, ratio} (keeps about `ratio` of the triangles, 0..1, with UVs and patches; the result is triangles) |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
@@ -341,7 +342,13 @@ An expression is one formula giving one number: `+ - * / % ^`, comparisons, `&&`
 `cond ? a : b`, brackets, the constants `pi`, `tau`, `e`, and the functions `sin cos tan asin acos
 atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smoothstep deg rad`.
 Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
-`@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
+`@<object id>.<path>` or `@<object name>.<path>` (the first object with that name; a name with
+dots or spaces needs the id). For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @Lever.translate.x"}`.
+In the app, typing `=` and a formula into any keyable number in Properties sets the same
+expression; a plain number typed there removes it again. Each formula is parsed once, a solve is
+skipped when nothing it reads changed (drawing the same frame again costs no evaluation), and one
+solve takes at most 262 144 steps (formula nodes and IK iterations); what does not fit is skipped
+and reported like a cycle.
 
 A point cache (`modelcraft-cli bake`) holds a skinned mesh as it is posed frame by frame.
 Exporting to `.glb` keeps the rig instead: when the scene has skins, blend shapes, curves or

@@ -77,6 +77,7 @@ pub enum Action {
     TransformDialog,
     CoordinatePanel,
     VariantsPanel,
+    SceneNodes,
     IconPalettes,
     About,
     SaveIncremental,
@@ -102,6 +103,7 @@ pub enum Action {
     Render(crate::render_ui::RenderAction),
     Bake(crate::bake_ui::BakeAction),
     Spline(crate::spline_ui::SplineAction),
+    Material(crate::matgraph_ui::MatAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -216,6 +218,7 @@ pub fn all() -> Vec<Action> {
         TransformDialog,
         CoordinatePanel,
         VariantsPanel,
+        SceneNodes,
         IconPalettes,
         Palette,
         KeyboardShortcuts,
@@ -229,6 +232,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::render_ui::RenderAction::ALL.map(Render));
     v.extend(crate::bake_ui::BakeAction::ALL.map(Bake));
     v.extend(crate::spline_ui::SplineAction::all().into_iter().map(Spline));
+    v.extend(crate::matgraph_ui::MatAction::ALL.map(Material));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -272,6 +276,7 @@ pub fn deformer_label(d: &str) -> String {
         "delta_smooth" => tl!("Delta Smooth"),
         "displace" => tl!("Displace"),
         "shrink_wrap" => tl!("Shrink Wrap"),
+        "formula" => tl!("Formula"),
         _ => d.to_string(),
     }
 }
@@ -432,6 +437,7 @@ impl Action {
             NextPanel => tl!("Focus Next Panel"),
             CoordinatePanel => tl!("Coordinates Panel"),
             VariantsPanel => tl!("Variants Panel"),
+            SceneNodes => tl!("Scene Nodes…"),
             IconPalettes => tl!("Icon Palettes"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
@@ -453,6 +459,7 @@ impl Action {
             Render(a) => a.label(),
             Bake(a) => a.label(),
             Spline(a) => a.label(),
+            Material(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -575,12 +582,14 @@ impl Action {
             Render(a) => a.id(),
             Bake(a) => a.id(),
             Spline(a) => return a.id(),
+            Material(a) => a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             CoordinatePanel => "view.coordinates",
             VariantsPanel => "view.variants",
+            SceneNodes => "view.scene_nodes",
             IconPalettes => "view.icon_palettes",
             About => "help.about",
         };
@@ -719,6 +728,7 @@ impl Action {
             Render(_) => "Render",
             Bake(_) => "UV",
             Spline(_) => "Spline",
+            Material(_) => "Render",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             Paint(_) => "Paint",

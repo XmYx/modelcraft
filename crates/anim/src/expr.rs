@@ -117,11 +117,41 @@ pub fn function_names() -> Vec<&'static str> {
     FUNCS.iter().map(|f| f.0).collect()
 }
 
+/// Whether `source` uses `name` as a name (not as part of a longer one), without parsing it:
+/// one pass over the text, no allocation. For cheap checks that run often (does a formula read
+/// the time?); a source that does not parse may still say yes.
+pub fn mentions(source: &str, name: &str) -> bool {
+    let src = source.as_bytes();
+    let is_name = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'@');
+    let mut i = 0;
+    while i < src.len() {
+        let Some(&c) = src.get(i) else { break };
+        if c.is_ascii_alphabetic() || c == b'_' || c == b'@' {
+            let start = i;
+            while src.get(i).is_some_and(|c| is_name(*c)) {
+                i += 1;
+            }
+            if src.get(start..i) == Some(name.as_bytes()) {
+                return true;
+            }
+        } else if c.is_ascii_digit() {
+            // A number, with any letters run into it (`1e3`), is not a name.
+            while src.get(i).is_some_and(|c| is_name(*c)) {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
 /// A parsed expression.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     root: Node,
     variables: Vec<String>,
+    nodes: usize,
 }
 
 struct Parser<'a> {
@@ -342,12 +372,18 @@ impl Expr {
             let rest = source.get(p.pos..).unwrap_or("");
             return err(format!("unexpected {:?}", rest.chars().next().unwrap_or(' ')));
         }
-        Ok(Expr { root, variables: p.variables })
+        Ok(Expr { root, variables: p.variables, nodes: p.nodes.max(1) })
     }
 
     /// The names the expression reads, each once, in order of first use.
     pub fn variables(&self) -> &[String] {
         &self.variables
+    }
+
+    /// How many nodes the expression has: the most steps one [`Expr::eval`] takes (at least 1).
+    /// Callers that run many expressions add these up to cap their work.
+    pub fn cost(&self) -> usize {
+        self.nodes
     }
 
     /// Compute the value; `lookup` gives the value of a name (or `None` when there is no such
@@ -501,6 +537,8 @@ mod tests {
             assert!((got - want).abs() < 1e-9, "{src} = {got}, not {want}");
         }
         assert_eq!(Expr::parse("@3.translate.x + frame + frame").unwrap().variables(), ["@3.translate.x", "frame"]);
+        assert_eq!(Expr::parse("1 + 2 * 3").unwrap().cost(), 5, "three numbers and two operators");
+        assert_eq!(Expr::parse("(((7)))").unwrap().cost(), 1, "brackets add no work");
     }
 
     #[test]
@@ -514,7 +552,25 @@ mod tests {
         assert!(Expr::parse(&format!("1{}", "+1".repeat(250))).is_ok());
     }
 
+    #[test]
+    fn mentions_finds_whole_names_only() {
+        assert!(mentions("sin(time * 2)", "time"));
+        assert!(mentions("time", "time") && mentions("1+frame", "frame"));
+        for (src, name) in [("timer", "time"), ("self.time", "time"), ("@3.time", "time"), ("overtime", "time"), ("2time", "time"), ("", "time")] {
+            assert!(!mentions(src, name), "{src:?} does not mention {name}");
+        }
+    }
+
     proptest! {
+        #[test]
+        fn mentions_agrees_with_the_parser(src in "[-+*/()., 0-9a-z_]{0,60}") {
+            if let Ok(e) = Expr::parse(&src) {
+                for name in ["time", "frame", "x"] {
+                    prop_assert_eq!(mentions(&src, name), e.variables().iter().any(|v| v == name), "{} in {:?}", name, src);
+                }
+            }
+        }
+
         #[test]
         fn any_text_parses_or_fails_cleanly(src in "[-+*/%^()<>=!?:,.@ 0-9a-z]{0,80}") {
             if let Ok(e) = Expr::parse(&src)

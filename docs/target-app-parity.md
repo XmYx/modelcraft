@@ -176,11 +176,11 @@ Weight: 5
 | Cached evaluation per step | M | D | S | `history_is_cached_and_reevaluated_from_the_change` |
 | Stale steps degrade gracefully | M | X | S | A step whose selection no longer fits is skipped and flagged, never fatal |
 | Generators as objects (cage of a child) | C | D | M | Smooth cage |
-| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace and shrink-wrap, in one stack order with blend shapes, lattices, clusters and skins |
+| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace, shrink-wrap and formula, in one stack order with blend shapes, lattices, clusters and skins |
 | Node view of the dependency graph | M | M | L | |
-| Connect any attribute to any other | M | M | M | |
+| Connect any attribute to any other | M | P | M | A formula on any keyable number (`=@Lever.rotate.z`, typed into the field) or a driven key makes one attribute follow another, ordered and cycle-checked with the constraints; no wiring view and no vector or colour connections |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
-| Expressions and driven keys | C M | P | M | Formulas over the frame, time and any attribute of any object (a small safe language: arithmetic, comparisons, 24 functions; property-tested against hostile text) and driven keys through a curve, both ordered with the constraints; the driven curve has no editor yet, formulas give one number (no vectors or strings) |
+| Expressions and driven keys | C M | P | M | Formulas over the frame, time and any attribute of any object (a small safe language: arithmetic, comparisons, 24 functions; property-tested against hostile text) and driven keys through a curve, both ordered with the constraints; typed as `=` into any keyable field in Properties, with errors and cycles shown in the field; parsed once, solved once per change and capped in work per frame; the driven curve has no editor yet, formulas give one number (no vectors or strings) |
 | Procedural geometry node graph (scene nodes, graph-based effects) | C M | M | XL | |
 | Parallel graph evaluation | C M | M | L | Single-threaded today |
 
@@ -285,7 +285,7 @@ Weight: 4
 | Ripple / wave, spherify | C M | D | S | Ripple, Round |
 | Lattice / free-form deformation | C M | P | M | A lattice of up to 8 cells per axis around a mesh, as one Bézier volume (the 1986 paper) or cell by cell, with a deformer stack order shared with clusters, blend shapes and skins (reorder by command); control points are moved by number and are keyable; the cage is drawn but its points are not picked in the viewport; clusters (weighted points following an object, with a soft radius) live in the same stack |
 | Wrap, shrink-wrap and surface deformers | C M | P | M | Shrink-wrap pulls the points onto a target object (nearest point, or along the deformer's Y axis) with an offset and the falloff fields as weights; no wrap to a cage and no surface deformer |
-| Noise and texture displacement deformer | C M | P | S | Displace along the normals by seeded fractal noise or by the falloff fields' weight; no texture maps |
+| Noise and texture displacement deformer | C M | P | S | Displace along the normals by seeded fractal noise or by the falloff fields' weight; a formula deformer moves points by a formula of their place, index and the time along the normal, an axis or away from the Y axis (parsed once, capped at 67 108 864 steps, re-evaluated when the frame changes); no texture maps |
 | Smooth, relax and delta-smoothing deformers | C M | P | M | Smooth (passes and strength, weighted by the fields) and delta smoothing, which smooths only what the deformers before it did; no separate volume-keeping relax |
 | Spline-driven deformation (curve warp, spline wrap) | C M | M | M | |
 | Wire, wrinkle and sculpt-object deformers | M | M | M | |
@@ -302,7 +302,7 @@ Weight: 5
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Cloner: linear, radial, grid, honeycomb, on-object modes | C M | P | L | Clones object: linear, radial, grid, scatter, surface and vertex layouts, seeded; no honeycomb or per-clone selections |
-| Effectors: plain, random, shader, step, delay, time, target, formula | C M | P | L | Clone modifiers: plain, random, noise (shader), step, delay (time based, follows the timeline) and target, each acting on position, rotation, scale and tint, stacked in order; no formula or mesh-sampled shader |
+| Effectors: plain, random, shader, step, delay, time, target, formula | C M | P | L | Clone modifiers: plain, random, noise (shader), step, delay (time based, follows the timeline) and target, and formula (a factor from the clone's index, count, place and the time; capped at 2 097 152 steps), each acting on position, rotation, scale and tint, stacked in order; no mesh-sampled shader |
 | Fields drive effectors | C | D | M | Falloff fields placed inside a clone modifier weigh each clone; several combine as in deformers |
 | Clone selections and weight maps | C | M | M | |
 | Instancing at scale (millions of points, render instances) | C M | P | M | Clones share one GPU mesh and one evaluated mesh; capped at 10,000 per generator, one draw call each |
@@ -400,11 +400,11 @@ Weight: 5
 | Per-object PBR material (base colour, metallic, roughness) | C M Z | D | S | glTF metallic-roughness core, exported to GLB |
 | Link a MaterialCraft `.mcmat` | | D | M | Stored and saved; the path tracer reads its base colour, roughness, metallic, normal, height and opacity maps (the viewport still shows the flat colour, counted under viewport textures) |
 | Full layered surface model (OpenPBR-class: coat, sheen, transmission, thin film) | C M R | P | L | The engine evaluates fuzz, coat, anisotropic metal with edge tint, dielectric with thin film, rough diffuse, rough transmission with absorption, emission and opacity on the CPU and the GPU (the same model in both, held together by tests), energy-checked by a furnace test; Properties exposes coat, sheen, transmission, index of refraction and emission; no nested dielectrics or dispersion |
-| Texture inputs: images, procedural noise, ramps, triplanar | C M R | P | L | Image maps for base colour, roughness, metalness, normal, height and opacity, bilinear, through a linked `.mcmat`; no mip filtering, procedural textures, ramps or triplanar, and no per-map controls in the app |
+| Texture inputs: images, procedural noise, ramps, triplanar | C M R | P | L | Image maps for base colour, roughness, metalness, normal, height and opacity, bilinear, through a linked `.mcmat`; procedural noise, ramps, mixes and picture nodes come from a material graph (see the node editor); no mip filtering or triplanar, and no per-map controls in the app |
 | Bump, normal and displacement inputs | C M R | P | M | Tangent-space normal maps and height bump in the path tracer (a test checks the lit result against the tilted normal); no displacement |
-| Node material editor | C M R | M | XL | Planned with MaterialCraft |
+| Node material editor | C M R | P | XL | `modelcraft-matgraph` and the Material Nodes window: a breadcrumb, a node picker with search, and a card per node with a thumbnail of what it makes, its settings and a list for each input that chooses the node feeding it (so linking needs no dragging); number, colour, noise (tiling fractal), ramp, mix, math, image and normal-map nodes into one surface node (base colour, metallic, roughness, emission, normal); the graph compiles to maps the path tracer reads on the CPU and the GPU (a test checks the two agree on a noise-driven roughness); loops, too many nodes and too deep a chain are refused; no wires drawn on a canvas, no node groups, no custom node kinds, no MaterialX |
 | Per-face / per-patch material assignment | C M Z | M | M | |
-| Material library and preset browser | C M R | M | M | |
+| Material library and preset browser | C M R | P | M | The Material Nodes window opens with a strip of every surface's material (colour and a graph marker; click to work on it) and Copy Material to Selection puts one onto others in one undo step; no named library that is kept across projects, no browser |
 | MaterialX import and export | M R | M | M | |
 
 ## Render engine: core
@@ -619,6 +619,65 @@ Weight: 3
 | Undo history kept across sessions | M Z | D | M | Saves store a base scene and the history's commands; open replays and checks them (`undo_history_survives_save_and_open`) |
 | Multithreaded dabs, evaluation and BVH build | C M Z | P | M | Skinning and the viewport's mesh data run on several cores (bit-identical to one core, tested; measured in performance.md) and the render BVH is built in parallel; sculpt dabs and the rest of the graph's evaluation are single-threaded |
 
+## UI parity with the reference layout
+
+Weight: 5
+
+How close ModelCraft's screens come to the reference modeller's layout, compared screen by screen
+with reference captures kept outside the repository. The rows follow its screens, in our own
+words; each status was checked in the code and a test on `staging` (2026-11-23, commit `79015d7`).
+`--screenshot-state` shows many of these states for a side-by-side comparison. `cargo xtask parity`
+reports this area's row parity as the UI parity.
+
+| Feature | Refs | Status | Size | Notes |
+|---|---|---|---|---|
+| Default layout: view in the centre, object tree over attributes at the side, transport always under the view | C | P | M | Tree and Undo History on the left, Properties on the right; transport shows only with the Animation panel open (`dock.rs` `default_layout`) |
+| Layout switcher with a layout per task (nine in the reference) | C | P | L | Six workspaces (Model, Sculpt, Paint, UV, Animate, Groom; Ctrl+1..6); UV, Animate and Groom are the Model layout plus a window or panel and an action strip; no node or script layout |
+| Modelling layout with four views and a coordinate panel | C | P | S | Coordinate panel (position, rotation, size, world or local, components too, one undo step per apply) and four views exist, but both are off at start (`coord_ui_tests`) |
+| Sculpt layout: brush palette, sculpt-layer manager, statistics in the view | C Z | P | M | The in-view statistics overlay exists; brushes are text buttons, shape layers and detail levels a radio list at the bottom of the panel, not a manager with columns |
+| UV layout: 3D view and UV view side by side | C | P | M | The UV workspace opens the UV Editor as a floating window, not docked beside the view |
+| Paint layout: colour picker, brushes, swatches, paint tools | C Z | P | L | Paint panel with a vertex-colour brush, colour and hex fields, swatches and fills (`paint_ui_tests`); no visual colour picker, texture painting, brush presets or tool palette |
+| Groom layout with a hair tool palette | C | P | M | Groom workspace with an action strip (add, groom, regrow, bake); the hair tools stay in Properties |
+| Node layout with a node editor and console | C | M | XL | No node editor; the only console is the Scripts window's output |
+| Docking, floating windows and tabs | C | D | S | craft-ui docking: tab groups, splits, float, hide, a saved layout per workspace, keyboard paths (`panels_dock_tab_and_hide_without_dragging`) |
+| Top menu bar covering every area, with a menu listing every window | C | P | M | File, Edit, Select, Create, Mesh, Spline, Sculpt, Rendering, Animate, Rig, Simulate and more; no volume menu, and View ▸ Panels lists only the docked panels |
+| Create menu grouped by kind | C | P | S | Submenus for primitives, generators, clones, deformers, fields, lights and cameras, rig and simulation (`create_menu_tests`); no materials or tags groups |
+| Mesh menu with tool submenus | C | P | S | A flat list of tools plus one Patches and Cleanup submenu |
+| Animation menu: playback, recording, preview, non-linear editing | C | P | M | Playback, keys, auto-key, motion paths, ghosts, turntable, rotation cleanup; no preview capture and nothing non-linear |
+| Character menu | C | P | M | Joints, binding, weights, IK, constraints, FK/IK match, blend shapes, lattice, cluster, deformer stack; no templates, muscles or weight manager |
+| Simulation menu with forces, connectors, particles and hair | C | P | M | Rigid body, collider, cloth, particles, bake and pin; wind and gravity are per-object fields, no force objects or connectors |
+| Vertical icon tool palette on the left | C | P | S | View ▸ Icon Palettes (off by default) adds an icon column of workspaces, modes and the four transform tools |
+| Vertical create palette with fold-outs on the right | C | P | S | The same palette setting adds Create groups as fold-outs of icon buttons; off by default, most icons are a letter |
+| Searchable command palette | | D | S | Ctrl+K (`command_palette_adds_a_cube_and_the_tree_shows_it`) |
+| Tool options before applying, with live update and Apply | C | D | S | Extrude, bevel and loop cut open an options window that previews live; Apply or Enter is one undo step, Esc cancels (`modeling_ui_tests`); bevel shapes are Flat, Round and a tension, no drawn profile curve |
+| Tree row: icon, name, view and render visibility, enabled tick, tag icons | C | P | M | Visibility, lock, reference-only toggle, type badge and name; no render toggle, enabled tick or tag column |
+| Tree menu row, search and filters | C | P | M | Search with clear, a row menu and selection sets; no menu row, filters or bookmarks |
+| Attribute pages split into tabs | C | P | L | Properties is one scroll of collapsible sections |
+| Key marker beside each attribute | C | P | S | Markers (not animated, animated, keyed here) on transform, material, primitive, deformer and count fields, keyed by Enter or Space (`key_marker_tests`); not on falloff, clone-modifier or physics fields |
+| Attribute page navigation: back, forward, lock to object, search | C | M | M | Properties always follows the active object |
+| Number fields with a slider beside them | C | P | S | Drag fields; sliders only for brush radius and strength |
+| Object link fields: drop an object in, pick it in the view, clear | C | P | M | Drop-down lists for clone and modifier targets, selection order for constraints; no drop-to-link, picker or clear |
+| Field and modifier layer list with blend and opacity | C | P | M | Falloff layers list in clone modifiers and deformers: on/off, blend, opacity, reorder, edit (`field_layers_ui_tests`); clone modifiers themselves have no such stack |
+| Basic page: name, layer, visibility, display colour, see-through | C | P | S | Name in the header, layer and tags under Organization; no display colour or see-through switch |
+| Key sheet docked under the view | C | P | M | Rows per curve with key diamonds, ruler and transport; no summary row, hierarchy folding or interpolation toolbar |
+| Curve editor | C | D | S | Coloured curves, value axis, zoom, curve list, tangent and interpolation editing by number (`curve_editor_edits_interpolation_and_tangents_by_number`); shares the bottom panel with the key sheet, which docks like any panel |
+| Key properties page | C | P | S | Key fields (frame, value, interpolation, tangents, extrapolation) inside the animation panel, not a page of their own |
+| Material editor with a channel list and preview | C | M | L | Material is a section of fields in Properties (base, coat, sheen, transmission, emission, linked file); no editor, channel list or preview |
+| Node editor for materials and scene nodes, with a node browser | C M | P | XL | A reusable node editor (`node_editor`): nodes and ports in the accessibility tree, links made and removed from the keyboard or by dragging, pan and zoom, a searchable node browser (Shift+A), node and link caps checked before an edit, every edit through the host's undo (`node_editor_tests`). Scene Nodes shows the objects with parent links, adds primitives and groups from the browser and removes objects (`scene_nodes_ui_tests`). Material graphs do not use the canvas yet, and there are no scene nodes beyond the hierarchy (no transform, math or effect nodes) |
+| Attribute node graph: driver and driven objects, math and remap nodes | M | M | L | A formula field and driven-key controls in Properties instead (`constraints_formulas_and_driven_keys_from_properties`) |
+| Render settings window with categories | C | D | S | Render Settings: Output, Save, Passes, Region, Quality, Frame Queue pages, each edit one undo step saved with the project (`render_ui_tests`); fewer pages than the reference and one setup per project |
+| Progressive render window with pass picker, region and snapshots | C | P | M | The Render View refines progressively; Render, Stop, Save Image, Settings and Pictures; finished pictures go to the Picture Viewer; no pass picker, region render or mid-render snapshot |
+| Picture viewer and render queue windows | C | P | M | Picture Viewer with a bounded history, histogram and split, difference and number comparison; the frame queue is a Render Settings page running one job, not a window listing jobs |
+| Script manager | C | D | S | Editor, run, run selection, output, macro recording, script library (`script_run_ui_tests`, `script_macro_ui_tests`) |
+| Preferences with a category tree and per-format pages | C | P | M | One window of sections plus the Keyboard Shortcuts dialog; no category tree, hardware page or per-format pages |
+| Scene variants, asset browser, point table and profiler windows | C | P | XL | The Variants panel (`variants_ui_tests`); point list for spline points only; no asset browser or profiler |
+| Layers window | C | D | S | Layers from the selection, show, render and lock per layer (`layers_are_made_from_the_selection_and_switched_in_the_layers_window`) |
+| Simulation settings in tabbed pages per body | C | P | S | One scroll with collapsing sections per body |
+| Per-view header menus and camera picker | C | P | M | View, Display, Options and Camera menus per view (`view_header_tests`); no filter or panel menus, and the camera menu lists only the editor camera |
+| In-view statistics, grid-spacing and view-transform readouts | C Z | P | S | Statistics overlay: object, points, polygons, detail level, memory, grid spacing, announced politely; no view-transform readout |
+| Axis triad, gizmos, field and deformer outlines with handles | C | P | M | Triad, move, rotate and scale gizmos; field outlines and the lattice cage are drawn but have no handles to drag |
+| Tool hints in the status line, tooltips with descriptions | C | P | M | The status line reports results, not what the tool does; tooltips on some controls only |
+
 ## What works today (evidence)
 
 - Mesh: `crates/mesh/src/tests.rs` (`arbitrary_soups_build_valid_meshes` proptest, repair, round trips).
@@ -667,6 +726,7 @@ can get there.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-23 | minor | UI parity area: 46 rows comparing the screens with the reference layout, statuses checked in code; `cargo xtask parity` reports it as UI parity |
 | 2026-11-18 | minor | In-app performance: multithreading partial (skinning, viewport mesh data); playback of the benchmark character measured |
 | 2026-11-18 | minor | Finishing pass: joints, skinning with weight painting, Curve Editor, Key Sheet, and animation layers done; ghosts added to motion paths (partial) |
 | 2026-11-18 | minor | Deformation: blend shapes with in-betweens done; lattice partial |
