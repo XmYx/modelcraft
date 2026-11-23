@@ -37,7 +37,7 @@ fn target(d: &mut Document, of: ObjectId, name: &str, by: f32) -> ObjectId {
     let id = cube(d, name);
     let rest = points(d, of);
     let verts: Vec<u32> = rest.iter().enumerate().filter(|(_, p)| p.y > 0.9).map(|(i, _)| i as u32).collect();
-    d.execute(Command::AddStep { id, op: StepOp::MoveVertices { verts, translate: Vec3::Y * by, rotate: Quat::IDENTITY, scale: Vec3::ONE } }).unwrap();
+    d.execute(Command::AddStep { id, op: StepOp::move_vertices(verts, Vec3::Y * by, Quat::IDENTITY, Vec3::ONE) }).unwrap();
     id
 }
 
