@@ -214,7 +214,6 @@ fn the_counts_are_bounded_and_a_hostile_file_is_repaired() {
         d.scene.add_variant(&format!("v{i}")).unwrap();
     }
     assert!(d.scene.add_variant("one too many").is_err());
-    assert!(MAX_OVERRIDES >= 1000);
     // Hostile JSON: a stash with no active variant, an unknown active id, overrides of objects
     // that do not exist, non-finite and over-long names.
     let json = format!(
@@ -228,4 +227,18 @@ fn the_counts_are_bounded_and_a_hostile_file_is_repaired() {
     assert!(s.variants.list[0].overrides.is_empty(), "an override of a missing object is dropped");
     assert_eq!(s.variants.active, None);
     assert!(s.variants.stash.is_empty());
+}
+
+#[test]
+fn a_file_with_too_many_overrides_is_cut_to_the_cap() {
+    let mut d = Document::new();
+    let a = cube(&mut d);
+    let v = add(&mut d, "Big");
+    let mut json = serde_json::to_value(&d.scene).unwrap();
+    let rows: Vec<serde_json::Value> =
+        (0..MAX_OVERRIDES + 50).map(|i| serde_json::json!({"object": a.0, "path": "visible", "value": f64::from(i as u32 % 2)})).collect();
+    json["variants"]["list"][0]["overrides"] = serde_json::Value::Array(rows);
+    let s: Scene = serde_json::from_value(json).unwrap();
+    let s = s.repaired().unwrap();
+    assert_eq!(s.variants.get(v).unwrap().overrides.len(), MAX_OVERRIDES, "cut to the cap, not applied past it");
 }
