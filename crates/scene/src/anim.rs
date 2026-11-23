@@ -658,7 +658,7 @@ mod tests {
         let id = cube(&mut s);
         let sid = s.fresh_id();
         if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-            steps.push(Step { id: sid, enabled: true, op: StepOp::Extrude { faces: vec![0, 1, 2, 3, 4, 5], distance: 1.0 } });
+            steps.push(Step { id: sid, enabled: true, op: StepOp::extrude(vec![0, 1, 2, 3, 4, 5], 1.0) });
         }
         let names: Vec<String> = attr::list(s.get(id).unwrap()).into_iter().map(|(n, _)| n).collect();
         for want in ["translate.x", "rotate.z", "scale.y", "visible", "material.roughness", "material.base_color.3", "primitive.size.0", "primitive.segments"] {
@@ -686,7 +686,7 @@ mod tests {
         assert!(s.set_attr(id, "translate.x", f64::NAN).is_err());
         assert!(s.set_attr(ObjectId(99), "translate.x", 1.0).is_err());
         // Other kinds are walked as they are saved.
-        let d = s.add("Bend", ObjectKind::Deformer { deformer: Deformer::Bend { angle: 90.0 } }, Some(id)).unwrap();
+        let d = s.add("Bend", ObjectKind::Deformer { deformer: Deformer::Bend { angle: 90.0 }, limits: Default::default(), target: None }, Some(id)).unwrap();
         assert_eq!(s.attr(d, "deformer.angle"), Some(90.0));
         let cage = s.add("Cage", ObjectKind::SmoothCage { levels: 2 }, None).unwrap();
         assert_eq!(s.set_attr(cage, "levels", 3.0), Ok(true));

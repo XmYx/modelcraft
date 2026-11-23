@@ -21,6 +21,7 @@ pub enum Pane {
     History,
     Simulation,
     Coordinates,
+    Variants,
 }
 
 impl Pane {
@@ -34,6 +35,7 @@ impl Pane {
             Pane::History => PanelId::History,
             Pane::Simulation => PanelId::Simulation,
             Pane::Coordinates => PanelId::Coordinates,
+            Pane::Variants => PanelId::Variants,
         })
     }
     pub fn of(p: PanelId) -> Pane {
@@ -45,6 +47,7 @@ impl Pane {
             PanelId::History => Pane::History,
             PanelId::Simulation => Pane::Simulation,
             PanelId::Coordinates => Pane::Coordinates,
+            PanelId::Variants => Pane::Variants,
         }
     }
     pub fn label(self) -> String {
@@ -85,24 +88,44 @@ pub fn default_layout(ws: Workspace) -> Layout<Pane> {
         Workspace::Paint => {
             split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Tree]), split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Paint])))
         }
+        // UV: the scene and Properties around the viewport; the UV Editor window opens with the
+        // workspace (it is not a dockable pane yet).
+        Workspace::Uv => {
+            split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Tree]), split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Properties])))
+        }
+        // Animate: Properties (with the key markers) beside the viewport, the scene tabbed with the
+        // undo history; the Animation panel opens under the view with the workspace.
+        Workspace::Animate => split(
+            h,
+            SplitSize::FixedFirst(250.0),
+            tabs(&[Pane::Tree, Pane::History]),
+            split(h, SplitSize::FixedSecond(300.0), viewport, tabs(&[Pane::Properties])),
+        ),
+        // Groom: the hair tools live in Properties, so it is wider; the scene on the left.
+        Workspace::Groom => {
+            split(h, SplitSize::FixedFirst(250.0), tabs(&[Pane::Tree]), split(h, SplitSize::FixedSecond(340.0), viewport, tabs(&[Pane::Properties])))
+        }
     };
     Layout { root: Some(root), floating: Vec::new() }
 }
 
-pub const WORKSPACES: [Workspace; 3] = [Workspace::Model, Workspace::Sculpt, Workspace::Paint];
+pub const WORKSPACES: [Workspace; 6] = [Workspace::Model, Workspace::Sculpt, Workspace::Paint, Workspace::Uv, Workspace::Animate, Workspace::Groom];
 
 fn key(ws: Workspace) -> &'static str {
     match ws {
         Workspace::Model => "model",
         Workspace::Sculpt => "sculpt",
         Workspace::Paint => "paint",
+        Workspace::Uv => "uv",
+        Workspace::Animate => "animate",
+        Workspace::Groom => "groom",
     }
 }
 
 /// The layouts of every workspace.
 #[derive(Clone, Debug)]
 pub struct Layouts {
-    pub per: [Layout<Pane>; 3],
+    pub per: [Layout<Pane>; 6],
     raise: Option<Pane>,
 }
 

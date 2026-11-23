@@ -432,14 +432,6 @@ pub fn badge(p: &egui::Painter, c: Pos2, kind: &ObjectKind) {
 
 // ---------------------------------------------------------------- menus and pages
 
-/// The Create menu's lights and cameras.
-pub fn create_menu(app: &mut ModelApp, ui: &mut egui::Ui) {
-    ui.separator();
-    for a in StageAction::ALL.iter().take(7) {
-        menu_button(app, ui, *a);
-    }
-}
-
 /// The View menu's camera entries.
 pub fn view_menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     for a in StageAction::ALL.iter().skip(7) {

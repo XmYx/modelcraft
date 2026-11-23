@@ -12,7 +12,8 @@ pub const CONTEXTS: [&str; 3] = ["Model", "Sculpt", "Paint"];
 
 pub fn context(ws: Workspace) -> &'static str {
     match ws {
-        Workspace::Model => "Model",
+        // The workspaces that edit the scene share the Model shortcuts.
+        Workspace::Model | Workspace::Uv | Workspace::Animate | Workspace::Groom => "Model",
         Workspace::Sculpt => "Sculpt",
         Workspace::Paint => "Paint",
     }

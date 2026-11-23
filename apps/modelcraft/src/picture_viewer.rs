@@ -44,6 +44,8 @@ pub struct PictureViewer {
     /// Multiplier of the difference image.
     pub gain: f32,
     texture: Option<(egui::TextureHandle, u64)>,
+    /// The histogram of the selected picture, and the revision and selection it was made for.
+    histogram: Option<(Histogram, u64, usize)>,
     focus_pending: bool,
     /// Bumped whenever the history changes, so the shown texture is rebuilt.
     revision: u64,
@@ -61,6 +63,7 @@ impl Default for PictureViewer {
             split: 0.5,
             gain: 8.0,
             texture: None,
+            histogram: None,
             focus_pending: false,
             revision: 0,
             had_focus: false,
@@ -202,8 +205,13 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
                             .color(theme::TEXT_DIM)
                             .small(),
                     );
-                    if let Some(p) = v.history.get(v.selected) {
-                        draw_histogram(ui, &Histogram::of(&p.pixels));
+                    // Counted once per picture, not every frame.
+                    let stale = v.histogram.as_ref().is_none_or(|(_, r, s)| *r != v.revision || *s != v.selected);
+                    if stale {
+                        v.histogram = v.history.get(v.selected).map(|p| (Histogram::of(&p.pixels), v.revision, v.selected));
+                    }
+                    if let Some((h, _, _)) = &v.histogram {
+                        draw_histogram(ui, h);
                     }
                 });
                 ui.separator();
@@ -270,9 +278,9 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
                         ui.ctx().accesskit_node_builder(r.id, |n| n.set_live(egui::accesskit::Live::Polite));
                     }
                     // The picture.
-                    if let Some((pixels, size)) = shown(v) {
+                    {
                         let stale = v.texture.as_ref().is_none_or(|(_, r)| *r != v.revision);
-                        if stale {
+                        if stale && let Some((pixels, size)) = shown(v) {
                             let img = egui::ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &pixels);
                             v.texture = Some((ui.ctx().load_texture("picture-viewer", img, egui::TextureOptions::LINEAR), v.revision));
                         }

@@ -2837,9 +2837,12 @@ name = "modelcraft-ops"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-field",
  "modelcraft-mesh",
+ "modelcraft-spline",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -2880,6 +2883,7 @@ dependencies = [
  "modelcraft-matgraph",
  "modelcraft-mesh",
  "modelcraft-ops",
+ "modelcraft-sculpt",
  "modelcraft-sim",
  "modelcraft-spline",
  "modelcraft-uv",

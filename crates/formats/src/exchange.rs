@@ -221,13 +221,16 @@ fn items_of(scene: cm::Scene) -> (Vec<Item>, Vec<String>) {
 fn convert_in(m: &cm::Mesh) -> (PolyMesh, Vec<String>) {
     let pos: Vec<Vec3> = m.positions.iter().map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)).collect();
     let uvset = m.uv_sets.first();
+    // glTF COLOR_0 and the like: one colour per point.
+    let point_colors = (!m.colors.is_empty() && m.colors.len() == m.positions.len()).then_some(&m.colors);
     let mut polys = Vec::new();
     for (pi, part) in m.parts.iter().enumerate() {
         for face in part.faces() {
             let verts = face.iter().map(|c| c.position).collect();
             let uvs: Option<Vec<Vec2>> =
                 uvset.and_then(|s| face.iter().map(|c| s.get(c.uv as usize).map(|uv| Vec2::new(uv[0], uv[1]))).collect::<Option<Vec<Vec2>>>());
-            polys.push(Polygon { verts, uvs, patch: pi as u32 });
+            let colors = point_colors.map(|cs| face.iter().map(|c| cs.get(c.position as usize).copied().unwrap_or([1.0; 4])).collect());
+            polys.push(Polygon { verts, uvs, patch: pi as u32, colors });
         }
     }
     let mut warnings = Vec::new();
@@ -274,6 +277,9 @@ fn convert_out(name: &str, m: &PolyMesh, material: Option<usize>) -> cm::Mesh {
     }
     if m.has_uvs() {
         out.uv_sets.push(uvs);
+    }
+    if m.has_colors() {
+        out.colors = modelcraft_ops::paint::vertex_colors(m);
     }
     out.parts.push(part);
     out

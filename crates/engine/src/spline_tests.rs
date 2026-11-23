@@ -181,3 +181,225 @@ fn curves_are_left_out_of_exports_and_the_scene_still_exports() {
     assert!(p.metadata().unwrap().len() > 100);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn edit_commands_change_points_as_single_undo_steps_and_refuse_bad_ones() {
+    use modelcraft_spline::{KnotMove, KnotRef, Side, SplineEdit};
+    let mut d = Document::new();
+    let id = add(&mut d, "empty");
+    let at = |k| KnotRef { segment: 0, knot: k };
+    for (i, p) in [Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0)].into_iter().enumerate() {
+        let before = d.undo.len();
+        d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::Append { segment: 0, knot: Knot::new(p), kind: CurveKind::Bezier } })).unwrap();
+        assert_eq!((d.undo.len(), d.eval.spline(&d.scene, id).unwrap().spline.knot_count()), (before + 1, i + 1));
+    }
+    d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::SetHandle { at: at(1), side: Side::Out, offset: Vec3::new(0.0, 0.5, 0.0) } })).unwrap();
+    d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::MoveKnots { moves: vec![KnotMove { at: at(2), pos: Vec3::new(5.0, 0.0, 0.0) }] } })).unwrap();
+    let s = d.eval.spline(&d.scene, id).unwrap().spline.clone();
+    assert_eq!((s.segments[0].knots[1].tan_out, s.segments[0].knots[2].pos), (Vec3::new(0.0, 0.5, 0.0), Vec3::new(5.0, 0.0, 0.0)));
+    // A bad edit is an error and no undo step.
+    let n = d.undo.len();
+    for edit in [
+        SplineEdit::Remove { knots: vec![at(9)] },
+        SplineEdit::MoveKnots { moves: vec![KnotMove { at: at(0), pos: Vec3::NAN }] },
+        SplineEdit::SetClosed { segment: 4, closed: true },
+    ] {
+        assert!(d.execute(Command::Spline(S::Edit { id, edit })).is_err());
+    }
+    assert_eq!(d.undo.len(), n);
+    // On a primitive the first edit makes it editable; Undo brings the primitive back.
+    let circle = add(&mut d, "circle");
+    d.execute(Command::Spline(S::Edit { id: circle, edit: SplineEdit::Translate { knots: vec![at(0)], by: Vec3::new(1.0, 0.0, 0.0) } })).unwrap();
+    assert!(matches!(d.scene.get(circle).unwrap().kind, ObjectKind::Spline { source: SplineSource::Curve { .. }, .. }));
+    d.execute(Command::Undo).unwrap();
+    assert!(matches!(d.scene.get(circle).unwrap().kind, ObjectKind::Spline { source: SplineSource::Primitive { .. }, .. }));
+    // Locked, and on something that is not a spline.
+    d.execute(Command::SetLocked { ids: vec![id], locked: true }).unwrap();
+    let e = d.execute(Command::Spline(S::Edit { id, edit: SplineEdit::SetClosed { segment: 0, closed: true } })).unwrap_err().to_string();
+    assert!(e.contains("locked"), "{e}");
+    let cube = d.execute(Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }).unwrap().created[0];
+    assert!(d.execute(Command::Spline(S::Edit { id: cube, edit: SplineEdit::SetClosed { segment: 0, closed: true } })).is_err());
+    // JSON as a user would write it.
+    let mut d2 = Document::new();
+    let c2 = add(&mut d2, "empty");
+    let j = format!(r#"{{"cmd":"spline","op":"edit","id":{},"edit":{{"edit":"append","segment":0,"knot":{{"pos":[1,2,3]}}}}}}"#, c2.0);
+    d2.execute(serde_json::from_str(&j).unwrap()).unwrap();
+    assert_eq!(d2.eval.spline(&d2.scene, c2).unwrap().spline.segments[0].knots[0].pos, Vec3::new(1.0, 2.0, 3.0));
+}
+
+fn faces(d: &mut Document, id: modelcraft_scene::ObjectId) -> usize {
+    d.eval.evaluate(&d.scene, id).mesh.face_count()
+}
+
+#[test]
+fn every_generator_starts_with_example_splines_and_shows_a_surface() {
+    use modelcraft_scene::SplineGen;
+    for kind in modelcraft_scene::spline_gen::KINDS {
+        let mut d = Document::new();
+        let g = d.execute(Command::Spline(S::AddGenerator { kind: (*kind).into(), inputs: vec![] })).unwrap().created[0];
+        assert!(matches!(d.scene.get(g).unwrap().kind, ObjectKind::SplineGenerator { .. }), "{kind}");
+        assert!(!d.scene.spline_children(g).is_empty(), "{kind}");
+        let e = d.eval.evaluate(&d.scene, g);
+        assert!(e.errors.is_empty(), "{kind}: {:?}", e.errors);
+        assert!(e.mesh.face_count() > 8, "{kind}");
+        assert_eq!(d.triangle_count(), e.mesh.triangle_count(), "{kind}: the spline children draw no mesh");
+        // One undo removes the generator and its splines together.
+        d.execute(Command::Undo).unwrap();
+        assert_eq!(d.scene.len(), 0, "{kind}");
+        d.execute(Command::Redo).unwrap();
+        assert_eq!(faces(&mut d, g), e.mesh.face_count(), "{kind}");
+        let _ = SplineGen::default_of(kind);
+    }
+    assert!(Document::new().execute(Command::Spline(S::AddGenerator { kind: "twist".into(), inputs: vec![] })).is_err());
+}
+
+#[test]
+fn a_generator_takes_the_listed_splines_inside_it_and_refuses_other_objects() {
+    let mut d = Document::new();
+    let a = add(&mut d, "circle");
+    let b = add(&mut d, "rectangle");
+    let g = d.execute(Command::Spline(S::AddGenerator { kind: "loft".into(), inputs: vec![a, b] })).unwrap().created[0];
+    assert_eq!(d.scene.spline_children(g), vec![a, b]);
+    assert_eq!(d.scene.get(a).unwrap().parent, Some(g));
+    // Not splines, or the same spline twice: an error, and no trace.
+    let n = d.undo.len();
+    let cube = d.execute(Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }).unwrap().created[0];
+    let n = n + 1;
+    assert!(d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![cube] })).is_err());
+    let c = add(&mut d, "star");
+    let n = n + 1;
+    assert!(d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![c, c] })).is_err());
+    assert!(d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![modelcraft_scene::ObjectId(999)] })).is_err());
+    assert_eq!(d.undo.len(), n);
+    assert_eq!(d.scene.get(c).unwrap().parent, None);
+}
+
+#[test]
+fn generator_options_are_sanitized_locked_and_checked() {
+    use modelcraft_ops::spline_gen::{ExtrudeOptions, RevolveOptions};
+    use modelcraft_scene::SplineGen;
+    let mut d = Document::new();
+    let g = d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![] })).unwrap().created[0];
+    d.execute(Command::Spline(S::SetGenerator {
+        id: g,
+        generator: SplineGen::Extrude(ExtrudeOptions { distance: f32::NAN, steps: u32::MAX, ..Default::default() }),
+    }))
+    .unwrap();
+    match &d.scene.get(g).unwrap().kind {
+        ObjectKind::SplineGenerator { generator: SplineGen::Extrude(o) } => assert_eq!((o.distance, o.steps), (1.0, modelcraft_ops::spline_gen::MAX_STEPS)),
+        other => panic!("{other:?}"),
+    }
+    // A different kind of generator replaces the options wholesale.
+    d.execute(Command::Spline(S::SetGenerator { id: g, generator: SplineGen::Revolve(RevolveOptions::default()) })).unwrap();
+    assert!(faces(&mut d, g) > 0);
+    // Wrong objects fail; a locked generator refuses.
+    let circle = add(&mut d, "circle");
+    assert!(d.execute(Command::Spline(S::SetGenerator { id: circle, generator: SplineGen::Revolve(RevolveOptions::default()) })).is_err());
+    d.execute(Command::SetLocked { ids: vec![g], locked: true }).unwrap();
+    let e = d.execute(Command::Spline(S::SetGenerator { id: g, generator: SplineGen::Revolve(RevolveOptions::default()) })).unwrap_err().to_string();
+    assert!(e.contains("locked"), "{e}");
+}
+
+#[test]
+fn a_generator_exports_its_mesh_and_chains_with_other_generators_and_saves() {
+    let dir = std::env::temp_dir().join(format!("mc-spline-gen-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut d = Document::new();
+    let g = d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![] })).unwrap().created[0];
+    let items = d.export_items();
+    assert_eq!(items.len(), 1, "the generator, not its curve");
+    assert_eq!(items[0].mesh.as_ref().map(|m| m.face_count()), Some(faces(&mut d, g)));
+    for ext in ["glb", "obj", "stl"] {
+        let p = dir.join(format!("out.{ext}"));
+        d.export(&p).unwrap();
+        assert!(p.metadata().unwrap().len() > 100, "{ext}");
+    }
+    // An array around it joins copies of the extruded mesh.
+    let one = faces(&mut d, g);
+    let arr = d.execute(Command::AddArray { kind: "linear".into(), input: Some(g) }).unwrap().created[0];
+    assert_eq!(faces(&mut d, arr), one * 4);
+    assert_eq!(d.export_items().len(), 1, "only the array is exported");
+    // Save and open.
+    let path = dir.join("gen.modelcraft");
+    d.save_as(&path).unwrap();
+    let mut e = Document::open(&path).unwrap();
+    assert_eq!(faces(&mut e, arr), one * 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn generator_commands_round_trip_as_json() {
+    use modelcraft_scene::SplineGen;
+    for c in [
+        S::AddGenerator { kind: "sweep".into(), inputs: vec![modelcraft_scene::ObjectId(1), modelcraft_scene::ObjectId(2)] },
+        S::SetGenerator { id: modelcraft_scene::ObjectId(3), generator: SplineGen::default_of("loft").unwrap() },
+        S::SetGenerator { id: modelcraft_scene::ObjectId(3), generator: SplineGen::default_of("sweep").unwrap() },
+    ] {
+        let cmd = Command::Spline(c);
+        let j = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(serde_json::from_str::<Command>(&j).unwrap(), cmd, "{j}");
+        assert!(!cmd.label().is_empty());
+    }
+    let j =
+        r#"{"cmd":"spline","op":"set_generator","id":1,"generator":{"kind":"extrude","distance":2.5,"axis":"z","steps":3,"cap_start":true,"cap_end":false}}"#;
+    assert!(serde_json::from_str::<Command>(j).is_ok());
+}
+
+#[test]
+fn corner_cuts_reverse_and_polygon_conversion_are_single_undo_steps() {
+    use modelcraft_spline::{KnotRef, SplineEdit};
+    let mut d = Document::new();
+    let r = add(&mut d, "rectangle");
+    let at = |k| KnotRef { segment: 0, knot: k };
+    let n = d.undo.len();
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Chamfer { knots: vec![at(0), at(1), at(2), at(3)], distance: 0.25 } })).unwrap();
+    assert_eq!((d.undo.len(), d.eval.spline(&d.scene, r).unwrap().spline.knot_count()), (n + 1, 8));
+    d.execute(Command::Undo).unwrap();
+    assert!(matches!(d.scene.get(r).unwrap().kind, ObjectKind::Spline { source: SplineSource::Primitive { .. }, .. }), "undo brings the primitive back");
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Fillet { knots: vec![at(1)], radius: 0.3 } })).unwrap();
+    let rounded = d.eval.spline(&d.scene, r).unwrap().spline.clone();
+    assert_eq!(rounded.segments[0].kind, CurveKind::Bezier);
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Reverse { segment: 0 } })).unwrap();
+    assert_eq!(d.eval.spline(&d.scene, r).unwrap().spline.segments[0].knots[0].pos, rounded.segments[0].knots[0].pos);
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::ToPolygon { tess: Tessellation::Fixed { steps: 6 } } })).unwrap();
+    assert_eq!(d.eval.spline(&d.scene, r).unwrap().spline.segments[0].kind, CurveKind::Linear);
+    // Nothing to cut, or a bad size: an error and no undo step.
+    let n = d.undo.len();
+    assert!(d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Fillet { knots: vec![at(99)], radius: 0.3 } })).is_err());
+    assert!(d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Chamfer { knots: vec![at(1)], distance: f32::NAN } })).is_err());
+    assert_eq!(d.undo.len(), n);
+}
+
+#[test]
+fn to_mesh_fills_closed_curves_with_holes_and_refuses_the_rest() {
+    let mut d = Document::new();
+    let a = add(&mut d, "rectangle");
+    // A second, smaller rectangle inside the same spline as a second curve: a hole.
+    let hole = modelcraft_spline::Segment::polyline(
+        &[Vec3::new(-0.25, -0.25, 0.0), Vec3::new(0.25, -0.25, 0.0), Vec3::new(0.25, 0.25, 0.0), Vec3::new(-0.25, 0.25, 0.0)],
+        true,
+    );
+    d.execute(Command::Spline(S::Edit { id: a, edit: modelcraft_spline::SplineEdit::AddSegment { segment: hole } })).unwrap();
+    let m = d.execute(Command::Spline(S::ToMesh { id: a })).unwrap().created[0];
+    let mesh = d.eval.evaluate(&d.scene, m).mesh;
+    assert!(matches!(d.scene.get(m).unwrap().kind, ObjectKind::Mesh { .. }));
+    mesh.validate().unwrap();
+    let (tris, _) = mesh.triangulate();
+    let area: f32 = tris.iter().map(|t| (mesh.position(t[1]) - mesh.position(t[0])).cross(mesh.position(t[2]) - mesh.position(t[0])).length() * 0.5).sum();
+    assert!((area - (2.0 * 1.5 - 0.25)).abs() < 1e-4, "the rectangle minus the hole: {area}");
+    // Open curves give no surface; other objects are refused; the lock check applies to the spline.
+    let open = add(&mut d, "arc");
+    assert!(d.execute(Command::Spline(S::ToMesh { id: open })).is_err());
+    assert!(d.execute(Command::Spline(S::ToMesh { id: m })).is_err());
+    d.execute(Command::SetLocked { ids: vec![a], locked: true }).unwrap();
+    assert!(d.execute(Command::Spline(S::ToMesh { id: a })).is_err());
+}
+
+#[test]
+fn to_mesh_of_a_generator_input_puts_the_mesh_beside_the_generator() {
+    let mut d = Document::new();
+    let g = d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![] })).unwrap().created[0];
+    let star = d.scene.spline_children(g)[0];
+    let m = d.execute(Command::Spline(S::ToMesh { id: star })).unwrap().created[0];
+    assert_eq!(d.scene.get(m).unwrap().parent, None, "not inside the generator, where it would be taken for an input");
+}
