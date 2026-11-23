@@ -208,6 +208,8 @@ pub struct ModelApp {
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
+    /// The `--screenshot-state` window to open on the first frame.
+    pub start_state: Option<crate::shot_state::ShotState>,
     pub shot: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
     pub frames: u64,
     pub frame_times: std::collections::VecDeque<f32>,
@@ -252,13 +254,36 @@ pub fn recovery_dir() -> Option<PathBuf> {
     Some(base.join("modelcraft").join("recovery"))
 }
 
+/// Whether this launch is a picture run (`--screenshot`, with or without `--screenshot-state`).
+/// A picture run is meant to be repeatable and harmless: its settings live in memory (so the
+/// picture does not depend on the user's saved layout, and an open window cannot change that
+/// layout), it has no recovery folder to journal into or clean up, and it starts no user code.
+#[derive(Clone, Copy)]
+pub struct PictureRun(pub bool);
+
+impl PictureRun {
+    pub fn of(app: &ModelApp) -> Self {
+        PictureRun(app.screenshot.is_some())
+    }
+
+    pub fn settings_location(self) -> craft_settings::paths::Location {
+        if self.0 { craft_settings::paths::Location::Memory } else { craft_settings::paths::Location::Auto }
+    }
+
+    pub fn recovery_dir(self) -> Option<PathBuf> {
+        if self.0 { None } else { recovery_dir() }
+    }
+}
+
 impl ModelApp {
     pub fn new(cc: &eframe::CreationContext<'_>, cli: Cli) -> Self {
         let mut app = Self::with_context(&cc.egui_ctx, cli);
-        let (store, _report) = craft_settings::store::SettingsStore::<crate::prefs::Prefs>::open(craft_settings::paths::Location::Auto);
+        // A picture run (`--screenshot`) reads and writes none of the user's files: see `PictureRun`.
+        let run = PictureRun::of(&app);
+        let (store, _report) = craft_settings::store::SettingsStore::<crate::prefs::Prefs>::open(run.settings_location());
         app.apply_prefs(store.get().clone());
         app.prefs = Some(store);
-        app.recovery_dir = recovery_dir();
+        app.recovery_dir = run.recovery_dir();
         app.start_autosave();
         if app.allow_agents {
             crate::agents::start(&mut app, &cc.egui_ctx);
@@ -266,8 +291,11 @@ impl ModelApp {
         app.script = crate::script_ui::ScriptState::new(crate::script_ui::default_dir());
         let drafts = app.recovery_dir.as_ref().map(|d| d.join("scripts"));
         crate::script_recover::init(&mut app, drafts);
-        crate::plugin_ui::init(&mut app, crate::plugin_ui::default_dir());
-        crate::script_ui::startup(&mut app);
+        if !run.0 {
+            // A picture run starts no user code: no plugin and no startup script.
+            crate::plugin_ui::init(&mut app, crate::plugin_ui::default_dir());
+            crate::script_ui::startup(&mut app);
+        }
         app
     }
 
@@ -341,6 +369,7 @@ impl ModelApp {
             sculpt_groups: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
+            start_state: cli.screenshot_state,
             shot: Default::default(),
             frames: 0,
             frame_times: Default::default(),
@@ -1311,6 +1340,9 @@ impl ModelApp {
         }
         self.last_frame = Some(now);
         self.frames += 1;
+        if let Some(s) = self.start_state.take() {
+            crate::shot_state::apply(self, &ctx, s);
+        }
         crate::agents::tick(self);
         // Before the shortcuts, so Escape stops a running bake instead of clearing the selection.
         crate::sim_ui::tick(self, &ctx);
