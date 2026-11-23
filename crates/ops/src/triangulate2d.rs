@@ -106,9 +106,10 @@ fn remove_slivers(p: &[DVec2], tris: &mut [[usize; 3]]) {
     let eps = scale * scale * 1e-13;
     let flat = |t: &[usize; 3]| cross(p[t[0]], p[t[1]], p[t[2]]).abs() <= eps;
     let len = |a: usize, b: usize| (p[a] - p[b]).length_squared();
-    let mut left_alone: Vec<usize> = Vec::new();
+    // One flag per triangle (not a list searched each time), so each pass is linear.
+    let mut left_alone = vec![false; tris.len()];
     for _ in 0..tris.len().saturating_mul(2) {
-        let Some(s) = (0..tris.len()).find(|i| flat(&tris[*i]) && !left_alone.contains(i)) else { return };
+        let Some(s) = (0..tris.len()).find(|i| !left_alone[*i] && flat(&tris[*i])) else { return };
         let t = tris[s];
         // Try each edge, longest first: the triangle across it may be split at the corner
         // opposite, which takes this flat triangle away.
@@ -134,8 +135,8 @@ fn remove_slivers(p: &[DVec2], tris: &mut [[usize; 3]]) {
             done = true;
             break;
         }
-        if !done {
-            left_alone.push(s);
+        if !done && let Some(f) = left_alone.get_mut(s) {
+            *f = true;
         }
     }
 }
