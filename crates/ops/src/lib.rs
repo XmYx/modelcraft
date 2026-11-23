@@ -11,6 +11,7 @@
 pub mod array;
 pub mod boolean;
 pub mod connect;
+pub mod bvh;
 pub mod decimate;
 pub mod deform;
 pub mod edit;

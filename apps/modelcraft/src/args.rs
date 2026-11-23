@@ -15,7 +15,7 @@ Options:
                              open the UV Editor with this heat map
   --screenshot <PNG>         render the window once to PNG and quit
   --screenshot-state <NAME>  open one window first: timeline, curve-editor, render-view,
-                             scripts, plugins, preferences, shortcuts, palette or layers
+                             scripts, plugins, preferences, shortcuts, palette, layers or statistics
   --bench-viewport <FRAMES>  orbit around a 1M-polygon sculpt for FRAMES frames, print frame
                              times and quit
   --bench-polys <N>          polygon count for --bench-viewport (default 1000000)

@@ -28,6 +28,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Disc, Polygon, Tube, Capsule, Pyramid, Tetrahedron, Octahedron, Dodecahedron, Icosahedron, Landscape (primitives); Hole radius, Feature scale | disc, n-gon, tube, capsule, pyramid, platonic solid and landscape primitives | Geometry words and plain nouns | Use |
+| Bulge, Squash, Smooth, Delta Smooth, Displace, Shrink Wrap (deformers); Reach, Fit to parent, Within box | bulge, squash-and-stretch, smoothing, delta smoothing, displacement and shrink-wrap deformers; limited / unlimited / within-box modes | Generic geometry words; Reach describes how far the effect goes | Use |
 | Radial, Cylinder, Cone, Capsule, Torus, Random, Formula (falloff fields); Falloff layers, Switched on, Opacity | radial, cylinder, cone, capsule, torus, random and formula fields; the field-layer list with its enable switch and opacity | Geometry words and plain descriptions; the formula field uses the expression language of the animation crate | Use |
 | Connect, Thicken, Reduce, Boolean (generators); Union, Subtract, Intersect; Join distance, Thickness, Grow, Keep, Operation | joining, solidify, polygon reduction and boolean generators | Plain geometry words; the reference product's generator names are not used as labels beyond these generic verbs | Use |
 | Round (deformer) | spherify | Generic | Use |
@@ -87,3 +88,4 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Selection Sets | named selections / quick selection sets | Generic | Use |
 | Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
 | Search objects | outliner filters | Generic | Use |
+| Spline; Circle, Rectangle, Star, N-Side, Arc, Helix (spline kinds); Intermediate points, Fixed steps, Uniform length, Adaptive, Tolerance, Largest turn (tessellation) | spline objects and their primitives | Plain geometry words; the references' "Points", "Intermediate points" and primitive names are generic nouns, no product term (such as their object type name) is used as a label | Use |

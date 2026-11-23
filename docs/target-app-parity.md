@@ -116,7 +116,7 @@ Weight: 6
 | Orbit, pan, zoom with navigation presets | C M Z | D | S | Three presets (Alt + buttons, middle button, right button); arrows and ± keys; wheel |
 | Frame selection and frame all | C M Z | D | S | F |
 | Perspective and orthographic views with presets | C M Z | D | S | Front, Right, Top; Alt+1..4 |
-| Single and four-view layouts | C M | D | S | Space |
+| Single and four-view layouts | C M | D | S | Space; each view has a header with View (presets, frame), Display (shading mode, patches), Options (grid, axes, statistics) and Camera (editor camera, reset) menus that change only that view |
 | Ground grid and axis triad | C M Z | D | S | |
 | Shaded with wireframe on selection | C M Z | D | S | Auto-smoothed normals (40°) |
 | Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | D | M | Organize ▸ Display Mode for the view, a Display tag per object; each mode drawn and read back on a real GPU adapter in a test |
@@ -131,7 +131,7 @@ Weight: 6
 | Screen-space ambient occlusion, reflections, antialiasing options | C M | M | M | |
 | Matcap library for sculpting | C M Z | P | S | One clay look |
 | Textures shown in the viewport | C M Z | M | M | |
-| Heads-up statistics (polygons, frame rate) | C M Z | P | S | Frame rate in the status bar; no polygon counts |
+| Heads-up statistics (polygons, frame rate) | C M Z | D | S | Options ▸ Statistics in a view header overlays the selected object's (or the scene's) points and polygons, the sculpt detail level, an estimate of the mesh memory and the grid spacing, as a polite live region; frame rate stays in the status bar |
 | Headless viewport renders for thumbnails and CI | M | P | S | GPU readback works in `modelcraft-cli bench` and tests; no render command |
 | Large-scene drawing: culling, level of detail, proxies | C M | P | L | 2.0 M triangles at ~290 fps; no culling or proxies |
 | Measure tool and scene units | C M | D | M | Measure (View ▸ Snapping and Axes, palette): two clicks on vertices, edge points or surfaces give the distance and its x, y, z parts in the preference's length unit, drawn in the view and announced in the status bar |
@@ -176,7 +176,7 @@ Weight: 5
 | Cached evaluation per step | M | D | S | `history_is_cached_and_reevaluated_from_the_change` |
 | Stale steps degrade gracefully | M | X | S | A step whose selection no longer fits is skipped and flagged, never fatal |
 | Generators as objects (cage of a child) | C | D | M | Smooth cage |
-| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round |
+| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace and shrink-wrap, in one stack order with blend shapes, lattices, clusters and skins |
 | Node view of the dependency graph | M | M | L | |
 | Connect any attribute to any other | M | M | M | |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
@@ -281,12 +281,12 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Bend, twist, taper | C M Z | D | S | In the deformer's own frame |
+| Bend, twist, taper | C M Z | D | S | In the deformer's own frame; each works limited (held beyond the box), unlimited (carries on) or within the box only, over the box that fits the mesh or one of its own size |
 | Ripple / wave, spherify | C M | D | S | Ripple, Round |
 | Lattice / free-form deformation | C M | P | M | A lattice of up to 8 cells per axis around a mesh, as one Bézier volume (the 1986 paper) or cell by cell, with a deformer stack order shared with clusters, blend shapes and skins (reorder by command); control points are moved by number and are keyable; the cage is drawn but its points are not picked in the viewport; clusters (weighted points following an object, with a soft radius) live in the same stack |
-| Wrap, shrink-wrap and surface deformers | C M | M | M | |
-| Noise and texture displacement deformer | C M | M | S | |
-| Smooth, relax and delta-smoothing deformers | C M | M | M | |
+| Wrap, shrink-wrap and surface deformers | C M | P | M | Shrink-wrap pulls the points onto a target object (nearest point, or along the deformer's Y axis) with an offset and the falloff fields as weights; no wrap to a cage and no surface deformer |
+| Noise and texture displacement deformer | C M | P | S | Displace along the normals by seeded fractal noise or by the falloff fields' weight; no texture maps |
+| Smooth, relax and delta-smoothing deformers | C M | P | M | Smooth (passes and strength, weighted by the fields) and delta smoothing, which smooths only what the deformers before it did; no separate volume-keeping relax |
 | Spline-driven deformation (curve warp, spline wrap) | C M | M | M | |
 | Wire, wrinkle and sculpt-object deformers | M | M | M | |
 | Collision deformer | C | M | M | |

@@ -25,6 +25,7 @@ mod record_tests;
 pub mod rig;
 pub mod sim;
 pub mod sim_bake;
+pub mod spline;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef, PastedKey};
@@ -39,6 +40,7 @@ pub use record::{MAX_RECORDED_COMMANDS, Recorded, RecordedCommand, Recorder};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
 pub use sim_bake::{BakeJob, BakeResult};
+pub use spline::SplineCommand;
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
@@ -50,6 +52,7 @@ pub use modelcraft_ops as ops;
 pub use modelcraft_scene as scene;
 pub use modelcraft_sculpt as sculpt;
 pub use modelcraft_sim as simulation;
+pub use modelcraft_spline as curves;
 pub use modelcraft_uv as uv;
 pub use modelcraft_uvpack as uvpack;
 
@@ -81,5 +84,7 @@ mod sim_particle_tests;
 mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;
+#[cfg(test)]
+mod spline_tests;
 #[cfg(test)]
 mod uv_udim_tests;
