@@ -240,6 +240,8 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
     }
     render(app, ui, i, rect);
     overlays(app, ui, &resp, i, rect);
+    crate::view_header::stats_overlay(app, ui, i, rect);
+    crate::view_header::header(app, ui, i, rect);
 }
 
 /// One accessible node per object, so screen readers can hear what the viewport shows and what
@@ -872,9 +874,10 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             }
         }
     }
+    let patches = crate::view_header::patches_of(app, i);
     let mut lines = scene_lines(app, i);
     let mut overlay = face_overlay(app);
-    let extras = crate::display_modes::plan(&app.doc.scene, app.display_mode, &|id| app.selection.contains(&id), &items);
+    let extras = crate::display_modes::plan(&app.doc.scene, crate::view_header::display_of(app, i), &|id| app.selection.contains(&id), &items);
     lines.extend(extras.lines);
     overlay.extend(extras.overlay);
     let modes = extras.modes;
@@ -899,7 +902,7 @@ fn render(app: &mut ModelApp, ui: &egui::Ui, i: usize, rect: Rect) {
             color: [base[0] * tint[0], base[1] * tint[1], base[2] * tint[2], base[3] * tint[3]],
             selected: app.selection.contains(id) && !sculpting,
             show_mask: Some(*id) == session,
-            patch_tint: app.show_patches || paint,
+            patch_tint: patches || paint,
             uv_checker: app.uv.viewport_checker && m.as_ref().is_some_and(|m| m.has_uvs()),
             roughness: o.material.roughness,
         });
@@ -930,7 +933,7 @@ fn line(a: Vec3, b: Vec3, c: [f32; 4]) -> [LineVertex; 2] {
 /// Grid, wireframes of selected objects and cages, selected edges.
 fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     let mut out = buffers::grid(20, 0.5, [0.24, 0.25, 0.27, 1.0], [0.34, 0.35, 0.38, 1.0]);
-    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right || !app.show_grid {
+    if app.views[i].preset == ViewPreset::Front || app.views[i].preset == ViewPreset::Right || !crate::view_header::grid_of(app, i) {
         out.clear();
     }
     for (a, b, color) in crate::rig_ui::bone_lines(app) {
@@ -1060,15 +1063,8 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     let cam = app.views[i].camera;
     crate::snap_ui::overlay(app, &painter, &cam, rect);
     crate::spline_pen::overlay(app, &painter, i, rect);
-    // View name and focus/active outline.
+    // Focus/active outline (the view's name is in its header).
     let active = app.active_view == i;
-    painter.text(
-        rect.left_top() + egui::vec2(8.0, 6.0),
-        egui::Align2::LEFT_TOP,
-        preset_label(app.views[i].preset),
-        egui::FontId::proportional(12.0),
-        if active { theme::ACCENT } else { theme::TEXT_DIM },
-    );
     if (app.quad && active) || resp.has_focus() {
         painter.rect_stroke(
             rect.shrink(0.5),
@@ -1077,7 +1073,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
             egui::StrokeKind::Inside,
         );
     }
-    if app.show_axes {
+    if crate::view_header::axes_of(app, i) {
         axis_triad(&painter, &cam, rect);
     }
     // Component points.

@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 glam = { workspace = true }
+modelcraft-anim = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
