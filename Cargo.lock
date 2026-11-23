@@ -2737,6 +2737,7 @@ dependencies = [
  "modelcraft-scene",
  "modelcraft-sculpt",
  "modelcraft-sim",
+ "modelcraft-spline",
  "modelcraft-uv",
  "modelcraft-uvpack",
  "proptest",
@@ -2750,6 +2751,7 @@ name = "modelcraft-field"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-anim",
  "proptest",
  "serde",
  "serde_json",
@@ -2849,6 +2851,7 @@ dependencies = [
  "modelcraft-mesh",
  "modelcraft-ops",
  "modelcraft-sim",
+ "modelcraft-spline",
  "modelcraft-uv",
  "modelcraft-uvpack",
  "proptest",

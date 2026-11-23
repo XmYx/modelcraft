@@ -172,6 +172,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::CoordinatePanel,
                     Action::RadialMenu,
                     Action::RenderView,
                 ] {
@@ -204,6 +205,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             crate::sim_ui::menu(app, ui);
+            crate::spline_ui::menu(app, ui);
             crate::organize_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
@@ -492,6 +494,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
         PanelId::Paint => paint(app, ui),
         PanelId::History => undo_history(app, ui),
         PanelId::Simulation => crate::sim_ui::panel(app, ui),
+        PanelId::Coordinates => crate::coord_ui::panel(app, ui),
     }
 }
 
@@ -571,6 +574,13 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             for dx in [-4.0, 0.0, 4.0] {
                 p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
             }
+        }
+        ObjectKind::Spline { .. } => {
+            // A curve with a handle.
+            let k = Color32::from_rgb(130, 200, 240);
+            let pts: Vec<egui::Pos2> = (0..=10).map(|j| c + egui::vec2(j as f32 - 5.0, -(j as f32 * 0.63).sin() * 4.0)).collect();
+            p.add(egui::Shape::line(pts, egui::Stroke::new(1.4, k)));
+            p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(-5.0, 0.0), egui::vec2(3.0, 3.0)), 0.0, k);
         }
         ObjectKind::Deformer { .. } => {
             let m = Color32::from_rgb(200, 140, 230);
@@ -763,17 +773,22 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
         }
+        ObjectKind::Spline { source, tess } => {
+            egui::CollapsingHeader::new(tl!("Spline")).default_open(true).show(ui, |ui| crate::spline_ui::fields(app, ui, id, source, *tess));
+        }
         ObjectKind::Field { field } => {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
         }
         ObjectKind::CloneModifier { modifier, target } => {
             egui::CollapsingHeader::new(tl!("Clone Modifier")).default_open(true).show(ui, |ui| crate::modifier_ui::fields(app, ui, id, *modifier, *target));
+            crate::field_layers_ui::list(app, ui, id);
         }
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
         ObjectKind::Deformer { deformer } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| deformer_fields(app, ui, id, *deformer));
+            crate::field_layers_ui::list(app, ui, id);
         }
         _ => {}
     }

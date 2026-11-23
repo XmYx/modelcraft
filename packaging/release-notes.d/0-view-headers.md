@@ -1,0 +1,1 @@
+- Each view has a header with View, Display, Options and Camera menus that change only that view, and a Statistics option that overlays points, polygons and the grid spacing.

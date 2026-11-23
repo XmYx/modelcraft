@@ -357,6 +357,8 @@ pub enum Command {
     Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
+    /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
+    Spline(crate::spline::SplineCommand),
 }
 
 fn default_axis() -> u32 {
@@ -388,7 +390,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear) under target"),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_clone_modifier", "Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner"),
-    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the target deformer or clone modifier"),
+    (
+        "add_field",
+        "Add a falloff field (sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random, formula) inside the target deformer or clone modifier",
+    ),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -401,7 +406,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
     ("set_array", "Change an array's layout, copies and steps: id, array"),
     ("set_symmetry", "Change a symmetry's axis and join distance: id, axis, weld"),
-    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
+    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend, opacity, enabled): id, field"),
     ("set_clone_modifier", "Change a clone modifier (mode, strength, position, rotation, scale, tint) and its target object: id, modifier, target?"),
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
@@ -542,6 +547,7 @@ impl Command {
             Command::Organize(o) => o.label(),
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
+            Command::Spline(c) => c.label(),
         }
     }
 }

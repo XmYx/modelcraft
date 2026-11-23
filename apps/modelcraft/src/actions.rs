@@ -74,6 +74,7 @@ pub enum Action {
     Palette,
     NextPanel,
     TransformDialog,
+    CoordinatePanel,
     About,
     SaveIncremental,
     SelectLoop,
@@ -94,6 +95,7 @@ pub enum Action {
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
     Sim(crate::sim_ui::SimAction),
+    Spline(crate::spline_ui::SplineAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -196,6 +198,7 @@ pub fn all() -> Vec<Action> {
         RadialMenu,
         Preferences,
         TransformDialog,
+        CoordinatePanel,
         Palette,
         KeyboardShortcuts,
         NextPanel,
@@ -204,6 +207,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
     v.extend(crate::sim_ui::SimAction::ALL.map(Sim));
+    v.extend(crate::spline_ui::SplineAction::all().into_iter().map(Spline));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -392,6 +396,7 @@ impl Action {
             Organize(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
+            CoordinatePanel => tl!("Coordinates Panel"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
             SelectLoop => tl!("Select Edge Loop"),
@@ -408,6 +413,7 @@ impl Action {
             Anim(a) => a.label(),
             Rig(a) => a.label(),
             Sim(a) => a.label(),
+            Spline(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -519,10 +525,12 @@ impl Action {
             Anim(a) => a.id(),
             Rig(a) => a.id(),
             Sim(a) => a.id(),
+            Spline(a) => return a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
+            CoordinatePanel => "view.coordinates",
             About => "help.about",
         };
         s.to_string()
@@ -619,6 +627,7 @@ impl Action {
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
             Sim(a) => return a.default_binding(),
+            Spline(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
@@ -644,6 +653,7 @@ impl Action {
             Anim(_) => "Animate",
             Rig(_) => "Rig",
             Sim(_) => "Simulate",
+            Spline(_) => "Spline",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",

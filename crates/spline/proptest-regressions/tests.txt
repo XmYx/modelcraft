@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1e7062907d396e9aa81a6d72af62c72d657877a009c864ef8804bb571b1f8c62 # shrinks to seg = Segment { kind: Linear, closed: true, knots: [Knot { pos: Vec3(0.0, 1.479961, 0.0), tan_in: Vec3(0.0, 0.0, 0.0), tan_out: Vec3(0.0, 0.0, 0.0), mode: Free }, Knot { pos: Vec3(0.0, 0.0, 0.0), tan_in: Vec3(0.0, 0.0, 0.0), tan_out: Vec3(0.0, 0.0, 0.0), mode: Free }, Knot { pos: Vec3(-3.0992794, 4.13766, 0.0), tan_in: Vec3(0.0, 0.0, 0.0), tan_out: Vec3(0.0, 0.0, 0.0), mode: Free }] }, frac = 0.33835626

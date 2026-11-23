@@ -25,12 +25,16 @@
 mod curve;
 pub mod edit;
 mod path;
+pub mod primitives;
 mod tess;
 
 pub use curve::{CurveKind, HandleMode, Knot, Piece, Segment, Side, Spline};
 pub use path::PathBuilder;
+pub use primitives::{ArcClose, Plane, SplinePrimitive};
 pub use tess::{MODES, Polyline, Tessellation, tessellate_pieces};
 
+#[cfg(test)]
+mod prim_tests;
 #[cfg(test)]
 mod tests;
 
