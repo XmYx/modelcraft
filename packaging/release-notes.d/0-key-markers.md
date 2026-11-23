@@ -1,0 +1,1 @@
+- Properties: a key marker before each keyable number (position, rotation, scale, material, shape, deformer, clone and array fields) shows whether it is animated and keys or un-keys it at the current frame from the mouse or the keyboard.
