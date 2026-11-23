@@ -5,7 +5,7 @@
 use egui::RichText;
 use glam::Vec3;
 use modelcraft_engine::Command;
-use modelcraft_engine::ops::deform::{DisplaceSource, LIMIT_MODES, LimitMode, Limits, MAX_OCTAVES, MAX_SMOOTH_ITERATIONS, WrapMode};
+use modelcraft_engine::ops::deform::{Along, DisplaceSource, LIMIT_MODES, LimitMode, Limits, MAX_OCTAVES, MAX_SMOOTH_ITERATIONS, WrapMode};
 use modelcraft_engine::scene::{Deformer, ObjectId, ObjectKind};
 
 use crate::app::ModelApp;
@@ -36,6 +36,16 @@ fn wrap_label(m: WrapMode) -> String {
     }
 }
 
+fn along_label(a: Along) -> String {
+    match a {
+        Along::Normal => tl!("Normal"),
+        Along::X => tl!("X axis"),
+        Along::Y => tl!("Y axis"),
+        Along::Z => tl!("Z axis"),
+        Along::Radial => tl!("Away from the Y axis"),
+    }
+}
+
 fn int(ui: &mut egui::Ui, v: &mut u32, range: std::ops::RangeInclusive<u32>, name: String) -> egui::Response {
     ui.label(name.clone());
     let r = ui.add(egui::DragValue::new(v).range(range));
@@ -48,7 +58,7 @@ fn set(id: ObjectId, deformer: Deformer, limits: Limits, target: Option<ObjectId
 }
 
 pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Deformer, limits: Limits, target: Option<ObjectId>) {
-    let (mut q, mut lim, mut tgt) = (d, limits, target);
+    let (mut q, mut lim, mut tgt) = (d.clone(), limits, target);
     let mut cleared = false;
     let mut discrete = false;
     let responses: Vec<egui::Response> = ui
@@ -83,6 +93,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Deformer, 
                 v
             }
             Deformer::ShrinkWrap { offset, .. } => vec![drag_k(ui, "deformer.offset", offset, 0.005, -1000.0..=1000.0, tl!("Offset"))],
+            Deformer::Formula { amount, .. } => vec![drag_k(ui, "deformer.amount", amount, 0.01, -1000.0..=1000.0, tl!("Amount"))],
         })
         .inner;
 
@@ -136,6 +147,31 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Deformer, 
                 ui.label(RichText::new(tl!("Choose the object to wrap onto.")).color(theme::TEXT_DIM).small());
             }
         }
+        Deformer::Formula { expr, along, .. } => {
+            let labels: Vec<String> = Along::ALL.iter().map(|a| along_label(*a)).collect();
+            let cur = Along::ALL.iter().position(|a| a == along).unwrap_or(0);
+            if let Some(i) = pick(ui, ("formula-along", id.0), tl!("Move along"), cur, &labels)
+                && let Some(a) = Along::ALL.get(i)
+            {
+                *along = *a;
+                discrete = true;
+            }
+            let points = app.doc.scene.get(id).and_then(|o| o.parent).map_or(0, |m| app.doc.eval.evaluate(&app.doc.scene, m).mesh.vertex_count());
+            let problem = d.problem(points);
+            let hint = tl!("x, y, z, r, t, i, n, time, frame");
+            if let Some(text) = crate::formula_modes_ui::formula_text(
+                ui,
+                ("deformer-formula", id.0),
+                &tl!("Formula"),
+                expr,
+                problem,
+                &hint,
+                modelcraft_engine::ops::deform::FORMULA_NAMES,
+            ) {
+                *expr = text;
+                discrete = true;
+            }
+        }
         _ => {}
     }
 
@@ -160,23 +196,23 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Deformer, 
     });
 
     if discrete && (q != d || lim != limits || tgt != target || cleared) {
-        let mut c = set(id, q, lim, tgt);
+        let mut c = set(id, q.clone(), lim, tgt);
         if let Command::SetDeformer { clear_target, .. } = &mut c {
             *clear_target = cleared;
         }
         app.run(c);
     } else if let Some(r) = responses.iter().chain(box_drags.iter()).find(|r| r.changed() || r.drag_stopped()) {
-        let (q2, lim2) = (q, lim);
+        let (q2, lim2) = (q.clone(), lim);
         commit_edit(
             app,
             r,
             |o| {
                 if let ObjectKind::Deformer { deformer, limits, .. } = &mut o.kind {
-                    *deformer = q2;
+                    *deformer = q2.clone();
                     *limits = lim2;
                 }
             },
-            || set(id, q, lim, tgt),
+            || set(id, q.clone(), lim, tgt),
             id,
         );
     }

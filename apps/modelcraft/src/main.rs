@@ -52,6 +52,9 @@ mod field_ui_tests;
 mod formula_field;
 #[cfg(test)]
 mod formula_field_tests;
+mod formula_modes_ui;
+#[cfg(test)]
+mod formula_modes_ui_tests;
 mod generator_ui;
 #[cfg(test)]
 mod generator_ui_tests;

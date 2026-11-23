@@ -808,7 +808,9 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
         }
         ObjectKind::CloneModifier { modifier, target } => {
-            egui::CollapsingHeader::new(tl!("Clone Modifier")).default_open(true).show(ui, |ui| crate::modifier_ui::fields(app, ui, id, *modifier, *target));
+            egui::CollapsingHeader::new(tl!("Clone Modifier"))
+                .default_open(true)
+                .show(ui, |ui| crate::modifier_ui::fields(app, ui, id, modifier.clone(), *target));
             crate::field_layers_ui::list(app, ui, id);
         }
         ObjectKind::Cloner { cloner, target } => {
@@ -817,7 +819,7 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Deformer { deformer, limits, target } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind()))
                 .default_open(true)
-                .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
+                .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, deformer.clone(), *limits, *target));
             crate::field_layers_ui::list(app, ui, id);
         }
         ObjectKind::Light { light } => {
