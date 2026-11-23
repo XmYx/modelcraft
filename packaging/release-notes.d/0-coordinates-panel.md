@@ -1,0 +1,1 @@
+- A Coordinates panel (View, Coordinates Panel) shows the selection's position, rotation and size or scale as numbers and applies typed changes to objects or components in one step.

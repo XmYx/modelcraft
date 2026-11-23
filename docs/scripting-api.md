@@ -57,7 +57,7 @@ changes the scene runs a command, so it is journaled and undoable, and `undo_gro
 
 ## Edit
 
-- `add_primitive(kind) -> id`: Add a primitive: cube, plane, sphere, round_cube, cylinder, cone or torus.
+- `add_primitive(kind) -> id`: Add a primitive: cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron or landscape.
 - `add_primitive(kind, name) -> id`: Add a primitive with a name (made unique when taken).
 - `add_group() -> id`: Add an empty group.
 - `add_group(name) -> id`: Add an empty group with a name.
@@ -196,7 +196,7 @@ fields of each command are in [cli.md](cli.md#commands).
 
 | Function | What it does |
 |---|---|
-| `cmd::add_primitive` | Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent? |
+| `cmd::add_primitive` | Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron, landscape), name?, parent? |
 | `cmd::add_group` | Add an empty group: name? |
 | `cmd::add_smooth_cage` | Add a smooth cage generator around input? with levels |
 | `cmd::add_array` | Add an array generator (linear, radial) around input?: real copies joined into one mesh |
@@ -204,7 +204,7 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::add_deformer` | Add a deformer (bend, twist, taper, ripple, round, shear) under target |
 | `cmd::add_cloner` | Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input |
 | `cmd::add_clone_modifier` | Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner |
-| `cmd::add_field` | Add a falloff field (sphere, box, linear, noise) inside the target deformer or clone modifier |
+| `cmd::add_field` | Add a falloff field (sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random, formula) inside the target deformer or clone modifier |
 | `cmd::delete` | Delete objects and their children: ids |
 | `cmd::duplicate` | Duplicate an object and its children: id |
 | `cmd::rename` | Rename an object: id, name |
@@ -217,7 +217,7 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::set_deformer` | Change a deformer's parameters: id, deformer |
 | `cmd::set_array` | Change an array's layout, copies and steps: id, array |
 | `cmd::set_symmetry` | Change a symmetry's axis and join distance: id, axis, weld |
-| `cmd::set_field` | Change a falloff field (shape, remap curve, invert, strength, blend): id, field |
+| `cmd::set_field` | Change a falloff field (shape, remap curve, invert, strength, blend, opacity, enabled): id, field |
 | `cmd::set_clone_modifier` | Change a clone modifier (mode, strength, position, rotation, scale, tint) and its target object: id, modifier, target? |
 | `cmd::set_cloner` | Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target? |
 | `cmd::add_step` | Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op |

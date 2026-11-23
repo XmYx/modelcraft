@@ -75,7 +75,7 @@ pub enum ShapeOp {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
-    /// Add a parametric primitive (`cube`, `plane`, `sphere`, `round_cube`, `cylinder`, `cone`, `torus`).
+    /// Add a parametric primitive (`cube`, `plane`, `sphere`, `round_cube`, `cylinder`, `cone`, `torus`, `disc`, `polygon`, `tube`, `capsule`, `pyramid`, `tetrahedron`, `octahedron`, `dodecahedron`, `icosahedron`, `landscape`).
     AddPrimitive {
         kind: String,
         #[serde(default)]
@@ -379,7 +379,10 @@ fn yes() -> bool {
 
 /// Command names with a one-line description (for `modelcraft-cli commands` and the agent channel).
 pub const COMMANDS: &[(&str, &str)] = &[
-    ("add_primitive", "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus), name?, parent?"),
+    (
+        "add_primitive",
+        "Add a parametric primitive: kind (cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron, landscape), name?, parent?",
+    ),
     ("add_group", "Add an empty group: name?"),
     ("add_smooth_cage", "Add a smooth cage generator around input? with levels"),
     ("add_array", "Add an array generator (linear, radial) around input?: real copies joined into one mesh"),
@@ -387,7 +390,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("add_deformer", "Add a deformer (bend, twist, taper, ripple, round, shear) under target"),
     ("add_cloner", "Add a clone generator (linear, radial, grid, scatter, surface, vertices) around input?; clones are instances of the input"),
     ("add_clone_modifier", "Add a clone modifier (plain, random, noise, step, delay, target) inside the clone generator cloner"),
-    ("add_field", "Add a falloff field (sphere, box, linear, noise) inside the target deformer or clone modifier"),
+    (
+        "add_field",
+        "Add a falloff field (sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random, formula) inside the target deformer or clone modifier",
+    ),
     ("delete", "Delete objects and their children: ids"),
     ("duplicate", "Duplicate an object and its children: id"),
     ("rename", "Rename an object: id, name"),
@@ -400,7 +406,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_deformer", "Change a deformer's parameters: id, deformer"),
     ("set_array", "Change an array's layout, copies and steps: id, array"),
     ("set_symmetry", "Change a symmetry's axis and join distance: id, axis, weld"),
-    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend): id, field"),
+    ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend, opacity, enabled): id, field"),
     ("set_clone_modifier", "Change a clone modifier (mode, strength, position, rotation, scale, tint) and its target object: id, modifier, target?"),
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (

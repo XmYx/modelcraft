@@ -1,9 +1,10 @@
 //! Falloff fields: a weight between 0 and 1 for every point in space.
 //!
-//! A [`Field`] is a shape (sphere, box, linear gradient or noise) whose value is 1 where its
-//! effect is full and 0 where there is none, reshaped by a [`Remap`] curve. A [`FieldStack`]
-//! combines several fields, each in its own frame, with a blend mode. Deformers and clone
-//! modifiers read the stack to decide how strongly they act at a point.
+//! A [`Field`] is a shape (sphere, box, linear gradient, noise, radial sweep, cylinder, cone,
+//! capsule, torus, random cells or a formula) whose value is 1 where its effect is full and 0
+//! where there is none, reshaped by a [`Remap`] curve. A [`FieldStack`] combines several fields,
+//! each in its own frame, with a blend mode and an opacity. Deformers and clone modifiers read
+//! the stack to decide how strongly they act at a point.
 //!
 //! Everything is total and bounded: parameters are sanitized (NaN and infinities become neutral
 //! values), a curve has at most [`Curve::MAX_POINTS`] points, noise has at most
@@ -12,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 use glam::{Mat4, Vec3};
+use modelcraft_anim::expr::Expr;
 use serde::{Deserialize, Serialize};
 
 /// Most octaves a noise field adds up.
@@ -197,7 +199,7 @@ impl CompiledRemap {
 // ------------------------------------------------------------------ shapes
 
 /// What a field measures.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "shape", rename_all = "snake_case")]
 pub enum Shape {
     /// 1 inside `inner` (a fraction of the radius), falling to 0 at `radius`.
@@ -208,10 +210,30 @@ pub enum Shape {
     Linear { length: f32 },
     /// Smooth value noise (0..1) at `scale` features per unit, `octaves` layers deep, seeded.
     Noise { scale: f32, octaves: u32, seed: u32 },
+    /// An angular sweep around the Y axis: 1 along +X, falling to 0 at half of `angle` degrees
+    /// either way (`inner` is the fraction of that half-angle held at full strength).
+    Radial { angle: f32, inner: f32 },
+    /// A cylinder around Y of `radius` and `height`, full inside the `inner` fraction.
+    Cylinder { radius: f32, height: f32, inner: f32 },
+    /// A cone around Y with its base (radius `radius`) at the bottom and its tip at the top.
+    Cone { radius: f32, height: f32, inner: f32 },
+    /// A capsule along Y: a segment of `length` between two ends, thickened by `radius`.
+    Capsule { radius: f32, length: f32, inner: f32 },
+    /// A torus around Y: a ring of `radius` thickened by `tube`.
+    Torus { radius: f32, tube: f32, inner: f32 },
+    /// A random value per cell of a grid of `scale` cells per unit, seeded (blocky: every point
+    /// of one cell shares a value).
+    Random { scale: f32, seed: u32 },
+    /// A formula over `x`, `y`, `z` (the point in the field's frame) and `r` (its distance from
+    /// the origin), clamped to 0..1. It uses the expression language of the animation crate.
+    Formula { expr: String },
 }
 
 /// The shape names, in menu order.
-pub const SHAPES: &[&str] = &["sphere", "box", "linear", "noise"];
+pub const SHAPES: &[&str] = &["sphere", "box", "linear", "noise", "radial", "cylinder", "cone", "capsule", "torus", "random", "formula"];
+
+/// Longest formula kept (the expression language's own limit).
+pub const MAX_FORMULA: usize = modelcraft_anim::expr::MAX_SOURCE;
 
 impl Shape {
     pub fn default_of(kind: &str) -> Option<Shape> {
@@ -220,6 +242,13 @@ impl Shape {
             "box" => Shape::Box { size: Vec3::splat(2.0), inner: 0.0 },
             "linear" => Shape::Linear { length: 2.0 },
             "noise" => Shape::Noise { scale: 1.0, octaves: 2, seed: 1 },
+            "radial" => Shape::Radial { angle: 180.0, inner: 0.0 },
+            "cylinder" => Shape::Cylinder { radius: 1.0, height: 2.0, inner: 0.0 },
+            "cone" => Shape::Cone { radius: 1.0, height: 2.0, inner: 0.0 },
+            "capsule" => Shape::Capsule { radius: 0.5, length: 2.0, inner: 0.0 },
+            "torus" => Shape::Torus { radius: 1.0, tube: 0.4, inner: 0.0 },
+            "random" => Shape::Random { scale: 2.0, seed: 1 },
+            "formula" => Shape::Formula { expr: "1 - r / 2".into() },
             _ => return None,
         })
     }
@@ -230,12 +259,19 @@ impl Shape {
             Shape::Box { .. } => "box",
             Shape::Linear { .. } => "linear",
             Shape::Noise { .. } => "noise",
+            Shape::Radial { .. } => "radial",
+            Shape::Cylinder { .. } => "cylinder",
+            Shape::Cone { .. } => "cone",
+            Shape::Capsule { .. } => "capsule",
+            Shape::Torus { .. } => "torus",
+            Shape::Random { .. } => "random",
+            Shape::Formula { .. } => "formula",
         }
     }
 
-    pub fn sanitized(self) -> Shape {
+    pub fn sanitized(&self) -> Shape {
         let len = |v: f32| finite(v, 1.0).clamp(1e-4, MAX_LEN);
-        match self {
+        match *self {
             Shape::Sphere { radius, inner } => Shape::Sphere { radius: len(radius), inner: unit(inner).min(0.999) },
             Shape::Box { size, inner } => {
                 Shape::Box { size: Vec3::new(len(size.x.abs()), len(size.y.abs()), len(size.z.abs())), inner: unit(inner).min(0.999) }
@@ -244,19 +280,36 @@ impl Shape {
             Shape::Noise { scale, octaves, seed } => {
                 Shape::Noise { scale: finite(scale, 1.0).clamp(-MAX_LEN, MAX_LEN), octaves: octaves.clamp(1, MAX_OCTAVES), seed }
             }
+            Shape::Radial { angle, inner } => Shape::Radial { angle: finite(angle, 180.0).abs().clamp(1.0, 360.0), inner: unit(inner).min(0.999) },
+            Shape::Cylinder { radius, height, inner } => Shape::Cylinder { radius: len(radius), height: len(height), inner: unit(inner).min(0.999) },
+            Shape::Cone { radius, height, inner } => Shape::Cone { radius: len(radius), height: len(height), inner: unit(inner).min(0.999) },
+            Shape::Capsule { radius, length, inner } => {
+                Shape::Capsule { radius: len(radius), length: finite(length, 1.0).abs().min(MAX_LEN), inner: unit(inner).min(0.999) }
+            }
+            Shape::Torus { radius, tube, inner } => Shape::Torus { radius: len(radius), tube: len(tube), inner: unit(inner).min(0.999) },
+            Shape::Random { scale, seed } => Shape::Random { scale: finite(scale, 1.0).clamp(-MAX_LEN, MAX_LEN), seed },
+            Shape::Formula { ref expr } => Shape::Formula { expr: expr.chars().take(MAX_FORMULA).collect() },
         }
     }
 
-    /// The raw 0..1 value at `p`, in the field's own frame.
+    /// The raw 0..1 value at `p`, in the field's own frame. (A formula is parsed on every call
+    /// here; a [`FieldStack`] parses it once.)
     pub fn value(&self, p: Vec3) -> f32 {
-        self.sanitized().raw(p)
+        let s = self.sanitized();
+        let expr = match &s {
+            Shape::Formula { expr } => Expr::parse(expr).ok(),
+            _ => None,
+        };
+        s.raw(p, expr.as_ref())
     }
 
-    /// [`Shape::value`] for a shape that is already sanitized (the per-point path of a stack).
-    fn raw(&self, p: Vec3) -> f32 {
+    /// [`Shape::value`] for a shape that is already sanitized (the per-point path of a stack);
+    /// `expr` is the parsed formula of a formula shape.
+    fn raw(&self, p: Vec3, expr: Option<&Expr>) -> f32 {
         let p = if p.is_finite() { p } else { Vec3::ZERO };
         // 1 at or inside `inner`, 0 at 1, linear between (`d` is a fraction of the extent).
         let ramp = |d: f32, inner: f32| unit(1.0 - (d - inner) / (1.0 - inner));
+        let (flat, y) = (p.x.hypot(p.z), p.y);
         match *self {
             Shape::Sphere { radius, inner } => ramp(p.length() / radius, inner),
             Shape::Box { size, inner } => {
@@ -265,6 +318,40 @@ impl Shape {
             }
             Shape::Linear { length } => unit(1.0 - p.y / length),
             Shape::Noise { scale, octaves, seed } => fbm(p * scale, octaves, seed),
+            Shape::Radial { angle, inner } => {
+                // Angle from +X, turning towards -Z (the way the primitives' rings run).
+                let a = (-p.z).atan2(p.x).abs();
+                ramp(a / (angle.to_radians() * 0.5), inner)
+            }
+            Shape::Cylinder { radius, height, inner } => ramp((flat / radius).max(y.abs() / (height * 0.5)), inner),
+            Shape::Cone { radius, height, inner } => {
+                // 0 at the base, 1 at the tip; the allowed radius shrinks to nothing at the tip.
+                let along = (y + height * 0.5) / height;
+                let allowed = (radius * (1.0 - along)).max(radius * 1e-4);
+                ramp((flat / allowed).max(y.abs() / (height * 0.5)), inner)
+            }
+            Shape::Capsule { radius, length, inner } => {
+                let beyond = (y.abs() - length * 0.5).max(0.0);
+                ramp(flat.hypot(beyond) / radius, inner)
+            }
+            Shape::Torus { radius, tube, inner } => ramp((flat - radius).hypot(y) / tube, inner),
+            Shape::Random { scale, seed } => {
+                let q = (p * scale).floor();
+                lattice(q.x as i64, q.y as i64, q.z as i64, seed)
+            }
+            Shape::Formula { .. } => expr.map_or(0.0, |e| {
+                let r = p.length();
+                let v = e.eval(&|name: &str| match name {
+                    "x" => Some(f64::from(p.x)),
+                    "y" => Some(f64::from(p.y)),
+                    "z" => Some(f64::from(p.z)),
+                    "r" => Some(f64::from(r)),
+                    "pi" => Some(std::f64::consts::PI),
+                    "tau" => Some(std::f64::consts::TAU),
+                    _ => None,
+                });
+                unit(v.map_or(0.0, |v| v as f32))
+            }),
         }
     }
 }
@@ -357,11 +444,22 @@ pub struct Field {
     pub remap: Remap,
     #[serde(default)]
     pub blend: Blend,
+    /// How much of the blend this field contributes: 0 leaves the fields before it as they are,
+    /// 1 applies it fully.
+    #[serde(default = "one")]
+    pub opacity: f32,
+    /// A field that is off is left out of the stack.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Field {
     pub fn default_of(kind: &str) -> Option<Field> {
-        Shape::default_of(kind).map(|shape| Field { shape, remap: Remap::default(), blend: Blend::Multiply })
+        Shape::default_of(kind).map(|shape| Field { shape, remap: Remap::default(), blend: Blend::Multiply, opacity: 1.0, enabled: true })
     }
 
     pub fn kind(&self) -> &'static str {
@@ -373,6 +471,8 @@ impl Field {
             shape: self.shape.sanitized(),
             remap: Remap { curve: self.remap.curve.sanitized(), invert: self.remap.invert, strength: unit(self.remap.strength) },
             blend: self.blend,
+            opacity: finite(self.opacity, 1.0).clamp(0.0, 1.0),
+            enabled: self.enabled,
         }
     }
 
@@ -387,7 +487,16 @@ impl Field {
 pub struct FieldStack {
     /// The frame is `None` for a field whose transform cannot be inverted (a scale of zero): it
     /// covers nothing, so it weighs 0 everywhere.
-    layers: Vec<(Option<Mat4>, Field, CompiledRemap)>,
+    layers: Vec<Layer>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Layer {
+    frame: Option<Mat4>,
+    field: Field,
+    remap: CompiledRemap,
+    /// The parsed formula of a formula field.
+    expr: Option<Expr>,
 }
 
 /// Most fields one stack holds.
@@ -401,13 +510,17 @@ impl FieldStack {
     /// Add a field; `to_field` maps the stack's space into the field's frame. A matrix that is
     /// singular or not finite (the field was scaled to nothing) makes a field that covers nothing,
     /// so it weighs 0 and does not switch the others' falloff off. Fields past [`MAX_LAYERS`] are
-    /// left out.
+    /// left out, and so is a field that is switched off.
     pub fn push(&mut self, to_field: Mat4, field: Field) {
-        if self.layers.len() < MAX_LAYERS {
+        if self.layers.len() < MAX_LAYERS && field.enabled {
             let frame = (to_field.is_finite() && to_field.determinant().abs() > 1e-20).then_some(to_field);
             let field = field.sanitized();
             let remap = field.remap.compile();
-            self.layers.push((frame, field, remap));
+            let expr = match &field.shape {
+                Shape::Formula { expr } => Expr::parse(expr).ok(),
+                _ => None,
+            };
+            self.layers.push(Layer { frame, field, remap, expr });
         }
     }
 
@@ -419,16 +532,17 @@ impl FieldStack {
         self.layers.len()
     }
 
-    /// The combined weight at `p`: the first field's value, then each next one blended in. An
-    /// empty stack weighs 1 everywhere (no falloff).
+    /// The combined weight at `p`: the first field's value, then each next one blended in by its
+    /// opacity. An empty stack weighs 1 everywhere (no falloff).
     pub fn weight(&self, p: Vec3) -> f32 {
         let mut acc: Option<f32> = None;
-        for (m, f, remap) in &self.layers {
-            let v = m.map_or(0.0, |m| remap.apply(f.shape.raw(m.transform_point3(p))));
-            acc = Some(match acc {
-                None => v,
-                Some(a) => f.blend.combine(a, v),
-            });
+        for l in &self.layers {
+            let v = l.frame.map_or(0.0, |m| l.remap.apply(l.field.shape.raw(m.transform_point3(p), l.expr.as_ref())));
+            let op = l.field.opacity;
+            // The first field has nothing to blend with: it fades in from "no falloff" (1).
+            let from = acc.unwrap_or(1.0);
+            let to = if acc.is_none() { v } else { l.field.blend.combine(from, v) };
+            acc = Some(from + (to - from) * op);
         }
         acc.map_or(1.0, unit)
     }

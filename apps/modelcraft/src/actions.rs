@@ -74,6 +74,7 @@ pub enum Action {
     Palette,
     NextPanel,
     TransformDialog,
+    CoordinatePanel,
     About,
     SaveIncremental,
     SelectLoop,
@@ -106,7 +107,7 @@ pub enum Action {
     Organize(crate::organize_ui::Op),
 }
 
-pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
+pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
 pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
 /// The array layouts (`modelcraft_ops::array::KINDS`).
 pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
@@ -197,6 +198,7 @@ pub fn all() -> Vec<Action> {
         RadialMenu,
         Preferences,
         TransformDialog,
+        CoordinatePanel,
         Palette,
         KeyboardShortcuts,
         NextPanel,
@@ -221,6 +223,16 @@ fn prim_label(p: &str) -> String {
         "cylinder" => tl!("Cylinder"),
         "cone" => tl!("Cone"),
         "torus" => tl!("Torus"),
+        "disc" => tl!("Disc"),
+        "polygon" => tl!("Polygon"),
+        "tube" => tl!("Tube"),
+        "capsule" => tl!("Capsule"),
+        "pyramid" => tl!("Pyramid"),
+        "tetrahedron" => tl!("Tetrahedron"),
+        "octahedron" => tl!("Octahedron"),
+        "dodecahedron" => tl!("Dodecahedron"),
+        "icosahedron" => tl!("Icosahedron"),
+        "landscape" => tl!("Landscape"),
         _ => p.to_string(),
     }
 }
@@ -384,6 +396,7 @@ impl Action {
             Organize(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
+            CoordinatePanel => tl!("Coordinates Panel"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
             SelectLoop => tl!("Select Edge Loop"),
@@ -517,6 +530,7 @@ impl Action {
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
+            CoordinatePanel => "view.coordinates",
             About => "help.about",
         };
         s.to_string()
