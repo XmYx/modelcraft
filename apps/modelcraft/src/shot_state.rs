@@ -146,7 +146,7 @@ mod tests {
                 ShotState::Shortcuts => app.shortcuts_state.is_some(),
                 ShotState::Palette => app.palette.is_some(),
                 ShotState::Layers => app.organize.layers_open,
-                ShotState::IconPalettes => app.icon_palettes = true,
+                ShotState::IconPalettes => app.icon_palettes,
                 ShotState::Statistics => app.views.iter().all(|v| v.options.stats),
             };
             assert!(open, "{s:?} opens its window");
