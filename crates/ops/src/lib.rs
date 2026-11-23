@@ -14,6 +14,7 @@ pub mod deform;
 pub mod edit;
 pub mod patches;
 pub mod primitives;
+mod primitives_more;
 pub mod remesh;
 pub mod select;
 pub mod subdivide;
