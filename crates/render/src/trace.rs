@@ -14,6 +14,7 @@ use glam::{Mat4, Vec2, Vec3};
 use modelcraft_mesh::PolyMesh;
 use modelcraft_scene::stage::{LightKind, Placement};
 use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene};
+use std::sync::Arc;
 
 use crate::buffers::mesh_data;
 use crate::camera::{Camera, Projection};
@@ -144,11 +145,11 @@ pub const GRAPH_MAP_SIZE: u32 = 512;
 /// Reads the pictures a material graph's image nodes name, once each, as linear colour.
 #[derive(Default)]
 pub struct FileImages {
-    cache: std::sync::Mutex<std::collections::HashMap<String, Option<modelcraft_matgraph::Picture>>>,
+    cache: std::sync::Mutex<std::collections::HashMap<String, Option<Arc<modelcraft_matgraph::Picture>>>>,
 }
 
 impl modelcraft_matgraph::Resolver for FileImages {
-    fn picture(&self, path: &str) -> Option<modelcraft_matgraph::Picture> {
+    fn picture(&self, path: &str) -> Option<Arc<modelcraft_matgraph::Picture>> {
         let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
         cache
             .entry(path.to_string())
@@ -167,14 +168,59 @@ impl modelcraft_matgraph::Resolver for FileImages {
                     .iter()
                     .map(|p| if integer { [srgb_to_linear(p[0]), srgb_to_linear(p[1]), srgb_to_linear(p[2])] } else { [p[0], p[1], p[2]] })
                     .collect::<Vec<_>>();
-                (rgb.len() == rgba.width() as usize * rgba.height() as usize).then(|| modelcraft_matgraph::Picture {
-                    width: rgba.width(),
-                    height: rgba.height(),
-                    rgb,
-                })
+                (rgb.len() == rgba.width() as usize * rgba.height() as usize)
+                    .then(|| Arc::new(modelcraft_matgraph::Picture { width: rgba.width(), height: rgba.height(), rgb }))
             })
             .clone()
     }
+}
+
+/// Compiled graphs kept between renders, most recent last.
+const GRAPH_CACHE_LEN: usize = 16;
+static GRAPH_CACHE: std::sync::Mutex<Vec<(u64, Arc<modelcraft_matgraph::Compiled>)>> = std::sync::Mutex::new(Vec::new());
+
+/// What a compiled graph depends on: the graph itself, the map size, whether pictures are read,
+/// and the size and time of each picture file it names.
+fn graph_key(graph: &modelcraft_matgraph::Graph, size: u32, read_files: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    format!("{graph:?}").hash(&mut h);
+    (size, read_files).hash(&mut h);
+    for n in &graph.nodes {
+        if let modelcraft_matgraph::NodeKind::Image { path } = &n.kind
+            && read_files
+            && let Ok(m) = std::fs::metadata(path)
+        {
+            (m.len(), m.modified().ok()).hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
+/// A graph compiled at `size`, from the cache when nothing it depends on changed, so restarting a
+/// render after an unrelated edit does not evaluate every graph again.
+pub fn compile_graph(
+    graph: &modelcraft_matgraph::Graph,
+    size: u32,
+    read_files: bool,
+) -> Result<Arc<modelcraft_matgraph::Compiled>, modelcraft_matgraph::GraphError> {
+    let key = graph_key(graph, size, read_files);
+    {
+        let mut cache = GRAPH_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+            let hit = cache.remove(i);
+            let compiled = hit.1.clone();
+            cache.push(hit);
+            return Ok(compiled);
+        }
+    }
+    let compiled = Arc::new(if read_files { graph.compile(size, &FileImages::default())? } else { graph.compile(size, &modelcraft_matgraph::NoImages)? });
+    let mut cache = GRAPH_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    if cache.len() >= GRAPH_CACHE_LEN {
+        cache.remove(0);
+    }
+    cache.push((key, compiled.clone()));
+    Ok(compiled)
 }
 
 /// An image of a graph's map for the path tracer.
@@ -187,8 +233,8 @@ fn graph_image(map: &modelcraft_matgraph::Map) -> Option<Image> {
 /// that replaces the flat number it stands for, as a linked material's maps do. Emission has no
 /// map in the engine, so a linked emission is its mean colour. A graph that cannot be compiled is
 /// reported and the flat material renders.
-fn apply_graph(graph: &modelcraft_matgraph::Graph, builder: &mut SceneBuilder, material: &mut TraceMaterial) -> Result<(), String> {
-    let compiled = graph.compile(GRAPH_MAP_SIZE, &FileImages::default()).map_err(|e| e.to_string())?;
+fn apply_graph(graph: &modelcraft_matgraph::Graph, read_files: bool, builder: &mut SceneBuilder, material: &mut TraceMaterial) -> Result<(), String> {
+    let compiled = compile_graph(graph, GRAPH_MAP_SIZE, read_files).map_err(|e| e.to_string())?;
     material.base_color = Vec3::from_array(compiled.flat_base_color);
     material.base_metalness = compiled.flat_metallic;
     material.specular_roughness = compiled.flat_roughness;
@@ -379,7 +425,7 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
             log::warn!("linked material {path}: {e}; rendering its plain parameters");
         }
         if let Some(graph) = &object.material.graph
-            && let Err(e) = apply_graph(graph, &mut b, &mut converted)
+            && let Err(e) = apply_graph(graph, options.linked_materials, &mut b, &mut converted)
         {
             log::warn!("material graph of {}: {e}; rendering its flat material", object.name);
         }
@@ -898,6 +944,21 @@ mod tests {
             }
             None => eprintln!("skipped the GPU half: no adapter on this machine"),
         }
+    }
+
+    #[test]
+    fn a_compiled_graph_is_reused_until_the_graph_changes() {
+        use modelcraft_matgraph::{Graph, NodeKind};
+        let mut g = Graph::with_surface();
+        let surface = g.surface().map(|n| n.id).unwrap();
+        let noise = g.add(NodeKind::Noise { scale: 5.0, detail: 2, roughness: 0.5, seed: 31 }).unwrap();
+        g.link(surface, 2, Some(noise)).unwrap();
+        let first = compile_graph(&g, 32, false).unwrap();
+        assert!(Arc::ptr_eq(&first, &compile_graph(&g, 32, false).unwrap()), "an unchanged graph is not evaluated again");
+        g.set(noise, NodeKind::Noise { scale: 5.0, detail: 2, roughness: 0.5, seed: 32 }).unwrap();
+        let second = compile_graph(&g, 32, false).unwrap();
+        assert!(!Arc::ptr_eq(&first, &second) && first.roughness != second.roughness, "an edit compiles again");
+        assert!(!Arc::ptr_eq(&second, &compile_graph(&g, 16, false).unwrap()), "another size is another entry");
     }
 
     #[test]

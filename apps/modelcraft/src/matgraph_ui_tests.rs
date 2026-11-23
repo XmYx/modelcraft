@@ -169,6 +169,108 @@ fn the_strip_lists_materials_and_copies_one_onto_the_selection() {
     h.state_mut().selection = vec![a];
     palette(&mut h, "Copy Material to Selection");
     assert!(h.state().status.contains("Select the objects to copy onto"), "{}", h.state().status);
-    let disabled = h.get_by_role_and_label(Role::Button, "Copy to Selection").accesskit_node().is_disabled();
-    assert!(!disabled);
+    // The window's button does the same from the keyboard, as one undo step for all targets.
+    h.state_mut().selection = vec![b, a];
+    h.state_mut().doc.execute(Command::SetMaterial { id: b, material: Material::default() }).unwrap();
+    let undo = h.state().doc.undo.len();
+    press(&mut h, Role::Button, "Copy to Selection", Key::Enter);
+    assert_eq!(h.state().doc.scene.get(b).unwrap().material.base_color[0], 0.9);
+    assert_eq!(h.state().doc.undo.len(), undo + 1);
+}
+
+/// Give the cube a graph with one node of `kind` (unlinked) and open the editor on it.
+fn with_node(h: &mut Harness<'static, ModelApp>, kind: NodeKind) -> (ObjectId, u32) {
+    let cube = h.state().selection[0];
+    palette(h, "Add Material Graph");
+    let mut g = graph_of(h, cube).unwrap();
+    let node = g.add(kind).unwrap();
+    let material = Material { graph: Some(std::sync::Arc::new(g)), ..h.state().doc.scene.get(cube).unwrap().material.clone() };
+    h.state_mut().doc.execute(Command::SetMaterial { id: cube, material }).unwrap();
+    palette(h, "Material Nodes");
+    (cube, node)
+}
+
+#[test]
+fn a_math_operation_chosen_by_keyboard_is_kept_as_one_undo_step() {
+    use modelcraft_engine::scene::matgraph::MathOp;
+    let mut h = harness();
+    h.run();
+    let (cube, math) = with_node(&mut h, NodeKind::Math { op: MathOp::Multiply });
+    let undo = h.state().doc.undo.len();
+    // Open the list, go to its first entry (Add) and take it.
+    h.get_by_role_and_label(Role::ComboBox, "Operation").focus();
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+    h.key_press(Key::ArrowDown);
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    h.run();
+    let g = graph_of(&h, cube).unwrap();
+    assert_eq!(g.get(math).unwrap().kind, NodeKind::Math { op: MathOp::Add }, "the choice is applied, not dropped next frame");
+    assert_eq!(h.state().doc.undo.len(), undo + 1, "one undo step");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(graph_of(&h, cube).unwrap().get(math).unwrap().kind, NodeKind::Math { op: MathOp::Multiply });
+}
+
+#[test]
+fn a_mix_blend_chosen_by_keyboard_is_kept() {
+    use modelcraft_engine::scene::matgraph::Blend;
+    let mut h = harness();
+    h.run();
+    let (cube, mix) = with_node(&mut h, NodeKind::Mix { blend: Blend::Difference });
+    h.get_by_role_and_label(Role::ComboBox, "Blend").focus();
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+    h.key_press(Key::ArrowDown);
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    h.run();
+    assert_eq!(graph_of(&h, cube).unwrap().get(mix).unwrap().kind, NodeKind::Mix { blend: Blend::Mix });
+}
+
+#[test]
+fn a_typed_picture_path_is_applied_when_the_box_is_left() {
+    let mut h = harness();
+    h.run();
+    let (cube, img) = with_node(&mut h, NodeKind::Image { path: String::new() });
+    let undo = h.state().doc.undo.len();
+    h.get_by_role_and_label(Role::TextInput, "Picture file").focus();
+    h.run();
+    h.event(egui::Event::Text("textures/wood.png".into()));
+    h.run();
+    h.run();
+    assert_eq!(graph_of(&h, cube).unwrap().get(img).unwrap().kind, NodeKind::Image { path: String::new() }, "a half-typed path is not applied yet");
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    assert_eq!(graph_of(&h, cube).unwrap().get(img).unwrap().kind, NodeKind::Image { path: "textures/wood.png".into() });
+    assert_eq!(h.state().doc.undo.len(), undo + 1, "the whole path is one undo step");
+    assert!(h.state().materials.drafts.is_empty());
+}
+
+#[test]
+fn the_node_search_takes_the_focus_once_so_tab_reaches_the_add_buttons() {
+    let mut h = harness();
+    h.run();
+    let cube = h.state().selection[0];
+    palette(&mut h, "Add Material Graph");
+    palette(&mut h, "Material Nodes");
+    press(&mut h, Role::Button, "Add Node…", Key::Enter);
+    h.run();
+    assert!(h.get_by_role_and_label(Role::TextInput, "Search nodes").accesskit_node().is_focused());
+    h.key_press(Key::Tab);
+    h.run();
+    h.run();
+    assert!(h.get_by_role_and_label(Role::Button, "Add Number").accesskit_node().is_focused(), "Tab leaves the empty search box");
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    assert!(graph_of(&h, cube).unwrap().nodes.iter().any(|n| matches!(n.kind, NodeKind::Value { .. })));
 }

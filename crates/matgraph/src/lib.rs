@@ -15,6 +15,7 @@
 mod noise;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
@@ -158,6 +159,7 @@ pub struct Node {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "StoredGraph")]
 pub struct Graph {
     pub nodes: Vec<Node>,
     #[serde(default)]
@@ -180,6 +182,8 @@ pub enum GraphError {
     NoSurface,
     #[error("a map is {0} texels on a side; the most is {MAX_SIZE}")]
     TooLarge(u32),
+    #[error("the graph needs more working memory than a map may use")]
+    TooMuchWork,
     #[error("{0}")]
     Invalid(String),
 }
@@ -212,14 +216,14 @@ impl Picture {
 
 /// Finds the pictures image nodes name; `None` means it could not be read.
 pub trait Resolver {
-    fn picture(&self, path: &str) -> Option<Picture>;
+    fn picture(&self, path: &str) -> Option<Arc<Picture>>;
 }
 
 /// A resolver that finds nothing (image nodes then give mid grey).
 pub struct NoImages;
 
 impl Resolver for NoImages {
-    fn picture(&self, _: &str) -> Option<Picture> {
+    fn picture(&self, _: &str) -> Option<Arc<Picture>> {
         None
     }
 }
@@ -425,149 +429,331 @@ impl Graph {
         Ok(deepest)
     }
 
-    /// The colour node `id` makes at `uv` (`v` is 1 at the top of a picture).
-    pub fn eval(&self, id: NodeId, uv: Vec2, images: &dyn Resolver) -> Vec3 {
-        let mut cache = Cache::default();
-        self.eval_at(id, uv, images, &mut cache, 0)
-    }
-
-    fn input(&self, node: &Node, port: usize, uv: Vec2, images: &dyn Resolver, cache: &mut Cache, depth: usize) -> Option<Vec3> {
-        node.inputs.get(port).copied().flatten().map(|l| self.eval_at(l, uv, images, cache, depth + 1))
-    }
-
-    fn eval_at(&self, id: NodeId, uv: Vec2, images: &dyn Resolver, cache: &mut Cache, depth: usize) -> Vec3 {
-        if depth > MAX_DEPTH {
-            return Vec3::ZERO;
+    /// Every node's numbers put in their ranges (what loading a graph does).
+    pub fn sanitize(&mut self) {
+        for n in &mut self.nodes {
+            sanitize(&mut n.kind);
+            if n.name.chars().count() > 64 {
+                n.name = n.name.chars().take(64).collect();
+            }
         }
-        let Some(node) = self.get(id) else { return Vec3::ZERO };
-        match &node.kind {
-            NodeKind::Value { value } => Vec3::splat(*value),
-            NodeKind::Colour { color } => Vec3::from_array(*color),
-            NodeKind::Noise { scale, detail, roughness, seed } => Vec3::splat(noise::fractal(uv, *scale, *detail, *roughness, *seed)),
-            NodeKind::Ramp { stops } => {
-                let fac = self.input(node, 0, uv, images, cache, depth).map_or(uv.x, |v| v.x);
-                ramp(stops, fac)
+    }
+
+    /// The order nodes are worked out in to make `targets`: every node a target needs, each once,
+    /// after the nodes it reads (indices into `nodes`). Only for a graph that passed [`validate`],
+    /// so the walk is no deeper than [`MAX_DEPTH`].
+    ///
+    /// [`validate`]: Graph::validate
+    fn order(&self, targets: &[NodeId]) -> Vec<usize> {
+        let index: HashMap<NodeId, usize> = self.nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let mut done = vec![false; self.nodes.len()];
+        let mut out = Vec::new();
+        // An explicit stack of (node, next input to visit), so no recursion at all.
+        for t in targets {
+            let Some(&root) = index.get(t) else { continue };
+            if done[root] {
+                continue;
             }
-            NodeKind::Mix { blend } => {
-                let fac = self.input(node, 0, uv, images, cache, depth).map_or(0.5, |v| v.x).clamp(0.0, 1.0);
-                let a = self.input(node, 1, uv, images, cache, depth).unwrap_or(Vec3::splat(0.5));
-                let b = self.input(node, 2, uv, images, cache, depth).unwrap_or(Vec3::splat(0.5));
-                let mixed = match blend {
-                    Blend::Mix => b,
-                    Blend::Add => a + b,
-                    Blend::Multiply => a * b,
-                    Blend::Screen => Vec3::ONE - (Vec3::ONE - a) * (Vec3::ONE - b),
-                    Blend::Difference => (a - b).abs(),
-                };
-                a.lerp(mixed, fac)
-            }
-            NodeKind::Math { op } => {
-                let a = self.input(node, 0, uv, images, cache, depth).map_or(0.0, |v| v.x);
-                let b = self.input(node, 1, uv, images, cache, depth).map_or(0.5, |v| v.x);
-                let r = match op {
-                    MathOp::Add => a + b,
-                    MathOp::Subtract => a - b,
-                    MathOp::Multiply => a * b,
-                    MathOp::Divide => {
-                        if b.abs() > 1e-6 {
-                            a / b
-                        } else {
-                            0.0
+            let mut stack = vec![(root, 0usize)];
+            while let Some(top) = stack.last_mut() {
+                let (i, k) = *top;
+                top.1 += 1;
+                match self.nodes[i].inputs.get(k).copied() {
+                    Some(Some(id)) => {
+                        if let Some(&j) = index.get(&id)
+                            && !done[j]
+                            && !stack.iter().any(|(s, _)| *s == j)
+                            && stack.len() <= MAX_DEPTH + 1
+                        {
+                            stack.push((j, 0));
                         }
                     }
-                    MathOp::Power => a.max(0.0).powf(b.clamp(-16.0, 16.0)),
-                    MathOp::Minimum => a.min(b),
-                    MathOp::Maximum => a.max(b),
-                    MathOp::Absolute => a.abs(),
-                    MathOp::Invert => 1.0 - a,
-                };
-                Vec3::splat(if r.is_finite() { r } else { 0.0 })
+                    Some(None) => {}
+                    None => {
+                        stack.pop();
+                        if !done[i] {
+                            done[i] = true;
+                            out.push(i);
+                        }
+                    }
+                }
             }
-            NodeKind::Image { path } => cache.picture(path, images).map_or(Vec3::splat(0.5), |p| p.sample(uv)),
-            NodeKind::NormalMap { strength } => {
-                // The slope of the input's brightness over the UV square (height change per unit
-                // of u and v, from points a texel of 1/512 either side), tilting the normal away
-                // from rising height; the picture's y runs against v, so the green channel follows
-                // +dh/dv, as the engine reads maps.
-                let e = 1.0 / 512.0;
-                let mut h = |p: Vec2| self.input(node, 0, p, images, cache, depth).map_or(0.0, |v| (v.x + v.y + v.z) / 3.0);
-                let dhdu = (h(uv + Vec2::X * e) - h(uv - Vec2::X * e)) / (2.0 * e);
-                let dhdv = (h(uv + Vec2::Y * e) - h(uv - Vec2::Y * e)) / (2.0 * e);
-                let k = strength.clamp(0.0, 64.0) * 0.05;
-                let n = Vec3::new(-dhdu * k, dhdv * k, 1.0).normalize_or(Vec3::Z);
-                n * 0.5 + Vec3::splat(0.5)
-            }
-            NodeKind::Surface { base_color, .. } => self.input(node, 0, uv, images, cache, depth).unwrap_or(Vec3::from_array(*base_color)),
         }
+        out
+    }
+
+    /// Work out `targets` over a `size` by `size` square of UV space (the top row is `v = 1`):
+    /// each node once per texel, or once in all where nothing it reads changes across the square.
+    /// Buffers are freed as soon as nothing else reads them, and the texels alive at once are held
+    /// under [`MAX_LIVE_TEXELS`].
+    fn run(&self, targets: &[NodeId], size: u32, images: &dyn Resolver) -> Result<(Vec<Option<Value>>, Stats), GraphError> {
+        if size > MAX_SIZE {
+            return Err(GraphError::TooLarge(size));
+        }
+        self.validate()?;
+        let size = size.max(1) as usize;
+        let texels = size * size;
+        let order = self.order(targets);
+        let index: HashMap<NodeId, usize> = self.nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let link = |node: &Node, port: usize| node.inputs.get(port).copied().flatten().and_then(|id| index.get(&id).copied());
+        // How many later nodes (and targets) still read each node's value.
+        let mut readers = vec![0usize; self.nodes.len()];
+        for &i in &order {
+            for port in 0..self.nodes[i].inputs.len() {
+                if let Some(j) = link(&self.nodes[i], port) {
+                    readers[j] += 1;
+                }
+            }
+        }
+        for t in targets {
+            if let Some(&i) = index.get(t) {
+                readers[i] += 1;
+            }
+        }
+        let mut values: Vec<Option<Value>> = vec![None; self.nodes.len()];
+        let mut stats = Stats::default();
+        let mut live = 0usize;
+        let mut pictures: HashMap<&str, Option<Arc<Picture>>> = HashMap::new();
+        let uv_of = |t: usize| Vec2::new(((t % size) as f32 + 0.5) / size as f32, 1.0 - ((t / size) as f32 + 0.5) / size as f32);
+        for &i in &order {
+            let node = &self.nodes[i];
+            if let NodeKind::Image { path } = &node.kind {
+                pictures.entry(path.as_str()).or_insert_with(|| images.picture(path));
+            }
+            let value = {
+                let input = |port: usize| link(node, port).and_then(|j| values[j].as_ref());
+                let varies = match &node.kind {
+                    NodeKind::Noise { .. } | NodeKind::Image { .. } => true,
+                    NodeKind::Ramp { .. } => input(0).is_none_or(Value::varies),
+                    NodeKind::NormalMap { .. } => input(0).is_some_and(Value::varies),
+                    _ => (0..node.inputs.len()).any(|p| input(p).is_some_and(Value::varies)),
+                };
+                if varies && live + texels > MAX_LIVE_TEXELS {
+                    return Err(GraphError::TooMuchWork);
+                }
+                let stops = match &node.kind {
+                    NodeKind::Ramp { stops } => sorted_stops(stops),
+                    _ => Vec::new(),
+                };
+                let picture = match &node.kind {
+                    NodeKind::Image { path } => pictures.get(path.as_str()).cloned().flatten(),
+                    _ => None,
+                };
+                let at = |t: usize, uv: Vec2| -> Vec3 {
+                    let get = |port: usize| input(port).map(|v| v.at(t));
+                    finite3(match &node.kind {
+                        NodeKind::Value { value } => Vec3::splat(*value),
+                        NodeKind::Colour { color } => Vec3::from_array(*color),
+                        NodeKind::Noise { scale, detail, roughness, seed } => Vec3::splat(noise::fractal(uv, *scale, *detail, *roughness, *seed)),
+                        NodeKind::Ramp { .. } => ramp(&stops, get(0).map_or(uv.x, |v| v.x)),
+                        NodeKind::Mix { blend } => {
+                            mix(*blend, get(0).map_or(0.5, |v| v.x), get(1).unwrap_or(Vec3::splat(0.5)), get(2).unwrap_or(Vec3::splat(0.5)))
+                        }
+                        NodeKind::Math { op } => Vec3::splat(math(*op, get(0).map_or(0.0, |v| v.x), get(1).map_or(0.5, |v| v.x))),
+                        NodeKind::Image { .. } => picture.as_ref().map_or(Vec3::splat(0.5), |p| p.sample(uv)),
+                        NodeKind::NormalMap { strength } => match input(0) {
+                            Some(Value::Map(h)) => normal_at(h, size, t, *strength),
+                            _ => Vec3::new(0.5, 0.5, 1.0),
+                        },
+                        NodeKind::Surface { base_color, .. } => get(0).unwrap_or(Vec3::from_array(*base_color)),
+                    })
+                };
+                if varies {
+                    stats.evaluations += texels;
+                    let mut buf = Vec::new();
+                    buf.try_reserve_exact(texels).map_err(|_| GraphError::TooMuchWork)?;
+                    buf.extend((0..texels).map(|t| at(t, uv_of(t))));
+                    Value::Map(buf)
+                } else {
+                    stats.evaluations += 1;
+                    Value::Flat(at(0, Vec2::splat(0.5)))
+                }
+            };
+            if value.varies() {
+                live += texels;
+            }
+            stats.peak_live_texels = stats.peak_live_texels.max(live);
+            values[i] = Some(value);
+            // Free what nothing reads any more.
+            for port in 0..node.inputs.len() {
+                if let Some(j) = link(node, port) {
+                    readers[j] = readers[j].saturating_sub(1);
+                    if readers[j] == 0 {
+                        if values[j].as_ref().is_some_and(Value::varies) {
+                            live -= texels;
+                        }
+                        values[j] = None;
+                    }
+                }
+            }
+        }
+        let out = targets.iter().map(|t| index.get(t).and_then(|&i| values[i].clone())).collect();
+        Ok((out, stats))
     }
 
     /// Check the graph and evaluate every linked surface input over a `size` by `size` square of
     /// UV space (the picture's top row is `v = 1`, as the renderer reads maps).
     pub fn compile(&self, size: u32, images: &dyn Resolver) -> Result<Compiled, GraphError> {
+        self.compile_counted(size, images).map(|(c, _)| c)
+    }
+
+    /// [`compile`](Graph::compile), also saying how much work it took.
+    pub fn compile_counted(&self, size: u32, images: &dyn Resolver) -> Result<(Compiled, Stats), GraphError> {
         if size > MAX_SIZE {
             return Err(GraphError::TooLarge(size));
         }
         self.validate()?;
         let surface = self.surface().ok_or(GraphError::NoSurface)?;
         let NodeKind::Surface { base_color, metallic, roughness, emission } = &surface.kind else { return Err(GraphError::NoSurface) };
-        let size = size.max(1);
-        let make = |port: usize| -> Option<Map> {
-            let link = surface.inputs.get(port).copied().flatten()?;
-            let mut cache = Cache::default();
-            let mut rgb = Vec::with_capacity(size as usize * size as usize);
-            for y in 0..size {
-                for x in 0..size {
-                    let uv = Vec2::new((x as f32 + 0.5) / size as f32, 1.0 - (y as f32 + 0.5) / size as f32);
-                    rgb.push(self.eval_at(link, uv, images, &mut cache, 1).to_array());
-                }
-            }
-            Some(Map { width: size, height: size, rgb })
-        };
-        Ok(Compiled {
-            base_color: make(0),
-            metallic: make(1),
-            roughness: make(2),
-            emission: make(3),
-            normal: make(4),
-            flat_base_color: *base_color,
-            flat_metallic: *metallic,
-            flat_roughness: *roughness,
-            flat_emission: *emission,
-        })
+        let links: Vec<Option<NodeId>> = (0..5).map(|p| surface.inputs.get(p).copied().flatten()).collect();
+        let targets: Vec<NodeId> = links.iter().flatten().copied().collect();
+        let (values, stats) = self.run(&targets, size, images)?;
+        let side = size.max(1);
+        let mut values = values.into_iter();
+        let mut maps = links.iter().map(|l| l.and_then(|_| values.next().flatten().map(|v| v.into_map(side)))).collect::<Vec<_>>().into_iter();
+        let mut next = || maps.next().flatten();
+        Ok((
+            Compiled {
+                base_color: next(),
+                metallic: next(),
+                roughness: next(),
+                emission: next(),
+                normal: next(),
+                flat_base_color: *base_color,
+                flat_metallic: *metallic,
+                flat_roughness: *roughness,
+                flat_emission: *emission,
+            },
+            stats,
+        ))
     }
 
-    /// A small picture of what node `id` makes, `size` by `size` linear colours, for a card.
+    /// What node `id` makes over a `size` by `size` square of UV space.
+    pub fn evaluate(&self, id: NodeId, size: u32, images: &dyn Resolver) -> Result<Map, GraphError> {
+        let (values, _) = self.run(&[id], size, images)?;
+        values.into_iter().next().flatten().map(|v| v.into_map(size.max(1))).ok_or(GraphError::NoNode(id))
+    }
+
+    /// A small picture of what node `id` makes, `size` by `size` linear colours, for a card. A
+    /// graph that does not validate gives a flat grey picture rather than any work.
     pub fn thumbnail(&self, id: NodeId, size: u32, images: &dyn Resolver) -> Vec<[f32; 3]> {
         let size = size.clamp(1, 256);
-        let mut cache = Cache::default();
-        let mut out = Vec::with_capacity(size as usize * size as usize);
-        for y in 0..size {
-            for x in 0..size {
-                let uv = Vec2::new((x as f32 + 0.5) / size as f32, 1.0 - (y as f32 + 0.5) / size as f32);
-                out.push(self.eval_at(id, uv, images, &mut cache, 0).to_array());
+        match self.evaluate(id, size, images) {
+            Ok(map) => map.rgb,
+            Err(_) => vec![[0.5; 3]; size as usize * size as usize],
+        }
+    }
+}
+
+/// Most texels of working buffers alive at once while a graph is worked out (about 200 MB).
+pub const MAX_LIVE_TEXELS: usize = 16 << 20;
+
+/// How much work an evaluation took.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stats {
+    /// Node evaluations: a texel of a node that varies, or one for a node that does not.
+    pub evaluations: usize,
+    /// The most buffer texels alive at once.
+    pub peak_live_texels: usize,
+}
+
+/// A node's value over the square: one colour everywhere, or one per texel.
+#[derive(Clone, Debug)]
+enum Value {
+    Flat(Vec3),
+    Map(Vec<Vec3>),
+}
+
+impl Value {
+    fn varies(&self) -> bool {
+        matches!(self, Value::Map(_))
+    }
+
+    fn at(&self, t: usize) -> Vec3 {
+        match self {
+            Value::Flat(v) => *v,
+            Value::Map(m) => m.get(t).copied().unwrap_or(Vec3::ZERO),
+        }
+    }
+
+    fn into_map(self, side: u32) -> Map {
+        let n = side as usize * side as usize;
+        let rgb = match self {
+            Value::Flat(v) => vec![v.to_array(); n],
+            Value::Map(m) => m.iter().map(Vec3::to_array).collect(),
+        };
+        Map { width: side, height: side, rgb }
+    }
+}
+
+/// A tangent-space normal from the slope of the brightness `h` around texel `t` (the map wraps,
+/// as the UV square tiles). Height rising along +u tilts the normal towards -u; the rows run
+/// against v, so the green channel follows +dh/dv, as the engine reads maps.
+fn normal_at(h: &[Vec3], size: usize, t: usize, strength: f32) -> Vec3 {
+    let (x, y) = (t % size, t / size);
+    let lum = |x: usize, y: usize| h.get(y * size + x).map_or(0.0, |v| (v.x + v.y + v.z) / 3.0);
+    let (left, right) = ((x + size - 1) % size, (x + 1) % size);
+    let (up, down) = ((y + size - 1) % size, (y + 1) % size);
+    // Central differences in UV units: neighbours are 1/size apart.
+    let half = size as f32 * 0.5;
+    let dhdu = (lum(right, y) - lum(left, y)) * half;
+    let dhdv = (lum(x, up) - lum(x, down)) * half;
+    let k = strength.clamp(0.0, 64.0) * 0.05;
+    let n = Vec3::new(-dhdu * k, dhdv * k, 1.0).normalize_or(Vec3::Z);
+    n * 0.5 + Vec3::splat(0.5)
+}
+
+fn mix(blend: Blend, fac: f32, a: Vec3, b: Vec3) -> Vec3 {
+    let fac = if fac.is_finite() { fac.clamp(0.0, 1.0) } else { 0.5 };
+    let mixed = match blend {
+        Blend::Mix => b,
+        Blend::Add => a + b,
+        Blend::Multiply => a * b,
+        Blend::Screen => Vec3::ONE - (Vec3::ONE - a) * (Vec3::ONE - b),
+        Blend::Difference => (a - b).abs(),
+    };
+    a.lerp(mixed, fac)
+}
+
+fn math(op: MathOp, a: f32, b: f32) -> f32 {
+    match op {
+        MathOp::Add => a + b,
+        MathOp::Subtract => a - b,
+        MathOp::Multiply => a * b,
+        MathOp::Divide => {
+            if b.abs() > 1e-6 {
+                a / b
+            } else {
+                0.0
             }
         }
-        out
+        MathOp::Power => a.max(0.0).powf(b.clamp(-16.0, 16.0)),
+        MathOp::Minimum => a.min(b),
+        MathOp::Maximum => a.max(b),
+        MathOp::Absolute => a.abs(),
+        MathOp::Invert => 1.0 - a,
     }
 }
 
-/// Pictures already read while one evaluation runs.
-#[derive(Default)]
-struct Cache {
-    pictures: HashMap<String, Option<Picture>>,
+/// Largest magnitude a node's output keeps; beyond it values are held, and NaN becomes zero.
+const MAX_MAGNITUDE: f32 = 1e6;
+
+/// A colour every channel of which is finite and in range.
+fn finite3(v: Vec3) -> Vec3 {
+    Vec3::from_array(v.to_array().map(|c| if c.is_finite() { c.clamp(-MAX_MAGNITUDE, MAX_MAGNITUDE) } else { 0.0 }))
 }
 
-impl Cache {
-    fn picture(&mut self, path: &str, images: &dyn Resolver) -> Option<&Picture> {
-        self.pictures.entry(path.to_string()).or_insert_with(|| images.picture(path)).as_ref()
-    }
-}
-
-fn ramp(stops: &[(f32, [f32; 3])], fac: f32) -> Vec3 {
-    let mut s: Vec<(f32, Vec3)> = stops.iter().filter(|(p, _)| p.is_finite()).map(|(p, c)| (*p, Vec3::from_array(*c))).collect();
+/// A ramp's stops with finite places, sorted, at most [`MAX_STOPS`]: done once per evaluation.
+fn sorted_stops(stops: &[(f32, [f32; 3])]) -> Vec<(f32, Vec3)> {
+    let mut s: Vec<(f32, Vec3)> = stops.iter().take(MAX_STOPS).filter(|(p, _)| p.is_finite()).map(|(p, c)| (*p, finite3(Vec3::from_array(*c)))).collect();
     s.sort_by(|a, b| a.0.total_cmp(&b.0));
+    s
+}
+
+/// The colour of sorted stops at `fac`.
+fn ramp(s: &[(f32, Vec3)], fac: f32) -> Vec3 {
     let (Some(first), Some(last)) = (s.first(), s.last()) else { return Vec3::splat(fac.clamp(0.0, 1.0)) };
-    if fac <= first.0 {
+    if fac.is_nan() || fac <= first.0 {
         return first.1;
     }
     if fac >= last.0 {
@@ -603,11 +789,16 @@ fn sanitize(kind: &mut NodeKind) {
                 *p = finite(*p, 0.0, 1.0, 0.0);
                 col(c);
             }
+            stops.sort_by(|a, b| a.0.total_cmp(&b.0));
             if stops.is_empty() {
                 *stops = vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])];
             }
         }
-        NodeKind::Image { path } => path.truncate(4096),
+        NodeKind::Image { path } => {
+            if path.len() > MAX_PATH {
+                *path = path.chars().take(MAX_PATH / 4).collect();
+            }
+        }
         NodeKind::NormalMap { strength } => *strength = finite(*strength, 0.0, 64.0, 1.0),
         NodeKind::Surface { base_color, metallic, roughness, emission } => {
             col(base_color);
@@ -616,6 +807,25 @@ fn sanitize(kind: &mut NodeKind) {
             *roughness = finite(*roughness, 0.0, 1.0, 0.5);
         }
         NodeKind::Mix { .. } | NodeKind::Math { .. } => {}
+    }
+}
+
+/// Longest picture path an image node keeps, in bytes.
+pub const MAX_PATH: usize = 4096;
+
+/// A graph as it is stored; loading puts every number in range ([`Graph::sanitize`]).
+#[derive(Deserialize)]
+struct StoredGraph {
+    nodes: Vec<Node>,
+    #[serde(default)]
+    next_id: NodeId,
+}
+
+impl From<StoredGraph> for Graph {
+    fn from(s: StoredGraph) -> Graph {
+        let mut g = Graph { nodes: s.nodes, next_id: s.next_id };
+        g.sanitize();
+        g
     }
 }
 
@@ -645,15 +855,18 @@ mod tests {
         assert!(map.rgb.iter().all(|p| p[0] == p[1] && p[1] == p[2]), "noise is grey");
     }
 
+    /// What node `id` makes at texel (x, y) of a `size` square.
+    fn at(g: &Graph, id: NodeId, size: u32, x: u32, y: u32, images: &dyn Resolver) -> Vec3 {
+        let map = g.evaluate(id, size, images).unwrap();
+        Vec3::from_array(map.rgb[(y * size + x) as usize])
+    }
+
     #[test]
     fn noise_tiles_across_the_uv_square() {
-        let g = noisy_roughness();
-        let n = g.nodes.iter().find(|n| matches!(n.kind, NodeKind::Noise { .. })).map(|n| n.id).unwrap();
         for t in [0.13f32, 0.5, 0.77] {
-            let (a, b) = (g.eval(n, Vec2::new(0.0, t), &NoImages).x, g.eval(n, Vec2::new(1.0, t), &NoImages).x);
-            assert!((a - b).abs() < 1e-4, "left and right edges meet: {a} {b}");
-            let (a, b) = (g.eval(n, Vec2::new(t, 0.0), &NoImages).x, g.eval(n, Vec2::new(t, 1.0), &NoImages).x);
-            assert!((a - b).abs() < 1e-4, "top and bottom edges meet: {a} {b}");
+            let f = |u: f32, v: f32| noise::fractal(Vec2::new(u, v), 6.0, 3, 0.5, 7);
+            assert!((f(0.0, t) - f(1.0, t)).abs() < 1e-4, "left and right edges meet");
+            assert!((f(t, 0.0) - f(t, 1.0)).abs() < 1e-4, "top and bottom edges meet");
         }
     }
 
@@ -665,37 +878,156 @@ mod tests {
         let m = g.add(NodeKind::Math { op: MathOp::Multiply }).unwrap();
         g.link(m, 0, Some(a)).unwrap();
         g.link(m, 1, Some(b)).unwrap();
-        assert_eq!(g.eval(m, Vec2::ZERO, &NoImages), Vec3::splat(0.125));
+        assert_eq!(at(&g, m, 1, 0, 0, &NoImages), Vec3::splat(0.125));
         let ramp = g.add(NodeKind::Ramp { stops: vec![(0.0, [0.0, 0.0, 0.0]), (1.0, [1.0, 0.5, 0.0])] }).unwrap();
         g.link(ramp, 0, Some(b)).unwrap();
-        assert_eq!(g.eval(ramp, Vec2::ZERO, &NoImages), Vec3::new(0.5, 0.25, 0.0));
+        assert_eq!(at(&g, ramp, 1, 0, 0, &NoImages), Vec3::new(0.5, 0.25, 0.0));
         let mix = g.add(NodeKind::Mix { blend: Blend::Add }).unwrap();
         let (red, blue) = (g.add(NodeKind::Colour { color: [1.0, 0.0, 0.0] }).unwrap(), g.add(NodeKind::Colour { color: [0.0, 0.0, 1.0] }).unwrap());
         g.link(mix, 0, Some(b)).unwrap();
         g.link(mix, 1, Some(red)).unwrap();
         g.link(mix, 2, Some(blue)).unwrap();
-        assert_eq!(g.eval(mix, Vec2::ZERO, &NoImages), Vec3::new(1.0, 0.0, 0.5), "red plus half of blue");
+        assert_eq!(at(&g, mix, 1, 0, 0, &NoImages), Vec3::new(1.0, 0.0, 0.5), "red plus half of blue");
         let d = g.add(NodeKind::Math { op: MathOp::Divide }).unwrap();
         let zero = g.add(NodeKind::Value { value: 0.0 }).unwrap();
         g.link(d, 0, Some(a)).unwrap();
         g.link(d, 1, Some(zero)).unwrap();
-        assert_eq!(g.eval(d, Vec2::ZERO, &NoImages), Vec3::ZERO, "dividing by nothing is zero, not infinity");
+        assert_eq!(at(&g, d, 1, 0, 0, &NoImages), Vec3::ZERO, "dividing by nothing is zero, not infinity");
+        // Every blend and operation, as the editor sets them.
+        g.set(mix, NodeKind::Mix { blend: Blend::Multiply }).unwrap();
+        assert_eq!(at(&g, mix, 1, 0, 0, &NoImages), Vec3::new(0.5, 0.0, 0.0), "half way to red times blue");
+        g.set(m, NodeKind::Math { op: MathOp::Maximum }).unwrap();
+        assert_eq!(at(&g, m, 1, 0, 0, &NoImages), Vec3::splat(0.5));
     }
 
     #[test]
-    fn a_flat_normal_map_is_blue_and_a_slope_tilts_it() {
+    fn a_flat_normal_map_is_blue_and_slopes_tilt_red_and_green_the_right_way() {
         let mut g = Graph::with_surface();
         let flat = g.add(NodeKind::Value { value: 0.3 }).unwrap();
         let nm = g.add(NodeKind::NormalMap { strength: 1.0 }).unwrap();
         g.link(nm, 0, Some(flat)).unwrap();
-        let n = g.eval(nm, Vec2::new(0.4, 0.4), &NoImages);
+        let n = at(&g, nm, 8, 3, 3, &NoImages);
         assert!((n - Vec3::new(0.5, 0.5, 1.0)).length() < 1e-4, "{n:?}");
         // A ramp along u is a slope up to +u: the normal leans towards -u, so red drops below half.
         let ramp = g.add(NodeKind::Ramp { stops: vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])] }).unwrap();
         let nm2 = g.add(NodeKind::NormalMap { strength: 4.0 }).unwrap();
         g.link(nm2, 0, Some(ramp)).unwrap();
-        let n = g.eval(nm2, Vec2::new(0.5, 0.5), &NoImages);
+        let n = at(&g, nm2, 64, 32, 32, &NoImages);
         assert!(n.x < 0.45 && (n.y - 0.5).abs() < 0.02 && n.z > 0.5, "{n:?}");
+        // A picture that brightens towards its top row rises along +v: green goes above half.
+        struct Rising;
+        impl Resolver for Rising {
+            fn picture(&self, _: &str) -> Option<Arc<Picture>> {
+                let h = 64;
+                Some(Arc::new(Picture { width: 1, height: h, rgb: (0..h).map(|y| [1.0 - y as f32 / h as f32; 3]).collect() }))
+            }
+        }
+        let img = g.add(NodeKind::Image { path: "rise.png".into() }).unwrap();
+        let nm3 = g.add(NodeKind::NormalMap { strength: 4.0 }).unwrap();
+        g.link(nm3, 0, Some(img)).unwrap();
+        let n = at(&g, nm3, 64, 32, 32, &Rising);
+        assert!(n.y > 0.55 && (n.x - 0.5).abs() < 0.02, "{n:?}");
+    }
+
+    #[test]
+    fn shared_inputs_are_worked_out_once_per_texel() {
+        // A chain as deep as allowed where both inputs of every mix read the node before it: a
+        // walk per path would be 2^64 evaluations a texel; each node is evaluated once instead.
+        let mut g = Graph::with_surface();
+        let surface = g.surface().map(|n| n.id).unwrap();
+        let mut prev = g.add(NodeKind::Noise { scale: 4.0, detail: 1, roughness: 0.5, seed: 1 }).unwrap();
+        for _ in 0..MAX_DEPTH - 1 {
+            let m = g.add(NodeKind::Mix { blend: Blend::Add }).unwrap();
+            g.link(m, 1, Some(prev)).unwrap();
+            g.link(m, 2, Some(prev)).unwrap();
+            prev = m;
+        }
+        g.link(surface, 2, Some(prev)).unwrap();
+        let (c, stats) = g.compile_counted(16, &NoImages).unwrap();
+        assert!(c.roughness.is_some());
+        assert_eq!(stats.evaluations, MAX_DEPTH * 256, "one evaluation per node and texel");
+        assert!(stats.peak_live_texels <= 2 * 256, "buffers are freed as they are used: {}", stats.peak_live_texels);
+        // Normal maps read their input's buffer; a chain of them is linear too.
+        let mut h = Graph::with_surface();
+        let surface = h.surface().map(|n| n.id).unwrap();
+        let mut prev = h.add(NodeKind::Noise { scale: 4.0, detail: 1, roughness: 0.5, seed: 1 }).unwrap();
+        for _ in 0..MAX_DEPTH - 1 {
+            let n = h.add(NodeKind::NormalMap { strength: 1.0 }).unwrap();
+            h.link(n, 0, Some(prev)).unwrap();
+            prev = n;
+        }
+        h.link(surface, 4, Some(prev)).unwrap();
+        let (_, stats) = h.compile_counted(16, &NoImages).unwrap();
+        assert_eq!(stats.evaluations, MAX_DEPTH * 256);
+        // Nodes that do not vary across the square are worked out once.
+        let mut k = Graph::with_surface();
+        let surface = k.surface().map(|n| n.id).unwrap();
+        let v = k.add(NodeKind::Value { value: 0.2 }).unwrap();
+        let m = k.add(NodeKind::Math { op: MathOp::Add }).unwrap();
+        k.link(m, 0, Some(v)).unwrap();
+        k.link(surface, 1, Some(m)).unwrap();
+        let (c, stats) = k.compile_counted(64, &NoImages).unwrap();
+        assert_eq!(stats.evaluations, 2);
+        assert_eq!(c.metallic.map(|m| m.rgb[100]), Some([0.7; 3]));
+    }
+
+    #[test]
+    fn working_memory_is_capped_before_it_is_taken() {
+        // Five noise maps alive at once at 2048 a side is 20M texels, over the 16M cap: the fifth
+        // is refused before its buffer is made.
+        let mut g = Graph::with_surface();
+        let surface = g.surface().map(|n| n.id).unwrap();
+        let noise: Vec<NodeId> = (0..5).map(|s| g.add(NodeKind::Noise { scale: 2.0, detail: 1, roughness: 0.5, seed: s }).unwrap()).collect();
+        let inner = g.add(NodeKind::Mix { blend: Blend::Add }).unwrap();
+        let outer = g.add(NodeKind::Mix { blend: Blend::Add }).unwrap();
+        for (p, n) in noise[2..].iter().enumerate() {
+            g.link(inner, p, Some(*n)).unwrap();
+        }
+        g.link(outer, 0, Some(noise[0])).unwrap();
+        g.link(outer, 1, Some(noise[1])).unwrap();
+        g.link(outer, 2, Some(inner)).unwrap();
+        g.link(surface, 0, Some(outer)).unwrap();
+        assert_eq!(g.compile(2048, &NoImages), Err(GraphError::TooMuchWork));
+        assert!(g.compile(64, &NoImages).is_ok());
+    }
+
+    #[test]
+    fn a_graph_from_a_file_is_sanitized_and_checked_before_any_work() {
+        // Numbers too large for f32 load as infinity: loading puts the node's default back.
+        let json = r#"{"nodes":[
+            {"id":0,"name":"Surface","kind":{"type":"surface","base_color":[1e39,0.5,-1e39],"metallic":1e39,"roughness":-1e39,"emission":[0,0,0]},"inputs":[1,null,null,null,null]},
+            {"id":1,"name":"Ramp","kind":{"type":"ramp","stops":[]},"inputs":[2]},
+            {"id":2,"name":"Big","kind":{"type":"value","value":1e39},"inputs":[]}
+        ],"next_id":3}"#;
+        let mut stops = String::new();
+        for i in 0..100 {
+            stops.push_str(&format!("{}[{}, [0.1, 0.2, 0.3]]", if i == 0 { "" } else { "," }, 1.0 - i as f32 / 100.0));
+        }
+        let json = json.replace(r#""stops":[]"#, &format!(r#""stops":[{stops}]"#));
+        let g: Graph = serde_json::from_str(&json).unwrap();
+        let NodeKind::Surface { base_color, metallic, roughness, .. } = g.get(0).unwrap().kind else { panic!() };
+        assert_eq!((base_color, metallic, roughness), ([0.0, 0.5, 0.0], 0.0, 0.5));
+        assert!(matches!(&g.get(2).unwrap().kind, NodeKind::Value { value } if *value == 0.0));
+        let NodeKind::Ramp { stops } = &g.get(1).unwrap().kind else { panic!() };
+        assert_eq!(stops.len(), MAX_STOPS);
+        assert!(stops.windows(2).all(|w| w[0].0 <= w[1].0), "stops are sorted once on load");
+        let c = g.compile(4, &NoImages).unwrap();
+        assert!(c.base_color.unwrap().rgb.iter().flatten().all(|v| v.is_finite()));
+        // Sums that overflow stay finite.
+        let mut big = Graph::with_surface();
+        let v = big.add(NodeKind::Value { value: 1e6 }).unwrap();
+        let mix = big.add(NodeKind::Mix { blend: Blend::Add }).unwrap();
+        let fac = big.add(NodeKind::Value { value: 1.0 }).unwrap();
+        big.link(mix, 0, Some(fac)).unwrap();
+        big.link(mix, 1, Some(v)).unwrap();
+        big.link(mix, 2, Some(v)).unwrap();
+        assert!(at(&big, mix, 1, 0, 0, &NoImages).is_finite());
+        // A self-linked mix from a file is refused before any work, thumbnails included.
+        let looped = r#"{"nodes":[{"id":0,"name":"Mix","kind":{"type":"mix","blend":"add"},"inputs":[null,0,0]}],"next_id":1}"#;
+        let g: Graph = serde_json::from_str(looped).unwrap();
+        assert_eq!(g.validate(), Err(GraphError::Cycle));
+        assert_eq!(g.thumbnail(0, 8, &NoImages), vec![[0.5; 3]; 64], "a broken graph gives a grey card");
+        assert_eq!(g.evaluate(0, 8, &NoImages), Err(GraphError::Cycle));
     }
 
     #[test]
@@ -756,13 +1088,13 @@ mod tests {
         let img = g.add(NodeKind::Image { path: "wood.png".into() }).unwrap();
         struct Two;
         impl Resolver for Two {
-            fn picture(&self, path: &str) -> Option<Picture> {
-                (path == "wood.png").then(|| Picture { width: 2, height: 1, rgb: vec![[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] })
+            fn picture(&self, path: &str) -> Option<Arc<Picture>> {
+                (path == "wood.png").then(|| Arc::new(Picture { width: 2, height: 1, rgb: vec![[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] }))
             }
         }
-        assert_eq!(g.eval(img, Vec2::new(0.25, 0.5), &Two), Vec3::new(1.0, 0.0, 0.0));
-        assert_eq!(g.eval(img, Vec2::new(0.75, 0.5), &Two), Vec3::new(0.0, 0.0, 1.0));
-        assert_eq!(g.eval(img, Vec2::new(0.25, 0.5), &NoImages), Vec3::splat(0.5), "an unreadable picture is mid grey");
+        assert_eq!(at(&g, img, 2, 0, 0, &Two), Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(at(&g, img, 2, 1, 0, &Two), Vec3::new(0.0, 0.0, 1.0));
+        assert_eq!(at(&g, img, 2, 0, 0, &NoImages), Vec3::splat(0.5), "an unreadable picture is mid grey");
         assert_eq!(g.thumbnail(n, 8, &NoImages).len(), 64);
         // The graph keeps through its saved form.
         let json = serde_json::to_string(&g).unwrap();

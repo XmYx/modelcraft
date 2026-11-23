@@ -61,6 +61,9 @@ pub fn act(app: &mut ModelApp, a: MatAction) {
         MatAction::Window => {
             app.materials.open = !app.materials.open;
             app.materials.focus_pending = app.materials.open;
+            // Read pictures afresh each time the window opens.
+            app.materials.images = None;
+            app.materials.thumbs = None;
         }
         MatAction::AddGraph => add_graph(app),
         MatAction::RemoveGraph => match app.active() {
@@ -81,8 +84,14 @@ pub struct MaterialUi {
     pub selected: Option<NodeId>,
     /// Whether the node picker is open, and what it is searching for.
     pub picker: bool,
+    /// The search box takes the focus once, when the picker opens.
+    picker_focus: bool,
     pub query: String,
     thumbs: Option<Thumbs>,
+    /// Picture paths being typed, per image node; one is applied when its box loses the focus.
+    pub(crate) drafts: std::collections::HashMap<NodeId, String>,
+    /// Pictures read for thumbnails, kept while the window is open.
+    images: Option<FileImages>,
 }
 
 /// The thumbnails of one graph, kept while the graph does not change.
@@ -214,9 +223,18 @@ fn colour(ui: &mut egui::Ui, c: &mut [f32; 3], name: String, drags: &mut Vec<egu
     });
 }
 
-/// The settings of one node. Returns the node's changed kind when the user changed it.
-fn settings(ui: &mut egui::Ui, kind: &NodeKind, drags: &mut Vec<egui::Response>) -> Option<NodeKind> {
+/// What the user did to a node's settings.
+struct Edit {
+    /// The node's kind as changed, if it changed.
+    kind: Option<NodeKind>,
+    /// The change is a whole step (a choice from a list, a picture chosen), not part of a drag.
+    discrete: bool,
+}
+
+/// The settings of one node.
+fn settings(ui: &mut egui::Ui, nid: NodeId, kind: &NodeKind, drags: &mut Vec<egui::Response>, drafts: &mut std::collections::HashMap<NodeId, String>) -> Edit {
     let mut k = kind.clone();
+    let mut discrete = false;
     match &mut k {
         NodeKind::Value { value } => number(ui, value, tl!("Number"), -1e6..=1e6, 0.01, drags),
         NodeKind::Colour { color } => colour(ui, color, tl!("Colour"), drags),
@@ -238,19 +256,20 @@ fn settings(ui: &mut egui::Ui, kind: &NodeKind, drags: &mut Vec<egui::Response>)
         }
         NodeKind::Mix { blend } => {
             let before = *blend;
-            let r = egui::ComboBox::from_id_salt("mat-blend").selected_text(blend_title(*blend)).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt(("mat-blend", nid)).selected_text(blend_title(*blend)).show_ui(ui, |ui| {
                 for b in [Blend::Mix, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Difference] {
                     ui.selectable_value(blend, b, blend_title(b));
                 }
             });
             set_name(ui, &r.response, tl!("Blend"));
             if *blend != before {
+                discrete = true;
                 r.response.request_focus();
             }
         }
         NodeKind::Math { op } => {
             let before = *op;
-            let r = egui::ComboBox::from_id_salt("mat-op").selected_text(op_title(*op)).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt(("mat-op", nid)).selected_text(op_title(*op)).show_ui(ui, |ui| {
                 for o in [
                     MathOp::Add,
                     MathOp::Subtract,
@@ -267,18 +286,36 @@ fn settings(ui: &mut egui::Ui, kind: &NodeKind, drags: &mut Vec<egui::Response>)
             });
             set_name(ui, &r.response, tl!("Operation"));
             if *op != before {
+                discrete = true;
                 r.response.request_focus();
             }
         }
         NodeKind::Image { path } => {
             ui.horizontal(|ui| {
                 ui.label(tl!("Picture"));
-                let r = ui.add(egui::TextEdit::singleline(path).desired_width(150.0));
+                // Typing goes into a draft; the path is applied, as one undo step, when the box
+                // loses the focus (Enter or Tab), so a half-typed name is never read as a file.
+                let mut text = drafts.get(&nid).cloned().unwrap_or_else(|| path.clone());
+                let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(150.0));
                 set_name(ui, &r, tl!("Picture file"));
-                if ui.button(tl!("Choose…")).clicked()
+                if r.changed() {
+                    drafts.insert(nid, text);
+                }
+                if r.lost_focus()
+                    && let Some(t) = drafts.remove(&nid)
+                    && t != *path
+                {
+                    *path = t;
+                    discrete = true;
+                }
+                let choose = ui.button(tl!("Choose…"));
+                set_name(ui, &choose, tl!("Choose picture file"));
+                if choose.clicked()
                     && let Some(p) = rfd::FileDialog::new().add_filter(tl!("Pictures"), &["png", "jpg", "jpeg", "tga", "bmp"]).pick_file()
                 {
                     *path = p.display().to_string();
+                    drafts.remove(&nid);
+                    discrete = true;
                 }
             });
         }
@@ -290,7 +327,8 @@ fn settings(ui: &mut egui::Ui, kind: &NodeKind, drags: &mut Vec<egui::Response>)
             colour(ui, emission, tl!("Emission"), drags);
         }
     }
-    (k != *kind).then_some(k)
+    let kind = (k != *kind).then_some(k);
+    Edit { discrete: discrete && kind.is_some(), kind }
 }
 
 fn thumbnails(app: &mut ModelApp, ctx: &egui::Context, id: ObjectId, graph: &Graph) {
@@ -298,12 +336,12 @@ fn thumbnails(app: &mut ModelApp, ctx: &egui::Context, id: ObjectId, graph: &Gra
     if fresh {
         return;
     }
-    let images = FileImages::default();
+    let images = app.materials.images.get_or_insert_with(FileImages::default);
     let list = graph
         .nodes
         .iter()
         .map(|n| {
-            let rgb = graph.thumbnail(n.id, THUMB, &images);
+            let rgb = graph.thumbnail(n.id, THUMB, images);
             let px: Vec<u8> = rgb
                 .iter()
                 .flat_map(|p| {
@@ -437,6 +475,7 @@ fn editor(app: &mut ModelApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         }
         if r.clicked() {
             app.materials.picker = !app.materials.picker;
+            app.materials.picker_focus = app.materials.picker;
             app.materials.query.clear();
         }
         if ui.button(tl!("Remove Material Graph")).clicked() {
@@ -503,10 +542,12 @@ fn editor(app: &mut ModelApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                                 set_name(ui, &r.response, crate::tlf!("{input} of {name}", input = title, name = node.name));
                             });
                         }
-                        if let Some(k) = settings(ui, &node.kind, &mut drags)
-                            && let Err(e) = g.set(nid, k)
-                        {
-                            error = Some(e);
+                        let edit = settings(ui, nid, &node.kind, &mut drags, &mut app.materials.drafts);
+                        if let Some(k) = edit.kind {
+                            match g.set(nid, k) {
+                                Ok(()) => discrete |= edit.discrete,
+                                Err(e) => error = Some(e),
+                            }
                         }
                         if !matches!(node.kind, NodeKind::Surface { .. }) {
                             let r = ui.button(tl!("Remove"));
@@ -551,7 +592,7 @@ fn picker(app: &mut ModelApp, ui: &mut egui::Ui, g: &mut Graph, error: &mut Opti
             ui.label(tl!("Search nodes"));
             let r = ui.add(egui::TextEdit::singleline(&mut app.materials.query).desired_width(160.0));
             set_name(ui, &r, tl!("Search nodes"));
-            if !r.has_focus() && app.materials.query.is_empty() {
+            if std::mem::take(&mut app.materials.picker_focus) {
                 r.request_focus();
             }
             searched = Some(r);
