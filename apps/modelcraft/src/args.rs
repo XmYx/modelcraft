@@ -14,6 +14,8 @@ Options:
   --uv-editor none|angle|area|stretch
                              open the UV Editor with this heat map
   --screenshot <PNG>         render the window once to PNG and quit
+  --screenshot-state <NAME>  open one window first: timeline, curve-editor, render-view,
+                             scripts, plugins, preferences, shortcuts, palette or layers
   --bench-viewport <FRAMES>  orbit around a 1M-polygon sculpt for FRAMES frames, print frame
                              times and quit
   --bench-polys <N>          polygon count for --bench-viewport (default 1000000)
@@ -48,6 +50,8 @@ pub struct Cli {
     pub workspace: Option<StartWorkspace>,
     pub quad: bool,
     pub screenshot: Option<PathBuf>,
+    /// Open this window on the first frame (for `--screenshot`).
+    pub screenshot_state: Option<crate::shot_state::ShotState>,
     /// Open the UV Editor at start, with this heat map (`none`, `angle`, `area`, `stretch`).
     pub uv_editor: Option<crate::uv_ui::Heat>,
     pub bench_frames: Option<u32>,
@@ -116,6 +120,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Launch, String> {
             "--control" => cli.control = Some(cli.control.flatten()),
             "--control-port" => cli.control = Some(Some(value("--control-port")?.parse().map_err(|_| "--control-port takes a port number")?)),
             "--screenshot" => cli.screenshot = Some(PathBuf::from(value("--screenshot")?)),
+            "--screenshot-state" => cli.screenshot_state = Some(crate::shot_state::ShotState::parse(&value("--screenshot-state")?)?),
             "--bench-viewport" => cli.bench_frames = Some(value("--bench-viewport")?.parse().map_err(|_| "--bench-viewport takes a frame count")?),
             "--bench-skin" => cli.bench_skin = Some(value("--bench-skin")?.parse().map_err(|_| "--bench-skin takes a frame count")?),
             "--bench-skin-dq" => cli.bench_skin_dq = true,
@@ -150,5 +155,9 @@ mod tests {
         let Ok(Launch::Run(c)) = parse(["--control".to_string()]) else { panic!() };
         assert_eq!(c.control, Some(None));
         assert!(parse(["--control-port", "x"].map(String::from)).is_err());
+        let Ok(Launch::Run(c)) = parse(["--screenshot-state", "curve-editor"].map(String::from)) else { panic!() };
+        assert_eq!(c.screenshot_state, Some(crate::shot_state::ShotState::CurveEditor));
+        assert!(parse(["--screenshot-state", "nope"].map(String::from)).is_err());
+        assert!(parse(["--screenshot-state".to_string()]).is_err());
     }
 }
