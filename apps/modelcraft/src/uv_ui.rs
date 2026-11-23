@@ -942,6 +942,12 @@ pub fn seam_lines(app: &mut ModelApp) -> Vec<LineVertex> {
 pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ui.menu_button(tl!("UV"), |ui| {
+        let a = crate::actions::Action::Bake(crate::bake_ui::BakeAction::Window);
+        if ui.add(egui::Button::new(a.label()).shortcut_text(crate::keys::shortcut_text(app, a))).clicked() {
+            app.act(&ctx, a);
+            ui.close();
+        }
+        ui.separator();
         for a in UvAction::ALL {
             let b = egui::Button::new(a.label()).shortcut_text(crate::keys::shortcut_text(app, crate::actions::Action::Uv(a)));
             if ui.add(b).clicked() {

@@ -331,6 +331,8 @@ impl Evaluator {
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Light { .. }
+            | ObjectKind::Camera { .. }
             | ObjectKind::Spline { .. }
             | ObjectKind::Hair { .. } => Evaluated::default(),
         };

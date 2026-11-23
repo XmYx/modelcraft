@@ -900,6 +900,7 @@ impl Document {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
             Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::Stage(c) => return crate::stage::check_unlocked(self, c),
             Command::Spline(s) => return crate::spline::check_unlocked(self, s),
             Command::SetTransform { id, transform } => {
                 if let Some(o) = self.scene.get(*id)
@@ -1290,6 +1291,7 @@ impl Document {
             Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
+            Command::Stage(c) => crate::stage::apply(self, c, &mut out)?,
             Command::Spline(c) => crate::spline::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
