@@ -1,0 +1,1 @@
+- Spline operations: Spline > Chamfer Points and Fillet Points cut the corners of the selected points (set the size under Properties > Points), Reverse Spline, Convert Spline to Polygon and Convert Spline to Mesh.
