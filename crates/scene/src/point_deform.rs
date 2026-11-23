@@ -201,9 +201,12 @@ impl Scene {
         matches!(self.get(p)?.kind, ObjectKind::Mesh { .. }).then_some(p)
     }
 
-    /// Whether an object takes part in its parent's deformer stack.
+    /// Whether an object takes part in its parent's stack (a deformer, or a falloff field inside
+    /// one).
     pub fn in_stack(&self, id: ObjectId) -> bool {
-        self.get(id).is_some_and(|o| matches!(o.kind, ObjectKind::PointDeformer { .. } | ObjectKind::Skin { .. } | ObjectKind::Deformer { .. }))
+        self.get(id).is_some_and(|o| {
+            matches!(o.kind, ObjectKind::PointDeformer { .. } | ObjectKind::Skin { .. } | ObjectKind::Deformer { .. } | ObjectKind::Field { .. })
+        })
     }
 
     /// Move an object `delta` places among its siblings (negative: earlier). For a deformer
