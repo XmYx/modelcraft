@@ -31,6 +31,7 @@ pub mod rig;
 mod rle;
 pub mod sim;
 pub mod snap;
+pub mod spline_gen;
 pub mod splines;
 
 use std::sync::Arc;
@@ -51,6 +52,7 @@ use serde::{Deserialize, Serialize};
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
 pub use eval::{Evaluated, Evaluator, Instances, StepError};
 pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
+pub use spline_gen::SplineGen;
 pub use splines::{SplineEval, SplineSource};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
@@ -650,13 +652,18 @@ pub enum ObjectKind {
         #[serde(default)]
         tess: Tessellation,
     },
+    /// Shows a surface made from the splines inside it: extrude, revolve, loft or sweep
+    /// ([`spline_gen`]).
+    SplineGenerator {
+        generator: SplineGen,
+    },
 }
 
 impl ObjectKind {
     /// Whether the object makes a mesh a generator can take as an input: a mesh, a smooth cage,
     /// an array, a symmetry or another procedural generator.
     pub fn makes_geometry(&self) -> bool {
-        matches!(self, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Generator { .. })
+        matches!(self, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Generator { .. } | ObjectKind::SplineGenerator { .. })
     }
 
     pub fn type_name(&self) -> &'static str {
@@ -678,6 +685,7 @@ impl ObjectKind {
             ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
             ObjectKind::Spline { .. } => "Spline",
+            ObjectKind::SplineGenerator { .. } => "Spline generator",
         }
     }
 }
@@ -1254,6 +1262,8 @@ impl Scene {
     }
 }
 
+#[cfg(test)]
+mod spline_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

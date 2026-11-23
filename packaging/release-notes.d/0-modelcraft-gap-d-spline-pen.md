@@ -1,0 +1,1 @@
+- Spline pen: Spline > Pen Tool (Shift+P) draws curves with clicks (drag to pull out a smooth handle); with a spline selected, drag its points and handles, double-click the curve to add a point, Delete removes selected points; Properties lists the points with numbers.

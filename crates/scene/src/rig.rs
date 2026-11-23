@@ -125,6 +125,46 @@ pub fn stack_targets(scene: &Scene, mesh_id: ObjectId) -> Vec<ObjectId> {
     v
 }
 
+/// Whether evaluating `from` reads `goal`, through shrink-wrap targets (visible or not) of any
+/// mesh in `from`'s subtree, followed transitively. The walk keeps a visited set, so a loop in a
+/// hostile file ends it; `set_deformer` uses it to refuse a target that would make a loop.
+pub fn target_reaches(scene: &Scene, from: ObjectId, goal: ObjectId) -> bool {
+    let mut seen: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
+    let mut work = vec![from];
+    while let Some(o) = work.pop() {
+        if !seen.insert(o) {
+            continue;
+        }
+        for member in scene.subtree(o) {
+            if member == goal {
+                return true;
+            }
+            for c in scene.children(member) {
+                if let Some(ObjectKind::Deformer { deformer, target: Some(t), .. }) = scene.get(c).map(|x| &x.kind)
+                    && deformer.needs_target()
+                    && scene.get(*t).is_some()
+                {
+                    work.push(*t);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Every object `mesh_id`'s evaluation reads through shrink-wrap targets, followed transitively
+/// (not including `mesh_id`). Bounded by the number of objects.
+pub fn target_closure(scene: &Scene, mesh_id: ObjectId) -> Vec<ObjectId> {
+    let mut seen: std::collections::BTreeSet<ObjectId> = std::collections::BTreeSet::new();
+    let mut work = stack_targets(scene, mesh_id);
+    while let Some(t) = work.pop() {
+        if t != mesh_id && seen.insert(t) && matches!(scene.get(t).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
+            work.extend(stack_targets(scene, t));
+        }
+    }
+    seen.into_iter().collect()
+}
+
 /// Run the deformer stack of a mesh object on its evaluated mesh: its visible parametric
 /// deformers (bend, shrink-wrap…), blend-shape, lattice, cluster and skin children, in child
 /// order ([`crate::point_deform`]). Returns the deformed mesh (`None` when nothing ran) and
