@@ -403,6 +403,12 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
             Workspace::Paint => {
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
                 ui.separator();
+                for o in crate::paint_ui::ALL {
+                    if ui.button(Action::Paint(o).label()).clicked() {
+                        app.act(&ctx, Action::Paint(o));
+                    }
+                }
+                ui.separator();
                 if ui.button(tl!("Export GLB for TextureCraft…")).clicked() {
                     app.act(&ctx, Action::ExportGlb);
                 }
@@ -1199,12 +1205,7 @@ fn stamp_label(s: Stamp) -> String {
 }
 
 fn paint(app: &mut ModelApp, ui: &mut egui::Ui) {
-    let ctx = ui.ctx().clone();
-    ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
-    ui.label(RichText::new(tl!("Texture and vertex painting are planned for a later milestone. Today, paint in TextureCraft: export a GLB (Y up, metres, UVs kept) and open it there.")).color(theme::TEXT_DIM).small());
-    if ui.button(tl!("Export GLB for TextureCraft…")).clicked() {
-        app.act(&ctx, Action::ExportGlb);
-    }
+    crate::paint_ui::pane(app, ui);
 }
 
 // ---------------------------------------------------------------- dialogs

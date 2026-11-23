@@ -314,6 +314,24 @@ pub enum StepOp {
         #[serde(default, skip_serializing_if = "bool_is_false")]
         front_only: bool,
     },
+    /// Vertex colour stroke: stamps of a brush at the points (in the mesh's space), in order.
+    PaintStroke {
+        points: Vec<Vec3>,
+        radius: f32,
+        strength: f32,
+        /// Linear RGBA.
+        color: [f32; 4],
+        #[serde(default, skip_serializing_if = "bool_is_false")]
+        erase: bool,
+        #[serde(default)]
+        falloff: modelcraft_sculpt::brush::Falloff,
+    },
+    /// Set the colour of the corners at the listed vertices (all when empty).
+    FillColor {
+        color: [f32; 4],
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        verts: Vec<u32>,
+    },
     /// Join the listed vertices across the faces that have them as corners.
     Connect {
         verts: Vec<u32>,
@@ -622,6 +640,8 @@ impl StepOp {
             StepOp::SlicePlane { .. } => "Slice by plane",
             StepOp::CutLine { .. } => "Knife cut",
             StepOp::Connect { .. } => "Connect vertices",
+            StepOp::PaintStroke { .. } => "Paint stroke",
+            StepOp::FillColor { .. } => "Fill colour",
             StepOp::AddPolygon { .. } => "Add polygon",
             StepOp::ExtrudeEdges { .. } => "Extrude edges",
             StepOp::LoopCut { .. } => "Loop cut",
@@ -673,6 +693,8 @@ impl StepOp {
             StepOp::RelaxUvs { corners, .. } | StepOp::StraightenUvs { corners, .. } => corners.len() * 4,
             StepOp::SetUvs { uvs } => uvs.len() * 8,
             StepOp::SlicePlane { faces, .. } => faces.len() * 4,
+            StepOp::PaintStroke { points, .. } => points.len() * 12,
+            StepOp::FillColor { verts, .. } => verts.len() * 4,
             StepOp::AddPolygon { points, .. } => points.len() * 16,
             StepOp::Merge { verts }
             | StepOp::Connect { verts }

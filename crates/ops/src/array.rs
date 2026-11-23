@@ -105,7 +105,7 @@ impl Array {
         for mat in mats {
             let offset = positions.len() as u32;
             positions.extend(m.positions().iter().map(|p| mat.transform_point3(*p)));
-            polygons.extend(base_polys.iter().map(|p| Polygon { verts: p.verts.iter().map(|v| v + offset).collect(), uvs: p.uvs.clone(), patch: p.patch }));
+            polygons.extend(base_polys.iter().map(|p| Polygon { verts: p.verts.iter().map(|v| v + offset).collect(), uvs: p.uvs.clone(), patch: p.patch, colors: p.colors.clone() }));
         }
         crate::rebuild(positions, polygons)
     }

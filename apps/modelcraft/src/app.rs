@@ -198,6 +198,7 @@ pub struct ModelApp {
     pub script: crate::script_ui::ScriptState,
     pub mesh_tools: crate::mesh_tools::State,
     pub modeling: crate::modeling_ui::State,
+    pub paint: crate::paint_ui::State,
     pub radial: Option<crate::radial::Radial>,
     pub prefs_window: crate::prefs_ui::PrefsWindow,
     /// Action ids on the shelf.
@@ -364,6 +365,7 @@ impl ModelApp {
             script: Default::default(),
             mesh_tools: Default::default(),
             modeling: Default::default(),
+            paint: Default::default(),
             radial: None,
             prefs_window: Default::default(),
             shelf: Vec::new(),
@@ -983,6 +985,7 @@ impl ModelApp {
             Organize(op) => crate::organize_ui::run(self, op),
             Cut(op) => crate::cut_ui::run(self, op),
             Soft(op) => crate::soft_ui::run(self, op),
+            Paint(op) => crate::paint_ui::run(self, op),
         }
     }
 
@@ -1371,7 +1374,7 @@ impl ModelApp {
         if crate::render_view::escape(self, ctx) || self.radial.is_some() || crate::script_ui::escape(self, ctx) || crate::script_ui::keys(self, ctx) {
             return;
         }
-        if crate::uv_ui::keys(self, ctx) || crate::modeling_ui::escape(self, ctx) || crate::cut_ui::escape(self, ctx) {
+        if crate::uv_ui::keys(self, ctx) || crate::modeling_ui::escape(self, ctx) || crate::cut_ui::escape(self, ctx) || crate::paint_ui::escape(self, ctx) {
             return;
         }
         if crate::sculpt_groups_ui::escape(self, ctx) {

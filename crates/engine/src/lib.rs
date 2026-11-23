@@ -80,4 +80,6 @@ mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;
 #[cfg(test)]
+mod paint_tests;
+#[cfg(test)]
 mod uv_udim_tests;
