@@ -7,6 +7,8 @@ use std::f32::consts::{PI, TAU};
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
+pub use crate::primitives_more::Solid;
+use crate::primitives_more::{self as more, Parts};
 use crate::{OpResult, Polygon, rebuild};
 
 pub const MAX_SEGMENTS: u32 = 1024;
@@ -52,10 +54,78 @@ pub enum Primitive {
         segments: u32,
         sides: u32,
     },
+    /// A flat disc facing +Y; `inner_radius > 0` cuts a hole (an annulus).
+    Disc {
+        radius: f32,
+        inner_radius: f32,
+        sides: u32,
+        rings: u32,
+    },
+    /// A regular polygon: one n-gon face facing +Y.
+    Polygon {
+        radius: f32,
+        sides: u32,
+    },
+    /// A hollow cylinder with an inner wall; closed with `caps`.
+    Tube {
+        radius: f32,
+        inner_radius: f32,
+        height: f32,
+        sides: u32,
+        rings: u32,
+        caps: bool,
+    },
+    /// A cylinder of `height` between two hemispheres; `rings` rows per hemisphere.
+    Capsule {
+        radius: f32,
+        height: f32,
+        sides: u32,
+        rings: u32,
+    },
+    /// A rectangular-base pyramid, apex up.
+    Pyramid {
+        width: f32,
+        depth: f32,
+        height: f32,
+    },
+    /// A tetrahedron, octahedron, dodecahedron or icosahedron of the given circumradius.
+    Platonic {
+        solid: Solid,
+        radius: f32,
+    },
+    /// A seeded fractal-noise terrain in XZ. `scale` is the number of noise features across the
+    /// width, `height` the total vertical range.
+    Landscape {
+        width: f32,
+        depth: f32,
+        height: f32,
+        segments: u32,
+        seed: u32,
+        scale: f32,
+        octaves: u32,
+    },
 }
 
 /// The primitive kinds, in menu order.
-pub const KINDS: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
+pub const KINDS: &[&str] = &[
+    "cube",
+    "plane",
+    "sphere",
+    "round_cube",
+    "cylinder",
+    "cone",
+    "torus",
+    "disc",
+    "polygon",
+    "tube",
+    "capsule",
+    "pyramid",
+    "tetrahedron",
+    "octahedron",
+    "dodecahedron",
+    "icosahedron",
+    "landscape",
+];
 
 impl Primitive {
     /// The default primitive of a kind (`cube`, `plane`, …), `None` for an unknown kind.
@@ -68,7 +138,13 @@ impl Primitive {
             "cylinder" => Primitive::Cylinder { radius: 1.0, height: 2.0, sides: 24, rings: 1, caps: true },
             "cone" => Primitive::Cone { radius: 1.0, height: 2.0, sides: 24, caps: true },
             "torus" => Primitive::Torus { radius: 1.0, tube: 0.35, segments: 32, sides: 16 },
-            _ => return None,
+            "disc" => Primitive::Disc { radius: 1.0, inner_radius: 0.0, sides: 32, rings: 4 },
+            "polygon" => Primitive::Polygon { radius: 1.0, sides: 6 },
+            "tube" => Primitive::Tube { radius: 1.0, inner_radius: 0.6, height: 2.0, sides: 32, rings: 1, caps: true },
+            "capsule" => Primitive::Capsule { radius: 0.6, height: 1.6, sides: 24, rings: 8 },
+            "pyramid" => Primitive::Pyramid { width: 2.0, depth: 2.0, height: 2.0 },
+            "landscape" => Primitive::Landscape { width: 8.0, depth: 8.0, height: 2.0, segments: 64, seed: 1, scale: 4.0, octaves: 4 },
+            other => Primitive::Platonic { solid: Solid::from_kind(other)?, radius: 1.0 },
         })
     }
 
@@ -81,6 +157,13 @@ impl Primitive {
             Primitive::Cylinder { .. } => "cylinder",
             Primitive::Cone { .. } => "cone",
             Primitive::Torus { .. } => "torus",
+            Primitive::Disc { .. } => "disc",
+            Primitive::Polygon { .. } => "polygon",
+            Primitive::Tube { .. } => "tube",
+            Primitive::Capsule { .. } => "capsule",
+            Primitive::Pyramid { .. } => "pyramid",
+            Primitive::Platonic { solid, .. } => solid.kind(),
+            Primitive::Landscape { .. } => "landscape",
         }
     }
 
@@ -96,7 +179,34 @@ impl Primitive {
             Primitive::Cylinder { radius, height, sides, rings, caps } => lathe(len(radius), len(radius), len(height), seg(sides, 3), seg(rings, 1), caps),
             Primitive::Cone { radius, height, sides, caps } => lathe(len(radius), 0.0, len(height), seg(sides, 3), 1, caps),
             Primitive::Torus { radius, tube, segments, sides } => torus(len(radius), len(tube), seg(segments, 3), seg(sides, 3)),
+            _ => match self.parts() {
+                Some(parts) => rebuild(parts.0, parts.1),
+                None => Err(crate::OpError::Invalid(format!("{} has no mesh builder", self.kind()))),
+            },
         }
+    }
+
+    /// The raw positions and polygons of the second set of primitives, before they are rebuilt
+    /// (tests check that `PolyMesh::build` had nothing to repair). Sizes are clamped here.
+    pub(crate) fn parts(&self) -> Option<Parts> {
+        let seg = |n: u32, min: u32| n.clamp(min, MAX_SEGMENTS);
+        let len = |x: f32| if x.is_finite() { x.abs().max(1e-4) } else { 1.0 };
+        Some(match *self {
+            Primitive::Disc { radius, inner_radius, sides, rings } => more::disc(len(radius), inner_radius, seg(sides, 3), seg(rings, 1)),
+            Primitive::Polygon { radius, sides } => more::polygon(len(radius), seg(sides, 3)),
+            Primitive::Tube { radius, inner_radius, height, sides, rings, caps } => {
+                more::tube(len(radius), inner_radius, len(height), seg(sides, 3), seg(rings, 1), caps)
+            }
+            Primitive::Capsule { radius, height, sides, rings } => more::capsule(len(radius), len(height), seg(sides, 3), seg(rings, 1)),
+            Primitive::Pyramid { width, depth, height } => more::pyramid(len(width), len(depth), len(height)),
+            Primitive::Platonic { solid, radius } => more::platonic(solid, len(radius)),
+            Primitive::Landscape { width, depth, height, segments, seed, scale, octaves } => {
+                let height = if height.is_finite() { height.clamp(-1e4, 1e4) } else { 0.0 };
+                let scale = if scale.is_finite() { scale.clamp(0.01, 256.0) } else { 4.0 };
+                more::landscape(len(width), len(depth), height, seg(segments, 1), seed, scale, octaves.clamp(1, 8))
+            }
+            _ => return None,
+        })
     }
 }
 
@@ -289,7 +399,7 @@ mod tests {
             let m = p.build().unwrap();
             m.validate().unwrap();
             assert!(m.has_uvs(), "{kind} lost its UVs");
-            if *kind != "plane" && *kind != "torus" {
+            if !matches!(*kind, "plane" | "torus" | "disc" | "polygon" | "tube" | "landscape") {
                 assert!(closed(&m), "{kind} is open");
                 assert_eq!(euler(&m), 2, "{kind}");
                 let (lo, hi) = m.bounds();

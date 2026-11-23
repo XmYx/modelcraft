@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use glam::{Quat, Vec3};
-use modelcraft_engine::scene::{ObjectId, ObjectKind, StepOp};
+use modelcraft_engine::scene::{ObjectId, ObjectKind, StepOp, Transform};
 use modelcraft_engine::sculpt::{BrushKind, BrushSettings};
 use modelcraft_engine::{Command, Document};
 use modelcraft_render::{Camera, ViewPreset};
@@ -75,10 +75,12 @@ pub enum PanelId {
     Paint,
     History,
     Simulation,
+    Coordinates,
 }
 
 impl PanelId {
-    pub const ALL: [PanelId; 6] = [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History, PanelId::Simulation];
+    pub const ALL: [PanelId; 7] =
+        [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History, PanelId::Simulation, PanelId::Coordinates];
     pub fn label(self) -> String {
         match self {
             PanelId::Tree => tl!("Scene"),
@@ -87,6 +89,7 @@ impl PanelId {
             PanelId::Paint => tl!("Paint"),
             PanelId::History => tl!("Undo History"),
             PanelId::Simulation => tl!("Simulation"),
+            PanelId::Coordinates => tl!("Coordinates"),
         }
     }
 }
@@ -96,6 +99,8 @@ impl PanelId {
 pub struct View {
     pub camera: Camera,
     pub preset: ViewPreset,
+    /// What the view's header menus changed for this view only.
+    pub options: crate::view_header::ViewOptions,
 }
 
 /// Parameters of the modeling operations, edited in the tool options bar.
@@ -120,6 +125,18 @@ pub struct NumericTransform {
     pub translate: Vec3,
     pub rotate_deg: Vec3,
     pub scale: Vec3,
+}
+
+impl NumericTransform {
+    /// The transform after this move, turn and scale factor (a turn is applied on the left, as
+    /// Transform by Numbers does).
+    pub fn applied_to(&self, mut t: Transform) -> Transform {
+        let r = self.rotate_deg * (std::f32::consts::PI / 180.0);
+        t.translation += self.translate;
+        t.rotation = Quat::from_euler(glam::EulerRot::XYZ, r.x, r.y, r.z) * t.rotation;
+        t.scale *= self.scale;
+        t
+    }
 }
 
 impl Default for NumericTransform {
@@ -206,6 +223,7 @@ pub struct ModelApp {
     pub display_mode: modelcraft_engine::scene::DisplayMode,
     /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
     pub sculpt_groups: crate::sculpt_groups_ui::State,
+    pub coord: crate::coord_ui::State,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
     /// The `--screenshot-state` window to open on the first frame.
@@ -305,10 +323,10 @@ impl ModelApp {
         crate::i18n::set_language(None);
         crate::theme::apply(ctx);
         let views = [
-            View { camera: Camera::default(), preset: ViewPreset::Perspective },
-            View { camera: Camera::preset(ViewPreset::Front), preset: ViewPreset::Front },
-            View { camera: Camera::preset(ViewPreset::Right), preset: ViewPreset::Right },
-            View { camera: Camera::preset(ViewPreset::Top), preset: ViewPreset::Top },
+            View { camera: Camera::default(), preset: ViewPreset::Perspective, options: Default::default() },
+            View { camera: Camera::preset(ViewPreset::Front), preset: ViewPreset::Front, options: Default::default() },
+            View { camera: Camera::preset(ViewPreset::Right), preset: ViewPreset::Right, options: Default::default() },
+            View { camera: Camera::preset(ViewPreset::Top), preset: ViewPreset::Top, options: Default::default() },
         ];
         let mut app = ModelApp {
             doc: Document::new(),
@@ -367,6 +385,7 @@ impl ModelApp {
             show_patches: false,
             display_mode: Default::default(),
             sculpt_groups: Default::default(),
+            coord: Default::default(),
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
             start_state: cli.screenshot_state,
@@ -953,6 +972,15 @@ impl ModelApp {
             ViewTop => self.set_view(ViewPreset::Top),
             TransformDialog => self.numeric = Some(NumericTransform::default()),
             Palette => self.palette = Some(crate::panels::Palette::default()),
+            CoordinatePanel => {
+                // Show the panel (it is off by default) and put the keyboard focus in it.
+                if !self.layouts.shown(self.workspace, PanelId::Coordinates) {
+                    crate::dock::move_panel(self, PanelId::Coordinates, crate::dock::Move::Show);
+                }
+                self.layouts.raise(crate::dock::Pane::Coordinates);
+                let idx = PanelId::ALL.iter().position(|x| *x == PanelId::Coordinates).unwrap_or(0);
+                ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("panel-focus", idx))));
+            }
             NextPanel => {
                 // Next panel that is shown in this workspace.
                 let shown = self.layouts.shown_panels(self.workspace);
@@ -1046,7 +1074,12 @@ impl ModelApp {
     }
 
     fn set_view(&mut self, p: ViewPreset) {
-        let v = &mut self.views[self.active_view.min(3)];
+        self.set_view_of(self.active_view, p);
+    }
+
+    /// Give view `i` a preset camera, keeping what it looks at and how far away.
+    pub fn set_view_of(&mut self, i: usize, p: ViewPreset) {
+        let v = &mut self.views[i.min(3)];
         let (target, distance) = (v.camera.target, v.camera.distance);
         v.camera = Camera::preset(p);
         v.camera.target = target;
@@ -1090,11 +1123,8 @@ impl ModelApp {
             let verts = self.component_vertices();
             self.add_step(StepOp::MoveVertices { verts, translate: n.translate, rotate: rot, scale: n.scale });
         } else if let Some(id) = self.active() {
-            let Some(mut t) = self.doc.scene.get(id).map(|o| o.transform) else { return };
-            t.translation += n.translate;
-            t.rotation = rot * t.rotation;
-            t.scale *= n.scale;
-            self.run(Command::SetTransform { id, transform: t });
+            let Some(t) = self.doc.scene.get(id).map(|o| o.transform) else { return };
+            self.run(Command::SetTransform { id, transform: n.applied_to(t) });
         }
     }
 
