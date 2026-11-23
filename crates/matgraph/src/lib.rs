@@ -646,7 +646,13 @@ impl Graph {
         let size = size.clamp(1, 256);
         let ids: Vec<NodeId> = self.nodes.iter().map(|n| n.id).collect();
         match self.run(&ids, size, images) {
-            Ok((values, stats)) => (ids.into_iter().zip(values).map(|(id, v)| (id, v.map_or_else(|| vec![[0.5; 3]; size as usize * size as usize], |v| v.into_map(size).rgb))).collect(), stats),
+            Ok((values, stats)) => (
+                ids.into_iter()
+                    .zip(values)
+                    .map(|(id, v)| (id, v.map_or_else(|| vec![[0.5; 3]; size as usize * size as usize], |v| v.into_map(size).rgb)))
+                    .collect(),
+                stats,
+            ),
             Err(_) => (ids.into_iter().map(|id| (id, vec![[0.5; 3]; size as usize * size as usize])).collect(), Stats::default()),
         }
     }
@@ -1008,7 +1014,8 @@ mod tests {
         let separately: usize = g.nodes.iter().map(|n| g.run(&[n.id], 8, &NoImages).map_or(0, |(_, s)| s.evaluations)).sum();
         assert!(separately > 30 * stats.evaluations, "one at a time costs {separately}");
         // A broken graph gives grey cards and no work.
-        let looped: Graph = serde_json::from_str(r#"{"nodes":[{"id":0,"name":"Mix","kind":{"type":"mix","blend":"add"},"inputs":[null,0,0]}],"next_id":1}"#).unwrap();
+        let looped: Graph =
+            serde_json::from_str(r#"{"nodes":[{"id":0,"name":"Mix","kind":{"type":"mix","blend":"add"},"inputs":[null,0,0]}],"next_id":1}"#).unwrap();
         let (thumbs, stats) = looped.thumbnails_counted(4, &NoImages);
         assert_eq!((thumbs[&0].clone(), stats.evaluations), (vec![[0.5; 3]; 16], 0));
     }
