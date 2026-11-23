@@ -1,0 +1,1 @@
+- Scene variants: named sets of overrides (position, visibility, material and any other number) that you switch between in the Variants panel; the main scene always comes back exactly. `modelcraft-cli render --variant N` renders one.

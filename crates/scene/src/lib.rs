@@ -31,6 +31,7 @@ mod rle;
 pub mod sim;
 pub mod snap;
 pub mod splines;
+pub mod variants;
 
 use std::sync::Arc;
 
@@ -800,6 +801,9 @@ pub struct Scene {
     /// Saved attribute sets ([`organize::AttributePreset`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<AttributePreset>,
+    /// Scene variants: overrides over the main scene ([`variants`]).
+    #[serde(default, skip_serializing_if = "variants::Variants::is_empty")]
+    pub variants: variants::Variants,
 }
 
 #[allow(clippy::borrowed_box)]
@@ -898,6 +902,7 @@ impl Scene {
             s.name = s.name.chars().take(256).collect();
         }
         self.repair_organization();
+        variants::repair(&mut self);
         Ok(self)
     }
 

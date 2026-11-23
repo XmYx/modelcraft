@@ -1280,6 +1280,7 @@ impl Document {
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::Spline(c) => crate::spline::apply(self, c, &mut out)?,
+            Command::Variant(c) => crate::variants::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;

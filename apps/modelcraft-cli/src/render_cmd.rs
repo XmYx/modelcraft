@@ -41,6 +41,8 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
+      --variant N                   render scene variant N (see `variant` in `modelcraft-cli commands`); the
+                                    file is not changed
       --seed N";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +78,8 @@ pub struct RenderArgs {
     pub denoise: DenoiseMode,
     pub wide_bvh: bool,
     pub hardware_rays: bool,
+    /// Render this scene variant (the file is not changed).
+    pub variant: Option<u32>,
 }
 
 impl Default for RenderArgs {
@@ -102,6 +106,7 @@ impl Default for RenderArgs {
             restir: RestirSettings::default(),
             denoise: DenoiseMode::Off,
             wide_bvh: false,
+            variant: None,
             hardware_rays: false,
         }
     }
@@ -167,6 +172,7 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         denoise: parse_denoise(a)?,
         wide_bvh: parse_bvh(a)?,
         hardware_rays: a.iter().any(|x| x == "--hardware-rays"),
+        variant: number(a, "--variant")?,
     })
 }
 
@@ -218,6 +224,9 @@ pub fn builtin(name: &str) -> Result<Scene, String> {
 /// The path tracer's scene for a document, seen by a camera that frames everything.
 pub fn document_scene(d: &mut Document, args: &RenderArgs) -> Result<Scene, String> {
     d.sync_sculpt();
+    if let Some(v) = args.variant {
+        d.scene.switch_variant(Some(v)).map_err(|e| e.to_string())?;
+    }
     let mut cam = Camera::default();
     if let Some(v) = args.fov.filter(|v| v.is_finite()) {
         cam.fov_y = v.clamp(1.0, 170.0).to_radians();

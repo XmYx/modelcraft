@@ -368,6 +368,8 @@ pub enum Command {
     Sim(crate::sim::SimCommand),
     /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
     Spline(crate::spline::SplineCommand),
+    /// Scene variants: `{"cmd":"variant","op":"switch","id":1}` ([`crate::variants::VariantCommand`]).
+    Variant(crate::variants::VariantCommand),
 }
 
 fn default_axis() -> u32 {
@@ -560,6 +562,7 @@ impl Command {
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
             Command::Spline(c) => c.label(),
+            Command::Variant(c) => c.label(),
         }
     }
 }
