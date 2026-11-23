@@ -1395,6 +1395,7 @@ impl Scene {
 
 #[cfg(test)]
 mod modeling_tests;
+#[cfg(test)]
 mod spline_tests;
 #[cfg(test)]
 mod tests;

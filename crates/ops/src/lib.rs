@@ -10,8 +10,8 @@
 
 pub mod array;
 pub mod bevel;
-pub mod cut;
 pub mod bvh;
+pub mod cut;
 pub mod decimate;
 pub mod deform;
 pub mod edit;

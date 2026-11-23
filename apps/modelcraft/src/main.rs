@@ -24,12 +24,12 @@ mod constraint_ui_tests;
 mod coord_ui;
 #[cfg(test)]
 mod coord_ui_tests;
-mod cut_ui;
-#[cfg(test)]
-mod cut_ui_tests;
 mod create_menu;
 #[cfg(test)]
 mod create_menu_tests;
+mod cut_ui;
+#[cfg(test)]
+mod cut_ui_tests;
 mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
