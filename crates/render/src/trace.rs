@@ -136,6 +136,89 @@ fn apply_linked(path: &str, builder: &mut SceneBuilder, material: &mut TraceMate
     Ok(())
 }
 
+/// Largest picture file a graph's image node reads.
+const MAX_GRAPH_IMAGE_BYTES: u64 = 256 << 20;
+/// Side of the maps a material graph is evaluated into for a render.
+pub const GRAPH_MAP_SIZE: u32 = 512;
+
+/// Reads the pictures a material graph's image nodes name, once each, as linear colour.
+#[derive(Default)]
+pub struct FileImages {
+    cache: std::sync::Mutex<std::collections::HashMap<String, Option<modelcraft_matgraph::Picture>>>,
+}
+
+impl modelcraft_matgraph::Resolver for FileImages {
+    fn picture(&self, path: &str) -> Option<modelcraft_matgraph::Picture> {
+        let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        cache
+            .entry(path.to_string())
+            .or_insert_with(|| {
+                let size = std::fs::metadata(path).ok()?.len();
+                if size > MAX_GRAPH_IMAGE_BYTES {
+                    return None;
+                }
+                let decoded = craft_image_codecs::decode(&std::fs::read(path).ok()?).ok()?;
+                let integer = matches!(decoded.sample_type(), craft_image_codecs::SampleType::U8 | craft_image_codecs::SampleType::U16);
+                let rgba = decoded.convert(craft_image_codecs::ChannelLayout::Rgba, craft_image_codecs::SampleType::F32);
+                let values = rgba.to_f32_samples()?;
+                let rgb = values
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|p| if integer { [srgb_to_linear(p[0]), srgb_to_linear(p[1]), srgb_to_linear(p[2])] } else { [p[0], p[1], p[2]] })
+                    .collect::<Vec<_>>();
+                (rgb.len() == rgba.width() as usize * rgba.height() as usize).then(|| modelcraft_matgraph::Picture {
+                    width: rgba.width(),
+                    height: rgba.height(),
+                    rgb,
+                })
+            })
+            .clone()
+    }
+}
+
+/// An image of a graph's map for the path tracer.
+fn graph_image(map: &modelcraft_matgraph::Map) -> Option<Image> {
+    let values: Vec<f32> = map.rgb.iter().flat_map(|p| [p[0], p[1], p[2], 1.0]).collect();
+    Image::from_data(map.width, map.height, Kind::Color, values, &Limits::default()).ok()
+}
+
+/// Evaluate a material graph and point `material` at its maps: a linked input becomes a texture
+/// that replaces the flat number it stands for, as a linked material's maps do. Emission has no
+/// map in the engine, so a linked emission is its mean colour. A graph that cannot be compiled is
+/// reported and the flat material renders.
+fn apply_graph(graph: &modelcraft_matgraph::Graph, builder: &mut SceneBuilder, material: &mut TraceMaterial) -> Result<(), String> {
+    let compiled = graph.compile(GRAPH_MAP_SIZE, &FileImages::default()).map_err(|e| e.to_string())?;
+    material.base_color = Vec3::from_array(compiled.flat_base_color);
+    material.base_metalness = compiled.flat_metallic;
+    material.specular_roughness = compiled.flat_roughness;
+    let mut emission = Vec3::from_array(compiled.flat_emission);
+    if let Some(id) = compiled.base_color.as_ref().and_then(graph_image).and_then(|i| builder.add_texture(i).ok()) {
+        material.base_color_texture = Some(id);
+        material.base_color = Vec3::ONE;
+    }
+    if let Some(id) = compiled.metallic.as_ref().and_then(graph_image).and_then(|i| builder.add_texture(i).ok()) {
+        material.metalness_texture = Some(id);
+        material.base_metalness = 1.0;
+    }
+    if let Some(id) = compiled.roughness.as_ref().and_then(graph_image).and_then(|i| builder.add_texture(i).ok()) {
+        material.roughness_texture = Some(id);
+        material.specular_roughness = 1.0;
+    }
+    if let Some(id) = compiled.normal.as_ref().and_then(graph_image).and_then(|i| builder.add_texture(i).ok()) {
+        material.normal_texture = Some(id);
+    }
+    if let Some(map) = &compiled.emission {
+        let n = map.rgb.len().max(1) as f32;
+        emission = map.rgb.iter().fold(Vec3::ZERO, |a, p| a + Vec3::from_array(*p)) / n;
+    }
+    // The colour is radiance: its largest part is the strength, the rest is the hue.
+    let strength = emission.max_element().max(0.0);
+    material.emission_color = if strength > 0.0 { emission / strength } else { Vec3::ZERO };
+    material.emission_luminance = strength;
+    Ok(())
+}
+
 /// Largest panorama file that is read.
 const MAX_PANORAMA_BYTES: u64 = 1 << 30;
 
@@ -292,6 +375,11 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
             && let Err(e) = apply_linked(path, &mut b, &mut converted)
         {
             log::warn!("linked material {path}: {e}; rendering its plain parameters");
+        }
+        if let Some(graph) = &object.material.graph
+            && let Err(e) = apply_graph(graph, &mut b, &mut converted)
+        {
+            log::warn!("material graph of {}: {e}; rendering its flat material", object.name);
         }
         let material = b.add_material(converted)?;
         b.add_mesh(&trace_mesh(&mesh), scene.world_matrix(id), material)?;
@@ -755,5 +843,73 @@ mod tests {
         }
         let t = export_scene(&s, &mut eval, &Camera::default(), &options).unwrap();
         assert!(t.lights.env_map.is_none() && t.lights.environment == Vec3::new(0.0, 0.0, 2.0));
+    }
+
+    /// A glossy metal sphere whose roughness comes from a noise node of a material graph.
+    fn graph_sphere(with_noise: bool) -> Scene {
+        use modelcraft_matgraph::{Graph, NodeKind};
+        let mut s = Scene::new();
+        let id = s
+            .add(
+                "Ball",
+                ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::Sphere { radius: 1.0, segments: 24, rings: 12 } }, steps: vec![] },
+                None,
+            )
+            .unwrap();
+        let mut graph = Graph::new();
+        let surface = graph.add(NodeKind::Surface { base_color: [0.9, 0.7, 0.3], metallic: 1.0, roughness: 0.15, emission: [0.0; 3] }).unwrap();
+        if with_noise {
+            let noise = graph.add(NodeKind::Noise { scale: 6.0, detail: 3, roughness: 0.6, seed: 2 }).unwrap();
+            graph.link(surface, 2, Some(noise)).unwrap();
+        }
+        s.edit(id).unwrap().material = Material { graph: Some(Arc::new(graph)), ..Material::default() };
+        s
+    }
+
+    #[test]
+    fn a_material_graph_with_noise_roughness_renders_the_same_on_cpu_and_gpu() {
+        let mut eval = Evaluator::new();
+        let options = ExportOptions { aspect: 1.0, ..ExportOptions::default() };
+        let mut cam = Camera::default();
+        cam.frame(Vec3::splat(-1.0), Vec3::splat(1.0));
+        let settings = RenderSettings { width: 32, height: 32, ..RenderSettings::default() };
+        let mut film = |with_noise: bool, gpu: bool| -> Option<craft_render_core::Film> {
+            let t = export_scene(&graph_sphere(with_noise), &mut eval, &cam, &options).unwrap();
+            assert_eq!(t.textures.len(), usize::from(with_noise), "the noise node becomes one map");
+            if gpu {
+                let _turn = GPU_TURN.lock().unwrap_or_else(|p| p.into_inner());
+                let ctx = craft_render_gpu::GpuContext::new()?;
+                let mut r = craft_render_gpu::GpuRenderer::new(&ctx, &t, settings).unwrap();
+                r.render(&ctx, 32).unwrap();
+                return Some(r.film(&ctx).unwrap());
+            }
+            Some(render_image(Arc::new(t), settings, 32).unwrap())
+        };
+        let flat = film(false, false).unwrap();
+        let noisy = film(true, false).unwrap();
+        let different = craft_render_core::relative_mse(&noisy.mean(), &flat.mean());
+        assert!(different > 1e-4, "the noise changes the picture: {different}");
+        match film(true, true) {
+            Some(gpu) => {
+                let err = craft_render_core::relative_mse(&gpu.mean(), &noisy.mean());
+                assert!(err < 2e-3, "GPU and CPU agree on a graph-driven material: relative MSE {err}");
+            }
+            None => eprintln!("skipped the GPU half: no adapter on this machine"),
+        }
+    }
+
+    #[test]
+    fn a_broken_graph_renders_the_flat_material_and_says_so() {
+        use modelcraft_matgraph::{Graph, NodeKind};
+        let mut s = graph_sphere(false);
+        let id = s.objects()[0].id;
+        // A graph without a surface node cannot compile.
+        let mut broken = Graph::new();
+        broken.add(NodeKind::Value { value: 1.0 }).unwrap();
+        s.edit(id).unwrap().material.graph = Some(Arc::new(broken));
+        let mut eval = Evaluator::new();
+        let t = export_scene(&s, &mut eval, &Camera::default(), &ExportOptions::default()).unwrap();
+        assert_eq!(t.textures.len(), 0);
+        assert!(t.triangle_count() > 0, "the object still renders");
     }
 }

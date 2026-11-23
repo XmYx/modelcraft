@@ -37,6 +37,7 @@ use std::sync::Arc;
 use glam::{Mat4, Quat, Vec3};
 pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES, Modifier};
 pub use modelcraft_field::{Field, FieldStack};
+pub use modelcraft_matgraph as matgraph;
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::array::Array;
 pub use modelcraft_ops::deform::Deformer;
@@ -130,6 +131,10 @@ pub struct Material {
     pub transmission: f32,
     #[serde(default = "default_ior", skip_serializing_if = "is_default_ior")]
     pub ior: f32,
+    /// A node graph that makes the surface's maps (noise, ramps, mixes, pictures); where it links
+    /// an input, the map replaces the flat number ([`matgraph`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<Arc<matgraph::Graph>>,
 }
 
 fn white() -> [f32; 3] {
@@ -162,6 +167,7 @@ impl Default for Material {
             sheen: 0.0,
             transmission: 0.0,
             ior: default_ior(),
+            graph: None,
         }
     }
 }

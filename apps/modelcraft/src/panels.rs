@@ -1230,6 +1230,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::render_view::show(app, ctx);
     crate::render_ui::show(app, ctx);
     crate::bake_ui::show(app, ctx);
+    crate::matgraph_ui::show(app, ctx);
     crate::picture_viewer::show(app, ctx);
     crate::script_ui::show(app, ctx);
     crate::plugin_ui::show(app, ctx);

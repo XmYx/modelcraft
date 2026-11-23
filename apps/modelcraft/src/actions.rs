@@ -98,6 +98,7 @@ pub enum Action {
     Stage(crate::stage_ui::StageAction),
     Render(crate::render_ui::RenderAction),
     Bake(crate::bake_ui::BakeAction),
+    Material(crate::matgraph_ui::MatAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -212,6 +213,7 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::stage_ui::StageAction::ALL.map(Stage));
     v.extend(crate::render_ui::RenderAction::ALL.map(Render));
     v.extend(crate::bake_ui::BakeAction::ALL.map(Bake));
+    v.extend(crate::matgraph_ui::MatAction::ALL.map(Material));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -420,6 +422,7 @@ impl Action {
             Stage(a) => a.label(),
             Render(a) => a.label(),
             Bake(a) => a.label(),
+            Material(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -534,6 +537,7 @@ impl Action {
             Stage(a) => a.id(),
             Render(a) => a.id(),
             Bake(a) => a.id(),
+            Material(a) => a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
@@ -665,6 +669,7 @@ impl Action {
             Stage(a) => a.menu(),
             Render(_) => "Render",
             Bake(_) => "UV",
+            Material(_) => "Render",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",
