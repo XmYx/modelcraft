@@ -242,3 +242,45 @@ fn rigs_with_constraints_survive_save_load_and_crash_recovery() {
     assert!(near(pos(&again, foot), want.1));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn formulas_on_any_attribute_survive_save_undo_and_crash_recovery() {
+    let dir = std::env::temp_dir().join(format!("modelcraft-formulas-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("f.modelcraft");
+    let mut d = Document::new();
+    let lever = group(&mut d, [2.0, 0.0, 0.0], "Lever");
+    let ball = d.execute(Command::AddPrimitive { kind: "sphere".into(), name: Some("Ball".into()), parent: None }).unwrap().created[0];
+    let set = |d: &mut Document, path: &str, expr: &str| {
+        d.execute(Command::Rig(R::SetExpression { target: ball, path: path.into(), expr: expr.into() })).unwrap();
+    };
+    // A primitive parameter and a transform channel, one reading the other object by name.
+    set(&mut d, "primitive.radius", "0.25 + @Lever.translate.x / 4");
+    assert_eq!(d.scene.attr(ball, "primitive.radius"), Some(0.75));
+    d.save_as(&path).unwrap();
+    set(&mut d, "translate.y", "self.primitive.radius * 2 + frame");
+    d.execute(Command::Anim(AnimCommand::SetTime { frame: 3.0 })).unwrap();
+    assert_eq!(d.scene.attr(ball, "translate.y"), Some(4.5));
+    // Undo takes the second formula back (the frame is not an undo step); redo brings it again.
+    d.execute(Command::Undo).unwrap();
+    assert!(d.scene.constraints.formula(ball, "translate.y").is_none());
+    assert!(d.scene.constraints.formula(ball, "primitive.radius").is_some());
+    d.execute(Command::Redo).unwrap();
+    assert!(d.scene.constraints.formula(ball, "translate.y").is_some());
+    assert_eq!(d.scene.attr(ball, "translate.y"), Some(4.5));
+    d.sync_journal();
+    let want = d.scene.constraints.clone();
+    drop(d);
+    // The file has the first formula; the journal brings back the second.
+    let mut back = Document::open(&path).unwrap();
+    assert!(back.scene.constraints.formula(ball, "primitive.radius").is_some());
+    assert!(back.scene.constraints.formula(ball, "translate.y").is_none());
+    back.recover().unwrap();
+    assert!(back.scene.constraints == want);
+    back.set_frame(3.0);
+    assert_eq!(back.scene.attr(ball, "translate.y"), Some(4.5));
+    move_to(&mut back, lever, [6.0, 0.0, 0.0]);
+    assert_eq!(back.scene.attr(ball, "primitive.radius"), Some(1.75), "the formula follows its driver");
+    assert_eq!(back.scene.attr(ball, "translate.y"), Some(6.5), "and the formula reading it runs after it");
+    let _ = std::fs::remove_dir_all(&dir);
+}

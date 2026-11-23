@@ -77,8 +77,34 @@ pub fn dispatch(app: &mut ModelApp, ctx: &egui::Context) -> Vec<Action> {
     let active = Active { panel: None, contexts: if typing { &[] } else { &contexts }, typing };
     let keymap = &app.keymap;
     let dispatcher = &mut app.dispatcher;
-    let hits = ctx.input_mut(|i| dispatcher.dispatch_filtered(i, keymap, &active, |hit| !(control && widget_key(&hit.trigger.chord))));
+    // A plain Escape in a text field cancels the edit there; it must not also clear the selection
+    // (which empties Properties under the field being edited). egui drops the focus on Escape
+    // before the frame starts, so the field is the one that had it at the end of the last frame.
+    let typed_before = ctx.data(|d| d.get_temp::<egui::Id>(text_focus_id())).is_some_and(|id| ctx.memory(|m| m.had_focus_last_frame(id)));
+    let escape = |c: &craft_keymap::Chord| c.is_plain() && c.key == craft_keymap::Key::Escape;
+    let hits = ctx.input_mut(|i| {
+        dispatcher.dispatch_filtered(i, keymap, &active, |hit| {
+            !(control && widget_key(&hit.trigger.chord)) && !((typing || typed_before) && escape(&hit.trigger.chord))
+        })
+    });
     hits.iter().filter_map(|h| action_of(&h.command)).collect()
+}
+
+fn text_focus_id() -> egui::Id {
+    egui::Id::unique("modelcraft-text-focus")
+}
+
+/// Remember the text field that has the focus at the end of this frame (see [`dispatch`]).
+pub fn end_frame(ctx: &egui::Context) {
+    let focused = ctx.memory(|m| m.focused()).filter(|_| ctx.text_edit_focused());
+    ctx.data_mut(|d| match focused {
+        Some(id) => {
+            d.insert_temp(text_focus_id(), id);
+        }
+        None => {
+            d.remove::<egui::Id>(text_focus_id());
+        }
+    });
 }
 
 /// A plain press of a key that controls use themselves.

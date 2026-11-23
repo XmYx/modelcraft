@@ -1465,6 +1465,7 @@ impl ModelApp {
         crate::organize_ui::show(self, &ctx);
         crate::radial::show(self, &ctx);
         self.screenshot_tick(&ctx);
+        crate::keys::end_frame(&ctx);
         if self.stroke.is_some() || self.drag.is_some() || self.bench.is_some() || self.anim.playback.playing {
             ctx.request_repaint();
         }

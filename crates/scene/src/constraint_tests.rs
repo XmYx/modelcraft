@@ -208,7 +208,10 @@ fn constraints_run_in_dependency_order_whatever_their_list_order() {
     s.constraints.add("ik", j[2], ik(a, None, 2, IkSolver::Auto)).unwrap();
     s.constraints.add("a to b", a, ConstraintKind::Point { sources: sources(&[b]) }).unwrap();
     s.constraints.add("b to c", b, ConstraintKind::Point { sources: sources(&[c]) }).unwrap();
-    let (order, cyclic) = s.constraint_order();
+    let (order, cyclic) = {
+        let f = s.formulas();
+        s.constraint_order(&f)
+    };
     assert_eq!((order, cyclic), (vec![2, 1, 0], vec![]));
     s.edit(c).unwrap().transform.translation = Vec3::new(1.0, 1.0, 0.0);
     s.solve_constraints();
@@ -266,7 +269,7 @@ fn cycles_are_reported_and_skipped_and_the_rest_still_runs() {
     let o = group(&mut s, "O", Vec3::ZERO, None);
     s.constraints.add("grow", o, ConstraintKind::Expression { path: "translate.x".into(), expr: "self.translate.x + 1".into() }).unwrap();
     let curve = Arc::new(Curve::from_points(&[(0.0, 0.0), (1.0, 1.0)]));
-    s.constraints.add("loop", o, ConstraintKind::Driven { path: "rotate.z".into(), driver: o, driver_path: "rotate.x".into(), curve }).unwrap();
+    s.constraints.add("loop", o, ConstraintKind::Driven { path: "rotate.z".into(), driver: o, driver_path: "rotate.z".into(), curve }).unwrap();
     let j = chain(&mut s, 3);
     let goal = group(&mut s, "Goal", Vec3::X, Some(j[1]));
     s.constraints.add("ik", j[2], ik(goal, None, 2, IkSolver::Auto)).unwrap();
@@ -281,6 +284,27 @@ fn cycles_are_reported_and_skipped_and_the_rest_still_runs() {
     s.solve_constraints();
     assert!(!s.constraints.problems().iter().any(|p| p.constraint == ok));
     assert_eq!(s.get(free).unwrap().transform.scale.y, 3.0);
+    // Axes are separate: X from Y and Y from Z of one object is no cycle; Z from X closes one.
+    let axes = group(&mut s, "Axes", Vec3::new(0.0, 0.0, 1.0), None);
+    let xy = s.constraints.add("x from y", axes, ConstraintKind::Expression { path: "translate.x".into(), expr: "self.translate.y * 2".into() }).unwrap();
+    let yz = s.constraints.add("y from z", axes, ConstraintKind::Expression { path: "translate.y".into(), expr: "self.translate.z + 1".into() }).unwrap();
+    s.solve_constraints();
+    assert!(!s.constraints.problems().iter().any(|p| p.constraint == xy || p.constraint == yz), "{:?}", s.constraints.problems());
+    assert_eq!(s.get(axes).unwrap().transform.translation, Vec3::new(4.0, 2.0, 1.0), "y runs first, then x");
+    let zx = s.constraints.add("z from x", axes, ConstraintKind::Expression { path: "translate.z".into(), expr: "self.translate.x".into() }).unwrap();
+    s.solve_constraints();
+    let cyclic: Vec<u32> = s.constraints.problems().iter().map(|p| p.constraint).filter(|c| [xy, yz, zx].contains(c)).collect();
+    assert_eq!(cyclic.len(), 3, "all three are in the loop");
+    // A whole-channel constraint overlaps every axis: a point constraint writing the position
+    // runs before a formula reading one axis of it.
+    let src = group(&mut s, "Src", Vec3::new(5.0, 0.0, 0.0), None);
+    let follow = group(&mut s, "Follow", Vec3::ZERO, None);
+    let reader = group(&mut s, "Reader", Vec3::ZERO, None);
+    let f = s.constraints.add("read", reader, ConstraintKind::Expression { path: "translate.y".into(), expr: format!("@{}.translate.x", follow.0) }).unwrap();
+    s.constraints.add("follow", follow, ConstraintKind::Point { sources: sources(&[src]) }).unwrap();
+    s.solve_constraints();
+    assert!(!s.constraints.problems().iter().any(|p| p.constraint == f));
+    assert_eq!(s.get(reader).unwrap().transform.translation.y, 5.0);
 }
 
 #[test]
@@ -487,7 +511,98 @@ proptest! {
             prop_assert!((a.translation - b.translation).length() < 1e-4 && a.rotation.dot(b.rotation).abs() > 1.0 - 1e-5 && (a.scale - b.scale).length() < 1e-4, "{a:?} became {b:?}");
         }
         // Every skipped constraint says why; the order holds each enabled constraint at most once.
-        let (order, cyclic) = s.constraint_order();
+        let (order, cyclic) = { let f = s.formulas(); s.constraint_order(&f) };
         prop_assert_eq!(order.len() + cyclic.len(), s.constraints.list().len());
     }
+}
+
+#[test]
+fn a_solve_runs_once_per_change_not_once_per_call() {
+    let mut s = Scene::new();
+    let driver = group(&mut s, "Driver", Vec3::ZERO, None);
+    let door = group(&mut s, "Door", Vec3::ZERO, None);
+    let id =
+        s.constraints.add("f", door, ConstraintKind::Expression { path: "translate.y".into(), expr: format!("frame + @{}.translate.x", driver.0) }).unwrap();
+    s.solve_constraints();
+    let runs = s.constraints.solves_run();
+    // A redraw solves again with nothing changed: no work.
+    for _ in 0..100 {
+        assert_eq!(s.solve_constraints(), 0);
+    }
+    assert_eq!(s.constraints.solves_run(), runs, "a hundred calls with nothing changed run no solve");
+    // Each thing the formula reads makes the next call run once.
+    s.set_frame(5.0);
+    assert_eq!(s.constraints.solves_run(), runs + 1);
+    assert_eq!(s.get(door).unwrap().transform.translation.y, 5.0);
+    s.set_frame(5.0);
+    assert_eq!(s.constraints.solves_run(), runs + 1, "the same frame again");
+    s.edit(driver).unwrap().transform.translation.x = 2.0;
+    s.solve_constraints();
+    s.solve_constraints();
+    assert_eq!(s.constraints.solves_run(), runs + 2);
+    assert_eq!(s.get(door).unwrap().transform.translation.y, 7.0);
+    // An edit of the formula itself.
+    if let Some(ConstraintKind::Expression { expr, .. }) = s.constraints.get_mut(id).map(|c| &mut c.kind) {
+        *expr = "frame * 2".into();
+    }
+    s.solve_constraints();
+    assert_eq!(s.get(door).unwrap().transform.translation.y, 10.0);
+    assert_eq!(s.constraints.solves_run(), runs + 3);
+    // A transform written without a new revision still counts as a change.
+    if let Some(o) = s.object_mut(door) {
+        o.transform.translation.y = -1.0;
+    }
+    s.solve_constraints();
+    assert_eq!(s.get(door).unwrap().transform.translation.y, 10.0);
+}
+
+#[test]
+fn formulas_are_parsed_once_and_read_objects_by_name() {
+    let mut s = Scene::new();
+    let lever = group(&mut s, "Lever", Vec3::new(3.0, 0.0, 0.0), None);
+    let door = group(&mut s, "Door", Vec3::ZERO, None);
+    let a = s.constraints.add("a", door, ConstraintKind::Expression { path: "translate.y".into(), expr: "@Lever.translate.x * 2".into() }).unwrap();
+    let b = s.constraints.add("b", door, ConstraintKind::Expression { path: "translate.z".into(), expr: "self.translate.y + 1".into() }).unwrap();
+    s.solve_constraints();
+    assert!(s.constraints.problems().is_empty(), "{:?}", s.constraints.problems());
+    let t = s.get(door).unwrap().transform.translation;
+    assert_eq!((t.y, t.z), (6.0, 7.0), "b runs after a, which it reads");
+    assert_eq!(s.constraints.cache.parsed.len(), 2);
+    let parsed = s.constraints.cache.parsed.get(&a).and_then(|(_, e)| e.clone().ok());
+    s.edit(lever).unwrap().transform.translation.x = 1.0;
+    s.solve_constraints();
+    let again = s.constraints.cache.parsed.get(&a).and_then(|(_, e)| e.clone().ok());
+    assert!(matches!((&parsed, &again), (Some(p), Some(q)) if Arc::ptr_eq(p, q)), "the same parsed formula is used again");
+    assert_eq!(s.get(door).unwrap().transform.translation.y, 2.0);
+    // A name that no object has is a problem, not a crash; removed formulas leave the cache.
+    s.edit(lever).unwrap().name = "Handle".into();
+    s.solve_constraints();
+    assert_eq!(s.constraints.problems().iter().filter(|p| p.constraint == a).count(), 1);
+    s.constraints.remove(b);
+    s.solve_constraints();
+    assert_eq!(s.constraints.cache.parsed.len(), 1);
+    assert!(s.constraints.formula(door, "translate.y").is_some() && s.constraints.formula(door, "translate.z").is_none());
+}
+
+#[test]
+fn the_work_cap_skips_what_does_not_fit_and_says_so() {
+    let mut s = Scene::new();
+    // 251 ones and 250 plus signs: 501 steps each.
+    let long = format!("1{}", "+1".repeat(250));
+    let cost = modelcraft_anim::expr::Expr::parse(&long).unwrap().cost();
+    assert_eq!(cost, 501);
+    let n = 600;
+    for i in 0..n {
+        let o = group(&mut s, &format!("O{i}"), Vec3::ZERO, None);
+        s.constraints.add("long", o, ConstraintKind::Expression { path: "translate.x".into(), expr: long.clone() }).unwrap();
+    }
+    s.solve_constraints();
+    let fit = MAX_SOLVE_WORK / cost;
+    assert!(fit < n, "the test must overflow the cap");
+    assert_eq!(s.constraints.last_work(), fit * cost);
+    assert!(s.constraints.last_work() <= MAX_SOLVE_WORK);
+    assert_eq!(s.constraints.problems().len(), n - fit);
+    assert!(s.constraints.problems().iter().all(|p| p.message.contains("steps a frame")));
+    let ran = s.objects().iter().filter(|o| o.transform.translation.x == 251.0).count();
+    assert_eq!(ran, fit, "the ones that fit ran in full");
 }
