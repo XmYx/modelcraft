@@ -55,7 +55,7 @@ fn a_fill_paints_the_listed_vertices_or_everything() {
     assert!(mesh(&mut d, id).corner_colors().iter().all(|c| *c == [0.0, 1.0, 0.0, 1.0]));
     d.execute(Command::AddStep { id, op: StepOp::FillColor { color: [0.0, 0.0, 1.0, 1.0], verts: vec![0] } }).unwrap();
     let m = mesh(&mut d, id);
-    assert!(m.corner_colors().iter().any(|c| *c == [0.0, 0.0, 1.0, 1.0]) && m.corner_colors().iter().any(|c| *c == [0.0, 1.0, 0.0, 1.0]));
+    assert!(m.corner_colors().contains(&[0.0, 0.0, 1.0, 1.0]) && m.corner_colors().contains(&[0.0, 1.0, 0.0, 1.0]));
     // A stale vertex is a step error, not a crash.
     let out = d.execute(Command::AddStep { id, op: StepOp::FillColor { color: [1.0; 4], verts: vec![9999] } }).unwrap();
     assert!(!out.warnings.is_empty());

@@ -61,10 +61,10 @@ fn the_colour_fields_swatches_and_hex_by_keyboard() {
     // The hex field: Tab to it, replace the text, Tab away.
     h.get_by_label("Hex colour").focus();
     h.run();
+    // Select the whole text with the keyboard (End, then Shift+Home) and type over it.
     h.key_press(Key::End);
-    for _ in 0..10 {
-        h.key_press(Key::Backspace);
-    }
+    h.run();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Home);
     h.run();
     h.event(egui::Event::Text("#102030".into()));
     h.run();
