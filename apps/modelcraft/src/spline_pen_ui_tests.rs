@@ -49,6 +49,14 @@ fn screen_of(h: &Harness<'static, ModelApp>, world: Vec3) -> Pos2 {
     crate::viewport::to_screen(&h.state().views[0].camera, rect, world).expect("on screen")
 }
 
+/// Focus a control and press Space, as a keyboard user does.
+fn press(h: &mut Harness<'static, ModelApp>, role: Role, label: &str) {
+    h.get_by_role_and_label(role, label).focus();
+    h.run();
+    h.key_press(Key::Space);
+    h.run();
+}
+
 fn pointer(h: &mut Harness<'static, ModelApp>, kind: &str, at: Pos2) {
     match kind {
         "move" => h.event(Event::PointerMoved(at)),
@@ -319,37 +327,142 @@ fn the_points_list_edits_numerically_and_by_keyboard() {
     h.run();
     assert!((spline(&mut h, id).segments[0].knots[1].tan_out.y - 1.5).abs() < 1e-4);
     // Open the curve, then add, insert and delete points with buttons.
-    h.get_by_role_and_label(Role::CheckBox, "Closed").click();
+    press(&mut h, Role::CheckBox, "Closed");
     h.run();
     assert!(!spline(&mut h, id).segments[0].closed);
-    h.get_by_role_and_label(Role::Button, "Add Point").click();
+    press(&mut h, Role::Button, "Add Point");
     h.run();
     assert_eq!(spline(&mut h, id).segments[0].knots.len(), 5);
-    h.get_by_role_and_label(Role::Button, "Insert Point").click();
+    press(&mut h, Role::Button, "Insert Point");
     h.run();
     assert_eq!(spline(&mut h, id).segments[0].knots.len(), 6);
-    h.get_by_role_and_label(Role::Button, "Delete Points").click();
+    press(&mut h, Role::Button, "Delete Points");
     h.run();
     assert_eq!(spline(&mut h, id).segments[0].knots.len(), 5);
-    h.get_by_role_and_label(Role::CheckBox, "Closed").click();
+    press(&mut h, Role::CheckBox, "Closed");
     h.run();
     assert!(spline(&mut h, id).segments[0].closed);
 }
 
 #[test]
-fn points_are_not_drawn_for_other_objects_and_a_deleted_point_drops_out_of_the_selection() {
+fn a_removed_point_leaves_the_selection_and_other_objects_show_no_points() {
     let mut h = harness();
     h.run();
     palette(&mut h, "Add Rectangle Spline");
     let id = h.state().selection[0];
+    h.run();
     h.state_mut().spline.selected = vec![KnotRef { segment: 0, knot: 3 }];
+    h.run();
+    assert_eq!(h.state().spline.selected.len(), 1, "a point that exists stays selected");
     h.state_mut().run(modelcraft_engine::Command::Spline(modelcraft_engine::SplineCommand::Edit {
         id,
         edit: modelcraft_engine::curves::SplineEdit::Remove { knots: vec![KnotRef { segment: 0, knot: 3 }] },
     }));
     h.run();
     assert!(h.state().spline.selected.is_empty(), "the removed point is not selected any more");
+    // Select a point again, then make something else active: the selection goes and nothing is picked.
+    h.state_mut().spline.selected = vec![KnotRef { segment: 0, knot: 0 }];
+    h.run();
+    assert_eq!(h.state().spline.selected.len(), 1);
     palette(&mut h, "Add Cube");
     h.run();
     assert!(h.state().spline.selected.is_empty());
+    let rect = viewport_rect(&h);
+    let on_spline_point = crate::viewport::to_screen(&h.state().views[0].camera, rect, Vec3::new(-1.0, -0.75, 0.0)).unwrap();
+    assert_eq!(spline_pen::pick(h.state_mut(), 0, rect, on_spline_point), None, "the cube is active: the rectangle's points are not pickable");
+}
+
+const CORNER: Vec3 = Vec3::new(1.0, 0.75, 0.0);
+
+/// Everything about a spline that a preview could have changed.
+fn snapshot(h: &mut Harness<'static, ModelApp>, id: ObjectId) -> (Spline, usize) {
+    (spline(h, id), h.state().doc.undo.len())
+}
+
+/// Grab the point at `world` and pull it, leaving the button down.
+fn start_drag(h: &mut Harness<'static, ModelApp>, world: Vec3) -> Pos2 {
+    let from = screen_of(h, world);
+    pointer(h, "move", from);
+    pointer(h, "down", from);
+    for step in 1..=4 {
+        pointer(h, "move", from + egui::vec2(10.0 * step as f32, 0.0));
+    }
+    from + egui::vec2(40.0, 0.0)
+}
+
+#[test]
+fn a_drag_abandoned_by_escape_shift_p_undo_or_delete_leaves_no_trace() {
+    for how in ["escape", "pen", "undo", "delete"] {
+        let mut h = harness();
+        h.run();
+        palette(&mut h, "Add Rectangle Spline");
+        let id = h.state().selection[0];
+        h.run();
+        // A step to undo that is not the creation of the spline itself.
+        h.state_mut().run(modelcraft_engine::Command::Spline(modelcraft_engine::SplineCommand::SetTessellation {
+            id,
+            tess: modelcraft_engine::curves::Tessellation::Fixed { steps: 4 },
+        }));
+        let before = snapshot(&mut h, id);
+        let tail = start_drag(&mut h, CORNER);
+        assert_ne!(spline(&mut h, id), before.0, "{how}: the preview shows while the button is down");
+        match how {
+            "escape" => h.key_press(Key::Escape),
+            "pen" => h.key_press_modifiers(Modifiers::SHIFT, Key::P),
+            "undo" => h.key_press_modifiers(Modifiers::COMMAND, Key::Z),
+            _ => h.key_press(Key::Delete),
+        }
+        h.run();
+        if how == "delete" {
+            // The grab selected the point, so Delete removes it: one command, and the other points
+            // are where they were before the grab (the preview is not part of what is left).
+            let left = spline(&mut h, id);
+            let want: Vec<Vec3> = before.0.segments[0].knots.iter().map(|k| k.pos).filter(|p| p.distance(CORNER) > 0.01).collect();
+            assert_eq!(left.segments[0].knots.iter().map(|k| k.pos).collect::<Vec<_>>(), want);
+            assert_eq!(h.state().doc.undo.len(), before.1 + 1);
+            h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+            h.run();
+            assert_eq!(spline(&mut h, id), before.0, "undo brings back the point where it was, not where the drag had taken it");
+            continue;
+        }
+        assert_eq!(spline(&mut h, id), before.0, "{how}: the scene is as it was before the grab");
+        // Undo is the one case that does run a command: it takes back the step before the grab.
+        let want = if how == "undo" { before.1 - 1 } else { before.1 };
+        assert_eq!(h.state().doc.undo.len(), want, "{how}: no new undo step");
+        // Letting go afterwards, or moving on, changes nothing and does not follow the pointer.
+        pointer(&mut h, "move", tail + egui::vec2(30.0, 10.0));
+        pointer(&mut h, "up", tail + egui::vec2(30.0, 10.0));
+        h.run();
+        assert_eq!(spline(&mut h, id), before.0, "{how}: nothing moved after the release");
+        assert_eq!(h.state().doc.undo.len(), if how == "undo" { before.1 - 1 } else { before.1 }, "{how}");
+    }
+}
+
+#[test]
+fn undo_after_a_cancelled_drag_does_not_bring_the_preview_back() {
+    let mut h = harness();
+    h.run();
+    palette(&mut h, "Add Rectangle Spline");
+    let id = h.state().selection[0];
+    h.run();
+    let original = spline(&mut h, id);
+    // One real edit, then an abandoned drag, then undo: the original, not the preview.
+    let tail = start_drag(&mut h, CORNER);
+    pointer(&mut h, "up", tail);
+    h.run();
+    let moved = spline(&mut h, id);
+    assert_ne!(moved, original);
+    let at = moved.segments[0].knots.iter().map(|k| k.pos).find(|p| p.x > 1.2).expect("the moved corner");
+    let _ = start_drag(&mut h, at);
+    h.key_press(Key::Escape);
+    h.run();
+    assert_eq!(spline(&mut h, id), moved, "the cancelled drag changed nothing");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    h.run();
+    assert_eq!(spline(&mut h, id).knot_count(), original.knot_count());
+    assert!(
+        matches!(h.state().doc.scene.get(id).unwrap().kind, ObjectKind::Spline { source: SplineSource::Primitive { .. }, .. }),
+        "back to the primitive it was"
+    );
 }

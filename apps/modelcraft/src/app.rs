@@ -765,6 +765,9 @@ impl ModelApp {
 
     pub fn act(&mut self, ctx: &egui::Context, a: Action) {
         use Action::*;
+        // An action in the middle of dragging a spline point abandons the drag first, so the
+        // preview never outlives it (Undo, Delete, a tool switch and Escape all come through here).
+        crate::spline_pen::cancel_drag(self);
         match a {
             New => self.guard(Pending::New),
             Open => self.guard(Pending::Open),
