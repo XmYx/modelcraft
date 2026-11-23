@@ -8,7 +8,7 @@ use modelcraft_engine::clone::{Axis, KINDS, Layout, MAX_CLONES};
 use modelcraft_engine::scene::{Cloner, ObjectId, ObjectKind};
 
 use crate::app::ModelApp;
-use crate::panels::{commit_edit, drag, set_name, vec3_row};
+use crate::panels::{KeyPaths, commit_edit, drag_k, set_name, vec3_row_k};
 use crate::theme;
 
 /// The label of a layout (our own names, `docs/feature-names.md`).
@@ -34,6 +34,7 @@ fn axis_label(a: Axis) -> String {
 
 /// An integer field with an accessible name.
 fn count(ui: &mut egui::Ui, v: &mut u32, name: String) -> egui::Response {
+    crate::key_marker::marker(ui, "cloner.count", &name);
     ui.label(name.clone());
     let r = ui.add(egui::DragValue::new(v).speed(0.2).range(1..=MAX_CLONES as u32));
     set_name(ui, &r, name);
@@ -68,16 +69,16 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
     match &mut q.layout {
         Layout::Linear { count: n, offset, rotation, scale } => {
             ui.horizontal(|ui| drags.push(count(ui, n, tl!("Clone count"))));
-            drags.extend(vec3_row(ui, &tl!("Offset"), offset, 0.01));
-            drags.extend(vec3_row(ui, &tl!("Turn per clone"), rotation, 0.5));
-            drags.extend(vec3_row(ui, &tl!("Grow per clone"), scale, 0.01));
+            drags.extend(vec3_row_k(ui, &tl!("Offset"), KeyPaths::Index("cloner.offset"), offset, 0.01));
+            drags.extend(vec3_row_k(ui, &tl!("Turn per clone"), KeyPaths::Index("cloner.rotation"), rotation, 0.5));
+            drags.extend(vec3_row_k(ui, &tl!("Grow per clone"), KeyPaths::Index("cloner.scale"), scale, 0.01));
         }
         Layout::Radial { count: n, radius, axis, start, end, align } => {
             ui.horizontal(|ui| drags.push(count(ui, n, tl!("Clone count"))));
-            ui.horizontal(|ui| drags.push(drag(ui, radius, 0.01, 0.0..=100_000.0, tl!("Radius"))));
+            ui.horizontal(|ui| drags.push(drag_k(ui, "cloner.radius", radius, 0.01, 0.0..=100_000.0, tl!("Radius"))));
             ui.horizontal(|ui| {
-                drags.push(drag(ui, start, 0.5, -36_000.0..=36_000.0, tl!("Start angle")));
-                drags.push(drag(ui, end, 0.5, -36_000.0..=36_000.0, tl!("End angle")));
+                drags.push(drag_k(ui, "cloner.start", start, 0.5, -36_000.0..=36_000.0, tl!("Start angle")));
+                drags.push(drag_k(ui, "cloner.end", end, 0.5, -36_000.0..=36_000.0, tl!("End angle")));
             });
             ui.horizontal(|ui| {
                 ui.label(tl!("Axis"));
@@ -104,11 +105,11 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, cloner: Clone
                     drags.push(count(ui, v, crate::tlf!("Count {axis}", axis = axis)));
                 }
             });
-            drags.extend(vec3_row(ui, &tl!("Spacing"), spacing, 0.01));
+            drags.extend(vec3_row_k(ui, &tl!("Spacing"), KeyPaths::Index("cloner.spacing"), spacing, 0.01));
         }
         Layout::Scatter { count: n, extent } => {
             ui.horizontal(|ui| drags.push(count(ui, n, tl!("Clone count"))));
-            drags.extend(vec3_row(ui, &tl!("Box size"), extent, 0.01));
+            drags.extend(vec3_row_k(ui, &tl!("Box size"), KeyPaths::Index("cloner.extent"), extent, 0.01));
         }
         Layout::Surface { count: n, align } => {
             ui.horizontal(|ui| drags.push(count(ui, n, tl!("Clone count"))));

@@ -7,7 +7,7 @@ use modelcraft_engine::ops::array::{Array, KINDS, MAX_COPIES};
 use modelcraft_engine::scene::{ObjectId, ObjectKind};
 
 use crate::app::ModelApp;
-use crate::panels::{commit_edit, drag, set_name, vec3_row};
+use crate::panels::{KeyPaths, commit_edit, drag_k, set_name, vec3_row_k};
 use crate::theme;
 
 pub fn array_label(kind: &str) -> String {
@@ -62,24 +62,26 @@ pub fn array_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, array: 
     match &mut q {
         Array::Linear { count, offset, rotation, scale } => {
             ui.horizontal(|ui| {
+                crate::key_marker::marker(ui, "array.count", &tl!("Copies"));
                 ui.label(tl!("Copies"));
                 let r = ui.add(egui::DragValue::new(count).speed(0.2).range(1..=MAX_COPIES));
                 set_name(ui, &r, tl!("Copies"));
                 drags.push(r);
             });
-            drags.extend(vec3_row(ui, &tl!("Offset"), offset, 0.01));
-            drags.extend(vec3_row(ui, &tl!("Turn per copy"), rotation, 0.5));
-            drags.extend(vec3_row(ui, &tl!("Grow per copy"), scale, 0.01));
+            drags.extend(vec3_row_k(ui, &tl!("Offset"), KeyPaths::Index("array.offset"), offset, 0.01));
+            drags.extend(vec3_row_k(ui, &tl!("Turn per copy"), KeyPaths::Index("array.rotation"), rotation, 0.5));
+            drags.extend(vec3_row_k(ui, &tl!("Grow per copy"), KeyPaths::Index("array.scale"), scale, 0.01));
         }
         Array::Radial { count, radius, axis, angle, align } => {
             ui.horizontal(|ui| {
+                crate::key_marker::marker(ui, "array.count", &tl!("Copies"));
                 ui.label(tl!("Copies"));
                 let r = ui.add(egui::DragValue::new(count).speed(0.2).range(1..=MAX_COPIES));
                 set_name(ui, &r, tl!("Copies"));
                 drags.push(r);
             });
-            ui.horizontal(|ui| drags.push(drag(ui, radius, 0.01, 0.0..=100_000.0, tl!("Radius"))));
-            ui.horizontal(|ui| drags.push(drag(ui, angle, 0.5, -36_000.0..=36_000.0, tl!("Angle"))));
+            ui.horizontal(|ui| drags.push(drag_k(ui, "array.radius", radius, 0.01, 0.0..=100_000.0, tl!("Radius"))));
+            ui.horizontal(|ui| drags.push(drag_k(ui, "array.angle", angle, 0.5, -36_000.0..=36_000.0, tl!("Angle"))));
             let axes: Vec<String> = (0..3).map(axis_label).collect();
             if let Some(i) = pick(ui, ("array-axis", id.0), tl!("Axis"), *axis as usize, &axes) {
                 *axis = i as u32;
@@ -111,7 +113,7 @@ pub fn symmetry_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, axis
         discrete = true;
     }
     let mut drags = Vec::new();
-    ui.horizontal(|ui| drags.push(drag(ui, &mut w, 0.001, 0.0..=10.0, tl!("Join distance"))));
+    ui.horizontal(|ui| drags.push(drag_k(ui, "weld", &mut w, 0.001, 0.0..=10.0, tl!("Join distance"))));
     if discrete {
         app.run(Command::SetSymmetry { id, axis: a, weld: w });
     } else if let Some(r) = drags.iter().find(|r| r.changed() || r.drag_stopped()) {
