@@ -149,7 +149,7 @@ Weight: 5
 | Rename, duplicate, delete, reparent | C M | D | S | Reparent through the row menu |
 | Groups and nulls | C M | D | S | |
 | Attributes panel for the active object | C M Z | D | M | Transform, shape, cage, deformer, material, history |
-| Numeric entry for every transform | C M Z | D | S | Properties fields and Transform by Numbers (Ctrl+T) |
+| Numeric entry for every transform | C M Z | D | S | Properties fields, Transform by Numbers (Ctrl+T) and a dockable Coordinates panel (View ▸ Coordinates Panel, off by default): position, rotation and size or scale of the selected objects or components, object or world position, applied as one history step |
 | Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
 | Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
 | Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
@@ -192,9 +192,9 @@ Weight: 4
 |---|---|---|---|---|
 | Cube, plane, sphere, cylinder, cone, torus | C M Z | D | S | With UVs and segments |
 | Rounded cube / quad sphere (cube-mapped) | C M Z | D | S | The sculpting base |
-| Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | M | S | |
+| Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | P | S | Disc (with a hole), polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron and icosahedron are Create-menu primitives with editable parameters and UVs; the helix waits for splines |
 | Extruded 3D text | C M | M | M | |
-| Terrain / landscape generator | C | M | M | |
+| Terrain / landscape generator | C | D | M | Seeded fractal-noise height field: size, height, segments, feature scale, octaves and seed in Properties; no erosion or sculpt-in-place yet |
 | Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |
@@ -292,8 +292,8 @@ Weight: 4
 | Collision deformer | C | M | M | |
 | Explode / shatter deformer | C | M | S | |
 | Deformer weights painted per vertex | C M | M | M | |
-| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear and noise fields with a remap curve; they weight the deformers they sit in; no radial or shader field |
-| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer, blended by multiply, add, subtract, smallest or largest, then remapped; no delay or freeze |
+| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random-cell and formula fields with a remap curve; they weight the deformers and clone modifiers they sit in; no shader field |
+| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer or clone modifier, blended by multiply, add, subtract, smallest or largest at an opacity, then remapped; a list in Properties with a switch, blend, opacity and keyboard reordering for each; no delay or freeze |
 
 ## Procedural cloning and effectors
 
