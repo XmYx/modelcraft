@@ -834,10 +834,7 @@ impl Document {
     /// cube to work on, so a first click shows something.
     fn add_generator(&mut self, name: &str, kind: ObjectKind, input: Option<ObjectId>, out: &mut Outcome) -> Result<(), EngineError> {
         if let Some(i) = input
-            && !matches!(
-                self.scene.get(i).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
-            )
+            && !self.scene.get(i).is_some_and(|o| o.kind.makes_geometry())
         {
             return invalid("a generator needs a mesh or another generator as its input");
         }
@@ -894,6 +891,7 @@ impl Document {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
             Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::Procedural(p) => return crate::procedural::check_unlocked(self, p),
             Command::SetTransform { id, transform } => {
                 if let Some(o) = self.scene.get(*id)
                     && let Some(channel) = self.scene.protected_channel(*id, &o.transform, &transform.sanitized())
@@ -1260,6 +1258,7 @@ impl Document {
             Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
+            Command::Procedural(c) => crate::procedural::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;

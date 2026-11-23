@@ -59,10 +59,13 @@ mod panels;
 mod plugin_ui;
 #[cfg(test)]
 mod plugin_ui_tests;
+mod procedural_ui;
 mod prefs;
 mod prefs_ui;
 #[cfg(test)]
 mod procedural_ui_tests;
+#[cfg(test)]
+mod generators_ui_tests;
 mod radial;
 mod render_view;
 mod rig_tools;

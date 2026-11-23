@@ -616,7 +616,7 @@ impl ModelApp {
         self.active().filter(|id| {
             matches!(
                 self.doc.scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Generator { .. })
             )
         })
     }
@@ -828,6 +828,16 @@ impl ModelApp {
             AddArray(kind) => {
                 let input = self.generator_input_candidate();
                 self.run(Command::AddArray { kind: kind.into(), input });
+            }
+            AddGenerator(kind) => {
+                // Meshes that are selected go inside (all of them for a generator that joins them,
+                // the active one for the others); with none, the generator makes its own.
+                let scene = &self.doc.scene;
+                let takes_many = modelcraft_engine::scene::generator::Generator::default_of(kind).is_some_and(|g| g.takes_many());
+                let makes = |id: &ObjectId| scene.get(*id).is_some_and(|o| o.kind.makes_geometry()) && !scene.is_cage_input(*id);
+                let mut inputs: Vec<ObjectId> = if takes_many { self.selection.iter().copied().filter(makes).collect() } else { self.active().filter(makes).into_iter().collect() };
+                inputs.dedup();
+                self.run(Command::Procedural(modelcraft_engine::ProceduralCommand::AddGenerator { kind: kind.into(), inputs }));
             }
             AddSymmetry => {
                 let input = self.generator_input_candidate();

@@ -9,6 +9,8 @@
 #![forbid(unsafe_code)]
 
 pub mod array;
+pub mod boolean;
+pub mod connect;
 pub mod decimate;
 pub mod deform;
 pub mod edit;
@@ -18,6 +20,8 @@ mod primitives_more;
 pub mod remesh;
 pub mod select;
 pub mod subdivide;
+pub mod thicken;
+pub mod triangulate2d;
 pub mod trim;
 
 pub use modelcraft_mesh::{MeshError, PolyMesh, Polygon};

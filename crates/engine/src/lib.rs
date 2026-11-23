@@ -18,6 +18,7 @@ mod groups;
 pub mod hair;
 mod layers;
 pub mod organize;
+pub mod procedural;
 pub mod record;
 #[cfg(test)]
 mod record_tests;
@@ -33,6 +34,7 @@ pub use groups::{GroupOp, RegionAction, VisibilityOp};
 pub use hair::{HairCommand, HairExportFormat, HairExportWhat, MapEdit, MapKind};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use organize::OrganizeCommand;
+pub use procedural::ProceduralCommand;
 pub use record::{MAX_RECORDED_COMMANDS, Recorded, RecordedCommand, Recorder};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;

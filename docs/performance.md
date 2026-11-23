@@ -1027,6 +1027,24 @@ a script that needs less than an earlier one in the list shows +0. There is no a
 | mesh vertices in a loop | +0 MiB (stopped by the geometry budget) | 0.29 s |
 | all seven together | +203 MiB | |
 
+## Mesh booleans (`cargo test -p modelcraft-ops boolean_timings -- --ignored --nocapture`)
+
+Union of two UV spheres of the same size, one moved by (0.7, 0.2, 0.1) and tilted, run on a shared
+machine under load (single thread, optimized test profile, 2026-11-23). The work follows the part
+of the surfaces that touches, not the whole of them: the grid only pairs triangles whose boxes
+overlap, so the number of pairs tested grows with the length of the intersection curve.
+
+| Triangles in each | Time | Crossing points | Triangle pairs tested | Faces in the result |
+|---|---|---|---|---|
+| 3,968 | 16 ms | 352 | 2,778 | 6,460 |
+| 16,128 | 53 ms | 732 | 5,745 | 24,954 |
+| 65,024 | 195 ms | 1,466 | 11,435 | 97,834 |
+| 261,120 | 927 ms | 2,930 | 22,612 | 387,416 |
+
+Limits that bound the work and memory (`boolean::Limits`): 2,000,000 triangles in either input,
+40,000,000 overlapping pairs, 60,000,000 grid entries, and 4,000,000,000 triangle evaluations of the
+winding number for parts no cut reaches. Each is covered by a test that exceeds it.
+
 ## How the numbers stay low
 
 - Sculpt queries and picking use a triangle BVH whose boxes are padded by how far vertices have
