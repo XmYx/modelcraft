@@ -8,14 +8,14 @@ FILE                       a .modelcraft project, or a .glb/.gltf/.obj/.stl/.ply
 
 Options:
   --demo model|sculpt        open a built-in demo scene
-  --workspace model|sculpt|paint
+  --workspace model|sculpt|paint|uv|animate|groom
                              start in this workspace
   --quad                     start with four views
   --uv-editor none|angle|area|stretch
                              open the UV Editor with this heat map
   --screenshot <PNG>         render the window once to PNG and quit
   --screenshot-state <NAME>  open one window first: timeline, curve-editor, render-view,
-                             scripts, plugins, preferences, shortcuts, palette, layers or statistics
+                             scripts, plugins, preferences, shortcuts, palette, layers, statistics or icon-palettes
   --bench-viewport <FRAMES>  orbit around a 1M-polygon sculpt for FRAMES frames, print frame
                              times and quit
   --bench-polys <N>          polygon count for --bench-viewport (default 1000000)
@@ -42,6 +42,9 @@ pub enum StartWorkspace {
     Model,
     Sculpt,
     Paint,
+    Uv,
+    Animate,
+    Groom,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -104,6 +107,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Launch, String> {
                     "model" => StartWorkspace::Model,
                     "sculpt" => StartWorkspace::Sculpt,
                     "paint" => StartWorkspace::Paint,
+                    "uv" => StartWorkspace::Uv,
+                    "animate" => StartWorkspace::Animate,
+                    "groom" => StartWorkspace::Groom,
                     other => return Err(format!("unknown workspace {other:?}")),
                 })
             }

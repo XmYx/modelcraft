@@ -28,6 +28,7 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Disc, Polygon, Tube, Capsule, Pyramid, Tetrahedron, Octahedron, Dodecahedron, Icosahedron, Landscape (primitives); Hole radius, Feature scale | disc, n-gon, tube, capsule, pyramid, platonic solid and landscape primitives | Geometry words and plain nouns | Use |
+| Bulge, Squash, Smooth, Delta Smooth, Displace, Shrink Wrap (deformers); Reach, Fit to parent, Within box | bulge, squash-and-stretch, smoothing, delta smoothing, displacement and shrink-wrap deformers; limited / unlimited / within-box modes | Generic geometry words; Reach describes how far the effect goes | Use |
 | Radial, Cylinder, Cone, Capsule, Torus, Random, Formula (falloff fields); Falloff layers, Switched on, Opacity | radial, cylinder, cone, capsule, torus, random and formula fields; the field-layer list with its enable switch and opacity | Geometry words and plain descriptions; the formula field uses the expression language of the animation crate | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |
