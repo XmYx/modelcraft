@@ -232,7 +232,8 @@ mod tests {
     fn grid_has_axes() {
         let g = grid(10, 1.0, [0.5; 4], [0.7; 4]);
         assert_eq!(g.len(), 20 * 4 + 4);
-        assert_eq!(std::mem::size_of::<MeshVertex>(), 40);
+        // Position, normal, mask, patch, UV and the vertex colour: 56 bytes (it was 40 before colours).
+        assert_eq!(std::mem::size_of::<MeshVertex>(), 56);
     }
 
     #[test]
