@@ -158,7 +158,7 @@ Weight: 5
 | Instances that share a mesh | C M | D | M | Instance object shares the master's evaluated mesh (one allocation, one GPU upload); own transform and material; Make Unique; deleting a master keeps its instances as real meshes |
 | Selection sets | C M | D | S | Saved in the scene, follow deletes, selected by name |
 | Custom user attributes on objects | C M | D | M | Number, switch, text, colour, vector per object; numbers and vector parts are `user.<name>` attributes, so they key and script like any number |
-| Scene overrides (takes, render setups) | C M | M | L | |
+| Scene overrides (takes, render setups) | C M | P | L | Scene variants: named sets of number overrides (transform, visibility, material, shape, any keyable number) over the main scene, switched by one undoable `variant` command and saved with the project; the Variants panel (View ▸ Variants Panel) lists, adds, renames, removes and overrides; `modelcraft-cli render --variant N`; a test renders two variants and the main scene again. No render-setting overrides, no override of animated attributes, no variant picker in the Render View yet |
 | Lock and template objects (visible, not selectable) | C M | D | S | Locked objects refuse edits in the engine; reference-only objects are drawn but never picked |
 | Copy and paste attributes; attribute presets | C M | D | S | Copy and paste onto many objects; named presets saved in the scene (material, tags, user attributes, optionally the placement) |
 | Object pivot separate from the origin | C M Z | D | S | Pivot fields, Pivot to Center, Reset; objects and children stay in place; exports fold the pivot into the transform |

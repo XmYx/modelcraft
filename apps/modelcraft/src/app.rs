@@ -88,11 +88,12 @@ pub enum PanelId {
     History,
     Simulation,
     Coordinates,
+    Variants,
 }
 
 impl PanelId {
-    pub const ALL: [PanelId; 7] =
-        [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History, PanelId::Simulation, PanelId::Coordinates];
+    pub const ALL: [PanelId; 8] =
+        [PanelId::Tree, PanelId::Properties, PanelId::Brushes, PanelId::Paint, PanelId::History, PanelId::Simulation, PanelId::Coordinates, PanelId::Variants];
     pub fn label(self) -> String {
         match self {
             PanelId::Tree => tl!("Scene"),
@@ -102,6 +103,7 @@ impl PanelId {
             PanelId::History => tl!("Undo History"),
             PanelId::Simulation => tl!("Simulation"),
             PanelId::Coordinates => tl!("Coordinates"),
+            PanelId::Variants => tl!("Variants"),
         }
     }
 }
@@ -238,6 +240,7 @@ pub struct ModelApp {
     /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub coord: crate::coord_ui::State,
+    pub variants: crate::variants_ui::State,
     /// The icon columns (tools on the left, create on the right) are shown; off by default.
     pub icon_palettes: bool,
     pub screenshot: Option<PathBuf>,
@@ -412,6 +415,7 @@ impl ModelApp {
             display_mode: Default::default(),
             sculpt_groups: Default::default(),
             coord: Default::default(),
+            variants: Default::default(),
             icon_palettes: false,
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
@@ -1020,6 +1024,15 @@ impl ModelApp {
             ViewTop => self.set_view(ViewPreset::Top),
             TransformDialog => self.numeric = Some(NumericTransform::default()),
             Palette => self.palette = Some(crate::panels::Palette::default()),
+            VariantsPanel => {
+                // Show the panel (it is off by default) and put the keyboard focus in it.
+                if !self.layouts.shown(self.workspace, PanelId::Variants) {
+                    crate::dock::move_panel(self, PanelId::Variants, crate::dock::Move::Show);
+                }
+                self.layouts.raise(crate::dock::Pane::Variants);
+                let idx = PanelId::ALL.iter().position(|x| *x == PanelId::Variants).unwrap_or(0);
+                ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("panel-focus", idx))));
+            }
             IconPalettes => {
                 self.icon_palettes = !self.icon_palettes;
                 self.status = if self.icon_palettes { tl!("Icon palettes shown") } else { tl!("Icon palettes hidden") };

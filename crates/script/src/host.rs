@@ -224,6 +224,7 @@ impl Shared {
             | Command::Procedural(_)
             | Command::Stage(_)
             | Command::Spline(_)
+            | Command::Variant(_)
             | Command::AddCloner { .. }
             | Command::SetCloner { .. }
             | Command::AddCloneModifier { .. }
