@@ -562,6 +562,19 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
                 );
             }
         }
+        ObjectKind::Generator { .. } => {
+            // Two squares with a plus between them: meshes joined into one.
+            let g = Color32::from_rgb(130, 210, 120);
+            for dx in [-4.0, 4.0] {
+                p.rect_stroke(
+                    egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(4.0, 7.0)),
+                    0.0,
+                    egui::Stroke::new(1.0, g),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            p.line_segment([c + egui::vec2(-1.5, 0.0), c + egui::vec2(1.5, 0.0)], egui::Stroke::new(1.0, g));
+        }
         ObjectKind::Cloner { .. } => {
             // Three small squares: one source, many clones.
             let o = Color32::from_rgb(240, 170, 90);
@@ -776,6 +789,11 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
         }
+        ObjectKind::Generator { generator } => {
+            egui::CollapsingHeader::new(crate::procedural_ui::generator_label(generator.kind()))
+                .default_open(true)
+                .show(ui, |ui| crate::procedural_ui::fields(app, ui, id, generator));
+        }
         ObjectKind::SplineGenerator { generator } => {
             egui::CollapsingHeader::new(crate::spline_gen_ui::kind_label(generator.kind()))
                 .default_open(true)
@@ -814,6 +832,7 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             | ObjectKind::SmoothCage { .. }
             | ObjectKind::Array { .. }
             | ObjectKind::Symmetry { .. }
+            | ObjectKind::Generator { .. }
             | ObjectKind::SplineGenerator { .. }
             | ObjectKind::Instance { .. }
     ) {

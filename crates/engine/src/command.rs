@@ -366,6 +366,9 @@ pub enum Command {
     Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
+    /// Procedural generators: `{"cmd":"procedural","op":"add_generator","kind":"thicken"}`
+    /// ([`crate::procedural::ProceduralCommand`]).
+    Procedural(crate::procedural::ProceduralCommand),
     /// Lights and cameras: `{"cmd":"stage","op":"add_light","kind":"spot"}` ([`crate::stage::StageCommand`]).
     Stage(crate::stage::StageCommand),
     /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
@@ -561,6 +564,7 @@ impl Command {
             Command::Organize(o) => o.label(),
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
+            Command::Procedural(c) => c.label(),
             Command::Stage(c) => c.label(),
             Command::Spline(c) => c.label(),
         }

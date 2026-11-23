@@ -198,6 +198,8 @@ impl Evaluator {
         if let Some((k, e)) = self.scratch.get(&id)
             && *k == key
         {
+            // What depends on a cut loop taints whatever reads it.
+            self.cycle_hits += 1;
             return e.clone();
         }
         let hits_before = self.cycle_hits;
@@ -260,6 +262,7 @@ impl Evaluator {
             ObjectKind::Array { array } => self.generate(scene, id, depth, |m| array.build(m)),
             ObjectKind::SplineGenerator { generator } => self.spline_generate(scene, id, generator),
             ObjectKind::Symmetry { axis, weld } => self.generate(scene, id, depth, |m| edit::mirror(m, *axis as usize, *weld)),
+            ObjectKind::Generator { generator } => self.generate_many(scene, id, depth, generator),
             ObjectKind::Cloner { cloner, target } => {
                 let mut errors = Vec::new();
                 let mut out = Evaluated::default();
@@ -370,6 +373,49 @@ impl Evaluator {
             Err(e) => {
                 errors.push(StepError { step: usize::MAX, message: e.to_string() });
                 Evaluated { mesh: Arc::new(m), errors, ..Evaluated::default() }
+            }
+        }
+    }
+}
+
+impl Evaluator {
+    /// A generator over the meshes inside it: each input is evaluated and put in the generator's
+    /// space, and the generator turns them into one mesh. When it fails the first input is shown
+    /// unchanged with the reason.
+    fn generate_many(&mut self, scene: &Scene, id: ObjectId, depth: usize, generator: &crate::generator::Generator) -> Evaluated {
+        let inputs = scene.generator_inputs(id, generator);
+        if inputs.is_empty() {
+            return Evaluated { errors: vec![StepError { step: usize::MAX, message: "needs a mesh inside it".into() }], ..Evaluated::default() };
+        }
+        let mut errors = Vec::new();
+        let mut meshes: Vec<PolyMesh> = Vec::with_capacity(inputs.len());
+        for c in inputs {
+            let inner = self.evaluate_depth(scene, c, depth + 1);
+            errors.extend(inner.errors);
+            let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+            let mut m = (*inner.mesh).clone();
+            m.map_positions(|_, p| local.transform_point3(p));
+            // A mirroring transform (a negative scale) turns the faces inside out; put them back.
+            if local.determinant() < 0.0 {
+                let all: Vec<u32> = (0..m.face_count() as u32).collect();
+                if let Ok(flipped) = edit::flip_faces(&m, &all) {
+                    m = flipped;
+                }
+            }
+            meshes.push(m);
+        }
+        self.runs += 1;
+        match generator.run_noted(&meshes) {
+            Ok((r, notes)) => Evaluated {
+                mesh: Arc::new(r),
+                errors,
+                warnings: notes.into_iter().map(|message| StepError { step: usize::MAX, message }).collect(),
+                ..Evaluated::default()
+            },
+            Err(e) => {
+                errors.push(StepError { step: usize::MAX, message: e.to_string() });
+                let shown = if meshes.is_empty() { PolyMesh::default() } else { meshes.swap_remove(0) };
+                Evaluated { mesh: Arc::new(shown), errors, ..Evaluated::default() }
             }
         }
     }

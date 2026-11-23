@@ -10,7 +10,9 @@
 
 pub mod array;
 pub mod bevel;
+pub mod boolean;
 pub mod bvh;
+pub mod connect;
 pub mod cut;
 pub mod decimate;
 pub mod deform;
@@ -26,6 +28,8 @@ pub mod select;
 pub mod soft;
 pub mod spline_gen;
 pub mod subdivide;
+pub mod thicken;
+pub mod triangulate2d;
 pub mod trim;
 
 pub use modelcraft_mesh::{MeshError, PolyMesh, Polygon};

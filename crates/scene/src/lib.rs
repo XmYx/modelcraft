@@ -22,6 +22,7 @@ pub mod anim;
 pub mod attr;
 pub mod constraint;
 mod eval;
+pub mod generator;
 pub mod hair;
 pub mod organize;
 pub mod pick;
@@ -55,6 +56,9 @@ pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag,
 pub use spline_gen::SplineGen;
 pub use splines::{SplineEval, SplineSource};
 
+/// Most inputs a generator reads, however many children it has (the command refuses more; this
+/// holds for a file or a reparenting that made more).
+pub const MAX_GENERATOR_INPUTS: usize = 1_000;
 /// Deepest object nesting the scene accepts (hostile files, cycles).
 pub const MAX_DEPTH: usize = 64;
 /// Most objects in one scene.
@@ -803,6 +807,11 @@ pub enum ObjectKind {
     Sim {
         sim: Arc<SimObject>,
     },
+    /// A generator that makes one mesh from the meshes inside it: connect, thicken, reduce,
+    /// boolean ([`generator`]).
+    Generator {
+        generator: generator::Generator,
+    },
     /// A light: it shines along its own -Z ([`stage`]).
     Light {
         light: stage::LightData,
@@ -826,6 +835,20 @@ pub enum ObjectKind {
 }
 
 impl ObjectKind {
+    /// Whether the object makes a mesh a generator can take as an input: a mesh, a smooth cage,
+    /// an array, a symmetry or another procedural generator.
+    pub fn makes_geometry(&self) -> bool {
+        matches!(
+            self,
+            ObjectKind::Mesh { .. }
+                | ObjectKind::SmoothCage { .. }
+                | ObjectKind::Array { .. }
+                | ObjectKind::Symmetry { .. }
+                | ObjectKind::Generator { .. }
+                | ObjectKind::SplineGenerator { .. }
+        )
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             ObjectKind::Group => "Group",
@@ -834,6 +857,7 @@ impl ObjectKind {
             ObjectKind::Deformer { .. } => "Deformer",
             ObjectKind::Array { .. } => "Array",
             ObjectKind::Symmetry { .. } => "Symmetry",
+            ObjectKind::Generator { generator } => generator.type_name(),
             ObjectKind::Field { .. } => "Falloff field",
             ObjectKind::Joint { .. } => "Joint",
             ObjectKind::Skin { .. } => "Skin",
@@ -1341,6 +1365,7 @@ impl Scene {
         match self.get(parent).map(|p| &p.kind) {
             Some(ObjectKind::SmoothCage { .. }) => true,
             Some(ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Cloner { .. }) => self.generator_input(parent) == Some(id),
+            Some(ObjectKind::Generator { generator }) => self.generator_inputs(parent, generator).contains(&id),
             Some(ObjectKind::Sim { .. }) => self.is_particles(parent) && self.generator_input(parent) == Some(id),
             _ => false,
         }
@@ -1349,18 +1374,14 @@ impl Scene {
     /// The input a generator shows: its first child that makes geometry (a mesh or another
     /// generator).
     pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
-        self.children(id).into_iter().find(|c| {
-            self.get(*c).is_some_and(|o| {
-                matches!(
-                    o.kind,
-                    ObjectKind::Mesh { .. }
-                        | ObjectKind::SmoothCage { .. }
-                        | ObjectKind::Array { .. }
-                        | ObjectKind::Symmetry { .. }
-                        | ObjectKind::SplineGenerator { .. }
-                )
-            })
-        })
+        self.children(id).into_iter().find(|c| self.get(*c).is_some_and(|o| o.kind.makes_geometry()))
+    }
+
+    /// The inputs of a [`generator::Generator`]: every child that makes geometry for a generator
+    /// that joins them, the first one for the others.
+    pub fn generator_inputs(&self, id: ObjectId, generator: &generator::Generator) -> Vec<ObjectId> {
+        let all = self.children(id).into_iter().filter(|c| self.get(*c).is_some_and(|o| o.kind.makes_geometry()));
+        if generator.takes_many() { all.take(MAX_GENERATOR_INPUTS).collect() } else { all.take(1).collect() }
     }
 
     pub fn visible(&self, id: ObjectId) -> bool {

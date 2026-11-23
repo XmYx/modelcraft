@@ -196,6 +196,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             for (name, help) in modelcraft_engine::sim::COMMANDS {
                 println!("sim op={name}\t{help}");
             }
+            for (name, help) in modelcraft_engine::procedural::COMMANDS {
+                println!("procedural op={name}\t{help}");
+            }
             for (name, help) in modelcraft_engine::stage::COMMANDS {
                 println!("stage op={name}\t{help}");
             }

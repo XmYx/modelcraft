@@ -52,6 +52,8 @@ mod field_ui_tests;
 mod generator_ui;
 #[cfg(test)]
 mod generator_ui_tests;
+#[cfg(test)]
+mod generators_ui_tests;
 mod gpu;
 mod hair_ui;
 #[cfg(test)]
@@ -80,6 +82,7 @@ mod plugin_ui;
 mod plugin_ui_tests;
 mod prefs;
 mod prefs_ui;
+mod procedural_ui;
 #[cfg(test)]
 mod procedural_ui_tests;
 mod radial;
