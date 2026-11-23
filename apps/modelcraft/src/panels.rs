@@ -841,6 +841,10 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             | ObjectKind::Instance { .. }
     ) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
+            if obj.material.graph.is_some() {
+                // The graph's surface node decides these where it renders; say so where they are.
+                ui.label(RichText::new(tl!("This material has a node graph: its surface node sets the render's colour, metallic, roughness and emission. Edit them in Material Nodes.")).color(theme::TEXT_DIM));
+            }
             let mut m = obj.material.clone();
             let mut rgb = [m.base_color[0], m.base_color[1], m.base_color[2]];
             ui.horizontal(|ui| {
@@ -1242,6 +1246,7 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::render_view::show(app, ctx);
     crate::render_ui::show(app, ctx);
     crate::bake_ui::show(app, ctx);
+    crate::matgraph_ui::show(app, ctx);
     crate::picture_viewer::show(app, ctx);
     crate::script_ui::show(app, ctx);
     crate::plugin_ui::show(app, ctx);

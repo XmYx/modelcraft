@@ -35,6 +35,7 @@ modelcraft-uvpack = { path = "crates/uvpack" }
 modelcraft-hair = { path = "crates/hair" }
 modelcraft-bake = { path = "crates/bake" }
 modelcraft-spline = { path = "crates/spline" }
+modelcraft-matgraph = { path = "crates/matgraph" }
 
 # shared Craft libraries (storytold/craft-libs), pinned by commit like the other Craft apps
 craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "0649a07aa11834fa5bd7052c8b97a861db532a22", version = "=0.1.0" }

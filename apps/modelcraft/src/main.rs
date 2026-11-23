@@ -69,6 +69,9 @@ mod key_marker;
 mod key_marker_tests;
 mod keys;
 mod material_ui;
+mod matgraph_ui;
+#[cfg(test)]
+mod matgraph_ui_tests;
 mod mesh_tools;
 mod modeling_ui;
 #[cfg(test)]

@@ -1,0 +1,1 @@
+- Material graphs: build a surface from number, colour, noise, ramp, mix, math, picture and normal-map nodes in the new Material Nodes window (Rendering menu or Ctrl+K), with a preview on every node and links chosen from lists; the renderer reads the graph as maps on the processor and the graphics card.

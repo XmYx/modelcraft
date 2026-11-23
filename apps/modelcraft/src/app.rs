@@ -271,6 +271,8 @@ pub struct ModelApp {
     pub bake: crate::bake_ui::BakeUi,
     /// The pen tool and the selected spline points ([`crate::spline_pen`]).
     pub spline: crate::spline_pen::SplineUi,
+    /// The material manager and node editor.
+    pub materials: crate::matgraph_ui::MaterialUi,
     /// Hair grooming: brush, symmetry, the stroke in progress.
     pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
@@ -436,6 +438,7 @@ impl ModelApp {
             pictures: Default::default(),
             bake: Default::default(),
             spline: Default::default(),
+            materials: Default::default(),
             groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
@@ -833,6 +836,7 @@ impl ModelApp {
             Render(a) => crate::render_ui::act(self, ctx, a),
             Bake(a) => crate::bake_ui::act(self, ctx, a),
             Spline(a) => crate::spline_ui::act(self, a),
+            Material(a) => crate::matgraph_ui::act(self, a),
             Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
@@ -1475,6 +1479,7 @@ impl ModelApp {
         if crate::render_view::escape(self, ctx)
             || crate::render_ui::escape(self, ctx)
             || crate::bake_ui::escape(self, ctx)
+            || crate::matgraph_ui::escape(self, ctx)
             || crate::picture_viewer::escape(self, ctx)
             || self.radial.is_some()
             || crate::script_ui::escape(self, ctx)
