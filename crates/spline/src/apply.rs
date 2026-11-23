@@ -6,7 +6,8 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use crate::{CurveKind, HandleMode, Knot, MAX_KNOTS, MAX_SEGMENTS, Segment, Side, Spline, SplineError};
+use crate::modify::Cut;
+use crate::{CurveKind, HandleMode, Knot, MAX_KNOTS, MAX_SEGMENTS, Segment, Side, Spline, SplineError, Tessellation};
 
 /// A knot of a spline: which segment, which point.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -54,6 +55,14 @@ pub enum SplineEdit {
     AddSegment { segment: Segment },
     /// Remove a whole segment.
     RemoveSegment { segment: usize },
+    /// Run a segment the other way.
+    Reverse { segment: usize },
+    /// Cut the corners at these points with a straight edge `distance` along each side.
+    Chamfer { knots: Vec<KnotRef>, distance: f32 },
+    /// Round the corners at these points with an arc of `radius`.
+    Fillet { knots: Vec<KnotRef>, radius: f32 },
+    /// Turn every segment into a polyline of the points the tessellation gives.
+    ToPolygon { tess: Tessellation },
 }
 
 impl Spline {
@@ -107,7 +116,10 @@ impl Spline {
                 // Handles that were smooth keep the shape when a polyline becomes a curve.
                 s.kind = *kind;
             }
-            SplineEdit::SetClosed { segment, closed } => self.seg_mut(*segment)?.set_closed(*closed),
+            SplineEdit::SetClosed { segment, closed } => {
+                let s = self.seg_mut(*segment)?;
+                if *closed { s.close_curve() } else { s.set_closed(false) }
+            }
             SplineEdit::Insert { segment, u } => {
                 if self.knot_count() >= MAX_KNOTS {
                     return Err(SplineError::TooManyKnots(self.knot_count() + 1));
@@ -130,6 +142,14 @@ impl Spline {
                 }
                 self.segments.push(segment.clone());
             }
+            SplineEdit::Reverse { segment } => self.seg_mut(*segment)?.reverse(),
+            SplineEdit::Chamfer { knots, distance } => {
+                self.cut(knots, Cut::Chamfer(*distance))?;
+            }
+            SplineEdit::Fillet { knots, radius } => {
+                self.cut(knots, Cut::Fillet(*radius))?;
+            }
+            SplineEdit::ToPolygon { tess } => *self = self.to_polygon(*tess)?,
             SplineEdit::RemoveSegment { segment } => {
                 if *segment >= self.segments.len() {
                     return Err(SplineError::Invalid(format!("there is no segment {segment}")));

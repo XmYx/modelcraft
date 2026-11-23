@@ -195,6 +195,29 @@ pub(crate) fn add_cap(out: &mut Vec<Polygon>, positions: &[Vec3], rings: &[Vec<u
     Ok(())
 }
 
+// ---------------------------------------------------------------- fill
+
+/// A flat mesh filling the closed `curves` (a closed curve inside another is a hole), facing the
+/// positive side of the curves' plane. Open curves are left out; with no closed curve it is an error.
+pub fn fill(curves: &[Polyline]) -> OpResult {
+    let mut cs: Vec<Curve> = prepare(curves)?.into_iter().filter(|c| c.closed).collect();
+    if cs.is_empty() {
+        return Err(OpError::Invalid("filling needs a closed curve".into()));
+    }
+    let normal = extrude_dir(&cs, Axis::Auto);
+    orient(&mut cs, normal)?;
+    let mut positions: Vec<Vec3> = Vec::new();
+    let mut rings: Vec<Vec<u32>> = Vec::new();
+    for c in &cs {
+        let base = positions.len() as u32;
+        positions.extend(c.pts.iter().copied());
+        rings.push((base..base + c.pts.len() as u32).collect());
+    }
+    let mut polys = Vec::new();
+    add_cap(&mut polys, &positions, &rings, normal)?;
+    rebuild(positions, polys)
+}
+
 // ---------------------------------------------------------------- extrude
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
