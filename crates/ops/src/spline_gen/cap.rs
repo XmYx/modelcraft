@@ -17,6 +17,8 @@ pub const MAX_CAP_POINTS: usize = 30_000;
 pub const MAX_CAP_CONTOURS: usize = 1_024;
 /// The work (point tests) one cap may use.
 const MAX_WORK: u64 = 120_000_000;
+/// The work (edge tests) the nesting of a set of outlines may use.
+pub const MAX_NEST_WORK: u64 = 20_000_000;
 
 fn area2(pts: &[Vec2], idx: &[usize]) -> f32 {
     let n = idx.len();
@@ -50,9 +52,18 @@ pub fn plane_basis(normal: Vec3) -> (Vec3, Vec3) {
 }
 
 /// The nesting of closed outlines in the plane facing `normal`: for each, whether it is a hole
-/// (nested an odd number of levels deep) and its parent outline. `None` for an outline that is
-/// too short or when there are too many.
-pub fn nesting(contours: &[&[Vec3]], normal: Vec3) -> Vec<(bool, Option<usize>)> {
+/// (nested an odd number of levels deep) and its parent outline. Outlines whose box does not hold
+/// the probe point are skipped without testing their edges, and the edge tests that remain are
+/// counted: more than [`MAX_NEST_WORK`] is an error, so many outlines cannot stall an evaluation.
+pub fn nesting(contours: &[&[Vec3]], normal: Vec3) -> Result<Vec<(bool, Option<usize>)>, OpError> {
+    nesting_counted(contours, normal).map(|(n, _)| n)
+}
+
+/// [`nesting`], also returning the edge tests it made (for tests of the work bound).
+pub fn nesting_counted(contours: &[&[Vec3]], normal: Vec3) -> Result<(Vec<(bool, Option<usize>)>, u64), OpError> {
+    if contours.len() > MAX_CAP_CONTOURS {
+        return Err(OpError::Invalid(format!("{} closed curves are too many to tell holes from outlines; at most {MAX_CAP_CONTOURS}", contours.len())));
+    }
     let (u, v) = plane_basis(normal);
     let pts2: Vec<Vec<Vec2>> = contours.iter().map(|c| c.iter().map(|p| Vec2::new(p.dot(u), p.dot(v))).collect()).collect();
     let flat: Vec<Vec2> = pts2.iter().flatten().copied().collect();
@@ -64,14 +75,25 @@ pub fn nesting(contours: &[&[Vec3]], normal: Vec3) -> Vec<(bool, Option<usize>)>
     }
     let idx: Vec<Vec<usize>> = pts2.iter().enumerate().map(|(i, c)| (offs[i]..offs[i] + c.len()).collect()).collect();
     let areas: Vec<f32> = idx.iter().map(|ix| area2(&flat, ix).abs()).collect();
+    let boxes: Vec<(Vec2, Vec2)> =
+        pts2.iter().map(|c| c.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)))).collect();
     let mut out = Vec::with_capacity(contours.len());
+    let mut work = 0u64;
     for i in 0..contours.len() {
         let probe = idx[i].first().map(|k| flat[*k]);
         let mut depth = 0;
         let mut parent: Option<usize> = None;
         if let Some(p) = probe {
             for j in 0..contours.len() {
-                if j != i && idx[j].len() >= 3 && areas[j] > areas[i] && inside_polygon(p, &flat, &idx[j]) {
+                work += 1;
+                if j == i || idx[j].len() < 3 || areas[j] <= areas[i] || p.cmplt(boxes[j].0).any() || p.cmpgt(boxes[j].1).any() {
+                    continue;
+                }
+                work += idx[j].len() as u64;
+                if work > MAX_NEST_WORK {
+                    return Err(OpError::Invalid("these curves are nested too intricately to tell the holes from the outlines".into()));
+                }
+                if inside_polygon(p, &flat, &idx[j]) {
                     depth += 1;
                     if parent.is_none_or(|q| areas[j] < areas[q]) {
                         parent = Some(j);
@@ -81,7 +103,7 @@ pub fn nesting(contours: &[&[Vec3]], normal: Vec3) -> Vec<(bool, Option<usize>)>
         }
         out.push((depth % 2 == 1, parent));
     }
-    out
+    Ok((out, work))
 }
 
 /// Triangles filling the closed `contours` as seen from the side `normal` points to: indices into
@@ -101,7 +123,7 @@ pub fn fill(contours: &[&[Vec3]], normal: Vec3) -> Result<Vec<[u32; 3]>, OpError
         idx.push((o..o + c.len()).collect());
         o += c.len();
     }
-    let nest = nesting(contours, normal);
+    let nest = nesting(contours, normal)?;
     // Outer outlines counter-clockwise, holes clockwise.
     for (i, ix) in idx.iter_mut().enumerate() {
         let hole = nest.get(i).is_some_and(|n| n.0);
@@ -114,6 +136,12 @@ pub fn fill(contours: &[&[Vec3]], normal: Vec3) -> Result<Vec<[u32; 3]>, OpError
     let mut tris = Vec::new();
     for outer in 0..contours.len() {
         if nest[outer].0 || idx[outer].len() < 3 {
+            continue;
+        }
+        // An outline with no area (flat on edge to the cap's plane) has nothing to fill.
+        let (lo, hi) = idx[outer].iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), k| (lo.min(pts[*k]), hi.max(pts[*k])));
+        let size = (hi - lo).max_element();
+        if !size.is_finite() || area2(&pts, &idx[outer]).abs() <= 1e-9 * size * size {
             continue;
         }
         let mut ring = idx[outer].clone();
@@ -209,6 +237,9 @@ fn ear_clip(ring: &[usize], pts: &[Vec2], tris: &mut Vec<[u32; 3]>, work: &mut u
     let mut since_clip = 0usize;
     let p = |i: usize| pts[ring[i]];
     while alive > 3 {
+        // Every pass counts, ears or not: a degenerate outline that clips nothing for a round at a
+        // time must still run out of budget.
+        *work += 1;
         let (a, b, c) = (prev[cur], cur, next[cur]);
         let convex = cross(p(a), p(b), p(c)) > 1e-12;
         let mut ear = convex;

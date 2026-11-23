@@ -101,8 +101,11 @@ fn every_generator_re_evaluates_when_a_point_moves_and_not_otherwise() {
         }
         let _ = ev.evaluate(&s, g);
         assert_eq!(ev.runs, before + 1, "{kind}");
-        // The moved object (its transform) moves the surface too, as a child's transform does.
-        assert!(s.get(g).is_some());
+        // A child's own transform moves the surface too.
+        let at = ev.evaluate(&s, g).mesh.bounds();
+        s.edit(first).unwrap().transform.translation += Vec3::new(10.0, 0.0, 0.0);
+        let moved = ev.evaluate(&s, g).mesh.bounds();
+        assert!(moved.1.x > at.1.x + 1.0, "{kind}: {:?} then {:?}", at, moved);
     }
 }
 
