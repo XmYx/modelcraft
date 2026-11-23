@@ -274,6 +274,7 @@ pub fn deformer_label(d: &str) -> String {
         "delta_smooth" => tl!("Delta Smooth"),
         "displace" => tl!("Displace"),
         "shrink_wrap" => tl!("Shrink Wrap"),
+        "formula" => tl!("Formula"),
         _ => d.to_string(),
     }
 }

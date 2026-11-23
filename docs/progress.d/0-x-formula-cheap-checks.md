@@ -1,0 +1,1 @@
+| 2026-11-23 | Formula modes: whether a formula reads the time is a text scan instead of a parse (it runs on every cache-key check and paint), and the formula clone mode no longer copies its text per clone |

@@ -1091,7 +1091,7 @@ impl Document {
                 }
                 match &mut self.scene.edit(*id)?.kind {
                     ObjectKind::Deformer { deformer: d, limits: l, target: tg } => {
-                        *d = *deformer;
+                        *d = deformer.sanitized();
                         if let Some(new) = limits {
                             *l = new.sanitized();
                         }
@@ -1115,7 +1115,7 @@ impl Document {
                 }
                 match &mut self.scene.edit(*id)?.kind {
                     ObjectKind::CloneModifier { modifier: m, target: t } => {
-                        *m = modifier.sanitized();
+                        *m = modifier.clone().sanitized();
                         *t = *target;
                     }
                     _ => return invalid("not a clone modifier"),

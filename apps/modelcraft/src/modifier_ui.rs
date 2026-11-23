@@ -21,6 +21,7 @@ pub fn mode_label(kind: &str) -> String {
         "step" => tl!("Step"),
         "delay" => tl!("Delay"),
         "target" => tl!("Target"),
+        "formula" => tl!("Formula"),
         _ => kind.to_string(),
     }
 }
@@ -65,7 +66,7 @@ fn pick(ui: &mut egui::Ui, salt: (&str, u64), name: String, shown: String, selec
 }
 
 pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, modifier: Modifier, target: Option<ObjectId>) {
-    let mut q = modifier;
+    let mut q = modifier.clone();
     let mut t = target;
     let mut drags: Vec<egui::Response> = Vec::new();
     // Direct changes (combos, checkboxes) commit at once; drags commit when released.
@@ -150,6 +151,28 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, modifier: Mod
                 discrete = true;
             }
         }
+        Mode::Formula { expr } => {
+            let clones = app
+                .doc
+                .scene
+                .get(id)
+                .and_then(|o| o.parent)
+                .map_or(0, |g| app.doc.eval.evaluate(&app.doc.scene, g).instances.as_ref().map_or(0, |i| i.clones.instances.len()));
+            let problem = modifier.problem(clones);
+            let hint = tl!("i, n, t, x, y, z, time");
+            if let Some(text) = crate::formula_modes_ui::formula_text(
+                ui,
+                ("modifier-formula", id.0),
+                &tl!("Formula"),
+                expr,
+                problem,
+                &hint,
+                modelcraft_engine::clone::FORMULA_NAMES,
+            ) {
+                *expr = text;
+                discrete = true;
+            }
+        }
     }
 
     ui.separator();
@@ -192,7 +215,14 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, modifier: Mod
     if changed && discrete {
         app.run(Command::SetCloneModifier { id, modifier: q, target: t });
     } else if let Some(r) = drags.iter().find(|r| r.changed() || r.drag_stopped()) {
-        commit_edit(app, r, |o| o.kind = ObjectKind::CloneModifier { modifier: q, target: t }, || Command::SetCloneModifier { id, modifier: q, target: t }, id);
+        let preview = q.clone();
+        commit_edit(
+            app,
+            r,
+            |o| o.kind = ObjectKind::CloneModifier { modifier: preview, target: t },
+            || Command::SetCloneModifier { id, modifier: q, target: t },
+            id,
+        );
     }
 
     let fields = app.doc.scene.field_stack(id).len();

@@ -202,6 +202,10 @@ pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh, targets: &
                     errors.push(format!("{} needs a target object: choose one in the Properties panel", o.name));
                     continue;
                 }
+                if let Some(problem) = deformer.problem(positions.len()) {
+                    errors.push(format!("{} was skipped: {problem}", o.name));
+                    continue;
+                }
                 // Smoothing and displacement read the mesh's connections; its points are `positions`.
                 let cx = modelcraft_ops::deform::Context {
                     to_local: o.local_matrix().inverse(),
@@ -210,6 +214,7 @@ pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh, targets: &
                     topology: Some(mesh),
                     rest: Some(&rest),
                     target: bvh.as_ref(),
+                    time: modelcraft_ops::deform::Time { frame: scene.anim.frame, seconds: scene.anim.frame / scene.anim.time.fps.max(1e-6) },
                 };
                 deformer.apply_points(&mut positions, &cx);
                 changed = true;
