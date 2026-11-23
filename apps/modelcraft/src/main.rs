@@ -87,6 +87,8 @@ mod snap_ui;
 mod spline_gen_ui;
 #[cfg(test)]
 mod spline_gen_ui_tests;
+#[cfg(test)]
+mod spline_ops_ui_tests;
 mod spline_pen;
 #[cfg(test)]
 mod spline_pen_ui_tests;

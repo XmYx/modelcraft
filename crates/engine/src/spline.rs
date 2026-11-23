@@ -48,6 +48,8 @@ pub enum SplineCommand {
     },
     /// Change a generator's options.
     SetGenerator { id: ObjectId, generator: SplineGen },
+    /// A mesh object with a flat face filling the closed curves of a spline (holes by nesting).
+    ToMesh { id: ObjectId },
 }
 
 /// The `op` names of the `spline` command with one-line descriptions.
@@ -62,9 +64,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "set_generator",
         "Change a generator's options: id, generator {kind: extrude {distance, axis, steps, cap_start, cap_end} | revolve {angle, steps, axis, caps} | loft {steps, smooth, caps, points} | sweep {end_scale, twist, roll, caps}}",
     ),
+    ("to_mesh", "Make a mesh object with a flat face filling the closed curves of a spline (holes by nesting): id"),
     (
         "edit",
-        "Edit the points of a spline: id, edit {edit: append {segment, knot, kind?} | move_knots {moves [{at {segment, knot}, pos}]} | translate {knots, by} | set_handle {at, side (in, out), offset} | set_mode {at, mode (free, aligned, mirrored, auto)} | set_kind {segment, kind} | set_closed {segment, closed} | insert {segment, u} | remove {knots} | add_segment {segment} | remove_segment {segment}}",
+        "Edit the points of a spline: id, edit {edit: append {segment, knot, kind?} | move_knots {moves [{at {segment, knot}, pos}]} | translate {knots, by} | set_handle {at, side (in, out), offset} | set_mode {at, mode (free, aligned, mirrored, auto)} | set_kind {segment, kind} | set_closed {segment, closed} | insert {segment, u} | remove {knots} | add_segment {segment} | remove_segment {segment} | reverse {segment} | chamfer {knots, distance} | fillet {knots, radius} | to_polygon {tess}}",
     ),
 ];
 
@@ -78,6 +81,10 @@ fn edit_label(e: &SplineEdit) -> &'static str {
         SplineEdit::Insert { .. } => "Insert spline point",
         SplineEdit::Remove { .. } => "Delete spline points",
         SplineEdit::AddSegment { .. } | SplineEdit::RemoveSegment { .. } => "Spline curves",
+        SplineEdit::Reverse { .. } => "Reverse spline",
+        SplineEdit::Chamfer { .. } => "Chamfer spline points",
+        SplineEdit::Fillet { .. } => "Fillet spline points",
+        SplineEdit::ToPolygon { .. } => "Convert spline to polygon",
     }
 }
 
@@ -92,6 +99,7 @@ impl SplineCommand {
             SplineCommand::Edit { edit, .. } => edit_label(edit).into(),
             SplineCommand::AddGenerator { kind, .. } => format!("Add {kind}"),
             SplineCommand::SetGenerator { .. } => "Spline generator settings".into(),
+            SplineCommand::ToMesh { .. } => "Spline to mesh".into(),
         }
     }
 
@@ -104,7 +112,8 @@ impl SplineCommand {
             | SplineCommand::MakeEditable { id }
             | SplineCommand::SetCurve { id, .. }
             | SplineCommand::Edit { id, .. }
-            | SplineCommand::SetGenerator { id, .. } => Some(*id),
+            | SplineCommand::SetGenerator { id, .. }
+            | SplineCommand::ToMesh { id } => Some(*id),
         }
     }
 }
@@ -166,6 +175,22 @@ pub fn apply(doc: &mut Document, cmd: &SplineCommand, out: &mut Outcome) -> Resu
             _ => return invalid("not a spline"),
         },
         SplineCommand::AddGenerator { kind, inputs } => add_generator(doc, kind, inputs, out)?,
+        SplineCommand::ToMesh { id } => {
+            let (name, parent, transform) = match doc.scene.get(*id) {
+                Some(o) if matches!(o.kind, ObjectKind::Spline { .. }) => (o.name.clone(), o.parent, o.transform),
+                Some(_) => return invalid("not a spline"),
+                None => return Err(SceneError::NoObject(*id).into()),
+            };
+            let eval = doc.eval.spline(&doc.scene, *id).ok_or_else(|| EngineError::Invalid("not a spline".into()))?;
+            if let Some(e) = &eval.error {
+                return invalid(e.clone());
+            }
+            let mesh = modelcraft_ops::spline_gen::fill(&eval.lines).map_err(|e| EngineError::Invalid(e.to_string()))?;
+            let unique = doc.scene.unique_name(&format!("{name} Mesh"));
+            let new = doc.scene.add(unique, ObjectKind::Mesh { source: modelcraft_scene::Source::Mesh { mesh: Arc::new(mesh) }, steps: vec![] }, parent)?;
+            doc.scene.edit(new)?.transform = transform;
+            out.created.push(new);
+        }
         SplineCommand::SetGenerator { id, generator } => match &mut doc.scene.edit(*id)?.kind {
             ObjectKind::SplineGenerator { generator: g } => *g = generator.sanitized(),
             _ => return invalid("not a spline generator"),

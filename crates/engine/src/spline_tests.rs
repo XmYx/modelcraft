@@ -344,3 +344,53 @@ fn generator_commands_round_trip_as_json() {
         r#"{"cmd":"spline","op":"set_generator","id":1,"generator":{"kind":"extrude","distance":2.5,"axis":"z","steps":3,"cap_start":true,"cap_end":false}}"#;
     assert!(serde_json::from_str::<Command>(j).is_ok());
 }
+
+#[test]
+fn corner_cuts_reverse_and_polygon_conversion_are_single_undo_steps() {
+    use modelcraft_spline::{KnotRef, SplineEdit};
+    let mut d = Document::new();
+    let r = add(&mut d, "rectangle");
+    let at = |k| KnotRef { segment: 0, knot: k };
+    let n = d.undo.len();
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Chamfer { knots: vec![at(0), at(1), at(2), at(3)], distance: 0.25 } })).unwrap();
+    assert_eq!((d.undo.len(), d.eval.spline(&d.scene, r).unwrap().spline.knot_count()), (n + 1, 8));
+    d.execute(Command::Undo).unwrap();
+    assert!(matches!(d.scene.get(r).unwrap().kind, ObjectKind::Spline { source: SplineSource::Primitive { .. }, .. }), "undo brings the primitive back");
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Fillet { knots: vec![at(1)], radius: 0.3 } })).unwrap();
+    let rounded = d.eval.spline(&d.scene, r).unwrap().spline.clone();
+    assert_eq!(rounded.segments[0].kind, CurveKind::Bezier);
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Reverse { segment: 0 } })).unwrap();
+    assert_eq!(d.eval.spline(&d.scene, r).unwrap().spline.segments[0].knots[0].pos, rounded.segments[0].knots[0].pos);
+    d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::ToPolygon { tess: Tessellation::Fixed { steps: 6 } } })).unwrap();
+    assert_eq!(d.eval.spline(&d.scene, r).unwrap().spline.segments[0].kind, CurveKind::Linear);
+    // Nothing to cut, or a bad size: an error and no undo step.
+    let n = d.undo.len();
+    assert!(d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Fillet { knots: vec![at(99)], radius: 0.3 } })).is_err());
+    assert!(d.execute(Command::Spline(S::Edit { id: r, edit: SplineEdit::Chamfer { knots: vec![at(1)], distance: f32::NAN } })).is_err());
+    assert_eq!(d.undo.len(), n);
+}
+
+#[test]
+fn to_mesh_fills_closed_curves_with_holes_and_refuses_the_rest() {
+    let mut d = Document::new();
+    let a = add(&mut d, "rectangle");
+    // A second, smaller rectangle inside the same spline as a second curve: a hole.
+    let hole = modelcraft_spline::Segment::polyline(
+        &[Vec3::new(-0.25, -0.25, 0.0), Vec3::new(0.25, -0.25, 0.0), Vec3::new(0.25, 0.25, 0.0), Vec3::new(-0.25, 0.25, 0.0)],
+        true,
+    );
+    d.execute(Command::Spline(S::Edit { id: a, edit: modelcraft_spline::SplineEdit::AddSegment { segment: hole } })).unwrap();
+    let m = d.execute(Command::Spline(S::ToMesh { id: a })).unwrap().created[0];
+    let mesh = d.eval.evaluate(&d.scene, m).mesh;
+    assert!(matches!(d.scene.get(m).unwrap().kind, ObjectKind::Mesh { .. }));
+    mesh.validate().unwrap();
+    let (tris, _) = mesh.triangulate();
+    let area: f32 = tris.iter().map(|t| (mesh.position(t[1]) - mesh.position(t[0])).cross(mesh.position(t[2]) - mesh.position(t[0])).length() * 0.5).sum();
+    assert!((area - (2.0 * 1.5 - 0.25)).abs() < 1e-4, "the rectangle minus the hole: {area}");
+    // Open curves give no surface; other objects are refused; the lock check applies to the spline.
+    let open = add(&mut d, "arc");
+    assert!(d.execute(Command::Spline(S::ToMesh { id: open })).is_err());
+    assert!(d.execute(Command::Spline(S::ToMesh { id: m })).is_err());
+    d.execute(Command::SetLocked { ids: vec![a], locked: true }).unwrap();
+    assert!(d.execute(Command::Spline(S::ToMesh { id: a })).is_err());
+}

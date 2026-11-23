@@ -67,15 +67,22 @@ enum Grab {
 }
 
 /// Pointer state of the spline tools; kept in the app.
-#[derive(Default)]
 pub struct SplineUi {
     pub pen: Option<Pen>,
     /// The selected points of `owner`.
     pub selected: Vec<KnotRef>,
     /// The segment Properties lists.
     pub segment: usize,
+    /// How big a chamfer or fillet is (scene units).
+    pub corner: f32,
     owner: Option<ObjectId>,
     drag: Option<Drag>,
+}
+
+impl Default for SplineUi {
+    fn default() -> Self {
+        SplineUi { pen: None, selected: Vec::new(), segment: 0, corner: 0.2, owner: None, drag: None }
+    }
 }
 
 impl SplineUi {

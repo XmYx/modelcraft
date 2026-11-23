@@ -154,6 +154,15 @@ starts a new one; `kind?`), `move_knots` (`moves [{at:{segment,knot}, pos}]`), `
 nothing. A spline may have 1,024 segments and 100,000 points, and a curve is cut into at most
 1,000,000 points when it is tessellated; numbers that are not finite are refused.
 
+Corner and shape operations are edits too: `reverse` (`segment`) runs a curve the other way (a
+closed curve keeps its first point first); `chamfer` (`knots`, `distance`) and `fillet` (`knots`,
+`radius`) cut the corners at those points with a straight edge or a tangent arc, limited to half
+of the shorter edge (only corners between straight edges are cut; an error says why when none
+could be); `to_polygon` (`tess`) turns every curve into a polyline of the points the tessellation
+gives; `set_closed` with `closed: true` joins a last point that lies on the first. `to_mesh`
+(`id`) makes a mesh object with a flat face that fills the closed curves of a spline (a closed
+curve inside another is a hole; open curves are left out).
+
 `add_generator` makes a generator (`kind`: `extrude`, `revolve`, `loft` or `sweep`) that shows a
 surface built from the splines inside it; `inputs` lists spline objects to move inside it (with
 none, it starts with example splines). **Extrude** and **revolve** use every spline inside (a
