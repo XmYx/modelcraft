@@ -73,6 +73,9 @@ mod modeling_ui_tests;
 mod modifier_ui;
 #[cfg(test)]
 mod modifier_ui_tests;
+mod node_editor;
+#[cfg(test)]
+mod node_editor_tests;
 mod object_manager;
 mod organize_ui;
 mod paint_ui;
@@ -99,6 +102,9 @@ mod rig_tools_tests;
 mod rig_ui;
 #[cfg(test)]
 mod rig_ui_tests;
+mod scene_nodes_ui;
+#[cfg(test)]
+mod scene_nodes_ui_tests;
 #[cfg(test)]
 mod script_cb_ui_tests;
 #[cfg(test)]

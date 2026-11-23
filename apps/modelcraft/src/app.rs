@@ -241,6 +241,8 @@ pub struct ModelApp {
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub coord: crate::coord_ui::State,
     pub variants: crate::variants_ui::State,
+    /// The Scene Nodes window ([`crate::scene_nodes_ui`]).
+    pub scene_nodes: crate::scene_nodes_ui::SceneNodesUi,
     /// The icon columns (tools on the left, create on the right) are shown; off by default.
     pub icon_palettes: bool,
     pub screenshot: Option<PathBuf>,
@@ -416,6 +418,7 @@ impl ModelApp {
             sculpt_groups: Default::default(),
             coord: Default::default(),
             variants: Default::default(),
+            scene_nodes: Default::default(),
             icon_palettes: false,
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
@@ -1024,6 +1027,7 @@ impl ModelApp {
             ViewTop => self.set_view(ViewPreset::Top),
             TransformDialog => self.numeric = Some(NumericTransform::default()),
             Palette => self.palette = Some(crate::panels::Palette::default()),
+            SceneNodes => crate::scene_nodes_ui::toggle(self),
             VariantsPanel => {
                 // Show the panel (it is off by default) and put the keyboard focus in it.
                 if !self.layouts.shown(self.workspace, PanelId::Variants) {
@@ -1475,6 +1479,7 @@ impl ModelApp {
         if crate::render_view::escape(self, ctx)
             || crate::render_ui::escape(self, ctx)
             || crate::bake_ui::escape(self, ctx)
+            || crate::scene_nodes_ui::escape(self, ctx)
             || crate::picture_viewer::escape(self, ctx)
             || self.radial.is_some()
             || crate::script_ui::escape(self, ctx)
