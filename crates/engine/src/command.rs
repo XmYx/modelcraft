@@ -357,6 +357,8 @@ pub enum Command {
     Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
+    /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
+    Spline(crate::spline::SplineCommand),
 }
 
 fn default_axis() -> u32 {
@@ -539,6 +541,7 @@ impl Command {
             Command::Organize(o) => o.label(),
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
+            Command::Spline(c) => c.label(),
         }
     }
 }
