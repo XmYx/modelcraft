@@ -32,7 +32,7 @@ const CLOSE_REACH: f32 = 10.0;
 const HANDLE_DRAG: f32 = 4.0;
 /// Most points whose handles are drawn when none is selected.
 const HANDLES_FOR_ALL: usize = 200;
-/// Most points drawn as squares (beyond that every n-th is skipped).
+/// Most points drawn as squares (past this many, the rest are drawn as handles only).
 const MAX_MARKS: usize = 20_000;
 
 /// What the pen is doing.
@@ -59,6 +59,9 @@ struct Drag {
     /// met it at the start.
     plane: (Vec3, Vec3),
     start: Vec3,
+    /// The length of the undo history when the grab began: a change since then means the preview
+    /// is no longer on top of the scene it was made from.
+    undo_len: usize,
 }
 
 enum Grab {
@@ -111,7 +114,7 @@ fn sync_owner(app: &mut ModelApp) {
         app.spline.owner = now;
         app.spline.selected.clear();
         app.spline.segment = 0;
-        app.spline.drag = None;
+        cancel_drag(app);
     }
     // Points that no longer exist (undo, removal) drop out of the selection.
     if let Some(id) = now
@@ -262,7 +265,7 @@ pub fn insert_point(app: &mut ModelApp, id: ObjectId, segment: usize, u: f32) {
 fn begin_drag(app: &mut ModelApp, view: usize, rect: Rect, at: Pos2, hit: Hit, add: bool) -> bool {
     let Some(id) = active_spline(app) else { return false };
     let Some(spline) = spline_of(app, id) else { return false };
-    let cam = app.views[view].camera;
+    let Some(cam) = app.views.get(view).map(|v| v.camera) else { return false };
     let w = world_of(app, id);
     let (what, grab_local) = match hit {
         Hit::Knot(k) => {
@@ -283,7 +286,7 @@ fn begin_drag(app: &mut ModelApp, view: usize, rect: Rect, at: Pos2, hit: Hit, a
     let origin = w.transform_point3(grab_local);
     let plane = (origin, cam.back());
     let Some(start) = ray_plane(&cam, rect, at, plane) else { return false };
-    app.spline.drag = Some(Drag { view, object: id, what, base: Box::new(app.doc.scene.clone()), plane, start });
+    app.spline.drag = Some(Drag { view, object: id, what, base: Box::new(app.doc.scene.clone()), plane, start, undo_len: app.doc.undo.len() });
     true
 }
 
@@ -304,6 +307,21 @@ fn drag_edit(app: &ModelApp, d: &Drag, rect: Rect, at: Pos2, spline: &Spline) ->
             let target = inv.transform_point3(now);
             Some(SplineEdit::SetHandle { at: *k, side: *side, offset: target - kn.pos })
         }
+    }
+}
+
+/// Whether a point or handle is being dragged (its preview is on the scene).
+pub fn drag_active(app: &ModelApp) -> bool {
+    app.spline.drag.is_some()
+}
+
+/// Abandon a drag: the scene goes back to what it was before the grab (the preview was never a
+/// command, so nothing else knows about it). When something else has changed the document since
+/// (a command ran), the scene is left alone: the preview is gone with the command's own snapshot.
+pub fn cancel_drag(app: &mut ModelApp) {
+    let Some(d) = app.spline.drag.take() else { return };
+    if app.doc.undo.len() == d.undo_len {
+        app.doc.scene = *d.base;
     }
 }
 
@@ -338,6 +356,9 @@ fn finish_drag(app: &mut ModelApp, rect: Rect, at: Pos2) {
         _ => return,
     };
     let edit = drag_edit(app, &d, rect, at, &base_spline);
+    if app.doc.undo.len() != d.undo_len {
+        return;
+    }
     app.doc.scene = *d.base;
     if let Some(edit) = edit
         && edit_changes(&edit)
@@ -378,8 +399,7 @@ pub fn toggle_pen(app: &mut ModelApp) {
 pub fn pen_place(app: &mut ModelApp, view: usize, rect: Rect, press: Pos2, release: Pos2) -> bool {
     let Some(pen) = &app.spline.pen else { return false };
     let (mut target, mut segment) = (pen.target, pen.segment);
-    let cam = app.views[view].camera;
-    let preset = app.views[view].preset;
+    let Some((cam, preset)) = app.views.get(view).map(|v| (v.camera, v.preset)) else { return false };
     // The spline to draw into: made on the first click.
     if target.is_none() {
         if !app.run(Command::Spline(SplineCommand::Add { kind: "empty".into(), parent: None, name: None })) {
@@ -393,6 +413,8 @@ pub fn pen_place(app: &mut ModelApp, view: usize, rect: Rect, press: Pos2, relea
         return false;
     };
     let Some(spline) = spline_of(app, id) else { return false };
+    // An undo or a delete may have taken the curve being drawn away: start another then.
+    let segment = segment.filter(|s| spline.segments.get(*s).is_some_and(|g| !g.closed));
     let w = world_of(app, id);
     let inv = w.inverse();
     let last =
@@ -468,21 +490,29 @@ pub fn pen_end_segment(app: &mut ModelApp) {
 /// selection: Escape stops, Enter ends the curve, Backspace takes the last point back. Returns
 /// whether a key was used.
 pub fn keys(app: &mut ModelApp, ctx: &egui::Context) -> bool {
+    let pressed = |k: egui::Key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, k));
+    // Escape in the middle of a drag cancels just the drag.
+    if app.spline.drag.is_some() && pressed(egui::Key::Escape) {
+        cancel_drag(app);
+        app.status = tl!("Move cancelled");
+        return true;
+    }
     if app.spline.pen.is_none() || ctx.text_edit_focused() {
         return false;
     }
-    let pressed = |k: egui::Key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, k));
+    // Enter and Backspace belong to a focused control; the pen takes them only from the viewport.
+    let on_viewport = ctx.memory(|m| m.focused()).is_none_or(|f| (0..4usize).any(|i| f == egui::Id::unique(("viewport", i))));
     if pressed(egui::Key::Escape) {
         app.spline.pen = None;
         app.status = tl!("Pen off");
         return true;
     }
-    if pressed(egui::Key::Enter) {
+    if on_viewport && pressed(egui::Key::Enter) {
         pen_end_segment(app);
         app.status = tl!("Curve ended; the next click starts another");
         return true;
     }
-    if pressed(egui::Key::Backspace) {
+    if on_viewport && pressed(egui::Key::Backspace) {
         pen_undo_point(app);
         return true;
     }
