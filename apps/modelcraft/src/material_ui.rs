@@ -6,23 +6,23 @@ use modelcraft_engine::Command;
 use modelcraft_engine::scene::{Material, Object, ObjectId};
 
 use crate::app::ModelApp;
-use crate::panels::{commit_edit, drag};
+use crate::panels::{commit_edit, drag_k};
 
 type Field = fn(&mut Material) -> &mut f32;
 
 pub fn rows(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, obj: &Object) {
-    let sliders: [(String, Field, std::ops::RangeInclusive<f32>); 6] = [
-        (tl!("Coat"), |m| &mut m.coat, 0.0..=1.0),
-        (tl!("Coat roughness"), |m| &mut m.coat_roughness, 0.0..=1.0),
-        (tl!("Sheen"), |m| &mut m.sheen, 0.0..=1.0),
-        (tl!("Transmission"), |m| &mut m.transmission, 0.0..=1.0),
-        (tl!("Index of refraction"), |m| &mut m.ior, 1.0..=3.0),
-        (tl!("Emission strength"), |m| &mut m.emission_strength, 0.0..=1000.0),
+    let sliders: [(&str, String, Field, std::ops::RangeInclusive<f32>); 6] = [
+        ("material.coat", tl!("Coat"), |m| &mut m.coat, 0.0..=1.0),
+        ("material.coat_roughness", tl!("Coat roughness"), |m| &mut m.coat_roughness, 0.0..=1.0),
+        ("material.sheen", tl!("Sheen"), |m| &mut m.sheen, 0.0..=1.0),
+        ("material.transmission", tl!("Transmission"), |m| &mut m.transmission, 0.0..=1.0),
+        ("material.ior", tl!("Index of refraction"), |m| &mut m.ior, 1.0..=3.0),
+        ("material.emission_strength", tl!("Emission strength"), |m| &mut m.emission_strength, 0.0..=1000.0),
     ];
-    for (label, field, range) in sliders {
+    for (path, label, field, range) in sliders {
         let mut m = obj.material.clone();
         ui.horizontal(|ui| {
-            let r = drag(ui, field(&mut m), 0.01, range, label);
+            let r = drag_k(ui, path, field(&mut m), 0.01, range, label);
             let mm = m.clone();
             commit_edit(app, &r, |o| o.material = mm.clone(), || Command::SetMaterial { id, material: mm.clone() }, id);
         });

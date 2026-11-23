@@ -38,6 +38,9 @@ mod gpu;
 mod hair_ui;
 #[cfg(test)]
 mod hair_ui_tests;
+mod key_marker;
+#[cfg(test)]
+mod key_marker_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
