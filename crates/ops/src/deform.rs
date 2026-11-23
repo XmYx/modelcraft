@@ -272,7 +272,8 @@ impl Deformer {
     /// Whether the result changes with the frame (a formula that reads the time or the frame).
     pub fn is_time_dependent(&self) -> bool {
         match self {
-            Deformer::Formula { expr, .. } => Expr::parse(expr).is_ok_and(|e| e.variables().iter().any(|v| v == "time" || v == "frame")),
+            // A text scan, not a parse: this runs on every cache-key check.
+            Deformer::Formula { expr, .. } => modelcraft_anim::expr::mentions(expr, "time") || modelcraft_anim::expr::mentions(expr, "frame"),
             _ => false,
         }
     }
