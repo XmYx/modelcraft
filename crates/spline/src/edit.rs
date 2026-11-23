@@ -146,25 +146,41 @@ impl Segment {
         }
         let at = |u: f32| crate::curve::sample_pieces(&pieces, Vec3::ZERO, u).0;
         let steps = 24 * pieces.len();
+        let pts: Vec<Vec3> = (0..=steps).map(|s| at(s as f32 / 24.0)).collect();
+        let dist: Vec<f32> = pts.iter().map(|q| q.distance(p)).collect();
         let (mut best_u, mut best_d) = (0.0, f32::MAX);
-        for s in 0..=steps {
-            let u = s as f32 / 24.0;
+        for (s, d) in dist.iter().enumerate() {
+            if *d < best_d {
+                (best_u, best_d) = (s as f32 / 24.0, *d);
+            }
+        }
+        // The intervals between samples that could hold something nearer than the best sample,
+        // nearest first (any point of an interval is within half its length of an end).
+        let mut ivs: Vec<(f32, usize)> = (0..steps)
+            .map(|s| {
+                let half = pts[s].distance(pts[s + 1]) * 0.5;
+                ((dist[s].min(dist[s + 1]) - half).max(0.0), s)
+            })
+            .collect();
+        ivs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (lb, s) in ivs.into_iter().take(64) {
+            if lb >= best_d {
+                break;
+            }
+            let (mut lo, mut hi) = (s as f32 / 24.0, (s + 1) as f32 / 24.0);
+            for _ in 0..24 {
+                let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+                if at(m1).distance(p) < at(m2).distance(p) {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            let u = (lo + hi) * 0.5;
             let d = at(u).distance(p);
             if d < best_d {
                 (best_u, best_d) = (u, d);
             }
-        }
-        // Refine around the best sample.
-        let mut width = 1.0 / 24.0;
-        for _ in 0..12 {
-            for u in [best_u - width, best_u + width] {
-                let u = u.clamp(0.0, pieces.len() as f32);
-                let d = at(u).distance(p);
-                if d < best_d {
-                    (best_u, best_d) = (u, d);
-                }
-            }
-            width *= 0.5;
         }
         Some((best_u, best_d))
     }
