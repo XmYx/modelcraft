@@ -172,6 +172,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewRight,
                     Action::ViewTop,
                     Action::NextPanel,
+                    Action::CoordinatePanel,
                     Action::RadialMenu,
                     Action::RenderView,
                 ] {
@@ -492,6 +493,7 @@ pub fn panel_body(app: &mut ModelApp, ui: &mut egui::Ui, p: PanelId) {
         PanelId::Paint => paint(app, ui),
         PanelId::History => undo_history(app, ui),
         PanelId::Simulation => crate::sim_ui::panel(app, ui),
+        PanelId::Coordinates => crate::coord_ui::panel(app, ui),
     }
 }
 

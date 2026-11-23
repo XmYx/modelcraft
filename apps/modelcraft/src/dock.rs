@@ -20,6 +20,7 @@ pub enum Pane {
     Paint,
     History,
     Simulation,
+    Coordinates,
 }
 
 impl Pane {
@@ -32,6 +33,7 @@ impl Pane {
             Pane::Paint => PanelId::Paint,
             Pane::History => PanelId::History,
             Pane::Simulation => PanelId::Simulation,
+            Pane::Coordinates => PanelId::Coordinates,
         })
     }
     pub fn of(p: PanelId) -> Pane {
@@ -42,6 +44,7 @@ impl Pane {
             PanelId::Paint => Pane::Paint,
             PanelId::History => Pane::History,
             PanelId::Simulation => Pane::Simulation,
+            PanelId::Coordinates => Pane::Coordinates,
         }
     }
     pub fn label(self) -> String {

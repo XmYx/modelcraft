@@ -74,6 +74,7 @@ pub enum Action {
     Palette,
     NextPanel,
     TransformDialog,
+    CoordinatePanel,
     About,
     SaveIncremental,
     SelectLoop,
@@ -196,6 +197,7 @@ pub fn all() -> Vec<Action> {
         RadialMenu,
         Preferences,
         TransformDialog,
+        CoordinatePanel,
         Palette,
         KeyboardShortcuts,
         NextPanel,
@@ -392,6 +394,7 @@ impl Action {
             Organize(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
+            CoordinatePanel => tl!("Coordinates Panel"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
             SelectLoop => tl!("Select Edge Loop"),
@@ -523,6 +526,7 @@ impl Action {
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
+            CoordinatePanel => "view.coordinates",
             About => "help.about",
         };
         s.to_string()

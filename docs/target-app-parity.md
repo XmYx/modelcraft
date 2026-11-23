@@ -149,7 +149,7 @@ Weight: 5
 | Rename, duplicate, delete, reparent | C M | D | S | Reparent through the row menu |
 | Groups and nulls | C M | D | S | |
 | Attributes panel for the active object | C M Z | D | M | Transform, shape, cage, deformer, material, history |
-| Numeric entry for every transform | C M Z | D | S | Properties fields and Transform by Numbers (Ctrl+T) |
+| Numeric entry for every transform | C M Z | D | S | Properties fields, Transform by Numbers (Ctrl+T) and a dockable Coordinates panel (View ▸ Coordinates Panel, off by default): position, rotation and size or scale of the selected objects or components, object or world position, applied as one history step |
 | Multi-object editing in the attributes panel | C M | D | M | Transform and material edits apply to every selected object as one undo step (`batch`); a move, turn or scale is applied as a change, so each keeps its placement |
 | Drag-and-drop in the tree | C M | D | S | Drop a row on a row to put it under it, below the rows for the top level; Move Under in the row menu for the keyboard |
 | Search and filter in the tree | C M | D | S | By name or type; matches keep their parents |
