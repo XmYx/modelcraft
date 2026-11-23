@@ -5,7 +5,6 @@
 use egui::{Color32, RichText};
 use glam::Vec3;
 use modelcraft_engine::Command;
-use modelcraft_engine::ops::deform::Deformer;
 use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
@@ -786,8 +785,10 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
-        ObjectKind::Deformer { deformer } => {
-            egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| deformer_fields(app, ui, id, *deformer));
+        ObjectKind::Deformer { deformer, limits, target } => {
+            egui::CollapsingHeader::new(actions::deformer_label(deformer.kind()))
+                .default_open(true)
+                .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
             crate::field_layers_ui::list(app, ui, id);
         }
         _ => {}
@@ -1055,29 +1056,6 @@ fn primitive_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, p: Prim
             || Command::SetPrimitive { id, primitive: q },
             id,
         );
-    }
-}
-
-fn deformer_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Deformer) {
-    let mut q = d;
-    let r = ui
-        .horizontal(|ui| match &mut q {
-            Deformer::Bend { angle } | Deformer::Twist { angle } => vec![drag_k(ui, "deformer.angle", angle, 0.5, -3600.0..=3600.0, tl!("Angle"))],
-            Deformer::Taper { amount } => vec![drag_k(ui, "deformer.amount", amount, 0.01, -10.0..=10.0, tl!("Amount"))],
-            Deformer::Ripple { amplitude, frequency } => {
-                vec![
-                    drag_k(ui, "deformer.amplitude", amplitude, 0.005, -10.0..=10.0, tl!("Amplitude")),
-                    drag_k(ui, "deformer.frequency", frequency, 0.01, 0.0..=100.0, tl!("Frequency")),
-                ]
-            }
-            Deformer::Round { amount } => vec![drag_k(ui, "deformer.amount", amount, 0.01, 0.0..=1.0, tl!("Amount"))],
-            Deformer::Shear { x, z } => {
-                vec![drag_k(ui, "deformer.x", x, 0.01, -1000.0..=1000.0, tl!("Slide X")), drag_k(ui, "deformer.z", z, 0.01, -1000.0..=1000.0, tl!("Slide Z"))]
-            }
-        })
-        .inner;
-    if let Some(r) = r.iter().find(|r| r.changed() || r.drag_stopped()) {
-        commit_edit(app, r, |o| o.kind = ObjectKind::Deformer { deformer: q }, || Command::SetDeformer { id, deformer: q }, id);
     }
 }
 
