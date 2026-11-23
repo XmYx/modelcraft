@@ -895,6 +895,7 @@ impl Document {
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
             Command::Organize(o) => return crate::organize::check_unlocked(self, o),
             Command::Stage(c) => return crate::stage::check_unlocked(self, c),
+            Command::Spline(s) => return crate::spline::check_unlocked(self, s),
             Command::SetTransform { id, transform } => {
                 if let Some(o) = self.scene.get(*id)
                     && let Some(channel) = self.scene.protected_channel(*id, &o.transform, &transform.sanitized())
@@ -1262,6 +1263,7 @@ impl Document {
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
             Command::Stage(c) => crate::stage::apply(self, c, &mut out)?,
+            Command::Spline(c) => crate::spline::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;
@@ -1429,6 +1431,8 @@ impl Document {
             let Some(o) = self.scene.get(id).cloned() else { continue };
             if self.scene.is_cage_input(id)
                 || matches!(o.kind, ObjectKind::Deformer { .. } | ObjectKind::CloneModifier { .. } | ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. })
+                // A curve has no surface; the generators that use it export their mesh.
+                || matches!(o.kind, ObjectKind::Spline { .. })
                 // A cache that deforms a mesh is no object of its own; a particle system exports as instances.
                 || (matches!(o.kind, ObjectKind::Sim { .. }) && !self.scene.is_particles(id))
                 || !self.scene.renders(id)

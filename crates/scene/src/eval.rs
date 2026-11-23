@@ -67,6 +67,8 @@ struct StepCache {
 pub struct Evaluator {
     steps: HashMap<ObjectId, StepCache>,
     finals: HashMap<ObjectId, (u64, Evaluated)>,
+    /// Evaluated spline objects ([`crate::splines`]).
+    pub(crate) splines: crate::splines::SplineCache,
     /// Count of step evaluations performed (tests and stats).
     pub runs: u64,
 }
@@ -79,12 +81,14 @@ impl Evaluator {
     pub fn clear(&mut self) {
         self.steps.clear();
         self.finals.clear();
+        self.splines.clear();
     }
 
     /// Drop caches of objects that no longer exist.
     pub fn retain(&mut self, scene: &Scene) {
         self.steps.retain(|id, _| scene.get(*id).is_some());
         self.finals.retain(|id, _| scene.get(*id).is_some());
+        self.splines.retain(scene);
     }
 
     /// The mesh after the first `upto` steps of a mesh object (all of them for `usize::MAX`),
@@ -308,6 +312,7 @@ impl Evaluator {
             | ObjectKind::PointDeformer { .. }
             | ObjectKind::Light { .. }
             | ObjectKind::Camera { .. }
+            | ObjectKind::Spline { .. }
             | ObjectKind::Hair { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));

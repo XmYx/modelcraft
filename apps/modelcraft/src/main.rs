@@ -34,6 +34,9 @@ mod demo;
 mod display_modes;
 mod dock;
 mod exchange_ui;
+mod field_layers_ui;
+#[cfg(test)]
+mod field_layers_ui_tests;
 mod field_ui;
 #[cfg(test)]
 mod field_ui_tests;
@@ -100,6 +103,9 @@ mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
 mod snap_ui;
+mod spline_ui;
+#[cfg(test)]
+mod spline_ui_tests;
 mod stage_ui;
 #[cfg(test)]
 mod stage_ui_tests;
@@ -111,6 +117,9 @@ mod uv_ui;
 mod uv_ui_tests;
 #[cfg(test)]
 mod ux_ui_tests;
+mod view_header;
+#[cfg(test)]
+mod view_header_tests;
 mod viewport;
 
 use args::{Cli, Launch};

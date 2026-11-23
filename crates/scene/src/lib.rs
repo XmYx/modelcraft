@@ -30,6 +30,7 @@ pub mod rig;
 mod rle;
 pub mod sim;
 pub mod snap;
+pub mod splines;
 pub mod stage;
 
 use std::sync::Arc;
@@ -42,6 +43,7 @@ pub use modelcraft_ops::array::Array;
 pub use modelcraft_ops::deform::Deformer;
 pub use modelcraft_ops::primitives::Primitive;
 pub use modelcraft_sim::{FrameCache, SimKind, SimObject};
+pub use modelcraft_spline::{Polyline, Spline, SplinePrimitive, Tessellation};
 pub use modelcraft_uv::UnwrapMethod;
 pub use modelcraft_uvpack::{Density, Fit, Projection, Rotation};
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,7 @@ use serde::{Deserialize, Serialize};
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
 pub use eval::{Evaluated, Evaluator, Instances, StepError};
 pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
+pub use splines::{SplineEval, SplineSource};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
 pub const MAX_DEPTH: usize = 64;
@@ -637,6 +640,13 @@ pub enum ObjectKind {
     Camera {
         camera: stage::CameraData,
     },
+    /// A curve: drawn as a line, never as a surface. Spline generators take spline children as
+    /// their input ([`splines`]).
+    Spline {
+        source: SplineSource,
+        #[serde(default)]
+        tess: Tessellation,
+    },
 }
 
 impl ObjectKind {
@@ -659,6 +669,7 @@ impl ObjectKind {
             ObjectKind::Sim { .. } => "Simulation",
             ObjectKind::Light { light } => light.kind.title(),
             ObjectKind::Camera { .. } => "Camera",
+            ObjectKind::Spline { .. } => "Spline",
         }
     }
 }
@@ -743,6 +754,7 @@ impl Object {
             ObjectKind::Skin { skin } => skin.heap_bytes(),
             ObjectKind::Hair { hair } => hair.heap_bytes(),
             ObjectKind::Sim { sim } => sim.heap_bytes(),
+            ObjectKind::Spline { source, .. } => source.heap_bytes(),
             ObjectKind::PointDeformer { deformer } => deformer.heap_bytes(),
             _ => 0,
         };
