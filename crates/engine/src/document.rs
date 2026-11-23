@@ -836,7 +836,13 @@ impl Document {
         if let Some(i) = input
             && !matches!(
                 self.scene.get(i).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         {
             return invalid("a generator needs a mesh or another generator as its input");

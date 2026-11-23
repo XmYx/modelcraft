@@ -16,6 +16,7 @@ pub mod patches;
 pub mod primitives;
 pub mod remesh;
 pub mod select;
+pub mod spline_gen;
 pub mod subdivide;
 pub mod trim;
 

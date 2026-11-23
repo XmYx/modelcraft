@@ -84,6 +84,9 @@ mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
 mod snap_ui;
+mod spline_gen_ui;
+#[cfg(test)]
+mod spline_gen_ui_tests;
 mod spline_pen;
 #[cfg(test)]
 mod spline_pen_ui_tests;

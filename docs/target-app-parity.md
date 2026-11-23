@@ -195,7 +195,7 @@ Weight: 4
 | Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | M | S | |
 | Extruded 3D text | C M | M | M | |
 | Terrain / landscape generator | C | M | M | |
-| Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
+| Extrude, lathe, loft and sweep generators from splines | C M | D | L | Extrude (axis, steps, caps, holes from nested splines), revolve (any angle, caps, axis points shared), loft (aligned sections, smooth or straight, caps) and sweep (rotation-minimizing frame, end scale, twist, roll, caps) as live generators over spline children, with UVs, undo, commands, export and nesting inside other generators |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
 | Boolean generator (live, nested) | C M Z | M | L | |
 | Live polygon reduction generator | C | M | M | |

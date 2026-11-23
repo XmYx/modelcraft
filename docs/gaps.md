@@ -266,6 +266,8 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 | **M12** Voronoi fracture | 1 | 25 | 0.67 | 36 | D1 |
 | **M13** GPU subdivision | 1 | 25 | 0.56 | 44 | — |
 
+**M6 status (splines, stream D):** the spline type is a UI-free crate (`modelcraft-spline`: Bezier, B-spline and polyline segments, open or closed, tessellation, point editing, a path builder for outlines) that 3D text and any other outline source can use. In the app: circle, rectangle, star, n-side, arc and helix spline objects; a pen, point and handle editing and a numeric point list; chamfer, fillet, reverse, close, convert to polygon and to mesh; and the live extrude, revolve, loft and sweep generators over spline children (caps with holes, UVs, undo, export, nesting in arrays). **Still open in M6:** a text outline primitive (it comes with 3D text), spline offset, outline and 2D booleans, objects placed or bent along a spline and the spline deformer, snapping and rectangle selection of points, a pen that draws B-splines directly (a curve's type can be switched), per-point radius or tilt for sweeps, and NURBS (**M11**).
+
 ## UV and paint
 
 **U1**: craft-mesh-ops `unwrap_uvs` (craft-libs #1233) is still open and is a projection-chart unwrap on triangle slices, not a conformal solver, so ModelCraft carries its own UI-free `modelcraft-uv` crate (seams, automatic cuts, LSCM with pins, distortion measures) written to move to craft-libs; the editor and packing follow. TextureCraft auto-unwraps meshes without UVs today, and the Paint workspace only shows patches and hands off through GLB, so **U3** vertex colour painting is the cheapest real painting step.

@@ -154,6 +154,21 @@ starts a new one; `kind?`), `move_knots` (`moves [{at:{segment,knot}, pos}]`), `
 nothing. A spline may have 1,024 segments and 100,000 points, and a curve is cut into at most
 1,000,000 points when it is tessellated; numbers that are not finite are refused.
 
+`add_generator` makes a generator (`kind`: `extrude`, `revolve`, `loft` or `sweep`) that shows a
+surface built from the splines inside it; `inputs` lists spline objects to move inside it (with
+none, it starts with example splines). **Extrude** and **revolve** use every spline inside (a
+closed spline inside another is a hole); **loft** blends through the splines in order (all closed
+or all open); **sweep** moves the first spline (the profile: its origin rides the path) along the
+second (the path) without twisting it. `set_generator` changes the options, which are different for
+each kind: extrude `{distance, axis (auto, x, y, z), steps, cap_start, cap_end}`, revolve
+`{angle (degrees, 360 is a full turn), steps, axis, caps}`, loft `{steps (between curves), smooth,
+caps, points (0: the most any curve has)}`, sweep `{end_scale, twist, roll (degrees), caps}`.
+The surface follows the splines: moving a point of a child re-evaluates the generator, and a
+generator can sit inside an array, a symmetry or a smooth cage. Faces point outwards however the
+splines were drawn, with UVs, and closed curves get caps (holes and concave outlines included).
+A request that would build more than 2,000,000 faces, or a cap of more than 30,000 points, is an
+error before anything is built. The exported mesh of a scene holds the generator's surface.
+
 `modelcraft-cli commands` lists the operations as `spline op=…`.
 
 ### Animation
