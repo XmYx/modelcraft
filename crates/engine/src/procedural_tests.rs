@@ -56,6 +56,7 @@ fn changing_a_new_primitive_through_set_primitive_survives_hostile_numbers() {
 // ---------------------------------------------------------------- deformers, second set
 
 use modelcraft_ops::deform::{Deformer, LimitMode, Limits, WrapMode};
+use modelcraft_scene::ObjectKind;
 
 fn positions(d: &mut Document, id: modelcraft_scene::ObjectId) -> Vec<glam::Vec3> {
     d.eval.evaluate(&d.scene, id).mesh.positions().to_vec()
@@ -89,7 +90,14 @@ fn delta_smoothing_smooths_what_the_deformers_before_it_did() {
     let mesh = add(&mut d, "sphere");
     let rest = positions(&mut d, mesh);
     let ripple = add_deformer(&mut d, "ripple", mesh);
-    d.execute(Command::SetDeformer { id: ripple, deformer: Deformer::Ripple { amplitude: 0.2, frequency: 4.0 }, limits: None, target: None, clear_target: false }).unwrap();
+    d.execute(Command::SetDeformer {
+        id: ripple,
+        deformer: Deformer::Ripple { amplitude: 0.2, frequency: 4.0 },
+        limits: None,
+        target: None,
+        clear_target: false,
+    })
+    .unwrap();
     let rippled = positions(&mut d, mesh);
     add_deformer(&mut d, "delta_smooth", mesh);
     let smoothed = positions(&mut d, mesh);
@@ -107,7 +115,8 @@ fn parametric_deformers_and_the_lattice_share_one_stack_order() {
     d.execute(Command::Rig(RigCommand::AddLattice { mesh, divisions: [2, 2, 2], linear: false })).unwrap();
     let lattice = d.scene.children(mesh).into_iter().find(|c| d.scene.get(*c).is_some_and(|o| matches!(o.kind, ObjectKind::PointDeformer { .. }))).unwrap();
     // Move one lattice point so that the lattice changes the mesh.
-    d.execute(Command::Rig(RigCommand::EditLattice { id: lattice, points: vec![7], translate: Some([0.4, 0.4, 0.4]), to: None, reset: false, linear: None })).unwrap();
+    d.execute(Command::Rig(RigCommand::EditLattice { id: lattice, points: vec![7], translate: Some([0.4, 0.4, 0.4]), to: None, reset: false, linear: None }))
+        .unwrap();
     let bend_first = positions(&mut d, mesh);
     assert!(d.scene.children(mesh).iter().position(|c| *c == bend) < d.scene.children(mesh).iter().position(|c| *c == lattice));
     d.execute(Command::Rig(RigCommand::MoveInStack { id: bend, delta: 1 })).unwrap();
@@ -122,7 +131,8 @@ fn limits_change_the_reach_and_a_hostile_box_is_made_safe() {
     let twist = add_deformer(&mut d, "twist", mesh);
     let full = positions(&mut d, mesh);
     let small = Limits { mode: LimitMode::WithinBox, fit_to_parent: false, size: glam::Vec3::new(2.0, 1.0, 2.0) };
-    d.execute(Command::SetDeformer { id: twist, deformer: Deformer::default_of("twist").unwrap(), limits: Some(small), target: None, clear_target: false }).unwrap();
+    d.execute(Command::SetDeformer { id: twist, deformer: Deformer::default_of("twist").unwrap(), limits: Some(small), target: None, clear_target: false })
+        .unwrap();
     let within = positions(&mut d, mesh);
     assert!(within != full, "a box smaller than the mesh limits the twist");
     // Points above the box are untouched.
@@ -134,7 +144,8 @@ fn limits_change_the_reach_and_a_hostile_box_is_made_safe() {
     };
     assert!(rest.iter().zip(&within).filter(|(r, _)| r.y > 0.6).all(|(r, w)| (*r - *w).length() < 1e-6));
     let nasty = Limits { mode: LimitMode::Unlimited, fit_to_parent: false, size: glam::Vec3::new(f32::NAN, -5.0, 0.0) };
-    d.execute(Command::SetDeformer { id: twist, deformer: Deformer::default_of("twist").unwrap(), limits: Some(nasty), target: None, clear_target: false }).unwrap();
+    d.execute(Command::SetDeformer { id: twist, deformer: Deformer::default_of("twist").unwrap(), limits: Some(nasty), target: None, clear_target: false })
+        .unwrap();
     if let Some(ObjectKind::Deformer { limits, .. }) = d.scene.get(twist).map(|o| o.kind.clone()) {
         assert!(limits.size.is_finite() && limits.size.min_element() > 0.0, "{limits:?}");
     }
@@ -151,14 +162,21 @@ fn a_shrink_wrap_follows_its_target_and_asks_for_one() {
     let e = d.eval.evaluate(&d.scene, ball);
     assert!(e.errors.iter().any(|e| e.message.contains("target")), "{:?}", e.errors);
     let set = |d: &mut Document, target: Option<modelcraft_scene::ObjectId>| {
-        d.execute(Command::SetDeformer { id: wrap, deformer: Deformer::ShrinkWrap { mode: WrapMode::Closest, offset: 0.0 }, limits: None, target, clear_target: false })
+        d.execute(Command::SetDeformer {
+            id: wrap,
+            deformer: Deformer::ShrinkWrap { mode: WrapMode::Closest, offset: 0.0 },
+            limits: None,
+            target,
+            clear_target: false,
+        })
     };
     set(&mut d, Some(wall)).unwrap();
     let wrapped = positions(&mut d, ball);
     // The cube is 2 wide: every point of the unit sphere lands on it.
     assert!(wrapped.iter().all(|p| (p.abs().max_element() - 1.0).abs() < 1e-4), "on the cube's surface");
     // Moving the target moves the result (the cache is keyed on the target too).
-    d.execute(Command::SetTransform { id: wall, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(5.0, 0.0, 0.0), ..Default::default() } }).unwrap();
+    d.execute(Command::SetTransform { id: wall, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(5.0, 0.0, 0.0), ..Default::default() } })
+        .unwrap();
     let moved = positions(&mut d, ball);
     assert!(moved.iter().all(|p| p.x > 3.0), "followed the cube to x = 5");
     // The target may not be the mesh or anything inside it; a missing object is refused.
@@ -166,7 +184,14 @@ fn a_shrink_wrap_follows_its_target_and_asks_for_one() {
     assert!(set(&mut d, Some(wrap)).is_err());
     assert!(set(&mut d, Some(modelcraft_scene::ObjectId(999))).is_err());
     // Taking it away restores the message.
-    d.execute(Command::SetDeformer { id: wrap, deformer: Deformer::ShrinkWrap { mode: WrapMode::Closest, offset: 0.0 }, limits: None, target: None, clear_target: true }).unwrap();
+    d.execute(Command::SetDeformer {
+        id: wrap,
+        deformer: Deformer::ShrinkWrap { mode: WrapMode::Closest, offset: 0.0 },
+        limits: None,
+        target: None,
+        clear_target: true,
+    })
+    .unwrap();
     assert!(d.eval.evaluate(&d.scene, ball).errors.iter().any(|e| e.message.contains("target")));
     // Deleting the target is not a crash either.
     set(&mut d, Some(wall)).unwrap();

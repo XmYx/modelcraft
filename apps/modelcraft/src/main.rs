@@ -25,9 +25,9 @@ mod coord_ui;
 #[cfg(test)]
 mod coord_ui_tests;
 mod deform_ui;
-mod deformer_params_ui;
 #[cfg(test)]
 mod deform_ui_tests;
+mod deformer_params_ui;
 #[cfg(test)]
 mod deformer_params_ui_tests;
 mod demo;

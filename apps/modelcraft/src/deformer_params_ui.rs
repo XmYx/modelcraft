@@ -4,9 +4,9 @@
 
 use egui::RichText;
 use glam::Vec3;
+use modelcraft_engine::Command;
 use modelcraft_engine::ops::deform::{DisplaceSource, LIMIT_MODES, LimitMode, Limits, MAX_OCTAVES, MAX_SMOOTH_ITERATIONS, WrapMode};
 use modelcraft_engine::scene::{Deformer, ObjectId, ObjectKind};
-use modelcraft_engine::Command;
 
 use crate::app::ModelApp;
 use crate::generator_ui::pick;
@@ -115,7 +115,7 @@ pub fn fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, d: Deformer, 
                 .filter(|o| {
                     o.id != id
                         && Some(o.id) != mesh
-                        && matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Generator { .. })
+                        && matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
                         && !mesh.is_some_and(|m| app.doc.scene.subtree(m).contains(&o.id))
                 })
                 .map(|o| (o.id, o.name.clone()))

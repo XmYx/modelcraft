@@ -410,7 +410,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_material", "Set base_color, metallic, roughness: id, material"),
     ("set_primitive", "Change a primitive's parameters: id, primitive"),
     ("set_cage_levels", "Change a smooth cage's levels: id, levels"),
-    ("set_deformer", "Change a deformer's parameters, limits (mode limited / unlimited / within_box, fit_to_parent, size) or shrink-wrap target: id, deformer, limits?, target?, clear_target?"),
+    (
+        "set_deformer",
+        "Change a deformer's parameters, limits (mode limited / unlimited / within_box, fit_to_parent, size) or shrink-wrap target: id, deformer, limits?, target?, clear_target?",
+    ),
     ("set_array", "Change an array's layout, copies and steps: id, array"),
     ("set_symmetry", "Change a symmetry's axis and join distance: id, axis, weld"),
     ("set_field", "Change a falloff field (shape, remap curve, invert, strength, blend, opacity, enabled): id, field"),

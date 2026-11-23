@@ -5,7 +5,6 @@
 use egui::{Color32, RichText};
 use glam::Vec3;
 use modelcraft_engine::Command;
-use modelcraft_engine::ops::deform::Deformer;
 use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
@@ -776,7 +775,9 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
         ObjectKind::Deformer { deformer, limits, target } => {
-            egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
+            egui::CollapsingHeader::new(actions::deformer_label(deformer.kind()))
+                .default_open(true)
+                .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
             crate::field_layers_ui::list(app, ui, id);
         }
         _ => {}

@@ -338,7 +338,8 @@ fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
 fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
     let mut key = scene.deep_rev(id);
     // A shrink-wrap also depends on its target object and on where it sits relative to the mesh.
-    for t in crate::rig::stack_targets(scene, id) {
+    let is_mesh = matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }));
+    for t in if is_mesh { crate::rig::stack_targets(scene, id) } else { Vec::new() } {
         let mut h = key ^ scene.deep_rev(t).rotate_left(29);
         for f in target_frame(scene, id, t).to_cols_array() {
             h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);

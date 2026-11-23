@@ -97,7 +97,13 @@ impl TriBvh {
                     continue;
                 }
                 let ext = chi - clo;
-                let axis = if ext.x >= ext.y && ext.x >= ext.z { 0 } else if ext.y >= ext.z { 1 } else { 2 };
+                let axis = if ext.x >= ext.y && ext.x >= ext.z {
+                    0
+                } else if ext.y >= ext.z {
+                    1
+                } else {
+                    2
+                };
                 order[s..e].sort_by(|a, b| centroid(*a)[axis].total_cmp(&centroid(*b)[axis]));
                 let mid = (s + e) / 2;
                 let left = nodes.len();
@@ -243,10 +249,8 @@ mod tests {
         for i in 0..200 {
             let p = Vec3::new((i as f32 * 0.37).sin() * 2.5, (i as f32 * 0.91).cos() * 2.5, (i as f32 * 0.13).sin() * 2.0);
             let hit = bvh.closest(p).unwrap();
-            let brute = tris
-                .iter()
-                .map(|t| (closest_on_triangle(p, m.position(t[0]), m.position(t[1]), m.position(t[2])) - p).length())
-                .fold(f32::MAX, f32::min);
+            let brute =
+                tris.iter().map(|t| (closest_on_triangle(p, m.position(t[0]), m.position(t[1]), m.position(t[2])) - p).length()).fold(f32::MAX, f32::min);
             assert!((hit.distance - brute).abs() < 1e-5, "{} vs {brute}", hit.distance);
         }
     }

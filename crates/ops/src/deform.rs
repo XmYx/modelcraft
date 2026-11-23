@@ -325,18 +325,21 @@ fn weights(pts: &[Vec3], cx: &Context) -> Vec<f32> {
     };
     local
         .iter()
-        .map(|p| {
-            if limits.mode == LimitMode::WithinBox && !(p.cmpge(lo).all() && p.cmple(hi).all()) {
-                0.0
-            } else {
-                clean_weight((cx.weight)(*p))
-            }
-        })
+        .map(|p| if limits.mode == LimitMode::WithinBox && !(p.cmpge(lo).all() && p.cmple(hi).all()) { 0.0 } else { clean_weight((cx.weight)(*p)) })
         .collect()
 }
 
-fn neighbours(m: &PolyMesh, n: usize) -> Vec<Vec<u32>> {
-    (0..n as u32).map(|v| m.vertex_neighbors(v).collect()).collect()
+/// Each vertex's neighbours as one flat list and the offsets into it (so a million-point mesh
+/// does not allocate a million small lists).
+fn neighbours(m: &PolyMesh, n: usize) -> (Vec<u32>, Vec<u32>) {
+    let mut offsets = Vec::with_capacity(n + 1);
+    let mut list: Vec<u32> = Vec::with_capacity(n * 6);
+    offsets.push(0);
+    for v in 0..n as u32 {
+        list.extend(m.vertex_neighbors(v));
+        offsets.push(list.len() as u32);
+    }
+    (offsets, list)
 }
 
 fn smooth(pts: &mut [Vec3], cx: &Context, iterations: u32, strength: f32, delta: bool) {
@@ -355,7 +358,7 @@ fn smooth(pts: &mut [Vec3], cx: &Context, iterations: u32, strength: f32, delta:
         _ => None,
     };
     let w = weights(pts, cx);
-    let nb = neighbours(m, pts.len());
+    let (offsets, nb) = neighbours(m, pts.len());
     // Smooth the points themselves, or their offsets from the rest points.
     let mut cur: Vec<Vec3> = match rest {
         Some(r) => pts.iter().zip(r).map(|(p, q)| *p - *q).collect(),
@@ -363,7 +366,8 @@ fn smooth(pts: &mut [Vec3], cx: &Context, iterations: u32, strength: f32, delta:
     };
     let mut next = cur.clone();
     for _ in 0..iterations {
-        for (i, n) in nb.iter().enumerate() {
+        for i in 0..cur.len() {
+            let n = &nb[offsets[i] as usize..offsets[i + 1] as usize];
             if n.is_empty() {
                 continue;
             }
@@ -383,7 +387,10 @@ fn smooth(pts: &mut [Vec3], cx: &Context, iterations: u32, strength: f32, delta:
 /// 3D value noise in 0..1, seeded.
 fn noise3(p: Vec3, seed: u32) -> f32 {
     fn lattice(x: i64, y: i64, z: i64, seed: u32) -> f32 {
-        let mut h = (x as u64).wrapping_mul(0x9E37_79B1_85EB_CA87) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ (z as u64).wrapping_mul(0x1656_67B1_9E37_79F9) ^ u64::from(seed).wrapping_mul(0x27D4_EB2F_1656_67C5);
+        let mut h = (x as u64).wrapping_mul(0x9E37_79B1_85EB_CA87)
+            ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+            ^ (z as u64).wrapping_mul(0x1656_67B1_9E37_79F9)
+            ^ u64::from(seed).wrapping_mul(0x27D4_EB2F_1656_67C5);
         h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         h ^= h >> 31;
