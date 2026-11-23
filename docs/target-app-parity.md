@@ -236,7 +236,7 @@ Weight: 9
 | Loop cut (edge ring) | C M | D | M | N cuts; slide, symmetric placement and a spacing curve on an options page with live preview; stops at non-quads, keeps neighbours conforming |
 | Slide edges and vertices | C M | M | S | |
 | Connect vertices / split polygons | C M | D | S | Connect Vertices step (Shift+J): two corners of a face split it, three or more are joined in order; neighbours and single vertices say why nothing happens |
-| Knife, slice and plane cut | C M | D | M | Slice by Plane (both halves kept, by numbers or limited to selected faces); Knife (K) drags a line, Knife by Numbers types its ends and view; visible-faces-only means faces turned away, not occlusion; a cut that ends inside a face leaves that face whole |
+| Knife, slice and plane cut | C M | D | M | Slice by Plane (both halves kept, by numbers or limited to selected faces); Knife (C) drags a line, Knife by Numbers types its ends and view; visible-faces-only means faces turned away, not occlusion; a cut that ends inside a face leaves that face whole |
 | Merge vertices, weld by distance | C M | D | S | |
 | Collapse edges and faces to a point | C M | M | S | |
 | Delete vertices, edges, faces | C M Z | D | S | |

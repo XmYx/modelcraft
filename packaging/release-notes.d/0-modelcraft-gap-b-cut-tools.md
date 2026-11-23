@@ -1,1 +1,1 @@
-- Modeling: new cutting tools. Knife (K) cuts along a dragged line, Slice by Plane cuts along a plane, Connect Vertices (Shift+J) joins corners across faces, and the Polygon Pen (P) adds a polygon point by point. Each has a by-numbers window and is one undo step.
+- Modeling: new cutting tools. Knife (C) cuts along a dragged line, Slice by Plane (Shift+C) cuts along a plane, Connect Vertices (Shift+J) joins corners across faces, and the Polygon Pen (P) adds a polygon point by point. Each has a by-numbers window and is one undo step.

@@ -115,11 +115,8 @@ pub fn slice(m: &PolyMesh, s: &Slice) -> OpResult {
             }
         }
         pts.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for pair in pts.chunks_exact(2) {
-            if let [(_, a, ia), (_, b, ib)] = pair
-                && *ia
-                && *ib
-            {
+        for [(_, a, ia), (_, b, ib)] in pts.as_chunks::<2>().0 {
+            if *ia && *ib {
                 pairs.push((f, *a, *b));
                 for key in [a, b] {
                     if let Key::Edge(e) = key {
@@ -430,7 +427,7 @@ mod tests {
         assert!(closed(&m));
         assert_eq!(euler(&m), 2);
         assert_eq!(m.vertex_count(), 8, "the plane runs through vertices only");
-        assert_eq!(m.face_count(), 6 + 2 + 0, "two faces are split along their diagonal");
+        assert_eq!(m.face_count(), 6 + 2, "two faces are split along their diagonal");
     }
 
     #[test]

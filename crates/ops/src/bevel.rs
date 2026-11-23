@@ -373,7 +373,7 @@ mod tests {
             let m = bevel_edges_with(&c, &[0], &BevelOptions { width: 0.4, segments, profile: BevelProfile::Round, tension: 0.5 }).unwrap();
             assert!(closed(&m));
             assert_eq!(euler(&m), 2);
-            assert_eq!(m.face_count(), 6 + segments as usize + 0);
+            assert_eq!(m.face_count(), 6 + segments as usize);
         }
     }
 

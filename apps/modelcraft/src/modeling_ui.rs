@@ -267,9 +267,16 @@ pub fn cancel(app: &mut ModelApp) -> bool {
     true
 }
 
-/// Escape while the window is open cancels the tool.
+/// Escape, or an undo, while the window is open takes the tool back. (An undo is the tool's even
+/// with a number field in focus: the field's own text undo is not worth a step back in the
+/// history that the window just made.)
 pub fn escape(app: &mut ModelApp, ctx: &egui::Context) -> bool {
-    app.modeling.is_open() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) && cancel(app)
+    if !app.modeling.is_open() {
+        return false;
+    }
+    let esc = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
+    let undo = ctx.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::COMMAND, Key::Z));
+    (esc || undo) && cancel(app)
 }
 
 /// Draw the options window.

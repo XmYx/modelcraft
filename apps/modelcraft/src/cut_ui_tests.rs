@@ -4,7 +4,7 @@
 
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use modelcraft_engine::ops::cut::PenPoint;
 use modelcraft_engine::scene::{ObjectId, StepOp};
 
@@ -40,7 +40,7 @@ fn undo(h: &mut Harness<'static, ModelApp>) {
 fn slice_by_plane_by_keyboard_and_undo() {
     let mut h = harness();
     cube(&mut h);
-    h.key_press_modifiers(Modifiers::SHIFT, Key::K);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::C);
     h.run();
     assert!(h.state().modeling.cut.is_open());
     // The window opens on the first number; the plane starts through the middle, facing up.
@@ -61,7 +61,7 @@ fn slice_by_plane_by_keyboard_and_undo() {
 fn slice_numbers_move_the_plane_and_a_miss_adds_nothing() {
     let mut h = harness();
     cube(&mut h);
-    h.key_press_modifiers(Modifiers::SHIFT, Key::K);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::C);
     h.run();
     h.get_by_label("Point Y").set_value_accesskit(0.4);
     h.run();
@@ -70,7 +70,7 @@ fn slice_numbers_move_the_plane_and_a_miss_adds_nothing() {
     let StepOp::SlicePlane { point, .. } = &steps(&h)[0] else { panic!("no slice") };
     assert!((point.y - 0.4).abs() < 1e-6);
     // A plane that crosses nothing: the status says so, no step is added, the window stays.
-    h.key_press_modifiers(Modifiers::SHIFT, Key::K);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::C);
     h.run();
     h.get_by_label("Point Y").set_value_accesskit(5.0);
     h.run();
@@ -88,7 +88,7 @@ fn slice_numbers_move_the_plane_and_a_miss_adds_nothing() {
 fn knife_by_numbers_cuts_across_faces_by_keyboard() {
     let mut h = harness();
     cube(&mut h);
-    h.key_press_modifiers(Modifiers::ALT, Key::K);
+    h.key_press_modifiers(Modifiers::ALT, Key::C);
     h.run();
     assert!(h.state().modeling.cut.is_open());
     assert!(h.get_by_label("From X").is_focused());
@@ -104,7 +104,7 @@ fn knife_by_numbers_cuts_across_faces_by_keyboard() {
     undo(&mut h);
     assert_eq!(steps(&h).len(), 0);
     // Stopping the line half-way cuts only the face that is reached; through-cuts include the back.
-    h.key_press_modifiers(Modifiers::ALT, Key::K);
+    h.key_press_modifiers(Modifiers::ALT, Key::C);
     h.run();
     h.get_by_label("To X").set_value_accesskit(0.0);
     h.run();
@@ -145,7 +145,7 @@ fn connect_vertices_by_keyboard() {
 fn polygon_by_numbers_by_keyboard() {
     let mut h = harness();
     cube(&mut h);
-    h.key_press_modifiers(Modifiers::ALT, Key::P);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::P);
     h.run();
     assert!(h.get_by_label("Points").is_focused());
     h.event(egui::Event::Text("3 3 0; 4 3 0; 4 4 0".into()));
@@ -163,7 +163,7 @@ fn polygon_by_numbers_by_keyboard() {
     undo(&mut h);
     assert_eq!(steps(&h).len(), 0);
     // A line that is not a point is reported on the spot.
-    h.key_press_modifiers(Modifiers::ALT, Key::P);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::P);
     h.run();
     h.event(egui::Event::Text("1 2".into()));
     h.run();
@@ -216,7 +216,7 @@ fn click(h: &mut Harness<'static, ModelApp>, at: egui::Pos2) {
 fn the_knife_tool_cuts_along_a_dragged_line_and_undoes() {
     let mut h = harness();
     cube(&mut h);
-    h.key_press(Key::K);
+    h.key_press(Key::C);
     h.run();
     assert!(h.state().modeling.cut.tool.is_on());
     let rect = h.get_by_label_contains("Viewport, Perspective").rect();
@@ -257,4 +257,18 @@ fn the_pen_tool_clicks_points_and_enter_makes_the_polygon() {
     assert_eq!(mesh(&mut h).face_count(), 7);
     undo(&mut h);
     assert_eq!(steps(&h).len(), 0);
+}
+
+#[test]
+fn no_two_commands_share_a_default_key() {
+    // A shared key silently disables one of the commands (a clash with Key Transform and with Pack
+    // UV Islands was caught this way).
+    let mut seen: std::collections::HashMap<&'static str, String> = std::collections::HashMap::new();
+    for a in crate::actions::all() {
+        if let Some(key) = a.default_binding()
+            && let Some(other) = seen.insert(key, a.id())
+        {
+            panic!("{key} is bound to both {other} and {}", a.id());
+        }
+    }
 }

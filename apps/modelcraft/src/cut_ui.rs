@@ -58,12 +58,12 @@ impl Op {
     }
     pub fn default_binding(self) -> Option<&'static str> {
         Some(match self {
-            Op::Knife => "Model: K",
-            Op::KnifeNumbers => "Model: Alt+K",
-            Op::Slice => "Model: Shift+K",
+            Op::Knife => "Model: C",
+            Op::KnifeNumbers => "Model: Alt+C",
+            Op::Slice => "Model: Shift+C",
             Op::Connect => "Model: Shift+J",
             Op::Pen => "Model: P",
-            Op::PenNumbers => "Model: Alt+P",
+            Op::PenNumbers => "Model: Shift+P",
         })
     }
 }
@@ -411,11 +411,12 @@ pub fn input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, view: usi
             if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 finish_pen(app, view, rect);
             }
-            if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
-                if let Tool::Pen { points, world } = &mut app.modeling.cut.tool {
-                    points.pop();
-                    world.pop();
-                }
+            if resp.has_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Backspace))
+                && let Tool::Pen { points, world } = &mut app.modeling.cut.tool
+            {
+                points.pop();
+                world.pop();
             }
         }
         Tool::None => {}
