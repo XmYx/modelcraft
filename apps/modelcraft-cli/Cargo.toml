@@ -33,6 +33,7 @@ serde_json = { workspace = true }
 craft-control = { workspace = true }
 craft-mcp-server = { workspace = true }
 modelcraft-render = { workspace = true }
+modelcraft-bake = { workspace = true }
 craft-atomic = { workspace = true }
 wgpu = { workspace = true }
 craft-image-codecs = { workspace = true }

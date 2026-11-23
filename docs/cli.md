@@ -342,6 +342,28 @@ playback range (curves, layers, constraints and IK all baked into it). What glTF
 printed as warnings. Importing a `.glb` or `.gltf` with skins, morph targets or animations
 builds joints, skins, blend shapes and curves from it, under one group named after the file.
 
+### Lights and cameras
+
+One command, `stage`: `{"cmd":"stage","op":"add_light","kind":"spot"}`. `modelcraft-cli commands`
+lists the operations.
+
+| `op` | Fields |
+|---|---|
+| `add_light` | `kind` (point, spot, area, sun, dome), `name`, `parent`, `transform` |
+| `set_light` | `id`, `light` (`kind`, `color` [r,g,b], `intensity`, `size`, `height`, `spread`, `softness`, `image`) |
+| `add_camera` | `name`, `parent`, `transform` |
+| `set_camera` | `id`, `camera` (`focal_length` mm, `sensor_width`, `sensor_height`, `near`, `far`, `focus_distance`, `f_stop` (0: no blur), `orthographic`, `ortho_height`) |
+| `set_render_camera` | `id` (none: the viewport's view) |
+| `set_render_settings` | `config` (`width`, `height`, `samples`, `bounces`, `frame_start`, `frame_end`, `frame_step`, `format`, `passes`, `region`, `denoise`, `exposure`, `output`) |
+
+A light or camera looks and shines along its own -Z axis. Intensity is a radiant intensity (W/sr)
+for point and spot lights, an irradiance on a surface that faces it for a sun, and a radiance for
+an area light (a glowing rectangle of `size` by `height` metres) and a dome (a flat colour, or a
+Radiance HDR panorama in `image`, turned with the object about the vertical axis). Every number
+is an attribute that can be keyed (`light.intensity`, `light.color.0`, `camera.focal_length`,
+`camera.focus_distance`, `camera.f_stop` …). Values outside their range are held at the nearest
+end.
+
 ### Organising objects
 
 One command, `organize`, with the operation in `op`: `{"cmd":"organize","op":"set_tag","ids":[1],"tag":{"type":"protection","position":true,"rotation":false,"scale":false}}`.
@@ -389,8 +411,16 @@ samples per second.
 | `--env FILE.hdr`, `--env-rotation DEG` | Light the scene with a Radiance HDR panorama, optionally turned |
 | `--seed N` | The same seed gives the same image |
 
-The scene graph has no light objects yet, so a project is lit by a studio set-up (a soft sky and
-one key light sized to the scene) on a matte ground plane.
+A project with light objects is lit by them alone; one without any is lit by a studio set-up (a
+soft sky and one key light sized to the scene) on a matte ground plane. A project with a render
+camera (see below) is rendered through it, its lens fitted across the picture's width; `--camera
+NAME|ID` picks one, `--no-camera` ignores it for the framing view, and the framing options
+(`--yaw`, `--pitch`, `--fov`, `--ortho`) apply only when no camera object is used.
+
+| Option | Meaning |
+|---|---|
+| `--frames FIRST-LAST[:STEP]` | Render these frames of the project (keys, simulations and the camera all follow the frame) to numbered files: `out_0001.png`, or the `#` signs of the name (`out_####.png`); the output may be `.png` or `.exr` |
+| `--passes LIST` | The layers an `.exr` holds besides the picture, `albedo,normal,depth,motion,variance` or `none` (default all) |
 
 An output ending in `.exr` holds linear radiance (`R`, `G`, `B`) and the feature images a denoiser
 or compositor reads: `albedo.R/G/B`, `N.X/Y/Z` (world-space normal), `Z` (distance from the
@@ -400,6 +430,23 @@ camera), `motion.X/Y` and `variance`, all 32-bit float. The feature images come 
 [--device cpu|gpu] [--order z|independent] [--guiding] [--splitting]` measures error against samples and time on the
 benchmark scenes, each against its own converged reference, and prints one JSON line per scene and
 a table ([performance.md](performance.md) explains the protocol).
+
+## Baking maps
+
+`modelcraft-cli bake-maps <file> --target NAME|ID -o PREFIX` bakes maps from dense meshes onto the
+target's UV layout and writes `PREFIX_normal.png`, `PREFIX_occlusion.png` … and one JSON line (files,
+size, sources, texels covered and missed, seconds). The target needs UVs.
+
+| Option | Meaning |
+|---|---|
+| `--source NAME\|ID[,…]` | The dense meshes; by default every other surface a render shows |
+| `--maps LIST` | `normal`, `displacement`, `occlusion` (`ao`), `curvature`, `cavity`, `colour`; default `normal` |
+| `--size N`, `--width N --height N` | Map size in texels, default 1024 (at most 8192, and the memory a bake takes is bounded) |
+| `--cage D --distance D` | Rays start `D` above the target (default 0.05) and reach `D` further down (default 0.1, world units); occlusion rays are `distance` long |
+| `--rays N --seed N` | Occlusion rays per texel (default 64); the same seed gives the same map |
+| `--padding N` | Texels spread past the layout's edges (default 4) |
+| `--flip-green` | The other normal-map convention; by default green follows the picture's downward direction, as the path tracer reads normal maps |
+| `--exr` | Write 32-bit float EXR files instead of PNG |
 
 ## Control channel
 

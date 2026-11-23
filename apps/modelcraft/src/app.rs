@@ -256,6 +256,14 @@ pub struct ModelApp {
     pub anim: crate::anim_ui::AnimUi,
     /// The Simulation panel: the bake in progress.
     pub sim: crate::sim_ui::SimUi,
+    /// Lights and cameras: which camera each view looks through.
+    pub stage: crate::stage_ui::StageUi,
+    /// Render settings and the frame queue.
+    pub render_ui: crate::render_ui::RenderUi,
+    /// The Picture Viewer and its history.
+    pub pictures: crate::picture_viewer::PictureViewer,
+    /// Bake Maps.
+    pub bake: crate::bake_ui::BakeUi,
     /// The pen tool and the selected spline points ([`crate::spline_pen`]).
     pub spline: crate::spline_pen::SplineUi,
     /// Hair grooming: brush, symmetry, the stroke in progress.
@@ -415,6 +423,10 @@ impl ModelApp {
             recovery_dir: None,
             anim: Default::default(),
             sim: Default::default(),
+            stage: Default::default(),
+            render_ui: Default::default(),
+            pictures: Default::default(),
+            bake: Default::default(),
             spline: Default::default(),
             groom: Default::default(),
             agents: Default::default(),
@@ -808,6 +820,9 @@ impl ModelApp {
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
             Sim(a) => crate::sim_ui::act(self, a),
+            Stage(a) => crate::stage_ui::act(self, a),
+            Render(a) => crate::render_ui::act(self, ctx, a),
+            Bake(a) => crate::bake_ui::act(self, ctx, a),
             Spline(a) => crate::spline_ui::act(self, a),
             Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
@@ -1413,6 +1428,8 @@ impl ModelApp {
         crate::agents::tick(self);
         // Before the shortcuts, so Escape stops a running bake instead of clearing the selection.
         crate::sim_ui::tick(self, &ctx);
+        crate::render_ui::tick(self, &ctx);
+        crate::bake_ui::tick(self, &ctx);
         self.shortcuts(&ctx);
         crate::constraint_ui::tick(self);
         crate::script_ui::tick(self);
@@ -1437,7 +1454,14 @@ impl ModelApp {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if crate::render_view::escape(self, ctx) || self.radial.is_some() || crate::script_ui::escape(self, ctx) || crate::script_ui::keys(self, ctx) {
+        if crate::render_view::escape(self, ctx)
+            || crate::render_ui::escape(self, ctx)
+            || crate::bake_ui::escape(self, ctx)
+            || crate::picture_viewer::escape(self, ctx)
+            || self.radial.is_some()
+            || crate::script_ui::escape(self, ctx)
+            || crate::script_ui::keys(self, ctx)
+        {
             return;
         }
         if crate::uv_ui::keys(self, ctx) {
