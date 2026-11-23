@@ -55,22 +55,50 @@ pub fn state_of(scene: &Scene, id: ObjectId, path: &str) -> KeyState {
 }
 
 /// What a press on a marker asks for.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Press {
     /// Key the attribute here, or remove the key that is here.
     Toggle(String),
     /// Show the attribute's curve in the Curve Editor.
     ShowCurve(String),
+    /// Give the attribute a formula (empty removes it); see `formula_field`.
+    Formula(String, String),
+    /// Remove the attribute's formula and set it to this number.
+    Value(String, f64),
+}
+
+/// A formula on one attribute of the scope's object, as the field shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldFormula {
+    pub expr: String,
+    /// Why the last solve skipped it, if it did.
+    pub problem: Option<String>,
 }
 
 #[derive(Clone, Default)]
-struct Scope {
-    id: ObjectId,
+pub(crate) struct Scope {
+    pub(crate) id: ObjectId,
     /// The attributes the object has (only those can be keyed); a field whose path is missing
     /// gets no marker.
-    valid: Arc<BTreeSet<String>>,
+    pub(crate) valid: Arc<BTreeSet<String>>,
     states: Arc<BTreeMap<String, KeyState>>,
+    /// The formulas on the object's attributes, by path.
+    pub(crate) formulas: Arc<BTreeMap<String, FieldFormula>>,
     pressed: Arc<Mutex<Vec<Press>>>,
+}
+
+impl Scope {
+    /// Queue something for [`end`] to run.
+    pub(crate) fn press(&self, p: Press) {
+        if let Ok(mut q) = self.pressed.lock() {
+            q.push(p);
+        }
+    }
+}
+
+/// The open scope, if a panel opened one this frame.
+pub(crate) fn scope(ui: &Ui) -> Option<Scope> {
+    ui.ctx().data(|d| d.get_temp::<Scope>(scope_id()))
 }
 
 fn scope_id() -> Id {
@@ -82,7 +110,18 @@ pub fn begin(app: &ModelApp, ui: &Ui, id: ObjectId) {
     let scene = &app.doc.scene;
     let states: BTreeMap<String, KeyState> = scene.anim.tracks_of(id).map(|t| (t.path.clone(), state_of(scene, id, &t.path))).collect();
     let valid: BTreeSet<String> = scene.get(id).map(|o| modelcraft_engine::scene::attr::list(o).into_iter().map(|(p, _)| p).collect()).unwrap_or_default();
-    let scope = Scope { id, valid: Arc::new(valid), states: Arc::new(states), pressed: Arc::default() };
+    let formulas: BTreeMap<String, FieldFormula> = scene
+        .constraints
+        .of(id)
+        .filter_map(|c| match &c.kind {
+            modelcraft_engine::scene::constraint::ConstraintKind::Expression { path, expr } => {
+                let problem = scene.constraints.problems().iter().find(|p| p.constraint == c.id).map(|p| p.message.clone());
+                Some((path.clone(), FieldFormula { expr: expr.clone(), problem }))
+            }
+            _ => None,
+        })
+        .collect();
+    let scope = Scope { id, valid: Arc::new(valid), states: Arc::new(states), formulas: Arc::new(formulas), pressed: Arc::default() };
     ui.ctx().data_mut(|d| d.insert_temp(scope_id(), scope));
 }
 
@@ -97,6 +136,8 @@ pub fn end(app: &mut ModelApp, ui: &Ui) -> bool {
         ran |= match p {
             Press::Toggle(path) => toggle(app, id, &path),
             Press::ShowCurve(path) => show_curve(app, id, &path),
+            Press::Formula(path, expr) => crate::formula_field::set(app, id, &path, &expr),
+            Press::Value(path, value) => crate::formula_field::replace_with_value(app, id, &path, value),
         };
     }
     ran

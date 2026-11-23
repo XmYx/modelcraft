@@ -178,9 +178,9 @@ Weight: 5
 | Generators as objects (cage of a child) | C | D | M | Smooth cage |
 | Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace and shrink-wrap, in one stack order with blend shapes, lattices, clusters and skins |
 | Node view of the dependency graph | M | M | L | |
-| Connect any attribute to any other | M | M | M | |
+| Connect any attribute to any other | M | P | M | A formula on any keyable number (`=@Lever.rotate.z`, typed into the field) or a driven key makes one attribute follow another, ordered and cycle-checked with the constraints; no wiring view and no vector or colour connections |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
-| Expressions and driven keys | C M | P | M | Formulas over the frame, time and any attribute of any object (a small safe language: arithmetic, comparisons, 24 functions; property-tested against hostile text) and driven keys through a curve, both ordered with the constraints; the driven curve has no editor yet, formulas give one number (no vectors or strings) |
+| Expressions and driven keys | C M | P | M | Formulas over the frame, time and any attribute of any object (a small safe language: arithmetic, comparisons, 24 functions; property-tested against hostile text) and driven keys through a curve, both ordered with the constraints; typed as `=` into any keyable field in Properties, with errors and cycles shown in the field; parsed once, solved once per change and capped in work per frame; the driven curve has no editor yet, formulas give one number (no vectors or strings) |
 | Procedural geometry node graph (scene nodes, graph-based effects) | C M | M | XL | |
 | Parallel graph evaluation | C M | M | L | Single-threaded today |
 
