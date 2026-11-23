@@ -768,12 +768,14 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         ObjectKind::CloneModifier { modifier, target } => {
             egui::CollapsingHeader::new(tl!("Clone Modifier")).default_open(true).show(ui, |ui| crate::modifier_ui::fields(app, ui, id, *modifier, *target));
+            crate::field_layers_ui::list(app, ui, id);
         }
         ObjectKind::Cloner { cloner, target } => {
             egui::CollapsingHeader::new(tl!("Clones")).default_open(true).show(ui, |ui| crate::clone_ui::fields(app, ui, id, *cloner, *target));
         }
         ObjectKind::Deformer { deformer } => {
             egui::CollapsingHeader::new(actions::deformer_label(deformer.kind())).default_open(true).show(ui, |ui| deformer_fields(app, ui, id, *deformer));
+            crate::field_layers_ui::list(app, ui, id);
         }
         _ => {}
     }
