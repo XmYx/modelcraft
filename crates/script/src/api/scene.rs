@@ -97,7 +97,7 @@ fn get_attr(d: &Document, id: ObjectId, name: &str) -> R<Dynamic> {
         ("material", _) => from_json(&json_of(&o.material)?)?,
         ("primitive", ObjectKind::Mesh { source: Source::Primitive { primitive }, .. }) => from_json(&json_of(primitive)?)?,
         ("levels", ObjectKind::SmoothCage { levels }) => Dynamic::from_int(*levels as INT),
-        ("deformer", ObjectKind::Deformer { deformer }) => from_json(&json_of(deformer)?)?,
+        ("deformer", ObjectKind::Deformer { deformer, .. }) => from_json(&json_of(deformer)?)?,
         _ => return Err(rt(format!("{} has no attribute {name:?} (it has: {})", o.name, attribute_names(o).join(", ")))),
     })
 }
@@ -150,11 +150,11 @@ fn set_attr(s: &Shared, id: ObjectId, name: &str, v: &Dynamic) -> R<()> {
         }
         "deformer" => {
             let cur = s.with_doc(|d| match object(d, id)?.kind.clone() {
-                ObjectKind::Deformer { deformer } => Ok(deformer),
+                ObjectKind::Deformer { deformer, .. } => Ok(deformer),
                 _ => Err(rt("not a deformer")),
             })??;
             let p = serde_json::from_value(merged(json_of(&cur)?, to_json(v)?)?).map_err(|e| rt(format!("not valid deformer settings: {e}")))?;
-            s.exec(Command::SetDeformer { id, deformer: p })?;
+            s.exec(Command::SetDeformer { id, deformer: p, limits: None, target: None, clear_target: false })?;
         }
         "levels" => {
             let n = v.as_int().map_err(|_| rt("levels must be a whole number"))?;

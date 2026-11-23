@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod array;
+pub mod bvh;
 pub mod decimate;
 pub mod deform;
 pub mod edit;

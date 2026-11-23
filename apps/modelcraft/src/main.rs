@@ -30,6 +30,9 @@ mod create_menu_tests;
 mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
+mod deformer_params_ui;
+#[cfg(test)]
+mod deformer_params_ui_tests;
 mod demo;
 mod display_modes;
 mod dock;

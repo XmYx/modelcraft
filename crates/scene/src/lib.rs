@@ -39,7 +39,7 @@ pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES, Modifier
 pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::array::Array;
-pub use modelcraft_ops::deform::Deformer;
+pub use modelcraft_ops::deform::{Deformer, Limits as DeformLimits};
 pub use modelcraft_ops::primitives::Primitive;
 pub use modelcraft_sim::{FrameCache, SimKind, SimObject};
 pub use modelcraft_spline::{Polyline, Spline, SplinePrimitive, Tessellation};
@@ -573,6 +573,12 @@ pub enum ObjectKind {
     },
     Deformer {
         deformer: Deformer,
+        /// The box the deformer works over and how it treats what lies outside it.
+        #[serde(default)]
+        limits: modelcraft_ops::deform::Limits,
+        /// The object a shrink-wrap pulls onto.
+        #[serde(default)]
+        target: Option<ObjectId>,
     },
     /// Shows real copies of its first mesh child joined into one mesh, in a row or a ring.
     Array {
