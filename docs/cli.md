@@ -341,7 +341,13 @@ An expression is one formula giving one number: `+ - * / % ^`, comparisons, `&&`
 `cond ? a : b`, brackets, the constants `pi`, `tau`, `e`, and the functions `sin cos tan asin acos
 atan atan2 sqrt abs floor ceil round min max clamp lerp pow exp ln sign step smoothstep deg rad`.
 Names: `frame`, `time` (seconds), `fps`, `self.<path>` (an attribute of the target) and
-`@<object id>.<path>`. For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @3.translate.x"}`.
+`@<object id>.<path>` or `@<object name>.<path>` (the first object with that name; a name with
+dots or spaces needs the id). For example `{"cmd":"rig","op":"set_expression","target":4,"path":"rotate.z","expr":"sin(time * 2) * 30 + @Lever.translate.x"}`.
+In the app, typing `=` and a formula into any keyable number in Properties sets the same
+expression; a plain number typed there removes it again. Each formula is parsed once, a solve is
+skipped when nothing it reads changed (drawing the same frame again costs no evaluation), and one
+solve takes at most 262 144 steps (formula nodes and IK iterations); what does not fit is skipped
+and reported like a cycle.
 
 A point cache (`modelcraft-cli bake`) holds a skinned mesh as it is posed frame by frame.
 Exporting to `.glb` keeps the rig instead: when the scene has skins, blend shapes, curves or

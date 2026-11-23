@@ -122,6 +122,7 @@ pub fn function_names() -> Vec<&'static str> {
 pub struct Expr {
     root: Node,
     variables: Vec<String>,
+    nodes: usize,
 }
 
 struct Parser<'a> {
@@ -342,12 +343,18 @@ impl Expr {
             let rest = source.get(p.pos..).unwrap_or("");
             return err(format!("unexpected {:?}", rest.chars().next().unwrap_or(' ')));
         }
-        Ok(Expr { root, variables: p.variables })
+        Ok(Expr { root, variables: p.variables, nodes: p.nodes.max(1) })
     }
 
     /// The names the expression reads, each once, in order of first use.
     pub fn variables(&self) -> &[String] {
         &self.variables
+    }
+
+    /// How many nodes the expression has: the most steps one [`Expr::eval`] takes (at least 1).
+    /// Callers that run many expressions add these up to cap their work.
+    pub fn cost(&self) -> usize {
+        self.nodes
     }
 
     /// Compute the value; `lookup` gives the value of a name (or `None` when there is no such
@@ -501,6 +508,8 @@ mod tests {
             assert!((got - want).abs() < 1e-9, "{src} = {got}, not {want}");
         }
         assert_eq!(Expr::parse("@3.translate.x + frame + frame").unwrap().variables(), ["@3.translate.x", "frame"]);
+        assert_eq!(Expr::parse("1 + 2 * 3").unwrap().cost(), 5, "three numbers and two operators");
+        assert_eq!(Expr::parse("(((7)))").unwrap().cost(), 1, "brackets add no work");
     }
 
     #[test]

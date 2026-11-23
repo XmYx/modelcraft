@@ -292,7 +292,8 @@ pub(crate) fn drag(ui: &mut egui::Ui, v: &mut f32, speed: f32, range: std::ops::
 /// [`drag`] with a key marker before it (see `key_marker`): `path` is the attribute it edits.
 pub(crate) fn drag_k(ui: &mut egui::Ui, path: &str, v: &mut f32, speed: f32, range: std::ops::RangeInclusive<f32>, name: String) -> egui::Response {
     crate::key_marker::marker(ui, path, &name);
-    drag(ui, v, speed, range, name)
+    ui.label(name.clone());
+    crate::formula_field::number(ui, path, &name, v, speed, Some(range), None)
 }
 
 pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
@@ -717,11 +718,10 @@ pub(crate) fn vec3_row_k(ui: &mut egui::Ui, label: &str, paths: KeyPaths, v: &mu
             for (i, (axis, c, val)) in [("X", theme::AXIS_X, &mut v.x), ("Y", theme::AXIS_Y, &mut v.y), ("Z", theme::AXIS_Z, &mut v.z)].into_iter().enumerate()
             {
                 let name = format!("{label} {axis}");
-                crate::key_marker::marker(ui, &paths.path(i), &name);
+                let path = paths.path(i);
+                crate::key_marker::marker(ui, &path, &name);
                 ui.label(RichText::new(axis).color(c).small());
-                let r = ui.add_sized([54.0, 18.0], egui::DragValue::new(val).speed(speed).max_decimals(3));
-                set_name(ui, &r, name);
-                out.push(r);
+                out.push(crate::formula_field::number(ui, &path, &name, val, speed, None, Some(54.0)));
             }
         });
     });

@@ -28,6 +28,20 @@
 //! (object and channel), a constraint that reads what another writes runs after it, and
 //! constraints that depend on themselves, directly or through others, are skipped and reported
 //! in [`Constraints::problems`] instead of looping.
+//!
+//! # Formulas
+//!
+//! An expression constraint is a formula on one attribute (`rig op=set_expression`, or `=` typed
+//! into a field). It reads `frame`, `time`, `fps`, `self.<path>`, `@<id>.<path>` and
+//! `@<name>.<path>` (the first object with that name; names with dots or spaces need the id).
+//! Three things keep formulas cheap and safe:
+//!
+//! - each formula is parsed once and kept until its text changes;
+//! - a solve is skipped when nothing it reads changed since the last one: the frame, the
+//!   constraint list and every object's revision and transform make up a key, so drawing the
+//!   same frame again costs one pass over the objects, not a solve;
+//! - one solve does at most [`MAX_SOLVE_WORK`] steps (formula nodes, IK iterations); what does
+//!   not fit is skipped and reported, never run half-way.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -45,6 +59,9 @@ pub const MAX_CONSTRAINTS: usize = 4096;
 pub const MAX_SOURCES: usize = 16;
 /// Longest constraint name.
 pub const MAX_NAME: usize = 64;
+/// Most steps one solve takes: the nodes of every formula it runs plus the iterations of every IK
+/// chain. Constraints beyond it are skipped and reported.
+pub const MAX_SOLVE_WORK: usize = 1 << 18;
 /// The attribute-path prefix of a constraint's weight on its target: `constraint.<id>.weight`.
 pub const WEIGHT_PREFIX: &str = "constraint.";
 
@@ -260,6 +277,29 @@ pub struct Constraints {
     solved: BTreeMap<ObjectId, Transform>,
     #[serde(skip)]
     problems: Vec<Problem>,
+    #[serde(skip)]
+    cache: SolveCache,
+}
+
+/// What a solve keeps for the next one. Not saved and not compared.
+#[derive(Clone, Debug, Default)]
+struct SolveCache {
+    /// Each formula's text and what parsing it gave, by constraint id.
+    parsed: HashMap<u32, (String, Result<Arc<Expr>, String>)>,
+    /// The key of the scene the last solve left behind (see [`Scene::solve_key`]); `None` after
+    /// any change to the constraints.
+    key: Option<u64>,
+    /// The steps the last solve that ran took.
+    work: usize,
+    /// How many solves ran (not counting the skipped ones).
+    runs: u64,
+}
+
+/// The formulas of one solve, parsed, and the object names they use.
+#[derive(Default)]
+struct Formulas {
+    parsed: HashMap<u32, Result<Arc<Expr>, String>>,
+    names: HashMap<String, ObjectId>,
 }
 
 impl PartialEq for Constraints {
@@ -279,7 +319,20 @@ impl Constraints {
         self.list.iter().find(|c| c.id == id)
     }
     pub fn get_mut(&mut self, id: u32) -> Option<&mut Constraint> {
+        self.cache.key = None;
         self.list.iter_mut().find(|c| c.id == id)
+    }
+    /// The formula on `path` of `object`, if it has one.
+    pub fn formula(&self, object: ObjectId, path: &str) -> Option<&Constraint> {
+        self.of(object).find(|c| matches!(&c.kind, ConstraintKind::Expression { path: p, .. } if p == path))
+    }
+    /// How many steps the last solve that ran took (at most [`MAX_SOLVE_WORK`]).
+    pub fn last_work(&self) -> usize {
+        self.cache.work
+    }
+    /// How many solves ran on this list; a solve skipped because nothing changed is not counted.
+    pub fn solves_run(&self) -> u64 {
+        self.cache.runs
     }
     /// The constraints whose target is `object`.
     pub fn of(&self, object: ObjectId) -> impl Iterator<Item = &Constraint> {
@@ -297,6 +350,7 @@ impl Constraints {
     pub fn set_authored(&mut self, object: ObjectId, t: Transform) {
         if let Some(slot) = self.authored.get_mut(&object) {
             *slot = t.sanitized();
+            self.cache.key = None;
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -313,17 +367,20 @@ impl Constraints {
         let mut c = Constraint { id, name: name.chars().take(MAX_NAME).collect(), target, enabled: true, weight: 1.0, kind };
         sanitize(&mut c);
         self.list.push(c);
+        self.cache.key = None;
         Ok(id)
     }
 
     pub fn remove(&mut self, id: u32) -> Option<Constraint> {
         let i = self.list.iter().position(|c| c.id == id)?;
+        self.cache.key = None;
         Some(self.list.remove(i))
     }
 
     /// Forget an object that left the scene: constraints on it go, and it is dropped as a
     /// source, goal, pole or driver (a constraint left with nothing to follow goes too).
     pub fn remove_object(&mut self, id: ObjectId) {
+        self.cache.key = None;
         self.list.retain_mut(|c| {
             if c.target == id {
                 return false;
@@ -386,6 +443,7 @@ impl Constraints {
         }
         self.solved.clear();
         self.problems.clear();
+        self.cache = SolveCache::default();
     }
 }
 
@@ -452,17 +510,57 @@ enum Chan {
     Translate,
     Rotate,
     Scale,
+    /// One axis of a transform channel (0 translate, 1 rotate, 2 scale; axis 0..3), as formulas
+    /// and driven keys read and write it. It overlaps the whole channel.
+    Part(u8, u8),
     Attr(String),
+}
+
+impl Chan {
+    /// The slots a read of `slot` depends on: itself, and the whole channel or its axes.
+    fn overlapping(slot: &Slot) -> Vec<Slot> {
+        let (o, c) = slot;
+        let whole = |k: u8| match k {
+            0 => Chan::Translate,
+            1 => Chan::Rotate,
+            _ => Chan::Scale,
+        };
+        match c {
+            Chan::Part(k, _) => vec![slot.clone(), (*o, whole(*k))],
+            Chan::Translate | Chan::Rotate | Chan::Scale => {
+                let k = match c {
+                    Chan::Translate => 0,
+                    Chan::Rotate => 1,
+                    _ => 2,
+                };
+                let mut v = vec![slot.clone()];
+                v.extend((0..3).map(|a| (*o, Chan::Part(k, a))));
+                v
+            }
+            Chan::Attr(_) => vec![slot.clone()],
+        }
+    }
 }
 
 type Slot = (ObjectId, Chan);
 
 fn chan_of(path: &str) -> Chan {
-    match path.split('.').next() {
-        Some("translate") => Chan::Translate,
-        Some("rotate") => Chan::Rotate,
-        Some("scale") => Chan::Scale,
-        _ => Chan::Attr(path.to_string()),
+    let mut parts = path.split('.');
+    let channel = match parts.next() {
+        Some("translate") => 0,
+        Some("rotate") => 1,
+        Some("scale") => 2,
+        _ => return Chan::Attr(path.to_string()),
+    };
+    match (parts.next(), parts.next()) {
+        (Some("x"), None) => Chan::Part(channel, 0),
+        (Some("y"), None) => Chan::Part(channel, 1),
+        (Some("z"), None) => Chan::Part(channel, 2),
+        _ => match channel {
+            0 => Chan::Translate,
+            1 => Chan::Rotate,
+            _ => Chan::Scale,
+        },
     }
 }
 
@@ -540,7 +638,7 @@ impl Scene {
         }
     }
 
-    fn io(&self, c: &Constraint) -> Io {
+    fn io(&self, c: &Constraint, f: &Formulas) -> Io {
         let mut io = Io::default();
         let parent = self.get(c.target).and_then(|o| o.parent);
         let t = c.target;
@@ -592,10 +690,10 @@ impl Scene {
                 io.reads.push((*driver, chan_of(driver_path)));
                 io.writes.push((t, chan_of(path)));
             }
-            ConstraintKind::Expression { path, expr } => {
-                if let Ok(e) = Expr::parse(expr) {
+            ConstraintKind::Expression { path, .. } => {
+                if let Some(Ok(e)) = f.parsed.get(&c.id) {
                     for v in e.variables() {
-                        if let Some((object, p)) = variable_target(v, t) {
+                        if let Some((object, p)) = variable_target(v, t, &f.names) {
                             io.reads.push((object, chan_of(p)));
                         }
                     }
@@ -608,10 +706,10 @@ impl Scene {
 
     /// The order the enabled constraints run in (indices into the list) and the ones that
     /// depend on themselves.
-    fn constraint_order(&self) -> (Vec<usize>, Vec<usize>) {
+    fn constraint_order(&self, f: &Formulas) -> (Vec<usize>, Vec<usize>) {
         let list = &self.constraints.list;
         let active: Vec<usize> = (0..list.len()).filter(|i| list.get(*i).is_some_and(|c| c.enabled)).collect();
-        let ios: HashMap<usize, Io> = active.iter().filter_map(|i| list.get(*i).map(|c| (*i, self.io(c)))).collect();
+        let ios: HashMap<usize, Io> = active.iter().filter_map(|i| list.get(*i).map(|c| (*i, self.io(c, f)))).collect();
         let mut writers: HashMap<&Slot, Vec<usize>> = HashMap::new();
         for i in &active {
             for w in ios.get(i).map(|io| io.writes.as_slice()).unwrap_or(&[]) {
@@ -624,7 +722,9 @@ impl Scene {
         for r in &active {
             let mut before: BTreeSet<usize> = BTreeSet::new();
             for slot in ios.get(r).map(|io| io.reads.as_slice()).unwrap_or(&[]) {
-                before.extend(writers.get(slot).into_iter().flatten().copied());
+                for s in Chan::overlapping(slot) {
+                    before.extend(writers.get(&s).into_iter().flatten().copied());
+                }
             }
             for w in before {
                 if after.entry(w).or_default().insert(*r) {
@@ -674,6 +774,12 @@ impl Scene {
     pub fn solve_constraints(&mut self) -> usize {
         if self.constraints.is_empty() {
             self.constraints.problems.clear();
+            self.constraints.cache.key = None;
+            return 0;
+        }
+        let key = self.solve_key();
+        if self.constraints.cache.key == Some(key) {
+            // Nothing a constraint reads changed since the last solve: its result stands.
             return 0;
         }
         let mut driven: BTreeSet<ObjectId> = BTreeSet::new();
@@ -708,7 +814,8 @@ impl Scene {
         authored.retain(|id, _| driven.contains(id));
         self.constraints.authored = authored;
 
-        let (order, cyclic) = self.constraint_order();
+        let formulas = self.formulas();
+        let (order, cyclic) = self.constraint_order(&formulas);
         let mut problems = Vec::new();
         for i in cyclic {
             if let Some(c) = self.constraints.list.get(i) {
@@ -716,9 +823,23 @@ impl Scene {
             }
         }
         let mut attr_changes = 0;
+        let mut work = 0usize;
         for i in order {
             let Some(c) = self.constraints.list.get(i).cloned() else { continue };
-            match self.run_constraint(&c) {
+            let cost = match &c.kind {
+                ConstraintKind::Expression { .. } => formulas.parsed.get(&c.id).and_then(|e| e.as_ref().ok()).map_or(1, |e| e.cost()),
+                ConstraintKind::Ik { iterations, bones, .. } => (*iterations as usize).saturating_mul(*bones as usize + 1).max(1),
+                _ => 1,
+            };
+            if work.saturating_add(cost) > MAX_SOLVE_WORK {
+                problems.push(Problem {
+                    constraint: c.id,
+                    message: format!("{} was skipped: the constraints of this scene need more than {MAX_SOLVE_WORK} steps a frame", c.name),
+                });
+                continue;
+            }
+            work += cost;
+            match self.run_constraint(&c, &formulas) {
                 Ok(changed) => attr_changes += usize::from(changed),
                 Err(message) => problems.push(Problem { constraint: c.id, message: format!("{}: {message}", c.name) }),
             }
@@ -739,7 +860,55 @@ impl Scene {
             }
         }
         self.constraints.solved = solved;
+        self.constraints.cache.work = work;
+        self.constraints.cache.runs += 1;
+        self.constraints.cache.key = Some(self.solve_key());
         changed
+    }
+
+    /// A key of everything a solve reads: the frame, the frame rate, and every object's
+    /// revision, parent and transform (the constraint list clears the stored key whenever it
+    /// changes). Equal keys mean a solve would give the same result.
+    fn solve_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.anim.frame.to_bits().hash(&mut h);
+        self.anim.time.fps.to_bits().hash(&mut h);
+        self.objects.len().hash(&mut h);
+        for o in &self.objects {
+            (o.id.0, o.rev, o.parent.map(|p| p.0)).hash(&mut h);
+            let t = &o.transform;
+            for v in t.translation.to_array().into_iter().chain(t.rotation.to_array()).chain(t.scale.to_array()) {
+                v.to_bits().hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
+    /// Parse the formulas whose text changed since the last solve and gather the object names
+    /// they use.
+    fn formulas(&mut self) -> Formulas {
+        let cons = &mut self.constraints;
+        let mut live = BTreeSet::new();
+        for c in &cons.list {
+            if let ConstraintKind::Expression { expr, .. } = &c.kind {
+                live.insert(c.id);
+                if cons.cache.parsed.get(&c.id).is_none_or(|(src, _)| src != expr) {
+                    let parsed = Expr::parse(expr).map(Arc::new).map_err(|e| e.to_string());
+                    cons.cache.parsed.insert(c.id, (expr.clone(), parsed));
+                }
+            }
+        }
+        cons.cache.parsed.retain(|id, _| live.contains(id));
+        let parsed: HashMap<u32, Result<Arc<Expr>, String>> = cons.cache.parsed.iter().map(|(id, (_, e))| (*id, e.clone())).collect();
+        let named = parsed.values().filter_map(|e| e.as_ref().ok()).flat_map(|e| e.variables()).any(|v| uses_name(v));
+        let mut names = HashMap::new();
+        if named {
+            for o in &self.objects {
+                names.entry(o.name.clone()).or_insert(o.id);
+            }
+        }
+        Formulas { parsed, names }
     }
 
     /// The sources that exist and count, with their world matrices.
@@ -759,7 +928,7 @@ impl Scene {
 
     /// Run one constraint. `Ok(true)` when it changed an attribute through [`Scene::set_attr`]
     /// (transform writes are counted by the caller).
-    fn run_constraint(&mut self, c: &Constraint) -> Result<bool, String> {
+    fn run_constraint(&mut self, c: &Constraint, f: &Formulas) -> Result<bool, String> {
         let target = self.get(c.target).ok_or("its object is gone")?;
         let parent_world = target.parent.map_or(Mat4::IDENTITY, |p| self.world_matrix(p));
         let to_parent = parent_world.inverse();
@@ -826,7 +995,10 @@ impl Scene {
                 return self.set_attr(c.target, path, value).map_err(|e| e.to_string());
             }
             ConstraintKind::Expression { path, expr } => {
-                let e = Expr::parse(expr).map_err(|e| e.to_string())?;
+                let e = match f.parsed.get(&c.id) {
+                    Some(parsed) => parsed.clone()?,
+                    None => Arc::new(Expr::parse(expr).map_err(|e| e.to_string())?),
+                };
                 let frame = self.anim.frame;
                 let fps = self.anim.time.fps;
                 let value = e
@@ -834,7 +1006,7 @@ impl Scene {
                         "frame" => Some(frame),
                         "fps" => Some(fps),
                         "time" => Some(if fps > 0.0 { frame / fps } else { 0.0 }),
-                        _ => variable_target(name, c.target).and_then(|(object, p)| self.attr(object, p)),
+                        _ => variable_target(name, c.target, &f.names).and_then(|(object, p)| self.attr(object, p)),
                     })
                     .map_err(|e| e.to_string())?;
                 return self.set_attr(c.target, path, value).map_err(|e| e.to_string());
@@ -965,14 +1137,22 @@ impl Scene {
     }
 }
 
-/// The object and attribute path a variable of an expression names: `self.<path>` or
-/// `@<id>.<path>`.
-fn variable_target(name: &str, this: ObjectId) -> Option<(ObjectId, &str)> {
+/// The object and attribute path a variable of an expression names: `self.<path>`,
+/// `@<id>.<path>` or `@<name>.<path>` (looked up in `names`).
+fn variable_target<'a>(name: &'a str, this: ObjectId, names: &HashMap<String, ObjectId>) -> Option<(ObjectId, &'a str)> {
     if let Some(path) = name.strip_prefix("self.") {
         return Some((this, path));
     }
-    let (id, path) = name.strip_prefix('@')?.split_once('.')?;
-    Some((ObjectId(id.parse().ok()?), path))
+    let (object, path) = name.strip_prefix('@')?.split_once('.')?;
+    if object.bytes().all(|b| b.is_ascii_digit()) {
+        return Some((ObjectId(object.parse().ok()?), path));
+    }
+    Some((*names.get(object)?, path))
+}
+
+/// Whether a variable names an object by its name rather than its id.
+fn uses_name(v: &str) -> bool {
+    v.strip_prefix('@').and_then(|r| r.split_once('.')).is_some_and(|(o, _)| !o.bytes().all(|b| b.is_ascii_digit()))
 }
 
 #[cfg(test)]
