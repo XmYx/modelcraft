@@ -20,11 +20,11 @@ pub fn model(doc: &mut Document) -> Option<ObjectId> {
     let cube = add(doc, Command::AddPrimitive { kind: "cube".into(), name: Some("Body".into()), parent: None })?;
     // Top face (index 2) up, inset, then pushed back in; a bevel along the bottom ring.
     for op in [
-        StepOp::Extrude { faces: vec![2], distance: 0.8 },
+        StepOp::extrude(vec![2], 0.8),
         StepOp::Inset { faces: vec![2], amount: 0.35 },
-        StepOp::Extrude { faces: vec![2], distance: -0.5 },
-        StepOp::LoopCut { edge: 0, cuts: 1 },
-        StepOp::Bevel { edges: vec![1, 5], width: 0.12 },
+        StepOp::extrude(vec![2], -0.5),
+        StepOp::loop_cut(0, 1),
+        StepOp::bevel(vec![1, 5], 0.12),
     ] {
         let _ = doc.execute(Command::AddStep { id: cube, op });
     }
@@ -40,7 +40,7 @@ pub fn model(doc: &mut Document) -> Option<ObjectId> {
     if let Some(c) = add(doc, Command::AddPrimitive { kind: "cylinder".into(), name: None, parent: None }) {
         place(doc, c, Vec3::new(-3.0, 1.0, 0.5), Quat::IDENTITY);
         let _ = doc.execute(Command::AddStep { id: c, op: StepOp::Inset { faces: vec![25], amount: 0.3 } });
-        let _ = doc.execute(Command::AddStep { id: c, op: StepOp::Extrude { faces: vec![25], distance: 0.6 } });
+        let _ = doc.execute(Command::AddStep { id: c, op: StepOp::extrude(vec![25], 0.6) });
     }
     Some(cube)
 }

@@ -69,8 +69,19 @@ pub struct Evaluator {
     finals: HashMap<ObjectId, (u64, Evaluated)>,
     /// Evaluated spline objects ([`crate::splines`]).
     pub(crate) splines: crate::splines::SplineCache,
+    /// Mesh objects being evaluated now, outermost first: a shrink-wrap target that is already
+    /// among them is a loop, and is read undeformed instead of recursing.
+    active: Vec<ObjectId>,
+    /// Results that depended on cutting a loop. They hold only for the evaluation in progress
+    /// (they depend on where it started), so they are kept apart from `finals` and dropped when
+    /// the next top-level evaluation begins.
+    scratch: HashMap<ObjectId, (u64, Evaluated)>,
+    /// How many loops have been cut so far (tells a result whether it depended on one).
+    cycle_hits: u64,
     /// Count of step evaluations performed (tests and stats).
     pub runs: u64,
+    /// Count of objects evaluated from scratch (not answered from a cache), for tests of bounds.
+    pub evaluations: u64,
 }
 
 impl Evaluator {
@@ -173,6 +184,10 @@ impl Evaluator {
         if depth > crate::MAX_DEPTH {
             return Evaluated::default();
         }
+        if depth == 0 {
+            self.scratch.clear();
+            self.active.clear();
+        }
         // A skinned mesh also depends on where its joints are.
         let key = generator_key(scene, id) ^ crate::rig::pose_key(scene, id) ^ crate::sim::sim_key(scene, id);
         if let Some((k, e)) = self.finals.get(&id)
@@ -180,31 +195,38 @@ impl Evaluator {
         {
             return e.clone();
         }
+        if let Some((k, e)) = self.scratch.get(&id)
+            && *k == key
+        {
+            // What depends on a cut loop taints whatever reads it.
+            self.cycle_hits += 1;
+            return e.clone();
+        }
+        let hits_before = self.cycle_hits;
+        self.evaluations += 1;
         let result = match &obj.kind {
             ObjectKind::Mesh { .. } => {
                 let mut e = self.steps_output(scene, id, usize::MAX);
-                let deformers: Vec<(Mat4, crate::Deformer, crate::FieldStack)> = scene
-                    .children(id)
-                    .into_iter()
-                    .filter_map(|c| scene.get(c))
-                    .filter(|c| c.visible)
-                    .filter_map(|c| match &c.kind {
-                        ObjectKind::Deformer { deformer } => Some((c.local_matrix().inverse(), *deformer, scene.field_stack(c.id))),
-                        _ => None,
-                    })
-                    .collect();
-                if !deformers.is_empty() {
-                    let mut m = (*e.mesh).clone();
-                    for (to_local, d, fields) in deformers {
-                        if fields.is_empty() {
-                            d.apply(&mut m, to_local);
-                        } else {
-                            d.apply_weighted(&mut m, to_local, &|p| fields.weight(p));
-                        }
+                // The shrink-wrap targets of the deformer stack, evaluated first. A target that
+                // is being evaluated already (a loop of wraps) is read undeformed.
+                let mut targets = crate::rig::Targets::new();
+                self.active.push(id);
+                for t in crate::rig::stack_targets(scene, id) {
+                    if self.active.contains(&t) {
+                        self.cycle_hits += 1;
+                        targets.insert(t, self.steps_output(scene, t, usize::MAX).mesh);
+                    } else {
+                        targets.insert(t, self.evaluate_depth(scene, t, depth + 1).mesh);
                     }
-                    e.mesh = Arc::new(m);
                 }
-                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh);
+                self.active.pop();
+                if self.cycle_hits != hits_before {
+                    e.warnings.push(StepError {
+                        step: usize::MAX,
+                        message: "shrink-wrap targets form a loop; where it closes, the target is used as it is before its own deformers".into(),
+                    });
+                }
+                let (skinned, problems) = crate::rig::apply_stack(scene, id, &e.mesh, &targets);
                 if let Some(m) = skinned {
                     e.mesh = Arc::new(m);
                 }
@@ -238,7 +260,9 @@ impl Evaluator {
                 }
             }
             ObjectKind::Array { array } => self.generate(scene, id, depth, |m| array.build(m)),
+            ObjectKind::SplineGenerator { generator } => self.spline_generate(scene, id, generator),
             ObjectKind::Symmetry { axis, weld } => self.generate(scene, id, depth, |m| edit::mirror(m, *axis as usize, *weld)),
+            ObjectKind::Generator { generator } => self.generate_many(scene, id, depth, generator),
             ObjectKind::Cloner { cloner, target } => {
                 let mut errors = Vec::new();
                 let mut out = Evaluated::default();
@@ -310,10 +334,16 @@ impl Evaluator {
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Light { .. }
+            | ObjectKind::Camera { .. }
             | ObjectKind::Spline { .. }
             | ObjectKind::Hair { .. } => Evaluated::default(),
         };
-        self.finals.insert(id, (key, result.clone()));
+        if self.cycle_hits == hits_before {
+            self.finals.insert(id, (key, result.clone()));
+        } else {
+            self.scratch.insert(id, (key, result.clone()));
+        }
         result
     }
 }
@@ -348,6 +378,49 @@ impl Evaluator {
     }
 }
 
+impl Evaluator {
+    /// A generator over the meshes inside it: each input is evaluated and put in the generator's
+    /// space, and the generator turns them into one mesh. When it fails the first input is shown
+    /// unchanged with the reason.
+    fn generate_many(&mut self, scene: &Scene, id: ObjectId, depth: usize, generator: &crate::generator::Generator) -> Evaluated {
+        let inputs = scene.generator_inputs(id, generator);
+        if inputs.is_empty() {
+            return Evaluated { errors: vec![StepError { step: usize::MAX, message: "needs a mesh inside it".into() }], ..Evaluated::default() };
+        }
+        let mut errors = Vec::new();
+        let mut meshes: Vec<PolyMesh> = Vec::with_capacity(inputs.len());
+        for c in inputs {
+            let inner = self.evaluate_depth(scene, c, depth + 1);
+            errors.extend(inner.errors);
+            let local = scene.get(c).map(|o| o.transform.matrix()).unwrap_or(Mat4::IDENTITY);
+            let mut m = (*inner.mesh).clone();
+            m.map_positions(|_, p| local.transform_point3(p));
+            // A mirroring transform (a negative scale) turns the faces inside out; put them back.
+            if local.determinant() < 0.0 {
+                let all: Vec<u32> = (0..m.face_count() as u32).collect();
+                if let Ok(flipped) = edit::flip_faces(&m, &all) {
+                    m = flipped;
+                }
+            }
+            meshes.push(m);
+        }
+        self.runs += 1;
+        match generator.run_noted(&meshes) {
+            Ok((r, notes)) => Evaluated {
+                mesh: Arc::new(r),
+                errors,
+                warnings: notes.into_iter().map(|message| StepError { step: usize::MAX, message }).collect(),
+                ..Evaluated::default()
+            },
+            Err(e) => {
+                errors.push(StepError { step: usize::MAX, message: e.to_string() });
+                let shown = if meshes.is_empty() { PolyMesh::default() } else { meshes.swap_remove(0) };
+                Evaluated { mesh: Arc::new(shown), errors, ..Evaluated::default() }
+            }
+        }
+    }
+}
+
 /// The matrix that takes a target object's space into the generator's space.
 fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
     let to_gen = scene.world_matrix(generator).inverse() * scene.world_matrix(target);
@@ -358,6 +431,15 @@ fn target_frame(scene: &Scene, generator: ObjectId, target: ObjectId) -> Mat4 {
 /// target sits relative to it, which the subtree revision does not cover.
 fn generator_key(scene: &Scene, id: ObjectId) -> u64 {
     let mut key = scene.deep_rev(id);
+    // A shrink-wrap also depends on its target object and on where it sits relative to the mesh.
+    let is_mesh = matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Mesh { .. }));
+    for t in if is_mesh { crate::rig::target_closure(scene, id) } else { Vec::new() } {
+        let mut h = key ^ scene.deep_rev(t).rotate_left(29);
+        for f in target_frame(scene, id, t).to_cols_array() {
+            h = (h ^ u64::from(f.to_bits())).wrapping_mul(0x0100_0000_01b3);
+        }
+        key = h;
+    }
     if matches!(scene.get(id).map(|o| &o.kind), Some(ObjectKind::Cloner { .. })) {
         // A clone modifier also depends on its target object, and on the time when it is animated.
         let mut h = key;
@@ -459,21 +541,63 @@ fn same_step(a: &Step, b: &Step) -> bool {
 fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Result<PolyMesh, OpError> {
     let (nv, ne, nf) = (m.vertex_count(), m.edge_count(), m.face_count());
     match op {
-        StepOp::Extrude { faces, distance } => {
+        StepOp::Extrude { faces, distance, offset, subdivisions, variation, seed, caps, individual } => {
             edit::check_selection(faces, nf, "face")?;
-            edit::extrude_faces(m, faces, *distance)
+            let o = modelcraft_ops::extrude::ExtrudeOptions {
+                distance: *distance,
+                offset: *offset,
+                subdivisions: *subdivisions,
+                variation: *variation,
+                seed: *seed,
+                caps: *caps,
+                individual: *individual,
+            };
+            modelcraft_ops::extrude::extrude_faces_with(m, faces, &o)
+        }
+        StepOp::ExtrudeEdges { edges, distance, lift } => {
+            edit::check_selection(edges, ne, "edge")?;
+            modelcraft_ops::extrude::extrude_edges(m, edges, *distance, *lift)
         }
         StepOp::Inset { faces, amount } => {
             edit::check_selection(faces, nf, "face")?;
             edit::inset_faces(m, faces, *amount)
         }
-        StepOp::Bevel { edges, width } => {
+        StepOp::Bevel { edges, width, segments, profile, tension } => {
             edit::check_selection(edges, ne, "edge")?;
-            edit::bevel_edges(m, edges, *width)
+            let o = modelcraft_ops::bevel::BevelOptions { width: *width, segments: *segments, profile: *profile, tension: *tension };
+            modelcraft_ops::bevel::bevel_edges_with(m, edges, &o)
         }
-        StepOp::LoopCut { edge, cuts } => {
+        StepOp::BevelVertices { verts, width } => {
+            edit::check_selection(verts, nv, "vertex")?;
+            modelcraft_ops::bevel::bevel_vertices(m, verts, *width)
+        }
+        StepOp::SlicePlane { point, normal, faces } => {
+            edit::check_selection(faces, nf, "face")?;
+            modelcraft_ops::cut::slice(m, &modelcraft_ops::cut::Slice { point: *point, normal: *normal, limits: Vec::new(), faces: faces.clone() })
+        }
+        StepOp::CutLine { a, b, view, front_only } => modelcraft_ops::cut::cut_line(m, *a, *b, *view, *front_only),
+        StepOp::PaintStroke { points, radius, strength, color, erase, falloff } => {
+            let brush = modelcraft_ops::paint::Brush {
+                radius: *radius,
+                strength: *strength,
+                color: *color,
+                mode: if *erase { modelcraft_ops::paint::Mode::Erase } else { modelcraft_ops::paint::Mode::Paint },
+            };
+            modelcraft_ops::paint::stroke(m, points, &brush, &|x| falloff.weight(x))
+        }
+        StepOp::FillColor { color, verts } => {
+            edit::check_selection(verts, nv, "vertex")?;
+            modelcraft_ops::paint::fill(m, verts, *color)
+        }
+        StepOp::Connect { verts } => {
+            edit::check_selection(verts, nv, "vertex")?;
+            modelcraft_ops::cut::connect(m, verts)
+        }
+        StepOp::AddPolygon { points, toward } => modelcraft_ops::cut::add_polygon(m, points, *toward),
+        StepOp::LoopCut { edge, cuts, offset, symmetric, profile } => {
             edit::check_selection(&[*edge], ne, "edge")?;
-            edit::loop_cut(m, *edge, *cuts)
+            let o = modelcraft_ops::loopcut::LoopCutOptions { cuts: *cuts, offset: *offset, symmetric: *symmetric, profile: *profile };
+            modelcraft_ops::loopcut::loop_cut_with(m, *edge, &o)
         }
         StepOp::Merge { verts } => {
             edit::check_selection(verts, nv, "vertex")?;
@@ -492,9 +616,14 @@ fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Resul
             edit::check_selection(verts, nv, "vertex")?;
             edit::delete_vertices(m, verts)
         }
-        StepOp::MoveVertices { verts, translate, rotate, scale } => {
+        StepOp::MoveVertices { verts, translate, rotate, scale, soft, symmetry } => {
             edit::check_selection(verts, nv, "vertex")?;
-            edit::transform_vertices(m, verts, *translate, *rotate, *scale)
+            if soft.is_none() && symmetry.is_none() {
+                edit::transform_vertices(m, verts, *translate, *rotate, *scale)
+            } else {
+                let t = modelcraft_ops::soft::Xform { translate: *translate, rotate: *rotate, scale: *scale };
+                modelcraft_ops::soft::transform(m, verts, t, soft.as_ref(), symmetry.as_ref())
+            }
         }
         StepOp::Flip { faces } => edit::flip_faces(m, faces),
         StepOp::Triangulate => edit::triangulate(m),

@@ -39,6 +39,7 @@ pub enum Action {
     AddDeformer(&'static str),
     AddArray(&'static str),
     AddSymmetry,
+    AddGenerator(&'static str),
     AddField(&'static str),
     AddCloner(&'static str),
     AddCloneModifier(&'static str),
@@ -75,6 +76,7 @@ pub enum Action {
     NextPanel,
     TransformDialog,
     CoordinatePanel,
+    IconPalettes,
     About,
     SaveIncremental,
     SelectLoop,
@@ -95,6 +97,9 @@ pub enum Action {
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
     Sim(crate::sim_ui::SimAction),
+    Stage(crate::stage_ui::StageAction),
+    Render(crate::render_ui::RenderAction),
+    Bake(crate::bake_ui::BakeAction),
     Spline(crate::spline_ui::SplineAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
@@ -105,10 +110,13 @@ pub enum Action {
     Objects(crate::object_manager::Op),
     Snap(crate::snap_ui::Op),
     Organize(crate::organize_ui::Op),
+    Cut(crate::cut_ui::Op),
+    Soft(crate::soft_ui::Op),
+    Paint(crate::paint_ui::Op),
 }
 
 pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
-pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
+pub const DEFORMERS: &[&str] = modelcraft_engine::ops::deform::KINDS;
 /// The array layouts (`modelcraft_ops::array::KINDS`).
 pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 /// The falloff field shapes (`modelcraft_field::SHAPES`).
@@ -143,6 +151,9 @@ pub fn all() -> Vec<Action> {
         Workspace(crate::app::Workspace::Model),
         Workspace(crate::app::Workspace::Sculpt),
         Workspace(crate::app::Workspace::Paint),
+        Workspace(crate::app::Workspace::Uv),
+        Workspace(crate::app::Workspace::Animate),
+        Workspace(crate::app::Workspace::Groom),
         ModeObject,
         ModeVertex,
         ModeEdge,
@@ -157,6 +168,7 @@ pub fn all() -> Vec<Action> {
     v.extend(DEFORMERS.iter().map(|d| AddDeformer(d)));
     v.extend(ARRAYS.iter().map(|a| AddArray(a)));
     v.push(AddSymmetry);
+    v.extend(modelcraft_engine::scene::generator::KINDS.iter().map(|g| AddGenerator(g)));
     v.extend(FIELDS.iter().map(|f| AddField(f)));
     v.extend(CLONERS.iter().map(|c| AddCloner(c)));
     v.extend(MODIFIERS.iter().map(|m| AddCloneModifier(m)));
@@ -165,6 +177,9 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::object_manager::ALL.iter().map(|o| Objects(*o)));
     v.extend(crate::snap_ui::all_ops().into_iter().map(Snap));
     v.extend(crate::organize_ui::ALL.iter().map(|o| Organize(*o)));
+    v.extend(crate::cut_ui::ALL.iter().map(|o| Cut(*o)));
+    v.extend(crate::soft_ui::ALL.iter().map(|o| Soft(*o)));
+    v.extend(crate::paint_ui::ALL.iter().map(|o| Paint(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -199,6 +214,7 @@ pub fn all() -> Vec<Action> {
         Preferences,
         TransformDialog,
         CoordinatePanel,
+        IconPalettes,
         Palette,
         KeyboardShortcuts,
         NextPanel,
@@ -207,6 +223,9 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
     v.extend(crate::sim_ui::SimAction::ALL.map(Sim));
+    v.extend(crate::stage_ui::StageAction::ALL.map(Stage));
+    v.extend(crate::render_ui::RenderAction::ALL.map(Render));
+    v.extend(crate::bake_ui::BakeAction::ALL.map(Bake));
     v.extend(crate::spline_ui::SplineAction::all().into_iter().map(Spline));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
@@ -245,6 +264,12 @@ pub fn deformer_label(d: &str) -> String {
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
         "shear" => tl!("Shear"),
+        "bulge" => tl!("Bulge"),
+        "squash" => tl!("Squash"),
+        "smooth" => tl!("Smooth"),
+        "delta_smooth" => tl!("Delta Smooth"),
+        "displace" => tl!("Displace"),
+        "shrink_wrap" => tl!("Shrink Wrap"),
         _ => d.to_string(),
     }
 }
@@ -328,6 +353,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => tl!("Model Workspace"),
             Workspace(crate::app::Workspace::Sculpt) => tl!("Sculpt Workspace"),
             Workspace(crate::app::Workspace::Paint) => tl!("Paint Workspace"),
+            Workspace(crate::app::Workspace::Uv) => tl!("UV Workspace"),
+            Workspace(crate::app::Workspace::Animate) => tl!("Animate Workspace"),
+            Workspace(crate::app::Workspace::Groom) => tl!("Groom Workspace"),
             ModeObject => tl!("Object Mode"),
             ModeVertex => tl!("Vertex Mode"),
             ModeEdge => tl!("Edge Mode"),
@@ -341,6 +369,7 @@ impl Action {
             AddDeformer(d) => crate::tlf!("Add {shape} Deformer", shape = deformer_label(d)),
             AddArray(a) => crate::tlf!("Add {layout} Array", layout = crate::generator_ui::array_label(a)),
             AddSymmetry => tl!("Add Symmetry"),
+            AddGenerator(g) => crate::tlf!("Add {kind}", kind = crate::procedural_ui::generator_label(g)),
             AddField(f) => crate::tlf!("Add {shape} Falloff Field", shape = crate::field_ui::shape_label(f)),
             AddCloner(c) => crate::tlf!("Add {layout} Clones", layout = crate::clone_ui::layout_label(c)),
             AddCloneModifier(m) => crate::tlf!("Add {mode} Clone Modifier", mode = crate::modifier_ui::mode_label(m)),
@@ -394,9 +423,13 @@ impl Action {
             Objects(o) => o.label(),
             Snap(o) => o.label(),
             Organize(o) => o.label(),
+            Cut(o) => o.label(),
+            Soft(o) => o.label(),
+            Paint(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             CoordinatePanel => tl!("Coordinates Panel"),
+            IconPalettes => tl!("Icon Palettes"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
             SelectLoop => tl!("Select Edge Loop"),
@@ -413,6 +446,9 @@ impl Action {
             Anim(a) => a.label(),
             Rig(a) => a.label(),
             Sim(a) => a.label(),
+            Stage(a) => a.label(),
+            Render(a) => a.label(),
+            Bake(a) => a.label(),
             Spline(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
@@ -446,6 +482,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => "workspace.model",
             Workspace(crate::app::Workspace::Sculpt) => "workspace.sculpt",
             Workspace(crate::app::Workspace::Paint) => "workspace.paint",
+            Workspace(crate::app::Workspace::Uv) => "workspace.uv",
+            Workspace(crate::app::Workspace::Animate) => "workspace.animate",
+            Workspace(crate::app::Workspace::Groom) => "workspace.groom",
             ModeObject => "mode.object",
             ModeVertex => "mode.vertex",
             ModeEdge => "mode.edge",
@@ -459,6 +498,7 @@ impl Action {
             AddDeformer(d) => return format!("create.deformer.{d}"),
             AddArray(a) => return format!("create.array.{a}"),
             AddSymmetry => "create.symmetry",
+            AddGenerator(g) => return format!("create.generator.{g}"),
             AddField(f) => return format!("create.field.{f}"),
             AddCloner(c) => return format!("create.clones.{c}"),
             AddCloneModifier(m) => return format!("create.clone_modifier.{m}"),
@@ -520,17 +560,24 @@ impl Action {
             Objects(o) => o.id(),
             Snap(o) => o.id(),
             Organize(o) => o.id(),
+            Cut(o) => o.id(),
+            Soft(o) => o.id(),
+            Paint(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
             Rig(a) => a.id(),
             Sim(a) => a.id(),
+            Stage(a) => a.id(),
+            Render(a) => a.id(),
+            Bake(a) => a.id(),
             Spline(a) => return a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             CoordinatePanel => "view.coordinates",
+            IconPalettes => "view.icon_palettes",
             About => "help.about",
         };
         s.to_string()
@@ -558,6 +605,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => "Cmd+1",
             Workspace(crate::app::Workspace::Sculpt) => "Cmd+2",
             Workspace(crate::app::Workspace::Paint) => "Cmd+3",
+            Workspace(crate::app::Workspace::Uv) => "Cmd+4",
+            Workspace(crate::app::Workspace::Animate) => "Cmd+5",
+            Workspace(crate::app::Workspace::Groom) => "Cmd+6",
             ModeObject => "Model: 1",
             ModeVertex => "Model: 2",
             ModeEdge => "Model: 3",
@@ -627,10 +677,15 @@ impl Action {
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
             Sim(a) => return a.default_binding(),
+            Stage(a) => return a.default_binding(),
+            Render(a) => return a.default_binding(),
             Spline(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
+            Cut(o) => return o.default_binding(),
+            Soft(o) => return o.default_binding(),
+            Paint(o) => return o.default_binding(),
             _ => return None,
         })
     }
@@ -642,9 +697,12 @@ impl Action {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             Organize(_) => "Organize",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGroup => "Create",
-            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
-            SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGenerator(_)
+            | AddGroup => "Create",
+            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) | Cut(_) => {
+                "Mesh"
+            }
+            SelectLoop | SelectRing | GrowSelection | ShrinkSelection | Soft(_) => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
             | LiveDetail | EvenRemesh | Sculpt(_) => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",
@@ -653,9 +711,13 @@ impl Action {
             Anim(_) => "Animate",
             Rig(_) => "Rig",
             Sim(_) => "Simulate",
+            Stage(a) => a.menu(),
+            Render(_) => "Render",
+            Bake(_) => "UV",
             Spline(_) => "Spline",
             Hair(_) => "Hair",
             Uv(_) => "UV",
+            Paint(_) => "Paint",
             _ => "View",
         }
     }

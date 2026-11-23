@@ -28,7 +28,9 @@ such a label is renamed. Internal ids (command names, file keys) may differ from
 | Shoulder, Needle (falloff curves) | curve presets | Generic | Use |
 | Quad sphere | cube-mapped sphere primitive | Generic | Use |
 | Disc, Polygon, Tube, Capsule, Pyramid, Tetrahedron, Octahedron, Dodecahedron, Icosahedron, Landscape (primitives); Hole radius, Feature scale | disc, n-gon, tube, capsule, pyramid, platonic solid and landscape primitives | Geometry words and plain nouns | Use |
+| Bulge, Squash, Smooth, Delta Smooth, Displace, Shrink Wrap (deformers); Reach, Fit to parent, Within box | bulge, squash-and-stretch, smoothing, delta smoothing, displacement and shrink-wrap deformers; limited / unlimited / within-box modes | Generic geometry words; Reach describes how far the effect goes | Use |
 | Radial, Cylinder, Cone, Capsule, Torus, Random, Formula (falloff fields); Falloff layers, Switched on, Opacity | radial, cylinder, cone, capsule, torus, random and formula fields; the field-layer list with its enable switch and opacity | Geometry words and plain descriptions; the formula field uses the expression language of the animation crate | Use |
+| Connect, Thicken, Reduce, Boolean (generators); Union, Subtract, Intersect; Join distance, Thickness, Grow, Keep, Operation | joining, solidify, polygon reduction and boolean generators | Plain geometry words; the reference product's generator names are not used as labels beyond these generic verbs | Use |
 | Round (deformer) | spherify | Generic | Use |
 | Ripple (deformer) | wave / sine deformer | Generic | Use |
 | Transform by Numbers | numeric transform dialogs | Generic phrase | Use |
@@ -86,4 +88,12 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Selection Sets | named selections / quick selection sets | Generic | Use |
 | Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
 | Search objects | outliner filters | Generic | Use |
+| Tool Options (window), Slide, Spacing curve, Rows, Variation, Caps, Lift, Segments, Profile (Flat, Round, Custom), Bevel Vertices, Extrude Edges | per-tool settings pages and bevel/extrude/loop-cut parameters in the reference products | Plain modeling words; the reference products' option names avoided | Use |
+| Knife, Knife by Numbers, Slice by Plane, Connect Vertices, Polygon Pen, Polygon by Numbers | knife / line cut, plane cut, connect, create-polygon tools | Plain verbs and nouns; the reference products' tool names avoided | Use |
+| Point Light, Spot Light, Area Light, Sun Light, Dome Light; Camera; Look Through; Render Through This Camera | light and camera objects, viewing through a camera, the camera a render uses | Generic lighting and photography words; the reference products' object names avoided | Use |
+| Render Settings, Picture Viewer, Frame Queue, Passes, Region | render settings and render queue windows, the picture viewer, multi-pass output, render region | Generic words for what they do; the reference products' window names avoided | Use |
+| Bake Maps; Cage distance, Ray distance; Cavity | map baking, bake cages, cavity maps | Generic words for what they do; the reference products' bake dialog and map names avoided | Use |
 | Spline; Circle, Rectangle, Star, N-Side, Arc, Helix (spline kinds); Intermediate points, Fixed steps, Uniform length, Adaptive, Tolerance, Largest turn (tessellation) | spline objects and their primitives | Plain geometry words; the references' "Points", "Intermediate points" and primitive names are generic nouns, no product term (such as their object type name) is used as a label | Use |
+| Pen Tool; Point, Handle in, Handle out, Handles (Free, Aligned, Mirrored, Smooth), Curve type (Polyline, Bezier, B-spline), Closed, Add Point, Insert Point, Delete Points | spline drawing and point editing | Plain drawing words; the references' pen and tangent terms are generic craft terms, no product tool name is used | Use |
+| Extrude, Revolve, Loft, Sweep (spline generators); Cap at the start, Cap at the end, Scale at the end, Twist, Roll at the start, Smooth through the curves | surfaces from splines | Plain geometry verbs; the references' own object names for lathing ("Lathe") and their NURBS variants are not used as labels | Use |
+| Reverse Spline, Chamfer Points, Fillet Points, Corner size, Convert Spline to Polygon, Convert Spline to Mesh | spline operations | Plain geometry verbs (chamfer and fillet are standard drafting terms) | Use |

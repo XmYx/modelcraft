@@ -1,0 +1,1 @@
+- Paint workspace: paint vertex colours with a brush (one undo step per stroke) or fill them from the keyboard; the colours show in the viewport and are saved to glTF files.

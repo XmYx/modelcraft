@@ -135,7 +135,7 @@ Weight: 6
 | Headless viewport renders for thumbnails and CI | M | P | S | GPU readback works in `modelcraft-cli bench` and tests; no render command |
 | Large-scene drawing: culling, level of detail, proxies | C M | P | L | 2.0 M triangles at ~290 fps; no culling or proxies |
 | Measure tool and scene units | C M | D | M | Measure (View ▸ Snapping and Axes, palette): two clicks on vertices, edge points or surfaces give the distance and its x, y, z parts in the preference's length unit, drawn in the view and announced in the status bar |
-| Camera objects: create, look through, focal length, clipping | C M | M | M | One editor camera |
+| Camera objects: create, look through, focal length, clipping | C M | P | M | Camera objects (focal length, sensor, focus distance, f-stop, orthographic) with a drawing in the viewport, picking, keys on every number, look-through where moving the view moves the camera, and a render camera the Render View and `render` use; the near and far planes are stored and drawn but the viewport and renders choose their own; no roll while looking through |
 | Safe frames and resolution gate | C M | M | S | |
 | Colour-managed viewport (view transform from a colour config) | C M R | M | M | |
 
@@ -176,7 +176,7 @@ Weight: 5
 | Cached evaluation per step | M | D | S | `history_is_cached_and_reevaluated_from_the_change` |
 | Stale steps degrade gracefully | M | X | S | A step whose selection no longer fits is skipped and flagged, never fatal |
 | Generators as objects (cage of a child) | C | D | M | Smooth cage |
-| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round |
+| Deformers as children | C M | D | M | Bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta smooth, displace and shrink-wrap, in one stack order with blend shapes, lattices, clusters and skins |
 | Node view of the dependency graph | M | M | L | |
 | Connect any attribute to any other | M | M | M | |
 | Utility nodes: math, conditions, remap, vector ops | C M | M | M | |
@@ -195,10 +195,10 @@ Weight: 4
 | Capsule, disc, tube, pyramid, platonic solids, helix | C M Z | P | S | Disc (with a hole), polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron and icosahedron are Create-menu primitives with editable parameters and UVs; the helix waits for splines |
 | Extruded 3D text | C M | M | M | |
 | Terrain / landscape generator | C | D | M | Seeded fractal-noise height field: size, height, segments, feature scale, octaves and seed in Properties; no erosion or sculpt-in-place yet |
-| Extrude, lathe, loft and sweep generators from splines | C M | M | L | |
+| Extrude, lathe, loft and sweep generators from splines | C M | D | L | Extrude (axis, steps, caps, holes from nested splines), revolve (any angle, caps, axis points shared), loft (aligned sections, smooth or straight, caps) and sweep (rotation-minimizing frame, end scale, twist, roll, caps) as live generators over spline children, with UVs, undo, commands, export and nesting inside other generators |
 | Array and symmetry generators (live) | C M | D | M | Array joins linear or radial copies into one mesh; Symmetry mirrors across one plane; both chain and follow their input; the destructive Mirror step remains |
-| Boolean generator (live, nested) | C M Z | M | L | |
-| Live polygon reduction generator | C | M | M | |
+| Boolean generator (live, nested) | C M Z | D | L | Union, subtract and intersect of the meshes inside a Boolean object, folded in order; closed manifold inputs only; exact edge-through-triangle decisions with symbolic perturbation, so shared planes and touching faces resolve; UVs and patches survive along the cut; a Connect or another Boolean inside works as an input; the editor's caps are interactive (300 thousand triangles per input) and an over-limit boolean is an error |
+| Live polygon reduction generator | C | D | M | A Reduce object keeps a share of its input's triangles (quadric error metric, UV seams and patch lines held) and follows it when it changes |
 | Volume mesher: combine shapes as distance fields, then mesh | C | M | L | |
 | Metaballs | C M | M | M | |
 | Wireframe-to-geometry generator (atoms and bonds) | C | M | S | |
@@ -209,9 +209,9 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Spline primitives: circle, rectangle, arc, star, helix, text outline | C M | M | M | |
-| Pen tool: Bézier and B-spline drawing and point editing | C M | M | M | |
-| Spline operations: chamfer, offset, outline, 2D booleans | C M | M | M | |
+| Spline primitives: circle, rectangle, arc, star, helix, text outline | C M | P | M | Circle (ellipse), rectangle (rounded corners), star, n-side, arc (open, chord, pie) and helix (or spiral) on any of three planes, each with a Properties page and a choice of fixed, uniform or adaptive intermediate points; no text outline yet (3D text builds on the shared spline type) |
+| Pen tool: Bézier and B-spline drawing and point editing | C M | P | M | A pen (click adds a point, drag pulls out a smooth handle, click the first point to close, Enter, Backspace, Escape), points and handles drawn on the selected spline and dragged in the view's plane, double-click inserts, Delete removes, a Properties list of points with numeric fields and handle modes; a curve's type switches between polyline, Bézier and B-spline; the pen draws Bézier curves; no snapping and no rectangle selection of points |
+| Spline operations: chamfer, offset, outline, 2D booleans | C M | P | M | Chamfer and fillet of corners between straight edges, reverse, close (joining ends that meet), convert to polygon and to a flat mesh (with holes) are done, from the Spline menu, the command palette and Properties; offset, outline and 2D booleans are not |
 | Objects placed or bent along a spline | C M | M | M | |
 | NURBS curves: degree, knots, weighted control points | M | M | L | |
 | NURBS surfaces: loft, revolve, extrude, planar, birail | M | M | XL | |
@@ -227,16 +227,16 @@ Weight: 9
 |---|---|---|---|---|
 | Vertex, edge, face modes; click and box select | C M | D | S | 1–4, Ctrl+A, Shift adds |
 | Loop, ring, grow and shrink selection | C M | D | S | Alt+L / double-click, Alt+R, Ctrl+= / Ctrl+- |
-| Soft selection (falloff around the selection) | C M Z | M | M | |
-| Extrude faces (region) | C M Z | D | S | |
-| Extrude edges and vertices; extrude along a curve | C M | M | M | |
+| Soft selection (falloff around the selection) | C M Z | D | M | Move, rotate and scale (gizmo or Transform by Numbers) pull the vertices around the selection by a radius and a remap curve, recorded in the Move step; weights show as colour on the vertices; radius by field or Alt+[ / Alt+]. Euclidean distance (not along the surface) |
+| Extrude faces (region) | C M Z | D | S | Options page with live preview: distance, offset, rows on the walls, seeded variation, caps on or off, region or each face on its own |
+| Extrude edges and vertices; extrude along a curve | C M | P | M | Border edges of an open mesh extrude outwards and up (Extrude Edges step); extruding a vertex is not possible (no loose edges in a polygon mesh), and no extrusion along a curve |
 | Inset faces | C M | D | S | Per face |
-| Bevel edges with segments and profile | C M Z | P | M | One flat segment; skips boundary edges |
-| Bevel / chamfer vertices | C M | M | S | |
-| Loop cut (edge ring) | C M | D | M | N cuts; stops at non-quads, keeps neighbours conforming |
+| Bevel edges with segments and profile | C M Z | D | M | 1–16 segments; flat, round (circular) or custom (tension) profile; options page with live preview; skips border edges |
+| Bevel / chamfer vertices | C M | D | S | Bevel Vertices step cuts the corner at interior vertices (flat); skips border vertices |
+| Loop cut (edge ring) | C M | D | M | N cuts; slide, symmetric placement and a spacing curve on an options page with live preview; stops at non-quads, keeps neighbours conforming |
 | Slide edges and vertices | C M | M | S | |
-| Connect vertices / split polygons | C M | M | S | |
-| Knife, slice and plane cut | C M | M | M | |
+| Connect vertices / split polygons | C M | D | S | Connect Vertices step (Shift+J): two corners of a face split it, three or more are joined in order; neighbours and single vertices say why nothing happens |
+| Knife, slice and plane cut | C M | D | M | Slice by Plane (both halves kept, by numbers or limited to selected faces); Knife (C) drags a line, Knife by Numbers types its ends and view; visible-faces-only means faces turned away, not occlusion; a cut that ends inside a face leaves that face whole |
 | Merge vertices, weld by distance | C M | D | S | |
 | Collapse edges and faces to a point | C M | M | S | |
 | Delete vertices, edges, faces | C M Z | D | S | |
@@ -247,11 +247,11 @@ Weight: 9
 | Bridge two faces, fill a hole | C M Z | D | M | Both as history steps |
 | Bridge edge loops, grid fill | C M Z | M | M | |
 | Separate, combine, detach and duplicate faces | C M Z | M | S | |
-| Shell / solidify (give thickness) | C M Z | M | S | |
+| Shell / solidify (give thickness) | C M Z | D | S | A Thicken object: both sides, outward or inward, an open sheet closing with a rim into a solid, a closed mesh becoming a hollow shell; live |
 | Smooth and relax vertices | C M Z | M | S | Sculpt smooth brush only |
 | Mirror modeling with a welded seam | C M Z | D | S | Mirror X/Y/Z step, keeps UVs |
-| Live symmetric component editing | C M Z | M | M | |
-| Mesh booleans | C M Z | M | L | |
+| Live symmetric component editing | C M Z | D | M | Mirrors move, rotate and scale across X, Y or Z (Shift+Y cycles), matching vertices by position within a tolerance; recorded in the Move step; works with soft selection. Meshes that are not symmetric keep the unmatched vertices as they are |
+| Mesh booleans | C M Z | P | L | As a live Boolean object (Create menu, command `procedural add_generator boolean`); a generator cannot be baked into a mesh yet (Collapse and the component tools refuse it); no per-face-selection booleans, no booleans of open meshes |
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
 | Custom normals: harden, average, weighted by face area | C M | M | M | |
@@ -259,7 +259,7 @@ Weight: 9
 | Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | D | S | `PolyMesh::build` repairs non-manifold and lamina faces on every result; Mesh ▸ Patches and Cleanup finds n-gons, triangles, open borders, faces with no area and poles, and Clean Up Mesh welds and removes no-area faces |
 | Transfer attributes between meshes (positions, UVs, normals) | M | M | M | |
 | Align, distribute and snap objects together | C M | M | S | |
-| Polygon pen: draw polygons point by point | C M | M | M | |
+| Polygon pen: draw polygons point by point | C M | P | M | Polygon Pen (P) clicks points snapped to vertices, edges (splitting both faces) and the surface, Enter makes one polygon; Polygon by Numbers types them. Single polygons only: no quad strips, no snapping to other objects |
 | Topology validated after every operation | | X | S | Every result rebuilds through `PolyMesh::build`; property-tested |
 
 ## Subdivision surfaces
@@ -281,12 +281,12 @@ Weight: 4
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Bend, twist, taper | C M Z | D | S | In the deformer's own frame |
+| Bend, twist, taper | C M Z | D | S | In the deformer's own frame; each works limited (held beyond the box), unlimited (carries on) or within the box only, over the box that fits the mesh or one of its own size |
 | Ripple / wave, spherify | C M | D | S | Ripple, Round |
 | Lattice / free-form deformation | C M | P | M | A lattice of up to 8 cells per axis around a mesh, as one Bézier volume (the 1986 paper) or cell by cell, with a deformer stack order shared with clusters, blend shapes and skins (reorder by command); control points are moved by number and are keyable; the cage is drawn but its points are not picked in the viewport; clusters (weighted points following an object, with a soft radius) live in the same stack |
-| Wrap, shrink-wrap and surface deformers | C M | M | M | |
-| Noise and texture displacement deformer | C M | M | S | |
-| Smooth, relax and delta-smoothing deformers | C M | M | M | |
+| Wrap, shrink-wrap and surface deformers | C M | P | M | Shrink-wrap pulls the points onto a target object (nearest point, or along the deformer's Y axis) with an offset and the falloff fields as weights; no wrap to a cage and no surface deformer |
+| Noise and texture displacement deformer | C M | P | S | Displace along the normals by seeded fractal noise or by the falloff fields' weight; no texture maps |
+| Smooth, relax and delta-smoothing deformers | C M | P | M | Smooth (passes and strength, weighted by the fields) and delta smoothing, which smooths only what the deformers before it did; no separate volume-keeping relax |
 | Spline-driven deformation (curve warp, spline wrap) | C M | M | M | |
 | Wire, wrinkle and sculpt-object deformers | M | M | M | |
 | Collision deformer | C | M | M | |
@@ -370,7 +370,7 @@ Weight: 6
 | Dynamic topology | Z | P | L | "Live detail": strokes split the triangles under the brush down to a detail size, with exact undo and journal replay. Splits only (no collapsing or edge flips yet); base detail level only; each split re-uploads the whole mesh to the GPU |
 | Voxel / even remesh | Z | D | L | "Even remesh": a history step that rebuilds a closed mesh as even quads; volume kept within 0.05 % (measured). Closed meshes only; loses UVs and patches |
 | Automatic quad retopology with guides and density | C M Z | M | XL | |
-| Decimation that keeps UVs and vertex colour | Z | P | L | "Decimate": a history step that keeps a share of the triangles by quadric error (Garland and Heckbert), holding open edges, UV seams and patch lines in place; every corner keeps a UV the input had. ModelCraft has no vertex colours yet, so none are carried; edges collapse onto an end point only (no best-fit position); no density painting |
+| Decimation that keeps UVs and vertex colour | Z | P | L | "Decimate": a history step that keeps a share of the triangles by quadric error (Garland and Heckbert), holding open edges, UV seams and patch lines in place; every corner keeps a UV and a vertex colour the input had; edges collapse onto an end point only (no best-fit position); no density painting |
 | Project detail from one mesh to another | M Z | D | M | "Project Detail": the mesh being sculpted moves onto the surface of another object, along its normals first and to the closest point otherwise, within a reach; the mask protects, one undo step. Works at any detail level |
 | Extract a shell from a mask | Z | D | S | A new object from the fully masked faces, thickened along the normals with a closed rim; the rim is not smoothed |
 | Close holes and make watertight | Z | P | S | Fill one hole at a time |
@@ -381,15 +381,15 @@ Weight: 5
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Paint workspace | C M Z | P | S | Patch view and export only |
-| Vertex colour painting | C M Z | M | M | |
+| Paint workspace | C M Z | P | S | Colour fields, swatches, hex, brush settings, fills and the vertex colour brush; patch view and GLB export; no texture painting or layers (hand-off to TextureCraft) |
+| Vertex colour painting | C M Z | D | M | Colour per face corner (`PolyMesh` keeps it through edits; new faces are white); brush with the sculpt falloffs, paint or erase, one history step per stroke that replays exactly; fills from the keyboard; shown tinting the object colour in the viewport; glTF `COLOR_0` written and read (one colour per vertex, so corners at one vertex are averaged); Decimate keeps each triangle's corner colours. No stamps or pressure yet |
 | Texture and PBR channel painting | C M Z | M | L | Hand-off to TextureCraft (GLB export) instead |
 | Projection painting from images and stencils | Z | M | M | |
 | Paint materials per region (material capture painting) | Z | M | M | |
 | Vertex colour to texture and back | Z | M | M | |
-| Bake normal maps from high to low resolution | C M Z | M | L | |
-| Bake displacement maps (scalar and vector) | M Z | M | M | |
-| Bake occlusion, curvature and cavity maps | C M Z | M | M | |
+| Bake normal maps from high to low resolution | C M Z | P | L | `modelcraft-bake`: for every texel of the target's UV layout a ray from a cage distance above the surface finds the dense mesh in the render BVH, and its normal is written in the tangent frame the path tracer reads normal maps with (or the other green convention); Bake Maps window (UV menu), `modelcraft-cli bake-maps`, PNG or EXR, cancel, bounded memory; a sphere baked onto itself is flat in a test; the map is not yet attached to the target's material from the window |
+| Bake displacement maps (scalar and vector) | M Z | P | M | The scalar height of the dense mesh above or below the target within the ray distance (0.5 is level), as a PNG or float EXR; tested on a dome over a plane; no vector displacement |
+| Bake occlusion, curvature and cavity maps | C M Z | P | M | Cosine-weighted occlusion rays up to a distance (checked in an open box against the closed-form form factor), mean curvature from the dense mesh's normals, and its concave part as a cavity map; one window, one worker thread; no thickness or edge-wear maps |
 
 ## Materials and shading
 
@@ -426,10 +426,10 @@ Weight: 8
 | Denoiser | C R | P | L | `craft-render-denoise`: the variance-guided filter for the Render View while passes arrive and a first-order regression filter on the two half renderings for finished pictures and `--denoise` (2.6 to 125× lower error from 4 spp on the benchmark scenes, [performance.md](performance.md)); CPU only, no firefly handling, history under camera motion blurs, no learned denoiser |
 | Path controls: bounces per type, clamping, sample limits | R | P | S | Total bounces, indirect clamp and sample count; not per lobe type |
 | Instanced geometry at render time | C M R | M | L | |
-| Render region | C M R | M | S | |
-| Batch and command-line renders | C M Z R | P | M | `modelcraft-cli render` writes one PNG per call (CPU or GPU); no frame ranges or EXR yet |
+| Render region | C M R | P | S | The project keeps a region; saved pictures are cut to it (the whole picture is still rendered) |
+| Batch and command-line renders | C M Z R | D | M | `modelcraft-cli render` writes PNG or EXR (`--passes`), one picture per call or a range of frames to numbered files (`--frames 1-24:2`), through the project's camera object (`--camera`), on CPU or GPU |
 | Distributed rendering over the network | C M R | M | L | |
-| Render queue | C M | M | M | |
+| Render queue | C M | P | M | The Render Settings window renders the project's frame range to numbered files on a worker thread from a copy of the scene, with progress, cancel (button, palette, Esc), and each frame handed to the Picture Viewer; one queue at a time, no network or multi-job list |
 | Vendor cloud rendering services | C R | O | L | A paid hosted service, not a feature of the app; distributed rendering above covers the user need |
 | Vendor-SDK denoisers and GPU back ends shipped as closed or C++ libraries | R | O | L | House rules: Rust only, allowlisted licences; the in-house denoiser row counts instead |
 
@@ -439,9 +439,9 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Point, spot and directional lights | C M R | P | M | Point, spot (cone with soft edge), directional and sun-disk lights in the engine on CPU and GPU, tested against their formulas; no light objects in the scene graph yet, so the app cannot place them |
-| Area lights: rectangle, disk, sphere, mesh | C M R | P | M | Any object with emission is a light of its own shape (plane, disk, sphere or any mesh), sampled through a light tree (and optionally resampled, `--restir`) and checked against a rectangle's closed-form irradiance; no dedicated light objects with units, spread or camera visibility |
-| Dome / image-based lighting with importance sampling | C M R | D | M | Radiance `.hdr` panoramas, sampled in proportion to brightness and solid angle with MIS (a test compares its variance with BSDF sampling), rotation; Render View (Panorama image) and `modelcraft-cli render --env`; on the CPU and the GPU; no EXR panoramas yet |
+| Point, spot and directional lights | C M R | D | M | Point, spot (cone angle and edge softness), and sun (apparent size) light objects with colour, intensity and keys, drawn in the viewport, picked, rendered on CPU and GPU and checked against the Lambert formula by a test; a project with lights is lit by them alone |
+| Area lights: rectangle, disk, sphere, mesh | C M R | P | M | Any object with emission is a light of its own shape (plane, disk, sphere or any mesh), sampled through a light tree (and optionally resampled, `--restir`) and checked against a rectangle's closed-form irradiance; area light objects are a glowing rectangle (width, height, radiance, colour, keys); no disk, sphere or mesh light objects and no camera-visibility switch |
+| Dome / image-based lighting with importance sampling | C M R | D | M | Radiance `.hdr` panoramas, sampled in proportion to brightness and solid angle with MIS (a test compares its variance with BSDF sampling), rotation; Render View (Panorama image), `modelcraft-cli render --env`, and dome light objects (colour or panorama, turning with the object about the vertical axis); on the CPU and the GPU; no EXR panoramas yet |
 | Physical sun and sky | C M R | D | M | Daylight: single-scattering Rayleigh and Mie atmosphere baked per render plus a sun disk attenuated by the same air, which paths find by themselves as well as by aiming (so mirrors show it cleanly, on CPU and GPU); sun height and direction in the Render View and `--sun`; no multiple scattering, ozone or night sky |
 | Light linking (include / exclude) | C M R | M | M | |
 | Light groups and per-light outputs | R | M | M | |
@@ -450,11 +450,11 @@ Weight: 6
 | Volumes: homogeneous, heterogeneous, sparse grids | C M R | M | L | |
 | Render-time displacement with adaptive subdivision | C M R | M | L | |
 | Motion blur: transform and deformation | C M R | M | L | |
-| Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); no aperture control in the app or CLI yet |
+| Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); camera objects set the f-stop and focus distance (keyable) and renders use them, on CPU and GPU; no bokeh shapes, no focus picking |
 | Physical camera: exposure, white balance, lens distortion | C M R | M | S | |
 | Caustics and path guiding | R | P | L | Path guiding on the CPU: a hash grid over the scene learns, per cell, where light arrives from and a radiance cache; paths sample from it mixed with the BSDF, and are ended or split by their expected contribution (`--guiding --splitting`, "Learn where light comes from" in the Render View); same expected image, tested. Fixed 16×16 directions per cell, so sharp caustics from a small sun on a near-mirror are still noisy ([performance.md](performance.md)); no GPU port, no caustics-specific method (photon mapping, manifold walks) |
-| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU and the GPU path and are written into the `.exr`; no ID mattes, no per-light or per-lobe passes |
-| OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
+| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU and the GPU path and are written into the `.exr`; the project chooses which layers an `.exr` holds (Render Settings, Passes, and `--passes`); no ID mattes, no per-light or per-lobe passes |
+| OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr, written by the frame queue (Render Settings, Save: EXR) and the CLI, cut to the project's region; no half floats, multi-part files or metadata, and the Render View's Save Image is PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
 | Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference (relative MSE, and with `--flip` the FLIP perceptual difference, written from the paper and not checked against the reference implementation); no time limit or per-ray statistics |
@@ -592,7 +592,8 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Dense dark theme, light theme from the system | C M Z | D | S | Text ≥ 4.5:1 (tested) |
-| Workspace layouts (model, sculpt, paint) | C M Z | D | S | Ctrl+1..3 |
+| Workspace layouts (model, sculpt, paint, UV, animate, groom) | C M Z | D | S | Ctrl+1..6; the UV, Animate and Groom layouts open the UV Editor window or the Animation panel and keep the Model modes and tools, with an action strip each; the UV Editor is still a floating window, not a dockable pane, and Groom has no hair tool palette of its own |
+| Grouped Create menu and icon palettes | C M | D | M | Create has submenus for primitives, generators, clones, deformers, fields, rig and simulation (lights and cameras when those objects exist); View ▸ Icon Palettes (off by default) adds an icon column of workspaces, modes and tools on the left and the same groups as fold-outs of icon buttons on the right, drawn with the painter, each named and keyboard reachable |
 | Dockable panels | C M | D | M | craft-ui docking: tab groups, splits, floating, per-workspace layouts saved in the preferences; moves by drag, tab menu, panel options menu or View ▸ Panels |
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |

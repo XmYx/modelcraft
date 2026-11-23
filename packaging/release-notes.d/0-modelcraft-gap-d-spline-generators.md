@@ -1,0 +1,1 @@
+- Spline generators: Spline > Extrude, Revolve, Loft and Sweep build a surface from the splines inside them (select the splines first, or start with an example); move a point of a spline and the surface follows; they can be wrapped in arrays and exported.

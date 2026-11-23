@@ -834,10 +834,7 @@ impl Document {
     /// cube to work on, so a first click shows something.
     fn add_generator(&mut self, name: &str, kind: ObjectKind, input: Option<ObjectId>, out: &mut Outcome) -> Result<(), EngineError> {
         if let Some(i) = input
-            && !matches!(
-                self.scene.get(i).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
-            )
+            && !self.scene.get(i).is_some_and(|o| o.kind.makes_geometry())
         {
             return invalid("a generator needs a mesh or another generator as its input");
         }
@@ -894,6 +891,8 @@ impl Document {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
             Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::Procedural(p) => return crate::procedural::check_unlocked(self, p),
+            Command::Stage(c) => return crate::stage::check_unlocked(self, c),
             Command::Spline(s) => return crate::spline::check_unlocked(self, s),
             Command::SetTransform { id, transform } => {
                 if let Some(o) = self.scene.get(*id)
@@ -988,7 +987,7 @@ impl Document {
                     return invalid("deformers go under a mesh object");
                 }
                 let name = self.scene.unique_name(&title(kind));
-                out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
+                out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer, limits: Default::default(), target: None }, Some(*target))?);
             }
             Command::AddCloneModifier { kind, cloner } => {
                 let modifier = Modifier::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone modifier {kind:?}")))?;
@@ -1078,10 +1077,33 @@ impl Document {
                 }
                 _ => return invalid("not a symmetry generator"),
             },
-            Command::SetDeformer { id, deformer } => match &mut self.scene.edit(*id)?.kind {
-                ObjectKind::Deformer { deformer: d } => *d = *deformer,
-                _ => return invalid("not a deformer"),
-            },
+            Command::SetDeformer { id, deformer, limits, target, clear_target } => {
+                let mesh = self.scene.get(*id).and_then(|o| o.parent);
+                if let Some(t) = target
+                    && (self.scene.get(*t).is_none() || Some(*t) == mesh || *t == *id || mesh.is_some_and(|m| self.scene.subtree(m).contains(t)))
+                {
+                    return invalid("the target must be another object, not the mesh being deformed or anything inside it");
+                }
+                if let (Some(t), Some(m)) = (target, mesh)
+                    && modelcraft_scene::rig::target_reaches(&self.scene, *t, m)
+                {
+                    return invalid("that target is itself shrink-wrapped to this mesh: the wraps would form a loop");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::Deformer { deformer: d, limits: l, target: tg } => {
+                        *d = *deformer;
+                        if let Some(new) = limits {
+                            *l = new.sanitized();
+                        }
+                        if *clear_target {
+                            *tg = None;
+                        } else if target.is_some() {
+                            *tg = *target;
+                        }
+                    }
+                    _ => return invalid("not a deformer"),
+                }
+            }
             Command::SetField { id, field } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::Field { field: f } => *f = field.sanitized(),
                 _ => return invalid("not a falloff field"),
@@ -1261,6 +1283,8 @@ impl Document {
             Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
+            Command::Procedural(c) => crate::procedural::apply(self, c, &mut out)?,
+            Command::Stage(c) => crate::stage::apply(self, c, &mut out)?,
             Command::Spline(c) => crate::spline::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {

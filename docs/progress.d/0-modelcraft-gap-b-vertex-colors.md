@@ -1,0 +1,1 @@
+| 2026-11-23 | Vertex colour painting: a colour per face corner on meshes (kept through edits, written to and read from glTF `COLOR_0`, carried through Decimate), `PaintStroke` and `FillColor` history steps, a brush with the sculpt falloffs, fills and colour fields in the Paint workspace, and vertex colours tinting the viewport shading |

@@ -104,14 +104,78 @@ pub fn pose_key(scene: &Scene, mesh: ObjectId) -> u64 {
     h | 1
 }
 
-/// Run the deformer stack of a mesh object on its evaluated mesh: its visible blend-shape,
-/// lattice, cluster and skin children, in child order ([`crate::point_deform`]). Returns the
-/// deformed mesh (`None` when nothing ran) and messages for what could not run.
-pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option<PolyMesh>, Vec<String>) {
+/// The meshes the shrink-wrap deformers of a mesh object pull onto, by object, already evaluated.
+pub type Targets = std::collections::HashMap<ObjectId, std::sync::Arc<PolyMesh>>;
+
+/// The objects the deformer stack of `mesh_id` reads besides its own mesh: the targets of its
+/// shrink-wraps.
+pub fn stack_targets(scene: &Scene, mesh_id: ObjectId) -> Vec<ObjectId> {
+    let mut v: Vec<ObjectId> = scene
+        .children(mesh_id)
+        .into_iter()
+        .filter_map(|c| scene.get(c))
+        .filter(|o| o.visible)
+        .filter_map(|o| match &o.kind {
+            ObjectKind::Deformer { deformer, target: Some(t), .. } if deformer.needs_target() && *t != mesh_id && scene.get(*t).is_some() => Some(*t),
+            _ => None,
+        })
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Whether evaluating `from` reads `goal`, through shrink-wrap targets (visible or not) of any
+/// mesh in `from`'s subtree, followed transitively. The walk keeps a visited set, so a loop in a
+/// hostile file ends it; `set_deformer` uses it to refuse a target that would make a loop.
+pub fn target_reaches(scene: &Scene, from: ObjectId, goal: ObjectId) -> bool {
+    let mut seen: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
+    let mut work = vec![from];
+    while let Some(o) = work.pop() {
+        if !seen.insert(o) {
+            continue;
+        }
+        for member in scene.subtree(o) {
+            if member == goal {
+                return true;
+            }
+            for c in scene.children(member) {
+                if let Some(ObjectKind::Deformer { deformer, target: Some(t), .. }) = scene.get(c).map(|x| &x.kind)
+                    && deformer.needs_target()
+                    && scene.get(*t).is_some()
+                {
+                    work.push(*t);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Every object `mesh_id`'s evaluation reads through shrink-wrap targets, followed transitively
+/// (not including `mesh_id`). Bounded by the number of objects.
+pub fn target_closure(scene: &Scene, mesh_id: ObjectId) -> Vec<ObjectId> {
+    let mut seen: std::collections::BTreeSet<ObjectId> = std::collections::BTreeSet::new();
+    let mut work = stack_targets(scene, mesh_id);
+    while let Some(t) = work.pop() {
+        if t != mesh_id && seen.insert(t) && matches!(scene.get(t).map(|o| &o.kind), Some(ObjectKind::Mesh { .. })) {
+            work.extend(stack_targets(scene, t));
+        }
+    }
+    seen.into_iter().collect()
+}
+
+/// Run the deformer stack of a mesh object on its evaluated mesh: its visible parametric
+/// deformers (bend, shrink-wrap…), blend-shape, lattice, cluster and skin children, in child
+/// order ([`crate::point_deform`]). Returns the deformed mesh (`None` when nothing ran) and
+/// messages for what could not run. `targets` holds the evaluated meshes of [`stack_targets`].
+pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh, targets: &Targets) -> (Option<PolyMesh>, Vec<String>) {
     let stack: Vec<&crate::Object> = scene
         .objects()
         .iter()
-        .filter(|o| o.parent == Some(mesh_id) && o.visible && matches!(o.kind, ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. }))
+        .filter(|o| {
+            o.parent == Some(mesh_id) && o.visible && matches!(o.kind, ObjectKind::Skin { .. } | ObjectKind::PointDeformer { .. } | ObjectKind::Deformer { .. })
+        })
         .collect();
     if stack.is_empty() {
         return (None, Vec::new());
@@ -119,10 +183,38 @@ pub fn apply_stack(scene: &Scene, mesh_id: ObjectId, mesh: &PolyMesh) -> (Option
     let mut errors = Vec::new();
     let to_mesh = scene.world_matrix(mesh_id).inverse();
     let mut positions: Vec<Vec3> = mesh.positions().to_vec();
+    let rest = positions.clone();
     let mut out = Vec::new();
     let mut changed = false;
     for o in stack {
         let s = match &o.kind {
+            ObjectKind::Deformer { deformer, limits, target } => {
+                let fields = scene.field_stack(o.id);
+                let weight = |p: Vec3| fields.weight(p);
+                let one = |_: Vec3| 1.0;
+                let weigh: &dyn Fn(Vec3) -> f32 = if fields.is_empty() { &one } else { &weight };
+                // The shrink-wrap target, in this mesh's space.
+                let bvh = target.filter(|_| deformer.needs_target()).and_then(|t| {
+                    let m = targets.get(&t)?;
+                    Some(modelcraft_ops::bvh::TriBvh::from_mesh(m, to_mesh * scene.world_matrix(t)))
+                });
+                if deformer.needs_target() && bvh.is_none() {
+                    errors.push(format!("{} needs a target object: choose one in the Properties panel", o.name));
+                    continue;
+                }
+                // Smoothing and displacement read the mesh's connections; its points are `positions`.
+                let cx = modelcraft_ops::deform::Context {
+                    to_local: o.local_matrix().inverse(),
+                    limits: *limits,
+                    weight: weigh,
+                    topology: Some(mesh),
+                    rest: Some(&rest),
+                    target: bvh.as_ref(),
+                };
+                deformer.apply_points(&mut positions, &cx);
+                changed = true;
+                continue;
+            }
             ObjectKind::Skin { skin } => skin,
             ObjectKind::PointDeformer { deformer } => {
                 errors.extend(deformer.apply(&mut positions, o.local_matrix()));
