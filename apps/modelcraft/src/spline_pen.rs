@@ -310,11 +310,6 @@ fn drag_edit(app: &ModelApp, d: &Drag, rect: Rect, at: Pos2, spline: &Spline) ->
     }
 }
 
-/// Whether a point or handle is being dragged (its preview is on the scene).
-pub fn drag_active(app: &ModelApp) -> bool {
-    app.spline.drag.is_some()
-}
-
 /// Abandon a drag: the scene goes back to what it was before the grab (the preview was never a
 /// command, so nothing else knows about it). When something else has changed the document since
 /// (a command ran), the scene is left alone: the preview is gone with the command's own snapshot.
