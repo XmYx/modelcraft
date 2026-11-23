@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod bake_cmd;
 mod bench_cmd;
 mod hair_cmd;
 mod macro_cmd;
@@ -71,11 +72,12 @@ Commands:
 
 fn usage() -> String {
     format!(
-        "{USAGE}\nScripts (docs/scripting.md):\n{}\n{}\n\nRendering:\n{}\n{}\n\nHair:\n{}\n\nSimulation:\n{}\n",
+        "{USAGE}\nScripts (docs/scripting.md):\n{}\n{}\n\nRendering:\n{}\n{}\n\nBaking:\n{}\n\nHair:\n{}\n\nSimulation:\n{}\n",
         script_cmd::USAGE,
         macro_cmd::USAGE,
         render_cmd::USAGE,
         bench_cmd::USAGE,
+        bake_cmd::USAGE,
         hair_cmd::USAGE,
         sim_cmd::USAGE
     )
@@ -193,6 +195,9 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
             }
             for (name, help) in modelcraft_engine::sim::COMMANDS {
                 println!("sim op={name}\t{help}");
+            }
+            for (name, help) in modelcraft_engine::stage::COMMANDS {
+                println!("stage op={name}\t{help}");
             }
             Ok(())
         }
@@ -312,6 +317,7 @@ fn run(cmd: &str, a: &[String]) -> Result<(), String> {
         }
         "bench" if a.iter().any(|x| x == "--groups") => bench_groups(flag(a, "--polys").and_then(|v| v.parse().ok()).unwrap_or(1_000_000)),
         "uv" => uv_report(&mut load(arg(a, 0, "file")?)?),
+        "bake-maps" => bake_cmd::run(a, load),
         "hair-bench" => hair_cmd::bench(a),
         "hair-export" => hair_cmd::export(a, load),
         "sim-bench" => sim_cmd::bench(a),

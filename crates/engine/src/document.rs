@@ -894,6 +894,7 @@ impl Document {
             Command::Delete { ids } => ids.clone(),
             Command::Duplicate { .. } | Command::SetVisible { .. } | Command::SetLocked { .. } | Command::SetTemplate { .. } => return Ok(()),
             Command::Organize(o) => return crate::organize::check_unlocked(self, o),
+            Command::Stage(c) => return crate::stage::check_unlocked(self, c),
             Command::SetTransform { id, transform } => {
                 if let Some(o) = self.scene.get(*id)
                     && let Some(channel) = self.scene.protected_channel(*id, &o.transform, &transform.sanitized())
@@ -1260,6 +1261,7 @@ impl Document {
             Command::Organize(o) => crate::organize::apply(self, o, &mut out)?,
             Command::Hair(h) => crate::hair::apply(self, h, &mut out)?,
             Command::Sim(c) => crate::sim::apply(self, c, &mut out)?,
+            Command::Stage(c) => crate::stage::apply(self, c, &mut out)?,
             Command::SetLocked { ids, locked } => {
                 for id in ids {
                     self.scene.edit(*id)?.locked = *locked;

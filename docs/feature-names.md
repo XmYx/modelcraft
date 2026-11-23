@@ -84,3 +84,6 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Selection Sets | named selections / quick selection sets | Generic | Use |
 | Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
 | Search objects | outliner filters | Generic | Use |
+| Point Light, Spot Light, Area Light, Sun Light, Dome Light; Camera; Look Through; Render Through This Camera | light and camera objects, viewing through a camera, the camera a render uses | Generic lighting and photography words; the reference products' object names avoided | Use |
+| Render Settings, Picture Viewer, Frame Queue, Passes, Region | render settings and render queue windows, the picture viewer, multi-pass output, render region | Generic words for what they do; the reference products' window names avoided | Use |
+| Bake Maps; Cage distance, Ray distance; Cavity | map baking, bake cages, cavity maps | Generic words for what they do; the reference products' bake dialog and map names avoided | Use |

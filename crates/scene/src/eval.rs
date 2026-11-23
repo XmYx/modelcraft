@@ -306,6 +306,8 @@ impl Evaluator {
             | ObjectKind::Joint { .. }
             | ObjectKind::Skin { .. }
             | ObjectKind::PointDeformer { .. }
+            | ObjectKind::Light { .. }
+            | ObjectKind::Camera { .. }
             | ObjectKind::Hair { .. } => Evaluated::default(),
         };
         self.finals.insert(id, (key, result.clone()));

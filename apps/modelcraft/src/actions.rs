@@ -94,6 +94,9 @@ pub enum Action {
     Anim(crate::anim_ui::AnimAction),
     Rig(crate::rig_ui::RigAction),
     Sim(crate::sim_ui::SimAction),
+    Stage(crate::stage_ui::StageAction),
+    Render(crate::render_ui::RenderAction),
+    Bake(crate::bake_ui::BakeAction),
     Hair(crate::hair_ui::HairAction),
     Sculpt(crate::sculpt_groups_ui::SculptAction),
     Uv(crate::uv_ui::UvAction),
@@ -204,6 +207,9 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::anim_ui::AnimAction::ALL.map(Anim));
     v.extend(crate::rig_ui::RigAction::ALL.map(Rig));
     v.extend(crate::sim_ui::SimAction::ALL.map(Sim));
+    v.extend(crate::stage_ui::StageAction::ALL.map(Stage));
+    v.extend(crate::render_ui::RenderAction::ALL.map(Render));
+    v.extend(crate::bake_ui::BakeAction::ALL.map(Bake));
     v.extend(crate::hair_ui::HairAction::all().into_iter().map(Hair));
     v.extend(crate::sculpt_groups_ui::SculptAction::ALL.map(Sculpt));
     v.extend(crate::uv_ui::UvAction::ALL.map(Uv));
@@ -398,6 +404,9 @@ impl Action {
             Anim(a) => a.label(),
             Rig(a) => a.label(),
             Sim(a) => a.label(),
+            Stage(a) => a.label(),
+            Render(a) => a.label(),
+            Bake(a) => a.label(),
             Hair(a) => a.label(),
             Sculpt(a) => a.label(),
             Uv(a) => a.label(),
@@ -509,6 +518,9 @@ impl Action {
             Anim(a) => a.id(),
             Rig(a) => a.id(),
             Sim(a) => a.id(),
+            Stage(a) => a.id(),
+            Render(a) => a.id(),
+            Bake(a) => a.id(),
             Hair(a) => return a.id(),
             Sculpt(a) => a.id(),
             Uv(a) => a.id(),
@@ -609,6 +621,8 @@ impl Action {
             Anim(a) => return a.default_binding(),
             Rig(a) => return a.default_binding(),
             Sim(a) => return a.default_binding(),
+            Stage(a) => return a.default_binding(),
+            Render(a) => return a.default_binding(),
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
@@ -634,6 +648,9 @@ impl Action {
             Anim(_) => "Animate",
             Rig(_) => "Rig",
             Sim(_) => "Simulate",
+            Stage(a) => a.menu(),
+            Render(_) => "Render",
+            Bake(_) => "UV",
             Hair(_) => "Hair",
             Uv(_) => "UV",
             _ => "View",

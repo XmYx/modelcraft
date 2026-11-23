@@ -30,6 +30,7 @@ pub mod rig;
 mod rle;
 pub mod sim;
 pub mod snap;
+pub mod stage;
 
 use std::sync::Arc;
 
@@ -628,6 +629,14 @@ pub enum ObjectKind {
     Sim {
         sim: Arc<SimObject>,
     },
+    /// A light: it shines along its own -Z ([`stage`]).
+    Light {
+        light: stage::LightData,
+    },
+    /// A camera: it looks along its own -Z ([`stage`]).
+    Camera {
+        camera: stage::CameraData,
+    },
 }
 
 impl ObjectKind {
@@ -648,6 +657,8 @@ impl ObjectKind {
             ObjectKind::Instance { .. } => "Instance",
             ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
+            ObjectKind::Light { light } => light.kind.title(),
+            ObjectKind::Camera { .. } => "Camera",
         }
     }
 }
@@ -782,6 +793,10 @@ pub struct Scene {
     /// Saved attribute sets ([`organize::AttributePreset`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<AttributePreset>,
+    /// What renders of the project use: the camera object, and (with the render settings) the rest
+    /// ([`stage::RenderConfig`]).
+    #[serde(default, skip_serializing_if = "stage::RenderConfig::is_default")]
+    pub render: stage::RenderConfig,
 }
 
 #[allow(clippy::borrowed_box)]

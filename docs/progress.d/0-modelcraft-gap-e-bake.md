@@ -1,0 +1,1 @@
+| 2026-11-23 | Map baking: normal (tangent space), displacement, occlusion, curvature, cavity and colour maps from dense meshes onto a target's UV layout through the render BVH with a cage and ray distance, padding, cancel and bounded memory; a Bake Maps window in the UV menu, `modelcraft-cli bake-maps`, PNG or EXR |

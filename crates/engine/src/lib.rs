@@ -24,6 +24,7 @@ mod record_tests;
 pub mod rig;
 pub mod sim;
 pub mod sim_bake;
+pub mod stage;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef, PastedKey};
@@ -37,6 +38,7 @@ pub use record::{MAX_RECORDED_COMMANDS, Recorded, RecordedCommand, Recorder};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
 pub use sim_bake::{BakeJob, BakeResult};
+pub use stage::StageCommand;
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
@@ -77,5 +79,7 @@ mod sim_particle_tests;
 mod sim_rigid_tests;
 #[cfg(test)]
 mod sim_tests;
+#[cfg(test)]
+mod stage_tests;
 #[cfg(test)]
 mod uv_udim_tests;

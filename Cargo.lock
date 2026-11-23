@@ -2654,6 +2654,7 @@ dependencies = [
  "egui_kittest",
  "glam 0.30.10",
  "log",
+ "modelcraft-bake",
  "modelcraft-engine",
  "modelcraft-formats",
  "modelcraft-hair",
@@ -2683,6 +2684,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "modelcraft-bake"
+version = "0.1.0"
+dependencies = [
+ "craft-exr",
+ "craft-image-codecs",
+ "glam 0.30.10",
+ "modelcraft-mesh",
+ "modelcraft-ops",
+ "modelcraft-render",
+ "modelcraft-scene",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "modelcraft-cli"
 version = "0.1.0"
 dependencies = [
@@ -2692,6 +2708,7 @@ dependencies = [
  "craft-image-codecs",
  "craft-mcp-server",
  "glam 0.30.10",
+ "modelcraft-bake",
  "modelcraft-engine",
  "modelcraft-formats",
  "modelcraft-hair",
@@ -2819,6 +2836,7 @@ name = "modelcraft-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "craft-exr",
  "craft-hdr",
  "craft-image-codecs",
  "craft-mcmat",

@@ -24,6 +24,7 @@ craft-render-gpu = { workspace = true }
 craft-mcmat = { workspace = true }
 craft-hdr = { workspace = true }
 craft-image-codecs = { workspace = true }
+craft-exr = { workspace = true }
 glam = { workspace = true }
 bytemuck = { workspace = true }
 wgpu = { workspace = true }
