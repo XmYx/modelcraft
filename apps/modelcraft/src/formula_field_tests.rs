@@ -132,8 +132,7 @@ fn a_number_replaces_the_formula_and_undo_brings_it_back() {
     assert!(formula(&h, id, "translate.z").is_none());
     assert_eq!(h.state().doc.scene.attr(id, "translate.z"), Some(1.5));
     assert!(h.query_by_role_and_label(Role::SpinButton, "Position Z").is_some(), "a plain number again");
-    assert_eq!(h.state().doc.undo.len(), undo + 2, "remove the formula, set the value");
-    h.state_mut().run(Command::Undo);
+    assert_eq!(h.state().doc.undo.len(), undo + 1, "removing the formula and setting the value is one step");
     h.state_mut().run(Command::Undo);
     h.run();
     assert_eq!(formula(&h, id, "translate.z").as_deref(), Some("2 * 3"));
