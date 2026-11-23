@@ -90,6 +90,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
                     action_button(app, ui, a);
                 }
+                ui.separator();
+                for o in crate::soft_ui::ALL {
+                    action_button(app, ui, Action::Soft(o));
+                }
             });
             crate::create_menu::menu(app, ui);
             ui.menu_button(tl!("Mesh"), |ui| {
@@ -110,6 +114,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::Collapse,
                 ] {
                     action_button(app, ui, a);
+                }
+                ui.separator();
+                for o in crate::cut_ui::ALL {
+                    action_button(app, ui, Action::Cut(o));
                 }
                 ui.menu_button(tl!("Patches and Cleanup"), |ui| {
                     for t in crate::mesh_tools::ALL {
@@ -326,7 +334,7 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                         let r = ui.add(egui::DragValue::new(&mut p.cuts).range(1..=64));
                         set_name(ui, &r, tl!("Cuts"));
                         ui.separator();
-                        for a in [Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
+                        for a in [Action::Extrude, Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
                             if ui.button(a.label()).clicked() {
                                 app.act(&ctx, a);
                             }
@@ -334,7 +342,7 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                         app.ops = p;
                     }
                     SelectMode::Vertex => {
-                        for a in [Action::Merge, Action::Delete, Action::TransformDialog] {
+                        for a in [Action::Merge, Action::Bevel, Action::Delete, Action::TransformDialog] {
                             if ui.button(a.label()).clicked() {
                                 app.act(&ctx, a);
                             }
@@ -869,6 +877,7 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
         crate::mesh_tools::section(app, ui);
+        crate::soft_ui::section(app, ui);
     }
     if let Some((verts, tris)) = app.doc.sculpt.as_ref().map(|s| (s.mesh.vertex_count(), s.mesh.triangle_count())) {
         egui::CollapsingHeader::new(tl!("Sculpt")).default_open(true).show(ui, |ui| {
@@ -936,17 +945,9 @@ fn history(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
 fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op: &StepOp) {
     let mut edited = op.clone();
     let r = ui.indent(("step", i), |ui| {
-        ui.horizontal(|ui| match &mut edited {
-            StepOp::Extrude { distance, .. } => Some(drag(ui, distance, 0.01, -100.0..=100.0, tl!("Distance"))),
+        ui.horizontal_wrapped(|ui| match &mut edited {
             StepOp::Inset { amount, .. } => Some(drag(ui, amount, 0.01, 0.0..=0.99, tl!("Amount"))),
-            StepOp::Bevel { width, .. } => Some(drag(ui, width, 0.005, 0.0..=10.0, tl!("Width"))),
             StepOp::Weld { distance } => Some(drag(ui, distance, 0.0001, 0.0..=1.0, tl!("Distance"))),
-            StepOp::LoopCut { cuts, .. } => {
-                ui.label(tl!("Cuts"));
-                let r = ui.add(egui::DragValue::new(cuts).range(1..=64));
-                set_name(ui, &r, tl!("Cuts"));
-                Some(r)
-            }
             StepOp::EvenRemesh { cell } => Some(drag(ui, cell, 0.001, 0.0001..=1000.0, tl!("Cell size"))),
             StepOp::Decimate { ratio } => Some(drag(ui, ratio, 0.005, 0.001..=1.0, tl!("Share of triangles kept"))),
             StepOp::Subdivide { levels } => {
@@ -955,7 +956,7 @@ fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op
                 set_name(ui, &r, tl!("Levels"));
                 Some(r)
             }
-            _ => None,
+            other => crate::modeling_ui::fields(ui, other),
         })
         .inner
     });
@@ -1243,6 +1244,8 @@ pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
+    crate::modeling_ui::show(app, ctx);
+    crate::cut_ui::show(app, ctx);
     crate::sculpt_groups_ui::dialogs(app, ctx);
     rename(app, ctx);
     if app.about {

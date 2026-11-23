@@ -541,21 +541,50 @@ fn same_step(a: &Step, b: &Step) -> bool {
 fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Result<PolyMesh, OpError> {
     let (nv, ne, nf) = (m.vertex_count(), m.edge_count(), m.face_count());
     match op {
-        StepOp::Extrude { faces, distance } => {
+        StepOp::Extrude { faces, distance, offset, subdivisions, variation, seed, caps, individual } => {
             edit::check_selection(faces, nf, "face")?;
-            edit::extrude_faces(m, faces, *distance)
+            let o = modelcraft_ops::extrude::ExtrudeOptions {
+                distance: *distance,
+                offset: *offset,
+                subdivisions: *subdivisions,
+                variation: *variation,
+                seed: *seed,
+                caps: *caps,
+                individual: *individual,
+            };
+            modelcraft_ops::extrude::extrude_faces_with(m, faces, &o)
+        }
+        StepOp::ExtrudeEdges { edges, distance, lift } => {
+            edit::check_selection(edges, ne, "edge")?;
+            modelcraft_ops::extrude::extrude_edges(m, edges, *distance, *lift)
         }
         StepOp::Inset { faces, amount } => {
             edit::check_selection(faces, nf, "face")?;
             edit::inset_faces(m, faces, *amount)
         }
-        StepOp::Bevel { edges, width } => {
+        StepOp::Bevel { edges, width, segments, profile, tension } => {
             edit::check_selection(edges, ne, "edge")?;
-            edit::bevel_edges(m, edges, *width)
+            let o = modelcraft_ops::bevel::BevelOptions { width: *width, segments: *segments, profile: *profile, tension: *tension };
+            modelcraft_ops::bevel::bevel_edges_with(m, edges, &o)
         }
-        StepOp::LoopCut { edge, cuts } => {
+        StepOp::BevelVertices { verts, width } => {
+            edit::check_selection(verts, nv, "vertex")?;
+            modelcraft_ops::bevel::bevel_vertices(m, verts, *width)
+        }
+        StepOp::SlicePlane { point, normal, faces } => {
+            edit::check_selection(faces, nf, "face")?;
+            modelcraft_ops::cut::slice(m, &modelcraft_ops::cut::Slice { point: *point, normal: *normal, limits: Vec::new(), faces: faces.clone() })
+        }
+        StepOp::CutLine { a, b, view, front_only } => modelcraft_ops::cut::cut_line(m, *a, *b, *view, *front_only),
+        StepOp::Connect { verts } => {
+            edit::check_selection(verts, nv, "vertex")?;
+            modelcraft_ops::cut::connect(m, verts)
+        }
+        StepOp::AddPolygon { points, toward } => modelcraft_ops::cut::add_polygon(m, points, *toward),
+        StepOp::LoopCut { edge, cuts, offset, symmetric, profile } => {
             edit::check_selection(&[*edge], ne, "edge")?;
-            edit::loop_cut(m, *edge, *cuts)
+            let o = modelcraft_ops::loopcut::LoopCutOptions { cuts: *cuts, offset: *offset, symmetric: *symmetric, profile: *profile };
+            modelcraft_ops::loopcut::loop_cut_with(m, *edge, &o)
         }
         StepOp::Merge { verts } => {
             edit::check_selection(verts, nv, "vertex")?;
@@ -574,9 +603,14 @@ fn run_step_warn(m: &PolyMesh, op: &StepOp, warnings: &mut Vec<String>) -> Resul
             edit::check_selection(verts, nv, "vertex")?;
             edit::delete_vertices(m, verts)
         }
-        StepOp::MoveVertices { verts, translate, rotate, scale } => {
+        StepOp::MoveVertices { verts, translate, rotate, scale, soft, symmetry } => {
             edit::check_selection(verts, nv, "vertex")?;
-            edit::transform_vertices(m, verts, *translate, *rotate, *scale)
+            if soft.is_none() && symmetry.is_none() {
+                edit::transform_vertices(m, verts, *translate, *rotate, *scale)
+            } else {
+                let t = modelcraft_ops::soft::Xform { translate: *translate, rotate: *rotate, scale: *scale };
+                modelcraft_ops::soft::transform(m, verts, t, soft.as_ref(), symmetry.as_ref())
+            }
         }
         StepOp::Flip { faces } => edit::flip_faces(m, faces),
         StepOp::Triangulate => edit::triangulate(m),

@@ -300,11 +300,7 @@ fn the_pivot_goes_to_the_bounding_box_centre_and_exports_carry_it_in_the_transfo
     let a = cube(&mut d, "A");
     // Pull one face out so the centre is not the origin.
     let top: Vec<u32> = verts(&mut d, a).iter().enumerate().filter(|(_, p)| p.y > 0.0).map(|(i, _)| i as u32).collect();
-    d.execute(Command::AddStep {
-        id: a,
-        op: modelcraft_scene::StepOp::MoveVertices { verts: top, translate: Vec3::Y * 2.0, rotate: Quat::IDENTITY, scale: Vec3::ONE },
-    })
-    .unwrap();
+    d.execute(Command::AddStep { id: a, op: modelcraft_scene::StepOp::move_vertices(top, Vec3::Y * 2.0, Quat::IDENTITY, Vec3::ONE) }).unwrap();
     run(&mut d, &format!(r#"{{"cmd":"organize","op":"pivot_to_center","ids":[{}]}}"#, a.0));
     let o = d.scene.get(a).unwrap();
     assert!((o.pivot - Vec3::Y).length() < 1e-4, "{:?}", o.pivot);

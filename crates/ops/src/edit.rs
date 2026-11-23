@@ -8,71 +8,20 @@ use modelcraft_mesh::NONE;
 
 use crate::{OpError, OpResult, PolyMesh, Polygon, clean_selection, rebuild};
 
-fn polys_of(m: &PolyMesh) -> (Vec<Vec3>, Vec<Polygon>) {
+pub(crate) fn polys_of(m: &PolyMesh) -> (Vec<Vec3>, Vec<Polygon>) {
     (m.positions().to_vec(), m.to_polygons())
 }
 
-fn push(pos: &mut Vec<Vec3>, p: Vec3) -> u32 {
+pub(crate) fn push(pos: &mut Vec<Vec3>, p: Vec3) -> u32 {
     pos.push(p);
     (pos.len() - 1) as u32
 }
 
 /// Extrude a region of faces along the averaged normals by `distance`, adding side walls along
-/// the region's border. Faces that share edges move together.
+/// the region's border. Faces that share edges move together. See [`crate::extrude`] for the
+/// options (offset, rows, variation, caps, one by one).
 pub fn extrude_faces(m: &PolyMesh, faces: &[u32], distance: f32) -> OpResult {
-    let sel = clean_selection(faces, m.face_count());
-    if sel.is_empty() || !distance.is_finite() {
-        return Ok(m.clone());
-    }
-    let in_sel: HashSet<u32> = sel.iter().copied().collect();
-    let (mut pos, mut polys) = polys_of(m);
-    // Direction per vertex: sum of the selected faces' normals around it.
-    let mut dir: HashMap<u32, Vec3> = HashMap::new();
-    for &f in &sel {
-        let n = m.face_normal(f);
-        for v in m.face_vertices(f) {
-            *dir.entry(v).or_default() += n;
-        }
-    }
-    let mut copy: HashMap<u32, u32> = HashMap::new();
-    let mut verts: Vec<u32> = dir.keys().copied().collect();
-    verts.sort_unstable();
-    for v in verts {
-        let d = dir.get(&v).copied().unwrap_or_default();
-        // Keep the offset distance for corners (scale by 1/cos of the spread).
-        let n = d.normalize_or_zero();
-        let mean = sel.iter().filter(|f| m.face_vertices(**f).any(|x| x == v)).map(|f| m.face_normal(*f).dot(n)).fold(1.0f32, f32::min).max(0.35);
-        let p = m.position(v) + n * distance / mean;
-        copy.insert(v, push(&mut pos, p));
-    }
-    for &f in &sel {
-        if let Some(poly) = polys.get_mut(f as usize) {
-            for v in &mut poly.verts {
-                *v = copy.get(v).copied().unwrap_or(*v);
-            }
-        }
-    }
-    let uv_mode = m.has_uvs();
-    for &f in &sel {
-        for h in m.face_half_edges(f) {
-            let t = m.twin(h);
-            let other = m.face_of(t);
-            if other != NONE && in_sel.contains(&other) {
-                continue;
-            }
-            let (a, b) = (m.origin(h), m.dest(h));
-            let (a2, b2) = (copy.get(&a).copied().unwrap_or(a), copy.get(&b).copied().unwrap_or(b));
-            let mut p = Polygon::new(vec![a, b, b2, a2]);
-            if uv_mode {
-                let (ua, ub) = (m.uv(h), m.uv(m.next(h)));
-                let up = Vec2::new(0.0, 0.05);
-                p.uvs = Some(vec![ua, ub, ub - up, ua - up]);
-            }
-            p.patch = m.patch(f);
-            polys.push(p);
-        }
-    }
-    rebuild(pos, polys)
+    crate::extrude::extrude_faces_with(m, faces, &crate::extrude::ExtrudeOptions { distance, ..Default::default() })
 }
 
 /// Inset each selected face on its own: the face shrinks towards its centre by `amount`
@@ -115,157 +64,10 @@ pub fn inset_faces(m: &PolyMesh, faces: &[u32], amount: f32) -> OpResult {
 }
 
 /// Chamfer the selected edges with a flat strip of the given width. Boundary edges are skipped.
-/// Corners where beveled edges meet are closed with new polygons.
+/// Corners where beveled edges meet are closed with new polygons. See [`crate::bevel`] for
+/// segments and profiles.
 pub fn bevel_edges(m: &PolyMesh, edges: &[u32], width: f32) -> OpResult {
-    let sel: HashSet<u32> = clean_selection(edges, m.edge_count()).into_iter().filter(|e| !m.is_boundary_edge(*e)).collect();
-    if sel.is_empty() || !(width.is_finite() && width > 0.0) {
-        return Ok(m.clone());
-    }
-    let mut pos = m.positions().to_vec();
-    let orig_verts = pos.len() as u32;
-    let uv_mode = m.has_uvs();
-    // Shortest edge length at a vertex limits the width there.
-    let limit = |v: u32| m.vertex_neighbors(v).map(|w| m.position(v).distance(m.position(w))).fold(f32::MAX, f32::min) * 0.45;
-    // Split point on edge (v → x) near v.
-    let mut split: HashMap<(u32, u32), u32> = HashMap::new();
-    let mut split_at = |v: u32, h: u32, pos: &mut Vec<Vec3>| -> u32 {
-        let e = m.edge_of(h);
-        *split.entry((v, e)).or_insert_with(|| {
-            let x = if m.origin(h) == v { m.dest(h) } else { m.origin(h) };
-            let (pv, px) = (m.position(v), m.position(x));
-            let w = width.min(limit(v));
-            push(pos, pv + (px - pv).normalize_or_zero() * w)
-        })
-    };
-    let mut polys = Vec::with_capacity(m.face_count() + sel.len());
-    // Per face corner, the replacement vertex sequence; remember the corner points of beveled edges.
-    let mut corner_pt: HashMap<u32, u32> = HashMap::new(); // half-edge (corner at its origin) -> vertex replacing the corner
-    let mut corner_end: HashMap<u32, u32> = HashMap::new(); // half-edge -> vertex replacing the corner at its dest
-    let touched: HashSet<u32> = sel.iter().flat_map(|e| [m.edge_vertices(*e).0, m.edge_vertices(*e).1]).collect();
-    for f in 0..m.face_count() as u32 {
-        let mut verts = Vec::new();
-        let mut uvs = Vec::new();
-        for h in m.face_half_edges(f) {
-            let v = m.origin(h);
-            let hin = m.prev(h);
-            let (ein, eout) = (sel.contains(&m.edge_of(hin)), sel.contains(&m.edge_of(h)));
-            let uv = m.uv(h);
-            let seq: Vec<u32> = if !touched.contains(&v) {
-                vec![v]
-            } else if ein && eout {
-                let pv = m.position(v);
-                let a = (m.position(m.origin(hin)) - pv).normalize_or_zero();
-                let b = (m.position(m.dest(h)) - pv).normalize_or_zero();
-                let w = width.min(limit(v));
-                vec![push(&mut pos, pv + (a + b).normalize_or_zero() * w * std::f32::consts::SQRT_2)]
-            } else if ein {
-                vec![split_at(v, h, &mut pos)]
-            } else if eout {
-                vec![split_at(v, hin, &mut pos)]
-            } else {
-                // Neither edge of this corner is beveled, but the vertex is: keep the split
-                // points of the corner's own edges if a neighbouring corner made them.
-                let twin_in_sel = |hh: u32| sel.contains(&m.edge_of(m.prev(m.twin(hh)))) || sel.contains(&m.edge_of(m.next(m.twin(hh))));
-                let mut s = Vec::new();
-                if twin_in_sel(hin) {
-                    s.push(split_at(v, hin, &mut pos));
-                }
-                let out_split = twin_in_sel(h);
-                if s.is_empty() || !out_split {
-                    s.push(v);
-                }
-                if out_split {
-                    s.push(split_at(v, h, &mut pos));
-                }
-                if s.len() == 3 {
-                    s.remove(1);
-                }
-                s
-            };
-            if eout {
-                corner_pt.insert(h, seq.last().copied().unwrap_or(v));
-            }
-            if ein {
-                corner_end.insert(hin, seq.first().copied().unwrap_or(v));
-            }
-            for s in seq {
-                verts.push(s);
-                uvs.push(uv);
-            }
-        }
-        let mut p = Polygon::new(verts);
-        p.uvs = uv_mode.then_some(uvs);
-        p.patch = m.patch(f);
-        polys.push(p);
-    }
-    // Strips.
-    let mut sorted: Vec<u32> = sel.iter().copied().collect();
-    sorted.sort_unstable();
-    for e in sorted {
-        let h1 = m.edge_half_edge(e);
-        let h2 = m.twin(h1);
-        let get = |map: &HashMap<u32, u32>, h: u32| map.get(&h).copied();
-        let (Some(a1), Some(b1), Some(b2), Some(a2)) = (get(&corner_pt, h1), get(&corner_end, h1), get(&corner_pt, h2), get(&corner_end, h2)) else {
-            continue;
-        };
-        let mut p = Polygon::new(vec![b1, a1, a2, b2]);
-        if uv_mode {
-            p.uvs = Some(vec![m.uv(m.next(h1)), m.uv(h1), m.uv(m.next(h2)), m.uv(h2)]);
-        }
-        p.patch = m.patch(m.face_of(h1));
-        polys.push(p);
-    }
-    fill_new_holes(&mut polys, orig_verts, &touched, uv_mode);
-    compact(pos, polys)
-}
-
-/// Close boundary loops made only of vertices created by the operation (index ≥ `first_new`)
-/// or vertices it touched.
-fn fill_new_holes(polys: &mut Vec<Polygon>, first_new: u32, touched: &HashSet<u32>, uv_mode: bool) {
-    let mut directed: HashSet<(u32, u32)> = HashSet::new();
-    for p in polys.iter() {
-        let n = p.verts.len();
-        for i in 0..n {
-            if let (Some(a), Some(b)) = (p.verts.get(i), p.verts.get((i + 1) % n)) {
-                directed.insert((*a, *b));
-            }
-        }
-    }
-    // Open half-edges: (a, b) whose reverse is missing. The hole runs b → a.
-    let mut next: HashMap<u32, u32> = HashMap::new();
-    for (a, b) in &directed {
-        if !directed.contains(&(*b, *a)) {
-            next.insert(*b, *a);
-        }
-    }
-    let mut starts: Vec<u32> = next.keys().copied().collect();
-    starts.sort_unstable();
-    let mut seen = HashSet::new();
-    for s in starts {
-        if seen.contains(&s) {
-            continue;
-        }
-        let mut lp = vec![s];
-        let mut c = s;
-        let mut ok = false;
-        for _ in 0..64 {
-            let Some(&n) = next.get(&c) else { break };
-            if n == s {
-                ok = true;
-                break;
-            }
-            lp.push(n);
-            c = n;
-        }
-        for v in &lp {
-            seen.insert(*v);
-        }
-        if ok && lp.len() >= 3 && lp.iter().any(|v| *v >= first_new) && lp.iter().all(|v| *v >= first_new || touched.contains(v)) {
-            let mut p = Polygon::new(lp.clone());
-            p.uvs = uv_mode.then(|| vec![Vec2::ZERO; lp.len()]);
-            polys.push(p);
-        }
-    }
+    crate::bevel::bevel_edges_with(m, edges, &crate::bevel::BevelOptions { width, ..Default::default() })
 }
 
 /// The ring of edges across quads that starts at `edge`: each step crosses a quad to its
@@ -300,87 +102,10 @@ pub fn edge_ring(m: &PolyMesh, edge: u32) -> Vec<u32> {
     ring
 }
 
-/// Insert `cuts` evenly spaced edge loops across the ring of quads through `edge`.
+/// Insert `cuts` evenly spaced edge loops across the ring of quads through `edge`. See
+/// [`crate::loopcut`] for sliding and profiles.
 pub fn loop_cut(m: &PolyMesh, edge: u32, cuts: u32) -> OpResult {
-    let ring = edge_ring(m, edge);
-    let n = cuts.clamp(1, 64);
-    if ring.is_empty() {
-        return Ok(m.clone());
-    }
-    let ring_set: HashSet<u32> = ring.iter().copied().collect();
-    let mut pos = m.positions().to_vec();
-    // New vertices per ring edge, along its canonical direction.
-    let mut nodes: HashMap<u32, Vec<u32>> = HashMap::new();
-    for &e in &ring {
-        let (a, b) = m.edge_vertices(e);
-        let (pa, pb) = (m.position(a), m.position(b));
-        let ids = (1..=n).map(|k| push(&mut pos, pa.lerp(pb, k as f32 / (n + 1) as f32))).collect();
-        nodes.insert(e, ids);
-    }
-    // Points on half-edge h from its origin to its dest, ends included.
-    let along = |h: u32| -> Vec<u32> {
-        let e = m.edge_of(h);
-        let mut mid = nodes.get(&e).cloned().unwrap_or_default();
-        if m.edge_half_edge(e) != h {
-            mid.reverse();
-        }
-        let mut v = vec![m.origin(h)];
-        v.extend(mid);
-        v.push(m.dest(h));
-        v
-    };
-    let uv_along = |h: u32| -> Vec<Vec2> {
-        let (u0, u1) = (m.uv(h), m.uv(m.next(h)));
-        (0..=n + 1).map(|k| u0.lerp(u1, k as f32 / (n + 1) as f32)).collect()
-    };
-    let uv_mode = m.has_uvs();
-    let mut polys = Vec::new();
-    for f in 0..m.face_count() as u32 {
-        let hs: Vec<u32> = m.face_half_edges(f).collect();
-        let ring_hs: Vec<usize> = hs.iter().enumerate().filter(|(_, h)| ring_set.contains(&m.edge_of(**h))).map(|(i, _)| i).collect();
-        let patch = m.patch(f);
-        let quad_cut = hs.len() == 4 && ring_hs.len() == 2 && ring_hs.get(1).zip(ring_hs.first()).is_some_and(|(b, a)| b - a == 2);
-        if quad_cut {
-            let i0 = ring_hs.first().copied().unwrap_or(0);
-            let (h, h2) = (hs.get(i0).copied().unwrap_or(0), hs.get(i0 + 2).copied().unwrap_or(0));
-            let p = along(h);
-            let mut q = along(h2);
-            q.reverse(); // q[k] sits across from p[k]
-            let up = uv_along(h);
-            let mut uq = uv_along(h2);
-            uq.reverse();
-            for k in 0..=(n as usize) {
-                let (Some(a), Some(b), Some(c), Some(d)) = (p.get(k), p.get(k + 1), q.get(k + 1), q.get(k)) else { continue };
-                let mut poly = Polygon::new(vec![*a, *b, *c, *d]);
-                if uv_mode {
-                    let g = |v: &Vec<Vec2>, i: usize| v.get(i).copied().unwrap_or_default();
-                    poly.uvs = Some(vec![g(&up, k), g(&up, k + 1), g(&uq, k + 1), g(&uq, k)]);
-                }
-                poly.patch = patch;
-                polys.push(poly);
-            }
-        } else {
-            // Any other face that touches the ring keeps conforming: insert the new points.
-            let mut verts = Vec::new();
-            let mut uvs = Vec::new();
-            for &h in &hs {
-                if ring_set.contains(&m.edge_of(h)) {
-                    let pts = along(h);
-                    let us = uv_along(h);
-                    verts.extend(pts.iter().take(pts.len().saturating_sub(1)));
-                    uvs.extend(us.iter().take(us.len().saturating_sub(1)));
-                } else {
-                    verts.push(m.origin(h));
-                    uvs.push(m.uv(h));
-                }
-            }
-            let mut poly = Polygon::new(verts);
-            poly.uvs = uv_mode.then_some(uvs);
-            poly.patch = patch;
-            polys.push(poly);
-        }
-    }
-    rebuild(pos, polys)
+    crate::loopcut::loop_cut_with(m, edge, &crate::loopcut::LoopCutOptions { cuts, ..Default::default() })
 }
 
 /// Merge the selected vertices into one at their centre.
@@ -447,7 +172,7 @@ pub fn weld(m: &PolyMesh, distance: f32) -> OpResult {
 }
 
 /// Drop unused vertices and renumber.
-fn compact(pos: Vec<Vec3>, mut polys: Vec<Polygon>) -> OpResult {
+pub(crate) fn compact(pos: Vec<Vec3>, mut polys: Vec<Polygon>) -> OpResult {
     let mut used = vec![NONE; pos.len()];
     let mut out = Vec::new();
     for p in &mut polys {
@@ -820,7 +545,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(64))]
         /// Random sequences of edits on random primitives always validate.
         #[test]
-        fn random_edit_sequences_stay_valid(kind in 0usize..7, ops in prop::collection::vec((0u8..12, 0u32..200, -1.0f32..1.0), 1..6)) {
+        fn random_edit_sequences_stay_valid(kind in 0usize..7, ops in prop::collection::vec((0u8..20, 0u32..200, -1.0f32..1.0), 1..6)) {
             let kind = crate::primitives::KINDS[kind];
             let mut m = Primitive::default_of(kind).unwrap();
             if let Primitive::Sphere { segments, rings, .. } = &mut m { *segments = 8; *rings = 5; }
@@ -840,6 +565,29 @@ mod tests {
                     10 => fill_hole(&m, e).or_else(|_| Ok(m.clone())),
                     11 => bridge_faces(&m, f, (f + 3) % m.face_count().max(1) as u32).or_else(|_| Ok(m.clone())),
                     7 => bevel_edges(&m, &[e, e + 1, e + 2], x.abs() * 0.2),
+                    12 => {
+                        let profile = crate::bevel::BevelProfile::ALL[i as usize % 3];
+                        crate::bevel::bevel_edges_with(&m, &[e, e + 1, e + 5], &crate::bevel::BevelOptions { width: x.abs() * 0.25, segments: 1 + i % 6, profile, tension: x.abs() })
+                    }
+                    13 => crate::bevel::bevel_vertices(&m, &[f % m.vertex_count().max(1) as u32], x.abs() * 0.3),
+                    14 => crate::extrude::extrude_faces_with(
+                        &m,
+                        &[f, f + 1],
+                        &crate::extrude::ExtrudeOptions { distance: x, offset: x * 0.2, subdivisions: 1 + i % 4, variation: x.abs(), seed: i, caps: i % 3 != 0, individual: i % 2 == 0 },
+                    ),
+                    15 => crate::loopcut::loop_cut_with(&m, e, &crate::loopcut::LoopCutOptions { cuts: 1 + i % 4, offset: x, symmetric: i % 2 == 0, profile: x }),
+                    16 => crate::extrude::extrude_edges(&m, &[e, e + 1], x, x * 0.5).or_else(|_| Ok(m.clone())),
+                    17 => {
+                        let (lo, hi) = m.bounds();
+                        let n = glam::Vec3::new((i % 3) as f32 - 1.0, x, 1.0 - (i % 2) as f32);
+                        crate::cut::slice(&m, &crate::cut::Slice::plane((lo + hi) * 0.5 + n * 0.1, n))
+                    }
+                    18 => crate::cut::connect(&m, &[f % m.vertex_count().max(1) as u32, (f * 7 + 3) % m.vertex_count().max(1) as u32, (f * 13 + 5) % m.vertex_count().max(1) as u32]).or_else(|_| Ok(m.clone())),
+                    19 => {
+                        let nv = m.vertex_count().max(1) as u32;
+                        let pts = [crate::cut::PenPoint::Vertex { v: f % nv }, crate::cut::PenPoint::Vertex { v: (f + 1) % nv }, crate::cut::PenPoint::Position { p: glam::Vec3::new(x, 1.0, 0.5) }];
+                        crate::cut::add_polygon(&m, &pts, Some(glam::Vec3::Y)).or_else(|_| Ok(m.clone()))
+                    }
                     _ => flip_faces(&m, &[f]),
                 };
                 m = r.unwrap();

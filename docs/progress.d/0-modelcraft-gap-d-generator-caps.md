@@ -1,0 +1,1 @@
+| 2026-11-23 | Spline generators: the nesting of outlines counts its work, skips outlines by their boxes and refuses what would stall; more than 1,024 closed curves, 256 spline children or 200,000 points are refused before they are copied; ear clipping counts every pass and skips outlines with no area; a full turn revolve has at least three steps |

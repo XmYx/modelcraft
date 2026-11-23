@@ -30,6 +30,9 @@ mod coord_ui_tests;
 mod create_menu;
 #[cfg(test)]
 mod create_menu_tests;
+mod cut_ui;
+#[cfg(test)]
+mod cut_ui_tests;
 mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
@@ -61,6 +64,9 @@ mod key_marker_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
+mod modeling_ui;
+#[cfg(test)]
+mod modeling_ui_tests;
 mod modifier_ui;
 #[cfg(test)]
 mod modifier_ui_tests;
@@ -112,6 +118,9 @@ mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
 mod snap_ui;
+mod soft_ui;
+#[cfg(test)]
+mod soft_ui_tests;
 mod spline_gen_ui;
 #[cfg(test)]
 mod spline_gen_ui_tests;

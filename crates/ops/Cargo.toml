@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 modelcraft-mesh = { workspace = true }
+modelcraft-field = { workspace = true }
 modelcraft-spline = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }

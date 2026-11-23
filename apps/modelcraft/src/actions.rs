@@ -110,6 +110,8 @@ pub enum Action {
     Objects(crate::object_manager::Op),
     Snap(crate::snap_ui::Op),
     Organize(crate::organize_ui::Op),
+    Cut(crate::cut_ui::Op),
+    Soft(crate::soft_ui::Op),
 }
 
 pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
@@ -174,6 +176,8 @@ pub fn all() -> Vec<Action> {
     v.extend(crate::object_manager::ALL.iter().map(|o| Objects(*o)));
     v.extend(crate::snap_ui::all_ops().into_iter().map(Snap));
     v.extend(crate::organize_ui::ALL.iter().map(|o| Organize(*o)));
+    v.extend(crate::cut_ui::ALL.iter().map(|o| Cut(*o)));
+    v.extend(crate::soft_ui::ALL.iter().map(|o| Soft(*o)));
     v.extend([SelectAll, SelectNone, SelectLoop, SelectRing, GrowSelection, ShrinkSelection, ToggleSnap]);
     v.extend(modelcraft_engine::sculpt::brush::KINDS.iter().map(|k| Brush(*k)));
     v.extend([
@@ -417,6 +421,8 @@ impl Action {
             Objects(o) => o.label(),
             Snap(o) => o.label(),
             Organize(o) => o.label(),
+            Cut(o) => o.label(),
+            Soft(o) => o.label(),
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             CoordinatePanel => tl!("Coordinates Panel"),
@@ -551,6 +557,8 @@ impl Action {
             Objects(o) => o.id(),
             Snap(o) => o.id(),
             Organize(o) => o.id(),
+            Cut(o) => o.id(),
+            Soft(o) => o.id(),
             Palette => "help.palette",
             KeyboardShortcuts => "help.shortcuts",
             Anim(a) => a.id(),
@@ -671,6 +679,8 @@ impl Action {
             Hair(a) => return a.default_binding(),
             Sculpt(a) => return a.default_binding(),
             Uv(a) => return a.default_binding(),
+            Cut(o) => return o.default_binding(),
+            Soft(o) => return o.default_binding(),
             _ => return None,
         })
     }
@@ -682,10 +692,11 @@ impl Action {
             New | Open | Save | SaveAs | SaveIncremental | Import | ExportGlb | ExportObj | ExportStl | ExportFbx | Export3mf | ExportUsda => "File",
             Undo | Redo | Delete | Duplicate | Rename | SelectAll | SelectNone | TransformDialog | Preferences | Objects(_) => "Edit",
             Organize(_) => "Organize",
-            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGenerator(_)
-            | AddGroup => "Create",
-            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) => "Mesh",
-            SelectLoop | SelectRing | GrowSelection | ShrinkSelection => "Select",
+            AddPrimitive(_) | AddCage | AddDeformer(_) | AddField(_) | AddCloner(_) | AddCloneModifier(_) | AddArray(_) | AddSymmetry | AddGenerator(_) | AddGroup => "Create",
+            Extrude | Inset | Bevel | LoopCut | Merge | Bridge | FillHole | Mirror(_) | Subdivide | Triangulate | Flip | Collapse | MeshTool(_) | Cut(_) => {
+                "Mesh"
+            }
+            SelectLoop | SelectRing | GrowSelection | ShrinkSelection | Soft(_) => "Select",
             Brush(_) | Symmetry | MaskClear | MaskInvert | MaskFill | MaskOp(_) | BrushBigger | BrushSmaller | DetailUp | DetailDown | ShapeAdd
             | LiveDetail | EvenRemesh | Sculpt(_) => "Sculpt",
             ModeObject | ModeVertex | ModeEdge | ModeFace | ToolSelect | ToolMove | ToolRotate | ToolScale => "Tools",

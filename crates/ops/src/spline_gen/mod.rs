@@ -133,10 +133,10 @@ pub(crate) fn newell(pts: &[Vec3]) -> Vec3 {
 /// Reverse curves so that outlines run counter-clockwise about `normal` and holes (nested an odd
 /// number of levels) clockwise; open curves are turned so that the curve closed by its chord is
 /// counter-clockwise. Returns whether each curve is a hole.
-pub(crate) fn orient(curves: &mut [Curve], normal: Vec3) -> Vec<bool> {
+pub(crate) fn orient(curves: &mut [Curve], normal: Vec3) -> Result<Vec<bool>, OpError> {
     let closed: Vec<usize> = (0..curves.len()).filter(|i| curves[*i].closed).collect();
     let views: Vec<&[Vec3]> = closed.iter().map(|i| curves[*i].pts.as_slice()).collect();
-    let nest = cap::nesting(&views, normal);
+    let nest = cap::nesting(&views, normal)?;
     let mut hole = vec![false; curves.len()];
     for (k, i) in closed.iter().enumerate() {
         hole[*i] = nest.get(k).is_some_and(|n| n.0);
@@ -147,7 +147,7 @@ pub(crate) fn orient(curves: &mut [Curve], normal: Vec3) -> Vec<bool> {
             c.pts.reverse();
         }
     }
-    hole
+    Ok(hole)
 }
 
 /// Check the face count a build would make before it is allocated.
@@ -258,7 +258,7 @@ pub fn extrude(curves: &[Polyline], options: &ExtrudeOptions) -> OpResult {
     if dist < 1e-9 {
         return Err(OpError::Invalid("the extrusion distance is zero".into()));
     }
-    orient(&mut cs, dir);
+    orient(&mut cs, dir)?;
     let steps = o.steps as usize;
     let edges: usize = cs.iter().map(Curve::edges).sum();
     check_faces(edges.saturating_mul(steps).saturating_add(cs.iter().map(|c| c.pts.len()).sum::<usize>() * 2))?;
@@ -337,7 +337,8 @@ pub fn revolve(curves: &[Polyline], options: &RevolveOptions) -> OpResult {
         return Err(OpError::Invalid("the revolve angle is zero".into()));
     }
     let full = o.angle.abs() >= 359.999;
-    let steps = o.steps as usize;
+    // A full turn needs at least three steps to enclose anything.
+    let steps = (if full { o.steps.max(3) } else { o.steps }) as usize;
     let rings = if full { steps } else { steps + 1 };
     let edges: usize = cs.iter().map(Curve::edges).sum();
     check_faces(edges.saturating_mul(steps).saturating_add(cs.iter().map(|c| c.pts.len()).sum::<usize>() * 2))?;
@@ -347,7 +348,7 @@ pub fn revolve(curves: &[Polyline], options: &RevolveOptions) -> OpResult {
     let mid = all.iter().copied().sum::<Vec3>() / all.len().max(1) as f32;
     let radial = (mid - axis * mid.dot(axis)).try_normalize().unwrap_or_else(|| axis.any_orthonormal_vector());
     // A turn the other way round turns the outlines round too.
-    orient(&mut cs, radial.cross(axis) * o.angle.signum());
+    orient(&mut cs, radial.cross(axis) * o.angle.signum())?;
     let scale = all.iter().map(|p| p.length()).fold(0.0f32, f32::max).max(1e-6);
     let tol = scale * 1e-5;
     let mut positions: Vec<Vec3> = Vec::new();
