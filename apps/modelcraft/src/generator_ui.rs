@@ -28,7 +28,7 @@ pub fn axis_label(a: u32) -> String {
 
 /// A combo box over `options` (label per index); returns the index picked this frame. Focus goes
 /// back to the combo after a pick (its popup closes).
-fn pick(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, name: String, current: usize, options: &[String]) -> Option<usize> {
+pub(crate) fn pick(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, name: String, current: usize, options: &[String]) -> Option<usize> {
     let mut picked = None;
     ui.horizontal(|ui| {
         ui.label(name.clone());

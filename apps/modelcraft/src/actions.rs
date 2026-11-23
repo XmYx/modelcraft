@@ -107,7 +107,7 @@ pub enum Action {
 }
 
 pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
-pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
+pub const DEFORMERS: &[&str] = modelcraft_engine::ops::deform::KINDS;
 /// The array layouts (`modelcraft_ops::array::KINDS`).
 pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 /// The falloff field shapes (`modelcraft_field::SHAPES`).
@@ -243,6 +243,12 @@ pub fn deformer_label(d: &str) -> String {
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
         "shear" => tl!("Shear"),
+        "bulge" => tl!("Bulge"),
+        "squash" => tl!("Squash"),
+        "smooth" => tl!("Smooth"),
+        "delta_smooth" => tl!("Delta Smooth"),
+        "displace" => tl!("Displace"),
+        "shrink_wrap" => tl!("Shrink Wrap"),
         _ => d.to_string(),
     }
 }
