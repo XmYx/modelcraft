@@ -592,7 +592,8 @@ Weight: 4
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
 | Dense dark theme, light theme from the system | C M Z | D | S | Text ≥ 4.5:1 (tested) |
-| Workspace layouts (model, sculpt, paint) | C M Z | D | S | Ctrl+1..3 |
+| Workspace layouts (model, sculpt, paint, UV, animate, groom) | C M Z | D | S | Ctrl+1..6; the UV, Animate and Groom layouts open the UV Editor window or the Animation panel and keep the Model modes and tools, with an action strip each; the UV Editor is still a floating window, not a dockable pane, and Groom has no hair tool palette of its own |
+| Grouped Create menu and icon palettes | C M | D | M | Create has submenus for primitives, generators, clones, deformers, fields, rig and simulation (lights and cameras when those objects exist); View ▸ Icon Palettes (off by default) adds an icon column of workspaces, modes and tools on the left and the same groups as fold-outs of icon buttons on the right, drawn with the painter, each named and keyboard reachable |
 | Dockable panels | C M | D | M | craft-ui docking: tab groups, splits, floating, per-workspace layouts saved in the preferences; moves by drag, tab menu, panel options menu or View ▸ Panels |
 | Tool options bar | C M Z | D | S | |
 | Command palette, shortcut for every action | C M | D | S | Ctrl+K |

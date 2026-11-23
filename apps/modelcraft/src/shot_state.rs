@@ -21,9 +21,10 @@ pub enum ShotState {
     Palette,
     Layers,
     Statistics,
+    IconPalettes,
 }
 
-pub const ALL: [ShotState; 10] = [
+pub const ALL: [ShotState; 11] = [
     ShotState::Timeline,
     ShotState::CurveEditor,
     ShotState::RenderView,
@@ -34,6 +35,7 @@ pub const ALL: [ShotState; 10] = [
     ShotState::Palette,
     ShotState::Layers,
     ShotState::Statistics,
+    ShotState::IconPalettes,
 ];
 
 impl ShotState {
@@ -49,6 +51,7 @@ impl ShotState {
             ShotState::Palette => "palette",
             ShotState::Layers => "layers",
             ShotState::Statistics => "statistics",
+            ShotState::IconPalettes => "icon-palettes",
         }
     }
 
@@ -91,6 +94,7 @@ pub fn apply(app: &mut ModelApp, ctx: &egui::Context, s: ShotState) {
         ShotState::Palette => app.act(ctx, Action::Palette),
         ShotState::Layers => app.act(ctx, Action::Organize(crate::organize_ui::Op::Layers)),
         // The overlay is a per-view option, not part of the saved layout.
+        ShotState::IconPalettes => app.icon_palettes = true,
         ShotState::Statistics => app.views.iter_mut().for_each(|v| v.options.stats = true),
     }
 }
@@ -142,6 +146,7 @@ mod tests {
                 ShotState::Shortcuts => app.shortcuts_state.is_some(),
                 ShotState::Palette => app.palette.is_some(),
                 ShotState::Layers => app.organize.layers_open,
+                ShotState::IconPalettes => app.icon_palettes = true,
                 ShotState::Statistics => app.views.iter().all(|v| v.options.stats),
             };
             assert!(open, "{s:?} opens its window");

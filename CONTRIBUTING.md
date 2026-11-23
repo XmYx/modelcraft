@@ -10,4 +10,4 @@ clean room, assets, names, layering).
 5. New assets go in [ATTRIBUTION.md](ATTRIBUTION.md) in the same change.
 6. Screenshots for `docs/images/`: `cargo run --release -p modelcraft -- --demo model --screenshot docs/images/<name>.png`.
    Add `--screenshot-state <name>` to picture a window first (timeline, curve-editor, render-view,
-   scripts, plugins, preferences, shortcuts, palette, layers, statistics).
+   scripts, plugins, preferences, shortcuts, palette, layers, statistics, icon-palettes).

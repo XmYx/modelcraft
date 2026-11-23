@@ -1054,7 +1054,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
         axis_triad(&painter, &cam, rect);
     }
     // Component points.
-    if app.workspace == Workspace::Model
+    if app.workspace.models()
         && app.mode == SelectMode::Vertex
         && let Some((_, m, w)) = edit_mesh(app)
     {
@@ -1074,7 +1074,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(232, 138, 60, 28));
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
     }
-    if app.workspace == Workspace::Model {
+    if app.workspace.models() {
         gizmo(app, &painter, i, rect);
     }
     crate::sculpt_groups_ui::overlay(app, &painter, i);
