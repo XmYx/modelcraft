@@ -373,6 +373,8 @@ pub enum Command {
     Stage(crate::stage::StageCommand),
     /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
     Spline(crate::spline::SplineCommand),
+    /// Scene variants: `{"cmd":"variant","op":"switch","id":1}` ([`crate::variants::VariantCommand`]).
+    Variant(crate::variants::VariantCommand),
 }
 
 fn default_axis() -> u32 {
@@ -567,6 +569,7 @@ impl Command {
             Command::Procedural(c) => c.label(),
             Command::Stage(c) => c.label(),
             Command::Spline(c) => c.label(),
+            Command::Variant(c) => c.label(),
         }
     }
 }

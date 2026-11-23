@@ -43,6 +43,8 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
+      --variant N                   render scene variant N (see `variant` in `modelcraft-cli commands`); the
+                                    file is not changed
       --camera NAME|ID              look through this camera object (by default the project's render
                                     camera, else a view that frames the scene); --no-camera to ignore it
       --frames FIRST-LAST[:STEP]    render a range of frames of the project to numbered files
@@ -84,6 +86,8 @@ pub struct RenderArgs {
     pub denoise: DenoiseMode,
     pub wide_bvh: bool,
     pub hardware_rays: bool,
+    /// Render this scene variant (the file is not changed).
+    pub variant: Option<u32>,
     /// A camera object, by name or id; `None` takes the project's own choice.
     pub camera: Option<String>,
     /// Render from the framing view even when the project has a render camera.
@@ -118,6 +122,7 @@ impl Default for RenderArgs {
             restir: RestirSettings::default(),
             denoise: DenoiseMode::Off,
             wide_bvh: false,
+            variant: None,
             hardware_rays: false,
             camera: None,
             no_camera: false,
@@ -187,6 +192,7 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         denoise: parse_denoise(a)?,
         wide_bvh: parse_bvh(a)?,
         hardware_rays: a.iter().any(|x| x == "--hardware-rays"),
+        variant: number(a, "--variant")?,
         camera: value(a, "--camera").map(str::to_string),
         no_camera: a.iter().any(|x| x == "--no-camera"),
         frames: parse_frames(a)?,
@@ -273,6 +279,9 @@ pub fn builtin(name: &str) -> Result<Scene, String> {
 /// the project's render camera.
 pub fn view_and_light(d: &mut Document, args: &RenderArgs) -> Result<(Camera, Lighting), String> {
     d.sync_sculpt();
+    if let Some(v) = args.variant {
+        d.scene.switch_variant(Some(v)).map_err(|e| e.to_string())?;
+    }
     let mut cam = Camera::default();
     if let Some(v) = args.fov.filter(|v| v.is_finite()) {
         cam.fov_y = v.clamp(1.0, 170.0).to_radians();

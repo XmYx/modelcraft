@@ -28,6 +28,7 @@ pub mod sim_bake;
 pub mod spline;
 pub mod stage;
 mod undo;
+pub mod variants;
 
 pub use anim::{AnimCommand, KeyRef, PastedKey};
 pub use command::{COMMANDS, Command, DetailOp, MAX_BATCH, MAX_BATCH_DEPTH, MaskOp, Outcome, ShapeOp};
@@ -44,6 +45,7 @@ pub use sim_bake::{BakeJob, BakeResult};
 pub use spline::SplineCommand;
 pub use stage::StageCommand;
 pub use undo::{UndoEntry, UndoStack};
+pub use variants::VariantCommand;
 
 pub use modelcraft_anim as animation;
 pub use modelcraft_clone as clone;
@@ -94,3 +96,5 @@ mod spline_tests;
 mod stage_tests;
 #[cfg(test)]
 mod uv_udim_tests;
+#[cfg(test)]
+mod variants_tests;

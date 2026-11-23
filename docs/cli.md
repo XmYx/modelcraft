@@ -393,6 +393,18 @@ in the viewport, in renders and in exports; a layer with Render off shows them o
 viewport; a locked layer refuses edits like a locked object. A number or switch user attribute is
 the attribute `user.<name>` (a vector part is `user.<name>.x`), so `anim set_key` keys it.
 
+### Scene variants
+
+One command, `variant`: `{"cmd":"variant","op":"switch","id":1}`. A variant is a named set of
+attribute overrides (any path `anim set_attr` takes: `translate.x`, `visible`, `material.metallic`, …)
+over the main scene. `add` (name?), `rename`, `remove`, `switch` (no `id`: the main scene),
+`override` (object, paths) and `clear_override`. Overrides go to the applied variant and take the
+attribute's current value, which is still the main scene's: override first, then set the value. Every
+switch first puts the main scene's values back, so the main data is never changed by switching;
+edits to an overridden attribute while its variant is applied belong to the variant. An animated
+attribute cannot be overridden. Variants and the applied one are saved with the project, and
+`render --variant N` renders one without changing the file.
+
 ## Rendering
 
 `modelcraft-cli render <file|builtin:NAME> -o <out.png>` path-traces a project, any importable
