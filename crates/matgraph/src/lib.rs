@@ -634,6 +634,23 @@ impl Graph {
         values.into_iter().next().flatten().map(|v| v.into_map(size.max(1))).ok_or(GraphError::NoNode(id))
     }
 
+    /// Small pictures of what every node makes, `size` by `size` linear colours each, for the
+    /// cards, worked out in one evaluation (each node once per texel, however many cards read it).
+    /// A graph that does not validate gives flat grey pictures rather than any work.
+    pub fn thumbnails(&self, size: u32, images: &dyn Resolver) -> HashMap<NodeId, Vec<[f32; 3]>> {
+        self.thumbnails_counted(size, images).0
+    }
+
+    /// [`thumbnails`](Graph::thumbnails), also saying how much work it took.
+    pub fn thumbnails_counted(&self, size: u32, images: &dyn Resolver) -> (HashMap<NodeId, Vec<[f32; 3]>>, Stats) {
+        let size = size.clamp(1, 256);
+        let ids: Vec<NodeId> = self.nodes.iter().map(|n| n.id).collect();
+        match self.run(&ids, size, images) {
+            Ok((values, stats)) => (ids.into_iter().zip(values).map(|(id, v)| (id, v.map_or_else(|| vec![[0.5; 3]; size as usize * size as usize], |v| v.into_map(size).rgb))).collect(), stats),
+            Err(_) => (ids.into_iter().map(|id| (id, vec![[0.5; 3]; size as usize * size as usize])).collect(), Stats::default()),
+        }
+    }
+
     /// A small picture of what node `id` makes, `size` by `size` linear colours, for a card. A
     /// graph that does not validate gives a flat grey picture rather than any work.
     pub fn thumbnail(&self, id: NodeId, size: u32, images: &dyn Resolver) -> Vec<[f32; 3]> {
@@ -969,6 +986,31 @@ mod tests {
         let (c, stats) = k.compile_counted(64, &NoImages).unwrap();
         assert_eq!(stats.evaluations, 2);
         assert_eq!(c.metallic.map(|m| m.rgb[100]), Some([0.7; 3]));
+    }
+
+    #[test]
+    fn every_card_thumbnail_comes_from_one_evaluation() {
+        // A chain 64 deep: a thumbnail per node, each evaluated on its own, would redo the whole
+        // chain above it (64 * 65 / 2 node passes); together each node is evaluated once.
+        let mut g = Graph::with_surface();
+        let mut prev = g.add(NodeKind::Noise { scale: 4.0, detail: 2, roughness: 0.5, seed: 3 }).unwrap();
+        for _ in 0..MAX_DEPTH - 1 {
+            let m = g.add(NodeKind::Math { op: MathOp::Add }).unwrap();
+            g.link(m, 0, Some(prev)).unwrap();
+            prev = m;
+        }
+        let (thumbs, stats) = g.thumbnails_counted(8, &NoImages);
+        assert_eq!(thumbs.len(), g.nodes.len());
+        // The 64 varying nodes once per texel, and the unlinked surface node once.
+        assert_eq!(stats.evaluations, MAX_DEPTH * 64 + 1);
+        assert!(stats.peak_live_texels <= g.nodes.len() * 64);
+        assert_eq!(thumbs[&prev], g.thumbnail(prev, 8, &NoImages), "the same pictures as one at a time");
+        let separately: usize = g.nodes.iter().map(|n| g.run(&[n.id], 8, &NoImages).map_or(0, |(_, s)| s.evaluations)).sum();
+        assert!(separately > 30 * stats.evaluations, "one at a time costs {separately}");
+        // A broken graph gives grey cards and no work.
+        let looped: Graph = serde_json::from_str(r#"{"nodes":[{"id":0,"name":"Mix","kind":{"type":"mix","blend":"add"},"inputs":[null,0,0]}],"next_id":1}"#).unwrap();
+        let (thumbs, stats) = looped.thumbnails_counted(4, &NoImages);
+        assert_eq!((thumbs[&0].clone(), stats.evaluations), (vec![[0.5; 3]; 16], 0));
     }
 
     #[test]

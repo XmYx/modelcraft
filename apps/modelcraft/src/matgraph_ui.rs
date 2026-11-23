@@ -99,7 +99,12 @@ struct Thumbs {
     object: ObjectId,
     graph: Graph,
     images: Vec<(NodeId, egui::TextureHandle)>,
+    /// When they were made (egui time, seconds).
+    made: f64,
 }
+
+/// While a value is being dragged, thumbnails are refreshed at most this often (seconds).
+const DRAG_REFRESH: f64 = 0.15;
 
 const THUMB: u32 = 40;
 
@@ -332,16 +337,23 @@ fn settings(ui: &mut egui::Ui, nid: NodeId, kind: &NodeKind, drags: &mut Vec<egu
 }
 
 fn thumbnails(app: &mut ModelApp, ctx: &egui::Context, id: ObjectId, graph: &Graph) {
-    let fresh = app.materials.thumbs.as_ref().is_some_and(|t| t.object == id && t.graph == *graph);
+    let now = ctx.input(|i| i.time);
+    let dragging = ctx.input(|i| i.pointer.any_down());
+    let fresh = app.materials.thumbs.as_ref().is_some_and(|t| t.object == id && (t.graph == *graph || (dragging && now - t.made < DRAG_REFRESH)));
     if fresh {
+        if dragging {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(DRAG_REFRESH));
+        }
         return;
     }
     let images = app.materials.images.get_or_insert_with(FileImages::default);
+    // One evaluation for every card: each node once per texel.
+    let mut pictures = graph.thumbnails(THUMB, images);
     let list = graph
         .nodes
         .iter()
         .map(|n| {
-            let rgb = graph.thumbnail(n.id, THUMB, images);
+            let rgb = pictures.remove(&n.id).unwrap_or_else(|| vec![[0.5; 3]; (THUMB * THUMB) as usize]);
             let px: Vec<u8> = rgb
                 .iter()
                 .flat_map(|p| {
@@ -353,7 +365,7 @@ fn thumbnails(app: &mut ModelApp, ctx: &egui::Context, id: ObjectId, graph: &Gra
             (n.id, ctx.load_texture(format!("mat-thumb-{}-{}", id.0, n.id), img, egui::TextureOptions::LINEAR))
         })
         .collect();
-    app.materials.thumbs = Some(Thumbs { object: id, graph: graph.clone(), images: list });
+    app.materials.thumbs = Some(Thumbs { object: id, graph: graph.clone(), images: list, made: now });
 }
 
 pub fn escape(app: &mut ModelApp, ctx: &egui::Context) -> bool {
