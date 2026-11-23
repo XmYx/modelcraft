@@ -75,6 +75,7 @@ pub enum Action {
     NextPanel,
     TransformDialog,
     CoordinatePanel,
+    IconPalettes,
     About,
     SaveIncremental,
     SelectLoop,
@@ -108,7 +109,7 @@ pub enum Action {
 }
 
 pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
-pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
+pub const DEFORMERS: &[&str] = modelcraft_engine::ops::deform::KINDS;
 /// The array layouts (`modelcraft_ops::array::KINDS`).
 pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
 /// The falloff field shapes (`modelcraft_field::SHAPES`).
@@ -143,6 +144,9 @@ pub fn all() -> Vec<Action> {
         Workspace(crate::app::Workspace::Model),
         Workspace(crate::app::Workspace::Sculpt),
         Workspace(crate::app::Workspace::Paint),
+        Workspace(crate::app::Workspace::Uv),
+        Workspace(crate::app::Workspace::Animate),
+        Workspace(crate::app::Workspace::Groom),
         ModeObject,
         ModeVertex,
         ModeEdge,
@@ -199,6 +203,7 @@ pub fn all() -> Vec<Action> {
         Preferences,
         TransformDialog,
         CoordinatePanel,
+        IconPalettes,
         Palette,
         KeyboardShortcuts,
         NextPanel,
@@ -245,6 +250,12 @@ pub fn deformer_label(d: &str) -> String {
         "ripple" => tl!("Ripple"),
         "round" => tl!("Round"),
         "shear" => tl!("Shear"),
+        "bulge" => tl!("Bulge"),
+        "squash" => tl!("Squash"),
+        "smooth" => tl!("Smooth"),
+        "delta_smooth" => tl!("Delta Smooth"),
+        "displace" => tl!("Displace"),
+        "shrink_wrap" => tl!("Shrink Wrap"),
         _ => d.to_string(),
     }
 }
@@ -328,6 +339,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => tl!("Model Workspace"),
             Workspace(crate::app::Workspace::Sculpt) => tl!("Sculpt Workspace"),
             Workspace(crate::app::Workspace::Paint) => tl!("Paint Workspace"),
+            Workspace(crate::app::Workspace::Uv) => tl!("UV Workspace"),
+            Workspace(crate::app::Workspace::Animate) => tl!("Animate Workspace"),
+            Workspace(crate::app::Workspace::Groom) => tl!("Groom Workspace"),
             ModeObject => tl!("Object Mode"),
             ModeVertex => tl!("Vertex Mode"),
             ModeEdge => tl!("Edge Mode"),
@@ -397,6 +411,7 @@ impl Action {
             Palette => tl!("Command Palette…"),
             NextPanel => tl!("Focus Next Panel"),
             CoordinatePanel => tl!("Coordinates Panel"),
+            IconPalettes => tl!("Icon Palettes"),
             About => tl!("About ModelCraft"),
             SaveIncremental => tl!("Save Incremental"),
             SelectLoop => tl!("Select Edge Loop"),
@@ -446,6 +461,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => "workspace.model",
             Workspace(crate::app::Workspace::Sculpt) => "workspace.sculpt",
             Workspace(crate::app::Workspace::Paint) => "workspace.paint",
+            Workspace(crate::app::Workspace::Uv) => "workspace.uv",
+            Workspace(crate::app::Workspace::Animate) => "workspace.animate",
+            Workspace(crate::app::Workspace::Groom) => "workspace.groom",
             ModeObject => "mode.object",
             ModeVertex => "mode.vertex",
             ModeEdge => "mode.edge",
@@ -531,6 +549,7 @@ impl Action {
             Uv(a) => a.id(),
             NextPanel => "view.next_panel",
             CoordinatePanel => "view.coordinates",
+            IconPalettes => "view.icon_palettes",
             About => "help.about",
         };
         s.to_string()
@@ -558,6 +577,9 @@ impl Action {
             Workspace(crate::app::Workspace::Model) => "Cmd+1",
             Workspace(crate::app::Workspace::Sculpt) => "Cmd+2",
             Workspace(crate::app::Workspace::Paint) => "Cmd+3",
+            Workspace(crate::app::Workspace::Uv) => "Cmd+4",
+            Workspace(crate::app::Workspace::Animate) => "Cmd+5",
+            Workspace(crate::app::Workspace::Groom) => "Cmd+6",
             ModeObject => "Model: 1",
             ModeVertex => "Model: 2",
             ModeEdge => "Model: 3",

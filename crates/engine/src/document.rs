@@ -994,7 +994,7 @@ impl Document {
                     return invalid("deformers go under a mesh object");
                 }
                 let name = self.scene.unique_name(&title(kind));
-                out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer }, Some(*target))?);
+                out.created.push(self.scene.add(name, ObjectKind::Deformer { deformer, limits: Default::default(), target: None }, Some(*target))?);
             }
             Command::AddCloneModifier { kind, cloner } => {
                 let modifier = Modifier::default_of(kind).ok_or_else(|| EngineError::Invalid(format!("unknown clone modifier {kind:?}")))?;
@@ -1084,10 +1084,28 @@ impl Document {
                 }
                 _ => return invalid("not a symmetry generator"),
             },
-            Command::SetDeformer { id, deformer } => match &mut self.scene.edit(*id)?.kind {
-                ObjectKind::Deformer { deformer: d } => *d = *deformer,
-                _ => return invalid("not a deformer"),
-            },
+            Command::SetDeformer { id, deformer, limits, target, clear_target } => {
+                let mesh = self.scene.get(*id).and_then(|o| o.parent);
+                if let Some(t) = target
+                    && (self.scene.get(*t).is_none() || Some(*t) == mesh || *t == *id || mesh.is_some_and(|m| self.scene.subtree(m).contains(t)))
+                {
+                    return invalid("the target must be another object, not the mesh being deformed or anything inside it");
+                }
+                match &mut self.scene.edit(*id)?.kind {
+                    ObjectKind::Deformer { deformer: d, limits: l, target: tg } => {
+                        *d = *deformer;
+                        if let Some(new) = limits {
+                            *l = new.sanitized();
+                        }
+                        if *clear_target {
+                            *tg = None;
+                        } else if target.is_some() {
+                            *tg = *target;
+                        }
+                    }
+                    _ => return invalid("not a deformer"),
+                }
+            }
             Command::SetField { id, field } => match &mut self.scene.edit(*id)?.kind {
                 ObjectKind::Field { field: f } => *f = field.sanitized(),
                 _ => return invalid("not a falloff field"),
