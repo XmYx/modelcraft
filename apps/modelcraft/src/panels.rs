@@ -154,6 +154,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 crate::snap_ui::menu(app, ui);
+                crate::stage_ui::view_menu(app, ui);
                 ui.checkbox(&mut app.show_wire, tl!("Wireframe on Selection"));
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
                 ui.menu_button(tl!("Navigation"), |ui| {
@@ -180,6 +181,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             crate::sim_ui::menu(app, ui);
+            crate::render_ui::menu(app, ui);
             crate::spline_ui::menu(app, ui);
             crate::organize_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
@@ -605,6 +607,7 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             let pts = [c + egui::vec2(0.0, -5.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-5.0, 0.0)];
             p.add(egui::Shape::dashed_line(&[pts[0], pts[1], pts[2], pts[3], pts[0]], egui::Stroke::new(1.2, blue), 2.0, 2.0));
         }
+        ObjectKind::Light { .. } | ObjectKind::Camera { .. } => crate::stage_ui::badge(p, c, &o.kind),
         ObjectKind::Sim { .. } => {
             // A simulation: a falling dot over a small arc.
             let t = Color32::from_rgb(120, 220, 200);
@@ -782,6 +785,12 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
                 .default_open(true)
                 .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
             crate::field_layers_ui::list(app, ui, id);
+        }
+        ObjectKind::Light { light } => {
+            egui::CollapsingHeader::new(tl!("Light")).default_open(true).show(ui, |ui| crate::stage_ui::light_fields(app, ui, id, light));
+        }
+        ObjectKind::Camera { camera } => {
+            egui::CollapsingHeader::new(tl!("Camera")).default_open(true).show(ui, |ui| crate::stage_ui::camera_fields(app, ui, id, camera));
         }
         _ => {}
     }
@@ -1206,6 +1215,9 @@ pub struct Palette {
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
+    crate::render_ui::show(app, ctx);
+    crate::bake_ui::show(app, ctx);
+    crate::picture_viewer::show(app, ctx);
     crate::script_ui::show(app, ctx);
     crate::plugin_ui::show(app, ctx);
     crate::uv_ui::show(app, ctx);

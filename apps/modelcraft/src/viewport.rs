@@ -225,8 +225,10 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
         resp.request_focus();
         app.active_view = i;
     }
+    crate::stage_ui::begin_view(app, i);
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
+    crate::stage_ui::end_view(app, i, resp.dragged());
     if !crate::hair_ui::input(app, ui, &resp, i, rect) {
         match app.workspace {
             Workspace::Sculpt => {
@@ -644,6 +646,20 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
         }
         return;
     }
+    // Lights and cameras are picked by their drawings, like joints.
+    if let Some(stage) = crate::stage_ui::pick(app, i, rect, at) {
+        if add {
+            match app.selection.iter().position(|s| *s == stage) {
+                Some(p) => {
+                    app.selection.remove(p);
+                }
+                None => app.selection.push(stage),
+            }
+        } else {
+            app.select_only(stage);
+        }
+        return;
+    }
     let mut best: Option<(f32, ObjectId)> = None;
     for id in drawables(&app.doc.scene) {
         if app.doc.scene.get(id).is_some_and(|o| o.template) {
@@ -943,6 +959,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
         out.extend(line(a.into(), b.into(), color));
     }
     for (a, b, color) in crate::hair_ui::guide_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
+    for (a, b, color) in crate::stage_ui::lines(app, i) {
         out.extend(line(a.into(), b.into(), color));
     }
     for (a, b, color) in crate::spline_ui::curve_lines(app) {

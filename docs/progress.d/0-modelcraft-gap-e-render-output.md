@@ -1,0 +1,1 @@
+| 2026-11-23 | Render settings in the project (size, frame range, PNG or EXR, passes, region, quality), a Render Settings window, a frame queue on a worker thread with numbered files and cancel, a Picture Viewer with a memory-bounded history, histogram and split or difference comparison, and `modelcraft-cli render --frames --passes` |

@@ -115,6 +115,9 @@ pub struct RenderView {
     focus_pending: bool,
     /// Whether the keyboard focus was inside the window on the previous frame.
     had_focus: bool,
+    /// Film updates already kept in the Picture Viewer, and how many renders it has been given.
+    recorded: u64,
+    rendered: u32,
 }
 
 impl Default for RenderView {
@@ -139,6 +142,8 @@ impl Default for RenderView {
             texture: None,
             focus_pending: false,
             had_focus: false,
+            recorded: 0,
+            rendered: 0,
         }
     }
 }
@@ -304,6 +309,7 @@ fn scene_key(app: &ModelApp) -> u64 {
 /// Start (or restart) rendering the scene as it is now.
 pub fn start(app: &mut ModelApp, ctx: &egui::Context) {
     app.render_view.job = None;
+    app.render_view.recorded = 0;
     app.doc.sync_sculpt();
     let camera = app.views[app.active_view.min(3)].camera;
     let lighting = match app.render_view.light {
@@ -314,7 +320,8 @@ pub fn start(app: &mut ModelApp, ctx: &egui::Context) {
             None => Lighting::Studio,
         },
     };
-    let builder = match export_builder(&app.doc.scene, &mut app.doc.eval, &camera, &ExportOptions { lighting, ..ExportOptions::default() }) {
+    let aspect = app.render_view.width.max(1) as f32 / app.render_view.height.max(1) as f32;
+    let builder = match export_builder(&app.doc.scene, &mut app.doc.eval, &camera, &ExportOptions { lighting, aspect, ..ExportOptions::default() }) {
         Ok(b) => b,
         Err(e) => {
             app.render_view.state = crate::tlf!("Render failed: {error}", error = e);
@@ -392,6 +399,7 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
 
     // Take what the worker has published.
     let mut finished_now = None;
+    let mut keep = None;
     if let Some(j) = &app.render_view.job {
         let s = lock(&j.shared);
         let stale = app.render_view.texture.as_ref().is_none_or(|(_, g)| *g != s.generation);
@@ -403,6 +411,9 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
         if let Some(e) = &s.error {
             finished_now = Some(crate::tlf!("Render failed: {error}", error = e));
         } else if s.done && s.samples >= j.target {
+            if app.render_view.recorded != s.generation && !s.pixels.is_empty() {
+                keep = Some((s.generation, s.pixels.clone(), j.size, s.samples, s.seconds));
+            }
             finished_now = Some(crate::tlf!(
                 "Render finished: {samples} samples in {seconds} s ({device})",
                 samples = s.samples,
@@ -417,6 +428,13 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
         && app.render_view.state != text
     {
         app.render_view.state = text;
+    }
+    // A finished picture goes to the Picture Viewer's history.
+    if let Some((generation, pixels, size, samples, seconds)) = keep {
+        app.render_view.recorded = generation;
+        app.render_view.rendered += 1;
+        let label = crate::tlf!("Render {number}", number = app.render_view.rendered);
+        app.pictures.add(modelcraft_render::output::Picture { label, size, pixels, samples, seconds });
     }
 
     let mut open = true;
@@ -436,6 +454,14 @@ pub fn show(app: &mut ModelApp, ctx: &egui::Context) {
             }
             if ui.add_enabled(app.render_view.image().is_some(), egui::Button::new(tl!("Save Image…"))).clicked() {
                 save_to = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_file_name("render.png").save_file();
+            }
+            if ui.button(tl!("Settings…")).clicked() {
+                let ctx = ui.ctx().clone();
+                app.act(&ctx, crate::actions::Action::Render(crate::render_ui::RenderAction::Settings));
+            }
+            if ui.button(tl!("Pictures…")).clicked() {
+                let ctx = ui.ctx().clone();
+                app.act(&ctx, crate::actions::Action::Render(crate::render_ui::RenderAction::Pictures));
             }
             ui.separator();
             let v = &mut app.render_view;

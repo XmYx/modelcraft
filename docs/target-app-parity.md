@@ -135,7 +135,7 @@ Weight: 6
 | Headless viewport renders for thumbnails and CI | M | P | S | GPU readback works in `modelcraft-cli bench` and tests; no render command |
 | Large-scene drawing: culling, level of detail, proxies | C M | P | L | 2.0 M triangles at ~290 fps; no culling or proxies |
 | Measure tool and scene units | C M | D | M | Measure (View ▸ Snapping and Axes, palette): two clicks on vertices, edge points or surfaces give the distance and its x, y, z parts in the preference's length unit, drawn in the view and announced in the status bar |
-| Camera objects: create, look through, focal length, clipping | C M | M | M | One editor camera |
+| Camera objects: create, look through, focal length, clipping | C M | P | M | Camera objects (focal length, sensor, focus distance, f-stop, orthographic) with a drawing in the viewport, picking, keys on every number, look-through where moving the view moves the camera, and a render camera the Render View and `render` use; the near and far planes are stored and drawn but the viewport and renders choose their own; no roll while looking through |
 | Safe frames and resolution gate | C M | M | S | |
 | Colour-managed viewport (view transform from a colour config) | C M R | M | M | |
 
@@ -387,9 +387,9 @@ Weight: 5
 | Projection painting from images and stencils | Z | M | M | |
 | Paint materials per region (material capture painting) | Z | M | M | |
 | Vertex colour to texture and back | Z | M | M | |
-| Bake normal maps from high to low resolution | C M Z | M | L | |
-| Bake displacement maps (scalar and vector) | M Z | M | M | |
-| Bake occlusion, curvature and cavity maps | C M Z | M | M | |
+| Bake normal maps from high to low resolution | C M Z | P | L | `modelcraft-bake`: for every texel of the target's UV layout a ray from a cage distance above the surface finds the dense mesh in the render BVH, and its normal is written in the tangent frame the path tracer reads normal maps with (or the other green convention); Bake Maps window (UV menu), `modelcraft-cli bake-maps`, PNG or EXR, cancel, bounded memory; a sphere baked onto itself is flat in a test; the map is not yet attached to the target's material from the window |
+| Bake displacement maps (scalar and vector) | M Z | P | M | The scalar height of the dense mesh above or below the target within the ray distance (0.5 is level), as a PNG or float EXR; tested on a dome over a plane; no vector displacement |
+| Bake occlusion, curvature and cavity maps | C M Z | P | M | Cosine-weighted occlusion rays up to a distance (checked in an open box against the closed-form form factor), mean curvature from the dense mesh's normals, and its concave part as a cavity map; one window, one worker thread; no thickness or edge-wear maps |
 
 ## Materials and shading
 
@@ -426,10 +426,10 @@ Weight: 8
 | Denoiser | C R | P | L | `craft-render-denoise`: the variance-guided filter for the Render View while passes arrive and a first-order regression filter on the two half renderings for finished pictures and `--denoise` (2.6 to 125× lower error from 4 spp on the benchmark scenes, [performance.md](performance.md)); CPU only, no firefly handling, history under camera motion blurs, no learned denoiser |
 | Path controls: bounces per type, clamping, sample limits | R | P | S | Total bounces, indirect clamp and sample count; not per lobe type |
 | Instanced geometry at render time | C M R | M | L | |
-| Render region | C M R | M | S | |
-| Batch and command-line renders | C M Z R | P | M | `modelcraft-cli render` writes one PNG per call (CPU or GPU); no frame ranges or EXR yet |
+| Render region | C M R | P | S | The project keeps a region; saved pictures are cut to it (the whole picture is still rendered) |
+| Batch and command-line renders | C M Z R | D | M | `modelcraft-cli render` writes PNG or EXR (`--passes`), one picture per call or a range of frames to numbered files (`--frames 1-24:2`), through the project's camera object (`--camera`), on CPU or GPU |
 | Distributed rendering over the network | C M R | M | L | |
-| Render queue | C M | M | M | |
+| Render queue | C M | P | M | The Render Settings window renders the project's frame range to numbered files on a worker thread from a copy of the scene, with progress, cancel (button, palette, Esc), and each frame handed to the Picture Viewer; one queue at a time, no network or multi-job list |
 | Vendor cloud rendering services | C R | O | L | A paid hosted service, not a feature of the app; distributed rendering above covers the user need |
 | Vendor-SDK denoisers and GPU back ends shipped as closed or C++ libraries | R | O | L | House rules: Rust only, allowlisted licences; the in-house denoiser row counts instead |
 
@@ -439,9 +439,9 @@ Weight: 6
 
 | Feature | Refs | Status | Size | Notes |
 |---|---|---|---|---|
-| Point, spot and directional lights | C M R | P | M | Point, spot (cone with soft edge), directional and sun-disk lights in the engine on CPU and GPU, tested against their formulas; no light objects in the scene graph yet, so the app cannot place them |
-| Area lights: rectangle, disk, sphere, mesh | C M R | P | M | Any object with emission is a light of its own shape (plane, disk, sphere or any mesh), sampled through a light tree (and optionally resampled, `--restir`) and checked against a rectangle's closed-form irradiance; no dedicated light objects with units, spread or camera visibility |
-| Dome / image-based lighting with importance sampling | C M R | D | M | Radiance `.hdr` panoramas, sampled in proportion to brightness and solid angle with MIS (a test compares its variance with BSDF sampling), rotation; Render View (Panorama image) and `modelcraft-cli render --env`; on the CPU and the GPU; no EXR panoramas yet |
+| Point, spot and directional lights | C M R | D | M | Point, spot (cone angle and edge softness), and sun (apparent size) light objects with colour, intensity and keys, drawn in the viewport, picked, rendered on CPU and GPU and checked against the Lambert formula by a test; a project with lights is lit by them alone |
+| Area lights: rectangle, disk, sphere, mesh | C M R | P | M | Any object with emission is a light of its own shape (plane, disk, sphere or any mesh), sampled through a light tree (and optionally resampled, `--restir`) and checked against a rectangle's closed-form irradiance; area light objects are a glowing rectangle (width, height, radiance, colour, keys); no disk, sphere or mesh light objects and no camera-visibility switch |
+| Dome / image-based lighting with importance sampling | C M R | D | M | Radiance `.hdr` panoramas, sampled in proportion to brightness and solid angle with MIS (a test compares its variance with BSDF sampling), rotation; Render View (Panorama image), `modelcraft-cli render --env`, and dome light objects (colour or panorama, turning with the object about the vertical axis); on the CPU and the GPU; no EXR panoramas yet |
 | Physical sun and sky | C M R | D | M | Daylight: single-scattering Rayleigh and Mie atmosphere baked per render plus a sun disk attenuated by the same air, which paths find by themselves as well as by aiming (so mirrors show it cleanly, on CPU and GPU); sun height and direction in the Render View and `--sun`; no multiple scattering, ozone or night sky |
 | Light linking (include / exclude) | C M R | M | M | |
 | Light groups and per-light outputs | R | M | M | |
@@ -450,11 +450,11 @@ Weight: 6
 | Volumes: homogeneous, heterogeneous, sparse grids | C M R | M | L | |
 | Render-time displacement with adaptive subdivision | C M R | M | L | |
 | Motion blur: transform and deformation | C M R | M | L | |
-| Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); no aperture control in the app or CLI yet |
+| Depth of field and bokeh | C M R | P | M | Thin-lens camera in the engine (tested); camera objects set the f-stop and focus distance (keyable) and renders use them, on CPU and GPU; no bokeh shapes, no focus picking |
 | Physical camera: exposure, white balance, lens distortion | C M R | M | S | |
 | Caustics and path guiding | R | P | L | Path guiding on the CPU: a hash grid over the scene learns, per cell, where light arrives from and a radiance cache; paths sample from it mixed with the BSDF, and are ended or split by their expected contribution (`--guiding --splitting`, "Learn where light comes from" in the Render View); same expected image, tested. Fixed 16×16 directions per cell, so sharp caustics from a small sun on a near-mirror are still noisy ([performance.md](performance.md)); no GPU port, no caustics-specific method (photon mapping, manifold walks) |
-| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU and the GPU path and are written into the `.exr`; no ID mattes, no per-light or per-lobe passes |
-| OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr; no half floats, multi-part files or metadata, and the Render View still saves PNG |
+| Render passes (AOVs) and ID mattes | C M R | P | M | First-hit albedo, world normal, depth, screen motion and per-pixel variance accumulate with the image on the CPU and the GPU path and are written into the `.exr`; the project chooses which layers an `.exr` holds (Render Settings, Passes, and `--passes`); no ID mattes, no per-light or per-lobe passes |
+| OpenEXR output: multi-layer, half and float | C M R | P | M | `modelcraft-cli render -o file.exr`: one part of 32-bit float channels, linear radiance plus the feature layers by name, through craft-exr, written by the frame queue (Render Settings, Save: EXR) and the CLI, cut to the project's region; no half floats, multi-part files or metadata, and the Render View's Save Image is PNG |
 | Colour management: colour config files and an ACES pipeline | C M R | M | M | |
 | Toon and contour rendering | C M R | M | M | |
 | Render statistics and time limits | R | P | S | Every CLI render prints its time, samples per second and triangle count as JSON, and `render-bench` reports error against time with a converged reference (relative MSE, and with `--flip` the FLIP perceptual difference, written from the paper and not checked against the reference implementation); no time limit or per-ray statistics |
