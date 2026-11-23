@@ -27,6 +27,15 @@ pub enum SplineAction {
     Pen,
     /// A generator (`extrude`, `revolve`, `loft`, `sweep`) around the selected splines.
     AddGenerator(&'static str),
+    /// Run the selected spline's curves the other way.
+    Reverse,
+    /// Cut the selected points' corners with a straight edge or a round one.
+    Chamfer,
+    Fillet,
+    /// Flatten the selected spline's curves into straight edges.
+    ToPolygon,
+    /// Fill the selected spline's closed curves with a mesh.
+    ToMesh,
 }
 
 pub fn kind_label(kind: &str) -> String {
@@ -49,6 +58,7 @@ impl SplineAction {
         v.push(SplineAction::MakeEditable);
         v.push(SplineAction::Pen);
         v.extend(modelcraft_engine::scene::spline_gen::KINDS.iter().map(|k| SplineAction::AddGenerator(k)));
+        v.extend([SplineAction::Reverse, SplineAction::Chamfer, SplineAction::Fillet, SplineAction::ToPolygon, SplineAction::ToMesh]);
         v
     }
 
@@ -58,6 +68,11 @@ impl SplineAction {
             SplineAction::MakeEditable => tl!("Make Spline Editable"),
             SplineAction::Pen => tl!("Pen Tool"),
             SplineAction::AddGenerator(k) => crate::tlf!("Add {kind}", kind = crate::spline_gen_ui::kind_label(k)),
+            SplineAction::Reverse => tl!("Reverse Spline"),
+            SplineAction::Chamfer => tl!("Chamfer Points"),
+            SplineAction::Fillet => tl!("Fillet Points"),
+            SplineAction::ToPolygon => tl!("Convert Spline to Polygon"),
+            SplineAction::ToMesh => tl!("Convert Spline to Mesh"),
         }
     }
 
@@ -67,6 +82,11 @@ impl SplineAction {
             SplineAction::MakeEditable => "spline.make_editable".into(),
             SplineAction::Pen => "spline.pen".into(),
             SplineAction::AddGenerator(k) => format!("spline.add_generator.{k}"),
+            SplineAction::Reverse => "spline.reverse".into(),
+            SplineAction::Chamfer => "spline.chamfer".into(),
+            SplineAction::Fillet => "spline.fillet".into(),
+            SplineAction::ToPolygon => "spline.to_polygon".into(),
+            SplineAction::ToMesh => "spline.to_mesh".into(),
         }
     }
 
@@ -84,6 +104,7 @@ pub fn act(app: &mut ModelApp, a: SplineAction) {
             app.run(Command::Spline(SplineCommand::Add { kind: kind.into(), parent: None, name: None }));
         }
         SplineAction::Pen => crate::spline_pen::toggle_pen(app),
+        SplineAction::Reverse | SplineAction::Chamfer | SplineAction::Fillet | SplineAction::ToPolygon | SplineAction::ToMesh => modify(app, a),
         SplineAction::AddGenerator(kind) => {
             let inputs: Vec<ObjectId> = app.selection.iter().copied().filter(|id| app.doc.scene.is_spline(*id)).collect();
             app.run(Command::Spline(SplineCommand::AddGenerator { kind: kind.into(), inputs }));
@@ -97,10 +118,56 @@ pub fn act(app: &mut ModelApp, a: SplineAction) {
     }
 }
 
+/// Reverse, cut corners, flatten and fill: the operations on the selected spline.
+fn modify(app: &mut ModelApp, a: SplineAction) {
+    use modelcraft_engine::curves::SplineEdit;
+    let Some(id) = crate::spline_pen::active_spline(app) else {
+        app.status = tl!("Select a spline first");
+        return;
+    };
+    let Some(spline) = crate::spline_pen::spline_of(app, id) else { return };
+    let selected = app.spline.selected.clone();
+    match a {
+        SplineAction::Reverse => {
+            // The curves with a selected point, or every curve.
+            let mut segs: Vec<usize> = if selected.is_empty() { (0..spline.segments.len()).collect() } else { selected.iter().map(|k| k.segment).collect() };
+            segs.sort_unstable();
+            segs.dedup();
+            let commands = segs.into_iter().map(|segment| Command::Spline(SplineCommand::Edit { id, edit: SplineEdit::Reverse { segment } })).collect();
+            app.run(Command::Batch { label: Some("Reverse spline".into()), commands });
+        }
+        SplineAction::Chamfer | SplineAction::Fillet => {
+            if selected.is_empty() {
+                app.status = tl!("Select the points to cut first");
+                return;
+            }
+            let size = app.spline.corner;
+            let edit = if a == SplineAction::Chamfer {
+                SplineEdit::Chamfer { knots: selected, distance: size }
+            } else {
+                SplineEdit::Fillet { knots: selected, radius: size }
+            };
+            if app.run(Command::Spline(SplineCommand::Edit { id, edit })) {
+                app.spline.selected.clear();
+            }
+        }
+        SplineAction::ToPolygon => {
+            let tess = match app.doc.scene.get(id).map(|o| &o.kind) {
+                Some(ObjectKind::Spline { tess, .. }) => *tess,
+                _ => return,
+            };
+            app.run(Command::Spline(SplineCommand::Edit { id, edit: SplineEdit::ToPolygon { tess } }));
+        }
+        _ => {
+            app.run(Command::Spline(SplineCommand::ToMesh { id }));
+        }
+    }
+}
+
 pub fn menu(app: &mut ModelApp, ui: &mut egui::Ui) {
     ui.menu_button(tl!("Spline"), |ui| {
         for a in SplineAction::all() {
-            if a == SplineAction::MakeEditable || matches!(a, SplineAction::Pen | SplineAction::AddGenerator("extrude")) {
+            if a == SplineAction::MakeEditable || matches!(a, SplineAction::Pen | SplineAction::AddGenerator("extrude") | SplineAction::Reverse) {
                 ui.separator();
             }
             let action = crate::actions::Action::Spline(a);

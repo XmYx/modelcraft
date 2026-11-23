@@ -18,6 +18,7 @@ mod groups;
 pub mod hair;
 mod layers;
 pub mod organize;
+pub mod procedural;
 pub mod record;
 #[cfg(test)]
 mod record_tests;
@@ -25,6 +26,7 @@ pub mod rig;
 pub mod sim;
 pub mod sim_bake;
 pub mod spline;
+pub mod stage;
 mod undo;
 pub mod variants;
 
@@ -35,11 +37,13 @@ pub use groups::{GroupOp, RegionAction, VisibilityOp};
 pub use hair::{HairCommand, HairExportFormat, HairExportWhat, MapEdit, MapKind};
 pub use layers::{MAX_SHAPE_LAYERS, MAX_SHAPE_NAME};
 pub use organize::OrganizeCommand;
+pub use procedural::ProceduralCommand;
 pub use record::{MAX_RECORDED_COMMANDS, Recorded, RecordedCommand, Recorder};
 pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
 pub use sim_bake::{BakeJob, BakeResult};
 pub use spline::SplineCommand;
+pub use stage::StageCommand;
 pub use undo::{UndoEntry, UndoStack};
 pub use variants::VariantCommand;
 
@@ -73,6 +77,8 @@ mod hair_tests;
 #[cfg(test)]
 mod organize_tests;
 #[cfg(test)]
+mod paint_tests;
+#[cfg(test)]
 mod procedural_tests;
 #[cfg(test)]
 mod rig_tests;
@@ -86,6 +92,8 @@ mod sim_rigid_tests;
 mod sim_tests;
 #[cfg(test)]
 mod spline_tests;
+#[cfg(test)]
+mod stage_tests;
 #[cfg(test)]
 mod uv_udim_tests;
 #[cfg(test)]

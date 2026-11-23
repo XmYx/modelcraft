@@ -76,7 +76,23 @@ impl Evaluator {
         let mut errors: Vec<StepError> = Vec::new();
         let mut err = |message: String| errors.push(StepError { step: usize::MAX, message });
         let mut inputs: Vec<Input> = Vec::new();
-        for c in scene.spline_children(id) {
+        let children = scene.spline_children(id);
+        if children.len() > modelcraft_ops::spline_gen::MAX_INPUTS {
+            err(format!("{} splines inside it are too many; at most {} are used", children.len(), modelcraft_ops::spline_gen::MAX_INPUTS));
+            return Evaluated { errors, ..Evaluated::default() };
+        }
+        // Count the points before copying any: a file can hold far more than a generator takes.
+        let mut points = 0usize;
+        for c in &children {
+            if let Some(e) = self.spline(scene, *c) {
+                points = points.saturating_add(e.point_count());
+            }
+        }
+        if points > modelcraft_ops::spline_gen::MAX_INPUT_POINTS {
+            err(format!("the splines inside it have {points} points; at most {} are used", modelcraft_ops::spline_gen::MAX_INPUT_POINTS));
+            return Evaluated { errors, ..Evaluated::default() };
+        }
+        for c in children {
             let Some(o) = scene.get(c) else { continue };
             match self.spline(scene, c) {
                 Some(e) if e.error.is_none() => inputs.push(Input { name: o.name.clone(), lines: place(&e.lines, o.local_matrix()) }),

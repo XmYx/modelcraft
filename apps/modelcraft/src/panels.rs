@@ -90,6 +90,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 for a in [Action::SelectAll, Action::SelectNone, Action::SelectLoop, Action::SelectRing, Action::GrowSelection, Action::ShrinkSelection] {
                     action_button(app, ui, a);
                 }
+                ui.separator();
+                for o in crate::soft_ui::ALL {
+                    action_button(app, ui, Action::Soft(o));
+                }
             });
             crate::create_menu::menu(app, ui);
             ui.menu_button(tl!("Mesh"), |ui| {
@@ -110,6 +114,10 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::Collapse,
                 ] {
                     action_button(app, ui, a);
+                }
+                ui.separator();
+                for o in crate::cut_ui::ALL {
+                    action_button(app, ui, Action::Cut(o));
                 }
                 ui.menu_button(tl!("Patches and Cleanup"), |ui| {
                     for t in crate::mesh_tools::ALL {
@@ -155,6 +163,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
                 crate::snap_ui::menu(app, ui);
+                crate::stage_ui::view_menu(app, ui);
                 ui.checkbox(&mut app.show_wire, tl!("Wireframe on Selection"));
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
                 ui.menu_button(tl!("Navigation"), |ui| {
@@ -181,6 +190,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             crate::sim_ui::menu(app, ui);
+            crate::render_ui::menu(app, ui);
             crate::spline_ui::menu(app, ui);
             crate::organize_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
@@ -325,7 +335,7 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                         let r = ui.add(egui::DragValue::new(&mut p.cuts).range(1..=64));
                         set_name(ui, &r, tl!("Cuts"));
                         ui.separator();
-                        for a in [Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
+                        for a in [Action::Extrude, Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
                             if ui.button(a.label()).clicked() {
                                 app.act(&ctx, a);
                             }
@@ -333,7 +343,7 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
                         app.ops = p;
                     }
                     SelectMode::Vertex => {
-                        for a in [Action::Merge, Action::Delete, Action::TransformDialog] {
+                        for a in [Action::Merge, Action::Bevel, Action::Delete, Action::TransformDialog] {
                             if ui.button(a.label()).clicked() {
                                 app.act(&ctx, a);
                             }
@@ -374,6 +384,12 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
             }
             Workspace::Paint => {
                 ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
+                ui.separator();
+                for o in crate::paint_ui::ALL {
+                    if ui.button(Action::Paint(o).label()).clicked() {
+                        app.act(&ctx, Action::Paint(o));
+                    }
+                }
                 ui.separator();
                 if ui.button(tl!("Export GLB for TextureCraft…")).clicked() {
                     app.act(&ctx, Action::ExportGlb);
@@ -548,6 +564,19 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
                 );
             }
         }
+        ObjectKind::Generator { .. } => {
+            // Two squares with a plus between them: meshes joined into one.
+            let g = Color32::from_rgb(130, 210, 120);
+            for dx in [-4.0, 4.0] {
+                p.rect_stroke(
+                    egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(4.0, 7.0)),
+                    0.0,
+                    egui::Stroke::new(1.0, g),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            p.line_segment([c + egui::vec2(-1.5, 0.0), c + egui::vec2(1.5, 0.0)], egui::Stroke::new(1.0, g));
+        }
         ObjectKind::Cloner { .. } => {
             // Three small squares: one source, many clones.
             let o = Color32::from_rgb(240, 170, 90);
@@ -607,6 +636,7 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             let pts = [c + egui::vec2(0.0, -5.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(0.0, 5.0), c + egui::vec2(-5.0, 0.0)];
             p.add(egui::Shape::dashed_line(&[pts[0], pts[1], pts[2], pts[3], pts[0]], egui::Stroke::new(1.2, blue), 2.0, 2.0));
         }
+        ObjectKind::Light { .. } | ObjectKind::Camera { .. } => crate::stage_ui::badge(p, c, &o.kind),
         ObjectKind::Sim { .. } => {
             // A simulation: a falling dot over a small arc.
             let t = Color32::from_rgb(120, 220, 200);
@@ -761,6 +791,11 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
         }
+        ObjectKind::Generator { generator } => {
+            egui::CollapsingHeader::new(crate::procedural_ui::generator_label(generator.kind()))
+                .default_open(true)
+                .show(ui, |ui| crate::procedural_ui::fields(app, ui, id, generator));
+        }
         ObjectKind::SplineGenerator { generator } => {
             egui::CollapsingHeader::new(crate::spline_gen_ui::kind_label(generator.kind()))
                 .default_open(true)
@@ -785,6 +820,12 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
                 .show(ui, |ui| crate::deformer_params_ui::fields(app, ui, id, *deformer, *limits, *target));
             crate::field_layers_ui::list(app, ui, id);
         }
+        ObjectKind::Light { light } => {
+            egui::CollapsingHeader::new(tl!("Light")).default_open(true).show(ui, |ui| crate::stage_ui::light_fields(app, ui, id, light));
+        }
+        ObjectKind::Camera { camera } => {
+            egui::CollapsingHeader::new(tl!("Camera")).default_open(true).show(ui, |ui| crate::stage_ui::camera_fields(app, ui, id, camera));
+        }
         _ => {}
     }
     if matches!(
@@ -793,6 +834,7 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
             | ObjectKind::SmoothCage { .. }
             | ObjectKind::Array { .. }
             | ObjectKind::Symmetry { .. }
+            | ObjectKind::Generator { .. }
             | ObjectKind::SplineGenerator { .. }
             | ObjectKind::Instance { .. }
     ) {
@@ -843,6 +885,7 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
     if let Some(target) = app.edit_target() {
         history(app, ui, target);
         crate::mesh_tools::section(app, ui);
+        crate::soft_ui::section(app, ui);
     }
     if let Some((verts, tris)) = app.doc.sculpt.as_ref().map(|s| (s.mesh.vertex_count(), s.mesh.triangle_count())) {
         egui::CollapsingHeader::new(tl!("Sculpt")).default_open(true).show(ui, |ui| {
@@ -910,17 +953,9 @@ fn history(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId) {
 fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op: &StepOp) {
     let mut edited = op.clone();
     let r = ui.indent(("step", i), |ui| {
-        ui.horizontal(|ui| match &mut edited {
-            StepOp::Extrude { distance, .. } => Some(drag(ui, distance, 0.01, -100.0..=100.0, tl!("Distance"))),
+        ui.horizontal_wrapped(|ui| match &mut edited {
             StepOp::Inset { amount, .. } => Some(drag(ui, amount, 0.01, 0.0..=0.99, tl!("Amount"))),
-            StepOp::Bevel { width, .. } => Some(drag(ui, width, 0.005, 0.0..=10.0, tl!("Width"))),
             StepOp::Weld { distance } => Some(drag(ui, distance, 0.0001, 0.0..=1.0, tl!("Distance"))),
-            StepOp::LoopCut { cuts, .. } => {
-                ui.label(tl!("Cuts"));
-                let r = ui.add(egui::DragValue::new(cuts).range(1..=64));
-                set_name(ui, &r, tl!("Cuts"));
-                Some(r)
-            }
             StepOp::EvenRemesh { cell } => Some(drag(ui, cell, 0.001, 0.0001..=1000.0, tl!("Cell size"))),
             StepOp::Decimate { ratio } => Some(drag(ui, ratio, 0.005, 0.001..=1.0, tl!("Share of triangles kept"))),
             StepOp::Subdivide { levels } => {
@@ -929,7 +964,7 @@ fn step_fields(app: &mut ModelApp, ui: &mut egui::Ui, id: ObjectId, i: usize, op
                 set_name(ui, &r, tl!("Levels"));
                 Some(r)
             }
-            _ => None,
+            other => crate::modeling_ui::fields(ui, other),
         })
         .inner
     });
@@ -1188,12 +1223,7 @@ fn stamp_label(s: Stamp) -> String {
 }
 
 fn paint(app: &mut ModelApp, ui: &mut egui::Ui) {
-    let ctx = ui.ctx().clone();
-    ui.checkbox(&mut app.show_patches, tl!("Show Patches"));
-    ui.label(RichText::new(tl!("Texture and vertex painting are planned for a later milestone. Today, paint in TextureCraft: export a GLB (Y up, metres, UVs kept) and open it there.")).color(theme::TEXT_DIM).small());
-    if ui.button(tl!("Export GLB for TextureCraft…")).clicked() {
-        app.act(&ctx, Action::ExportGlb);
-    }
+    crate::paint_ui::pane(app, ui);
 }
 
 // ---------------------------------------------------------------- dialogs
@@ -1208,12 +1238,17 @@ pub struct Palette {
 pub fn dialogs(app: &mut ModelApp, ctx: &egui::Context) {
     crate::keys::dialog(app, ctx);
     crate::render_view::show(app, ctx);
+    crate::render_ui::show(app, ctx);
+    crate::bake_ui::show(app, ctx);
+    crate::picture_viewer::show(app, ctx);
     crate::script_ui::show(app, ctx);
     crate::plugin_ui::show(app, ctx);
     crate::uv_ui::show(app, ctx);
     save_prompt(app, ctx);
     palette(app, ctx);
     numeric(app, ctx);
+    crate::modeling_ui::show(app, ctx);
+    crate::cut_ui::show(app, ctx);
     crate::sculpt_groups_ui::dialogs(app, ctx);
     rename(app, ctx);
     if app.about {

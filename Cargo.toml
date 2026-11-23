@@ -33,6 +33,7 @@ craft-render-denoise = { path = "crates/craft-render-denoise" }
 modelcraft-uv = { path = "crates/uv" }
 modelcraft-uvpack = { path = "crates/uvpack" }
 modelcraft-hair = { path = "crates/hair" }
+modelcraft-bake = { path = "crates/bake" }
 modelcraft-spline = { path = "crates/spline" }
 
 # shared Craft libraries (storytold/craft-libs), pinned by commit like the other Craft apps

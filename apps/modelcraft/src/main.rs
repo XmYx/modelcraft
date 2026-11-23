@@ -15,6 +15,9 @@ mod anim_ui;
 mod anim_ui_tests;
 mod app;
 mod args;
+mod bake_ui;
+#[cfg(test)]
+mod bake_ui_tests;
 mod clone_ui;
 #[cfg(test)]
 mod clone_ui_tests;
@@ -27,6 +30,9 @@ mod coord_ui_tests;
 mod create_menu;
 #[cfg(test)]
 mod create_menu_tests;
+mod cut_ui;
+#[cfg(test)]
+mod cut_ui_tests;
 mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
@@ -46,6 +52,8 @@ mod field_ui_tests;
 mod generator_ui;
 #[cfg(test)]
 mod generator_ui_tests;
+#[cfg(test)]
+mod generators_ui_tests;
 mod gpu;
 mod hair_ui;
 #[cfg(test)]
@@ -56,20 +64,31 @@ mod key_marker_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
+mod modeling_ui;
+#[cfg(test)]
+mod modeling_ui_tests;
 mod modifier_ui;
 #[cfg(test)]
 mod modifier_ui_tests;
 mod object_manager;
 mod organize_ui;
+mod paint_ui;
+#[cfg(test)]
+mod paint_ui_tests;
 mod panels;
+mod picture_viewer;
 mod plugin_ui;
 #[cfg(test)]
 mod plugin_ui_tests;
 mod prefs;
 mod prefs_ui;
+mod procedural_ui;
 #[cfg(test)]
 mod procedural_ui_tests;
 mod radial;
+mod render_ui;
+#[cfg(test)]
+mod render_ui_tests;
 mod render_view;
 mod rig_tools;
 #[cfg(test)]
@@ -102,9 +121,14 @@ mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
 mod snap_ui;
+mod soft_ui;
+#[cfg(test)]
+mod soft_ui_tests;
 mod spline_gen_ui;
 #[cfg(test)]
 mod spline_gen_ui_tests;
+#[cfg(test)]
+mod spline_ops_ui_tests;
 mod spline_pen;
 #[cfg(test)]
 mod spline_pen_ui_tests;
@@ -112,6 +136,9 @@ mod spline_points_ui;
 mod spline_ui;
 #[cfg(test)]
 mod spline_ui_tests;
+mod stage_ui;
+#[cfg(test)]
+mod stage_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

@@ -99,6 +99,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
                         | ObjectKind::SmoothCage { .. }
                         | ObjectKind::Array { .. }
                         | ObjectKind::Symmetry { .. }
+                        | ObjectKind::Generator { .. }
                         | ObjectKind::SplineGenerator { .. }
                         | ObjectKind::Cloner { .. }
                         | ObjectKind::Instance { .. }
@@ -225,8 +226,10 @@ fn view_ui(app: &mut ModelApp, ui: &mut egui::Ui, i: usize, rect: Rect) {
         resp.request_focus();
         app.active_view = i;
     }
+    crate::stage_ui::begin_view(app, i);
     keyboard_nav(app, ui, &resp, i);
     navigate(app, ui, &resp, i, rect);
+    crate::stage_ui::end_view(app, i, resp.dragged());
     if !crate::hair_ui::input(app, ui, &resp, i, rect) {
         match app.workspace {
             Workspace::Sculpt => {
@@ -469,7 +472,7 @@ fn apply_drag(app: &ModelApp, scene: &mut Scene, t: Vec3, r: Quat, s: Vec3, pivo
     let local_t = inv.transform_vector3(t);
     let local_r = wr.inverse() * r * wr;
     let verts = app.component_vertices_cached.clone();
-    let op = StepOp::MoveVertices { verts, translate: local_t, rotate: local_r, scale: s };
+    let op = StepOp::MoveVertices { verts, translate: local_t, rotate: local_r, scale: s, soft: app.modeling.soft.soft(), symmetry: app.modeling.soft.sym() };
     if commit {
         cmds.push(Command::AddStep { id, op });
     } else if let Ok(o) = scene.edit(id)
@@ -482,7 +485,9 @@ fn apply_drag(app: &ModelApp, scene: &mut Scene, t: Vec3, r: Quat, s: Vec3, pivo
 
 fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
     // A rig tool (placing joints, painting weights) takes the pointer while it is on.
-    if !is_nav(app, ui) && crate::rig_tools::input(app, ui, resp, i, rect) {
+    if !is_nav(app, ui)
+        && (crate::rig_tools::input(app, ui, resp, i, rect) || crate::cut_ui::input(app, ui, resp, i, rect) || crate::paint_ui::input(app, ui, resp, i, rect))
+    {
         return;
     }
     // The pen tool and the points and handles of the selected spline.
@@ -641,6 +646,20 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
             }
         } else {
             app.select_only(spline);
+        }
+        return;
+    }
+    // Lights and cameras are picked by their drawings, like joints.
+    if let Some(stage) = crate::stage_ui::pick(app, i, rect, at) {
+        if add {
+            match app.selection.iter().position(|s| *s == stage) {
+                Some(p) => {
+                    app.selection.remove(p);
+                }
+                None => app.selection.push(stage),
+            }
+        } else {
+            app.select_only(stage);
         }
         return;
     }
@@ -945,6 +964,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     for (a, b, color) in crate::hair_ui::guide_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
+    for (a, b, color) in crate::stage_ui::lines(app, i) {
+        out.extend(line(a.into(), b.into(), color));
+    }
     for (a, b, color) in crate::spline_ui::curve_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
@@ -1062,6 +1084,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
     crate::snap_ui::overlay(app, &painter, &cam, rect);
+    crate::cut_ui::overlay(app, &painter, i, rect, resp.hover_pos());
     crate::spline_pen::overlay(app, &painter, i, rect);
     // Focus/active outline (the view's name is in its header).
     let active = app.active_view == i;
@@ -1076,16 +1099,39 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     if crate::view_header::axes_of(app, i) {
         axis_triad(&painter, &cam, rect);
     }
-    // Component points.
+    // Component points; with soft selection on, each is coloured by its weight.
+    let soft_w = if app.workspace.models() { crate::soft_ui::weights(app) } else { None };
     if app.workspace.models()
-        && app.mode == SelectMode::Vertex
+        && (app.mode == SelectMode::Vertex || soft_w.is_some())
         && let Some((_, m, w)) = edit_mesh(app)
     {
         let n = m.vertex_count().min(100_000);
+        let vertex_mode = app.mode == SelectMode::Vertex;
         for v in 0..n as u32 {
+            let weight = soft_w.as_ref().and_then(|ws| ws.get(v as usize)).copied().unwrap_or(0.0);
+            if !vertex_mode && weight <= 0.0 {
+                continue;
+            }
             if let Some(p) = to_screen(&cam, rect, w.transform_point3(m.position(v))) {
-                let sel = app.components.contains(&v);
-                painter.circle_filled(p, if sel { 3.5 } else { 2.2 }, if sel { theme::SELECT } else { Color32::from_rgb(150, 160, 175) });
+                let sel = vertex_mode && app.components.contains(&v);
+                let color = if sel {
+                    theme::SELECT
+                } else if weight > 0.0 {
+                    crate::soft_ui::weight_color(weight)
+                } else {
+                    Color32::from_rgb(150, 160, 175)
+                };
+                painter.circle_filled(
+                    p,
+                    if sel {
+                        3.5
+                    } else if weight > 0.0 {
+                        3.0
+                    } else {
+                        2.2
+                    },
+                    color,
+                );
             }
         }
     }

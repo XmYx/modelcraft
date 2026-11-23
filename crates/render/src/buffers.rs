@@ -4,8 +4,9 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use modelcraft_mesh::PolyMesh;
 
-/// A shaded vertex: position, normal, mask (sculpt), patch index and the UV of its corner (zero
-/// for meshes without UVs and for shared-vertex data).
+/// A shaded vertex: position, normal, mask (sculpt), patch index, the UV of its corner (zero
+/// for meshes without UVs and for shared-vertex data) and its vertex colour (white when none;
+/// it tints the object colour).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct MeshVertex {
@@ -14,7 +15,11 @@ pub struct MeshVertex {
     pub mask: f32,
     pub patch: f32,
     pub uv: [f32; 2],
+    pub color: [f32; 4],
 }
+
+/// The colour of a vertex nothing has painted.
+pub const WHITE: [f32; 4] = [1.0; 4];
 
 /// A coloured line or overlay vertex.
 #[repr(C)]
@@ -83,7 +88,8 @@ pub fn mesh_data_in(m: &PolyMesh, max_runs: usize) -> MeshData {
                 }
                 let normal = sum.normalize_or(nf);
                 let uv = if m.has_uvs() { m.uv(h).to_array() } else { [0.0; 2] };
-                out.vertices.push(MeshVertex { pos: m.position(v).to_array(), normal: normal.to_array(), mask: 0.0, patch: m.patch(f) as f32, uv });
+                let color = if m.has_colors() { m.color(h) } else { WHITE };
+                out.vertices.push(MeshVertex { pos: m.position(v).to_array(), normal: normal.to_array(), mask: 0.0, patch: m.patch(f) as f32, uv, color });
                 n += 1;
             }
             for i in 1..n.saturating_sub(1) {
@@ -116,7 +122,8 @@ pub fn flat_data(m: &PolyMesh) -> MeshData {
         let mut count = 0u32;
         for h in m.face_half_edges(f) {
             let uv = if m.has_uvs() { m.uv(h).to_array() } else { [0.0; 2] };
-            out.vertices.push(MeshVertex { pos: m.position(m.origin(h)).to_array(), normal: n, mask: 0.0, patch: m.patch(f) as f32, uv });
+            let color = if m.has_colors() { m.color(h) } else { WHITE };
+            out.vertices.push(MeshVertex { pos: m.position(m.origin(h)).to_array(), normal: n, mask: 0.0, patch: m.patch(f) as f32, uv, color });
             count += 1;
         }
         for i in 1..count.saturating_sub(1) {
@@ -139,6 +146,7 @@ pub fn vertex_at(positions: &[Vec3], normals: &[Vec3], mask: Option<&[f32]>, i: 
         mask: mask.and_then(|m| m.get(i)).copied().unwrap_or(0.0),
         patch: 0.0,
         uv: [0.0; 2],
+        color: WHITE,
     }
 }
 
@@ -224,7 +232,8 @@ mod tests {
     fn grid_has_axes() {
         let g = grid(10, 1.0, [0.5; 4], [0.7; 4]);
         assert_eq!(g.len(), 20 * 4 + 4);
-        assert_eq!(std::mem::size_of::<MeshVertex>(), 40);
+        // Position, normal, mask, patch, UV and the vertex colour: 56 bytes (it was 40 before colours).
+        assert_eq!(std::mem::size_of::<MeshVertex>(), 56);
     }
 
     #[test]

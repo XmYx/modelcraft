@@ -92,6 +92,8 @@ struct Work {
     pos: Vec<DVec3>,
     tris: Vec<[u32; 3]>,
     uvs: Vec<[Vec2; 3]>,
+    /// Corner colours of each triangle (they do not change when an edge collapses).
+    colors: Vec<[[f32; 4]; 3]>,
     patch: Vec<u32>,
     alive: Vec<bool>,
     vtris: Vec<Vec<u32>>,
@@ -265,6 +267,7 @@ pub fn decimate(m: &PolyMesh, ratio: f32) -> OpResult {
         pos: m.positions().iter().map(|p| p.as_dvec3()).collect(),
         tris: Vec::with_capacity(m.triangle_count()),
         uvs: Vec::new(),
+        colors: Vec::new(),
         patch: Vec::with_capacity(m.triangle_count()),
         alive: Vec::new(),
         vtris: vec![Vec::new(); n],
@@ -279,6 +282,9 @@ pub fn decimate(m: &PolyMesh, ratio: f32) -> OpResult {
             w.tris.push([m.origin(*a), m.origin(*b), m.origin(*c)]);
             if has_uvs {
                 w.uvs.push([m.uv(*a), m.uv(*b), m.uv(*c)]);
+            }
+            if m.has_colors() {
+                w.colors.push([m.color(*a), m.color(*b), m.color(*c)]);
             }
             w.patch.push(m.patch(f));
         }
@@ -381,6 +387,7 @@ pub fn decimate(m: &PolyMesh, ratio: f32) -> OpResult {
         }
         let mut p = Polygon::new(verts);
         p.uvs = has_uvs.then(|| w.uvs.get(t).map(|u| u.to_vec()).unwrap_or_default());
+        p.colors = m.has_colors().then(|| w.colors.get(t).map(|c| c.to_vec()).unwrap_or_default());
         p.patch = w.patch.get(t).copied().unwrap_or(0);
         polys.push(p);
     }

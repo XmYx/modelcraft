@@ -366,6 +366,11 @@ pub enum Command {
     Hair(crate::hair::HairCommand),
     /// Simulation caches and settings: `{"cmd":"sim","op":"attach_cache",…}` ([`crate::sim::SimCommand`]).
     Sim(crate::sim::SimCommand),
+    /// Procedural generators: `{"cmd":"procedural","op":"add_generator","kind":"thicken"}`
+    /// ([`crate::procedural::ProceduralCommand`]).
+    Procedural(crate::procedural::ProceduralCommand),
+    /// Lights and cameras: `{"cmd":"stage","op":"add_light","kind":"spot"}` ([`crate::stage::StageCommand`]).
+    Stage(crate::stage::StageCommand),
     /// Splines: `{"cmd":"spline","op":"add","kind":"circle"}` ([`crate::spline::SplineCommand`]).
     Spline(crate::spline::SplineCommand),
     /// Scene variants: `{"cmd":"variant","op":"switch","id":1}` ([`crate::variants::VariantCommand`]).
@@ -425,7 +430,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("set_cloner", "Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target?"),
     (
         "add_step",
-        "Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op",
+        "Append a history step (extrude, extrude_edges, inset, bevel, bevel_vertices, loop_cut, slice_plane {point, normal, faces}, cut_line {a, b, view, front_only}, connect {verts}, add_polygon {points, toward}, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op",
     ),
     ("set_step", "Change a history step: id, index, op"),
     ("enable_step", "Switch a history step on or off: id, index, enabled"),
@@ -561,6 +566,8 @@ impl Command {
             Command::Organize(o) => o.label(),
             Command::Hair(h) => h.label(),
             Command::Sim(c) => c.label(),
+            Command::Procedural(c) => c.label(),
+            Command::Stage(c) => c.label(),
             Command::Spline(c) => c.label(),
             Command::Variant(c) => c.label(),
         }

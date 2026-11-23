@@ -26,7 +26,9 @@ pub fn groups() -> Vec<Group> {
     use crate::sim_ui::SimAction;
     let mut generators = vec![Action::AddCage];
     generators.extend(ARRAYS.iter().map(|a| Action::AddArray(a)));
-    generators.extend([Action::AddSymmetry, Action::AddGroup]);
+    generators.push(Action::AddSymmetry);
+    generators.extend(modelcraft_engine::scene::generator::KINDS.iter().map(|g| Action::AddGenerator(g)));
+    generators.push(Action::AddGroup);
     let mut clones: Vec<Action> = CLONERS.iter().map(|c| Action::AddCloner(c)).collect();
     clones.extend(MODIFIERS.iter().map(|m| Action::AddCloneModifier(m)));
     vec![
@@ -35,6 +37,7 @@ pub fn groups() -> Vec<Group> {
         Group { name: tl!("Clones"), items: clones },
         Group { name: tl!("Deformers"), items: DEFORMERS.iter().map(|d| Action::AddDeformer(d)).collect() },
         Group { name: tl!("Fields"), items: FIELDS.iter().map(|f| Action::AddField(f)).collect() },
+        Group { name: tl!("Lights and cameras"), items: crate::stage_ui::StageAction::ALL.iter().take(7).copied().map(Action::Stage).collect() },
         Group {
             name: tl!("Rig"),
             items: [RigAction::AddJoint, RigAction::AddIk, RigAction::AddBlendShape, RigAction::AddLattice, RigAction::AddCluster].map(Action::Rig).to_vec(),

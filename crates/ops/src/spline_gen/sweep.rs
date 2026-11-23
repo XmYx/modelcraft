@@ -70,7 +70,7 @@ pub fn sweep(profiles: &[Polyline], path: &Polyline, options: &SweepOptions) -> 
     if !np.is_finite() {
         np = Vec3::Z;
     }
-    orient(&mut cs, np);
+    orient(&mut cs, np)?;
     let profile_points: usize = cs.iter().map(|c| c.pts.len()).sum();
     let sections = n;
     check_faces(cs.iter().map(Curve::edges).sum::<usize>().saturating_mul(path_curve.edges()).saturating_add(profile_points * 2))?;
