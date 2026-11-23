@@ -182,6 +182,7 @@ pub struct ModelApp {
     pub exchange: modelcraft_engine::formats::exchange::Convert,
     pub script: crate::script_ui::ScriptState,
     pub mesh_tools: crate::mesh_tools::State,
+    pub modeling: crate::modeling_ui::State,
     pub radial: Option<crate::radial::Radial>,
     pub prefs_window: crate::prefs_ui::PrefsWindow,
     /// Action ids on the shelf.
@@ -318,6 +319,7 @@ impl ModelApp {
             exchange: Default::default(),
             script: Default::default(),
             mesh_tools: Default::default(),
+            modeling: Default::default(),
             radial: None,
             prefs_window: Default::default(),
             shelf: Vec::new(),
@@ -827,26 +829,10 @@ impl ModelApp {
             AddGroup => {
                 self.run(Command::AddGroup { name: None });
             }
-            Extrude => self.face_op(|f, p| StepOp::Extrude { faces: f, distance: p.extrude }),
+            Extrude => crate::modeling_ui::extrude(self),
             Inset => self.face_op(|f, p| StepOp::Inset { faces: f, amount: p.inset }),
-            Bevel => {
-                if self.mode == SelectMode::Edge && !self.components.is_empty() {
-                    let w = self.ops.bevel;
-                    self.add_step(StepOp::Bevel { edges: self.selected_vec(), width: w });
-                } else {
-                    self.status = tl!("Bevel needs selected edges (edge mode)");
-                }
-            }
-            LoopCut => {
-                if self.mode == SelectMode::Edge
-                    && let Some(&edge) = self.components.iter().next()
-                {
-                    let cuts = self.ops.cuts;
-                    self.add_step(StepOp::LoopCut { edge, cuts });
-                } else {
-                    self.status = tl!("Loop cut needs a selected edge (edge mode)");
-                }
-            }
+            Bevel => crate::modeling_ui::bevel(self),
+            LoopCut => crate::modeling_ui::loop_cut(self),
             Merge => {
                 if self.mode == SelectMode::Vertex && self.components.len() > 1 {
                     self.add_step(StepOp::Merge { verts: self.selected_vec() });
@@ -940,6 +926,8 @@ impl ModelApp {
             Objects(op) => crate::object_manager::run(self, op),
             Snap(op) => crate::snap_ui::run(self, op),
             Organize(op) => crate::organize_ui::run(self, op),
+            Cut(op) => crate::cut_ui::run(self, op),
+            Soft(op) => crate::soft_ui::run(self, op),
         }
     }
 
@@ -1046,7 +1034,8 @@ impl ModelApp {
         let rot = Quat::from_euler(glam::EulerRot::XYZ, r.x, r.y, r.z);
         if self.mode != SelectMode::Object && !self.components.is_empty() {
             let verts = self.component_vertices();
-            self.add_step(StepOp::MoveVertices { verts, translate: n.translate, rotate: rot, scale: n.scale });
+            let (soft, symmetry) = (self.modeling.soft.soft(), self.modeling.soft.sym());
+            self.add_step(StepOp::MoveVertices { verts, translate: n.translate, rotate: rot, scale: n.scale, soft, symmetry });
         } else if let Some(id) = self.active() {
             let Some(mut t) = self.doc.scene.get(id).map(|o| o.transform) else { return };
             t.translation += n.translate;
@@ -1327,7 +1316,7 @@ impl ModelApp {
         if crate::render_view::escape(self, ctx) || self.radial.is_some() || crate::script_ui::escape(self, ctx) || crate::script_ui::keys(self, ctx) {
             return;
         }
-        if crate::uv_ui::keys(self, ctx) {
+        if crate::uv_ui::keys(self, ctx) || crate::modeling_ui::escape(self, ctx) || crate::cut_ui::escape(self, ctx) {
             return;
         }
         if crate::sculpt_groups_ui::escape(self, ctx) {

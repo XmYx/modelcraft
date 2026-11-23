@@ -84,3 +84,5 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Selection Sets | named selections / quick selection sets | Generic | Use |
 | Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
 | Search objects | outliner filters | Generic | Use |
+| Tool Options (window), Slide, Spacing curve, Rows, Variation, Caps, Lift, Segments, Profile (Flat, Round, Custom), Bevel Vertices, Extrude Edges | per-tool settings pages and bevel/extrude/loop-cut parameters in the reference products | Plain modeling words; the reference products' option names avoided | Use |
+| Knife, Knife by Numbers, Slice by Plane, Connect Vertices, Polygon Pen, Polygon by Numbers | knife / line cut, plane cut, connect, create-polygon tools | Plain verbs and nouns; the reference products' tool names avoided | Use |

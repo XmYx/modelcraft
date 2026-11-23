@@ -17,13 +17,13 @@ fn add(doc: &mut Document, kind: &str) -> ObjectId {
 fn modeling_with_history_undo_and_redo() {
     let mut d = Document::new();
     let cube = add(&mut d, "cube");
-    d.execute(Command::AddStep { id: cube, op: StepOp::Extrude { faces: vec![0], distance: 1.0 } }).unwrap();
-    d.execute(Command::AddStep { id: cube, op: StepOp::Bevel { edges: vec![0, 1], width: 0.1 } }).unwrap();
+    d.execute(Command::AddStep { id: cube, op: StepOp::extrude(vec![0], 1.0) }).unwrap();
+    d.execute(Command::AddStep { id: cube, op: StepOp::bevel(vec![0, 1], 0.1) }).unwrap();
     let cage = d.execute(Command::AddSmoothCage { input: Some(cube), levels: 2 }).unwrap().created[0];
     let faces = d.eval.evaluate(&d.scene, cage).mesh.face_count();
     assert!(faces > 100);
     // Edit an early step: everything downstream follows.
-    d.execute(Command::SetStep { id: cube, index: 0, op: StepOp::Extrude { faces: vec![0], distance: 2.0 } }).unwrap();
+    d.execute(Command::SetStep { id: cube, index: 0, op: StepOp::extrude(vec![0], 2.0) }).unwrap();
     let (lo, hi) = d.eval.evaluate(&d.scene, cube).mesh.bounds();
     assert!((hi - lo).max_element() > 2.9);
     assert_eq!(d.undo.len(), 5);
@@ -49,7 +49,7 @@ fn failed_commands_leave_no_trace() {
     assert!(d.execute(Command::RemoveStep { id: c, index: 3 }).is_err());
     assert_eq!(d.undo.len(), 1);
     // A stale selection is a warning, not an error.
-    let out = d.execute(Command::AddStep { id: c, op: StepOp::Extrude { faces: vec![99], distance: 1.0 } }).unwrap();
+    let out = d.execute(Command::AddStep { id: c, op: StepOp::extrude(vec![99], 1.0) }).unwrap();
     assert_eq!(out.warnings.len(), 1);
 }
 
@@ -161,7 +161,7 @@ fn import_export_round_trip_and_hostile_paths() {
 fn commands_round_trip_as_json() {
     let cmds = vec![
         Command::AddPrimitive { kind: "cube".into(), name: Some("A".into()), parent: None },
-        Command::AddStep { id: ObjectId(1), op: StepOp::LoopCut { edge: 3, cuts: 2 } },
+        Command::AddStep { id: ObjectId(1), op: StepOp::loop_cut(3, 2) },
         Command::SculptStroke { id: ObjectId(1), stroke: stroke(BrushKind::Grab) },
         Command::SculptDetail { id: ObjectId(1), op: crate::DetailOp::Up },
         Command::SculptShape { id: ObjectId(1), op: crate::ShapeOp::Strength { index: 0, strength: 0.25 } },

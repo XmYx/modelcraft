@@ -220,7 +220,7 @@ fields of each command are in [cli.md](cli.md#commands).
 | `cmd::set_field` | Change a falloff field (shape, remap curve, invert, strength, blend): id, field |
 | `cmd::set_clone_modifier` | Change a clone modifier (mode, strength, position, rotation, scale, tint) and its target object: id, modifier, target? |
 | `cmd::set_cloner` | Change a clone generator's layout (mode, counts, offsets, seed) and target: id, cloner, target? |
-| `cmd::add_step` | Append a history step (extrude, inset, bevel, loop_cut, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op |
+| `cmd::add_step` | Append a history step (extrude, extrude_edges, inset, bevel, bevel_vertices, loop_cut, slice_plane {point, normal, faces}, cut_line {a, b, view, front_only}, connect {verts}, add_polygon {points, toward}, merge, weld, delete_faces, delete_edges, delete_vertices, move_vertices, flip, triangulate, subdivide, set_patch, bridge, fill_hole, mirror, even_remesh, trim_plane {point, normal, cap}, decimate {ratio}): id, op |
 | `cmd::set_step` | Change a history step: id, index, op |
 | `cmd::enable_step` | Switch a history step on or off: id, index, enabled |
 | `cmd::remove_step` | Remove a history step: id, index |

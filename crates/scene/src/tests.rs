@@ -13,7 +13,7 @@ fn history_is_cached_and_reevaluated_from_the_change() {
     let id = s.add("Cube", cube_kind(), None).unwrap();
     let sid = s.fresh_id();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-        steps.push(Step { id: sid, enabled: true, op: StepOp::Extrude { faces: vec![0], distance: 1.0 } });
+        steps.push(Step { id: sid, enabled: true, op: StepOp::extrude(vec![0], 1.0) });
         steps.push(Step { id: sid + 1, enabled: true, op: StepOp::Subdivide { levels: 1 } });
     }
     let a = ev.evaluate(&s, id);
@@ -45,7 +45,7 @@ fn stale_steps_are_reported_not_fatal() {
     let mut ev = Evaluator::new();
     let id = s.add("Cube", cube_kind(), None).unwrap();
     if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-        steps.push(Step { id: 1, enabled: true, op: StepOp::Bevel { edges: vec![500], width: 0.1 } });
+        steps.push(Step { id: 1, enabled: true, op: StepOp::bevel(vec![500], 0.1) });
         steps.push(Step { id: 2, enabled: true, op: StepOp::Sculpt { layer: SculptLayer::default() } });
     }
     let e = ev.evaluate(&s, id);

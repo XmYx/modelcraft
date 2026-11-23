@@ -2808,6 +2808,7 @@ name = "modelcraft-ops"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "modelcraft-field",
  "modelcraft-mesh",
  "proptest",
  "serde",

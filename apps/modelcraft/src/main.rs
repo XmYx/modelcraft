@@ -21,6 +21,9 @@ mod clone_ui_tests;
 mod constraint_ui;
 #[cfg(test)]
 mod constraint_ui_tests;
+mod cut_ui;
+#[cfg(test)]
+mod cut_ui_tests;
 mod deform_ui;
 #[cfg(test)]
 mod deform_ui_tests;
@@ -41,6 +44,9 @@ mod hair_ui_tests;
 mod keys;
 mod material_ui;
 mod mesh_tools;
+mod modeling_ui;
+#[cfg(test)]
+mod modeling_ui_tests;
 mod modifier_ui;
 #[cfg(test)]
 mod modifier_ui_tests;
@@ -84,6 +90,9 @@ mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
 mod snap_ui;
+mod soft_ui;
+#[cfg(test)]
+mod soft_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

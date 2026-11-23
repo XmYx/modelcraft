@@ -658,7 +658,7 @@ mod tests {
         let id = cube(&mut s);
         let sid = s.fresh_id();
         if let ObjectKind::Mesh { steps, .. } = &mut s.edit(id).unwrap().kind {
-            steps.push(Step { id: sid, enabled: true, op: StepOp::Extrude { faces: vec![0, 1, 2, 3, 4, 5], distance: 1.0 } });
+            steps.push(Step { id: sid, enabled: true, op: StepOp::extrude(vec![0, 1, 2, 3, 4, 5], 1.0) });
         }
         let names: Vec<String> = attr::list(s.get(id).unwrap()).into_iter().map(|(n, _)| n).collect();
         for want in ["translate.x", "rotate.z", "scale.y", "visible", "material.roughness", "material.base_color.3", "primitive.size.0", "primitive.segments"] {

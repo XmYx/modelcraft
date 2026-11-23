@@ -9,13 +9,18 @@
 #![forbid(unsafe_code)]
 
 pub mod array;
+pub mod bevel;
+pub mod cut;
 pub mod decimate;
 pub mod deform;
 pub mod edit;
+pub mod extrude;
+pub mod loopcut;
 pub mod patches;
 pub mod primitives;
 pub mod remesh;
 pub mod select;
+pub mod soft;
 pub mod subdivide;
 pub mod trim;
 
