@@ -218,7 +218,8 @@ proptest! {
         let all: Vec<usize> = (0..n).collect();
         let r = s.cut_corners(&all, if fillet { Cut::Fillet(d) } else { Cut::Chamfer(d) }).unwrap();
         prop_assert!(Spline::single(s.clone()).validate().is_ok());
-        prop_assert_eq!(s.knots.len(), n + r.cut);
+        // Cuts that meet in the middle of an edge share a point, so the count is at most one more per cut.
+        prop_assert!(s.knots.len() >= n && s.knots.len() <= n + r.cut);
         let after = area(&flat(&s));
         // Cutting corners off a convex-or-not star shape never adds area to a polygon whose corners are convex; for
         // reflex corners the cut adds area, so only check that the result is a finite, non-degenerate shape.
@@ -234,4 +235,98 @@ proptest! {
         s.reverse();
         prop_assert_eq!(s, original);
     }
+}
+
+#[test]
+fn a_fillet_on_a_polyline_with_stored_handles_keeps_the_straight_edges_straight() {
+    // A polyline whose points still carry handles (drawn with the pen, then switched to a polyline).
+    let knots: Vec<Knot> = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+        .iter()
+        .map(|(x, y)| Knot { pos: Vec3::new(*x, *y, 0.0), tan_in: Vec3::new(-0.7, 0.3, 0.0), tan_out: Vec3::new(0.7, -0.3, 0.0), mode: HandleMode::Mirrored })
+        .collect();
+    let mut s = Segment::new(CurveKind::Linear, true, knots);
+    assert_eq!(s.cut_corners(&[1], Cut::Fillet(1.0)).unwrap().cut, 1);
+    assert_eq!(s.kind, CurveKind::Bezier);
+    assert!(s.knots.iter().all(|k| k.mode == HandleMode::Free));
+    // Area: the square minus one rounded corner, and no edge bows out.
+    assert!((area(&flat(&s)) - (16.0 - (1.0 - PI / 4.0))).abs() < 2e-3, "{}", area(&flat(&s)));
+    for p in flat(&s) {
+        assert!(p.x >= -1e-4 && p.x <= 4.0 + 1e-4 && p.y >= -1e-4 && p.y <= 4.0 + 1e-4, "{p:?} left the square");
+    }
+}
+
+#[test]
+fn cutting_every_corner_of_a_big_polygon_is_one_pass_and_the_cap_is_checked_first() {
+    use crate::{KnotRef, MAX_KNOTS};
+    let n = 60_000;
+    let pts: Vec<Vec3> = (0..n)
+        .map(|i| {
+            let a = std::f32::consts::TAU * i as f32 / n as f32;
+            // A zigzag, so that every point is a real corner.
+            Vec3::new(a.cos(), a.sin(), 0.0) * if i % 2 == 0 { 100.0 } else { 99.0 }
+        })
+        .collect();
+    let mut s = Spline::single(Segment::polyline(&pts, true));
+    let all: Vec<KnotRef> = (0..n).map(|k| KnotRef { segment: 0, knot: k }).collect();
+    // 120,000 points would pass the cap: refused before anything is built, and nothing changed.
+    let before = s.clone();
+    let e = s.apply(&SplineEdit::Chamfer { knots: all.clone(), distance: 0.001 }).unwrap_err();
+    assert_eq!(e, SplineError::TooManyKnots(2 * n));
+    assert_eq!(s, before);
+    // Under the cap it is fine (every other point).
+    let some: Vec<KnotRef> = all.iter().step_by(2).copied().collect();
+    let t = std::time::Instant::now();
+    s.apply(&SplineEdit::Chamfer { knots: some, distance: 0.001 }).unwrap();
+    assert_eq!(s.knot_count(), n + n / 2, "a point is added for every cut");
+    assert!(s.knot_count() <= MAX_KNOTS);
+    assert!(t.elapsed().as_secs_f32() < 5.0, "one pass, not one shift per corner");
+}
+
+#[test]
+fn a_cut_clamped_at_both_ends_leaves_no_coincident_points() {
+    let mut s = square(4.0);
+    s.cut_corners(&[0, 1, 2, 3], Cut::Chamfer(100.0)).unwrap();
+    assert_eq!(s.knots.len(), 4, "the cuts meet at the edge middles: one point each");
+    let mut f = square(4.0);
+    f.cut_corners(&[0, 1, 2, 3], Cut::Fillet(100.0)).unwrap();
+    for w in f.knots.windows(2) {
+        assert!(w[0].pos.distance(w[1].pos) > 1e-4);
+    }
+}
+
+#[test]
+fn reversing_and_closing_use_the_handles_a_point_really_has() {
+    // A mirrored point whose stored in-handle is not the opposite of its out-handle.
+    let k = |x: f32, tin: Vec3, tout: Vec3, mode| Knot { pos: Vec3::new(x, 0.0, 0.0), tan_in: tin, tan_out: tout, mode };
+    let s0 = Segment::new(
+        CurveKind::Bezier,
+        false,
+        vec![
+            k(0.0, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), HandleMode::Free),
+            k(2.0, Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -1.0, 0.0), HandleMode::Mirrored),
+            k(4.0, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO, HandleMode::Free),
+        ],
+    );
+    let mut r = s0.clone();
+    r.reverse();
+    let (a, b) = (s0.tessellate(Tessellation::Fixed { steps: 16 }).unwrap(), r.tessellate(Tessellation::Fixed { steps: 16 }).unwrap());
+    assert!(a.points.iter().all(|p| b.points.iter().any(|q| q.distance(*p) < 1e-4)), "the same curve");
+    // Closing an open curve whose last point is on its first keeps both handles of the joined point.
+    let mut c = Segment::new(
+        CurveKind::Bezier,
+        false,
+        vec![
+            k(0.0, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), HandleMode::Mirrored),
+            k(2.0, Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), HandleMode::Free),
+            Knot { pos: Vec3::new(1.0, 2.0, 0.0), ..Knot::default() },
+            Knot { pos: Vec3::ZERO, tan_in: Vec3::new(0.0, -2.0, 0.0), tan_out: Vec3::ZERO, mode: HandleMode::Free },
+        ],
+    );
+    c.close_curve();
+    assert!(c.closed && c.knots.len() == 3);
+    assert_eq!(
+        (c.knots[0].tan_in, c.knots[0].tan_out),
+        (Vec3::new(0.0, -2.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+        "arrives as the last point did, leaves as the first did"
+    );
 }

@@ -186,6 +186,8 @@ pub fn apply(doc: &mut Document, cmd: &SplineCommand, out: &mut Outcome) -> Resu
                 return invalid(e.clone());
             }
             let mesh = modelcraft_ops::spline_gen::fill(&eval.lines).map_err(|e| EngineError::Invalid(e.to_string()))?;
+            // A spline inside a generator is its input: the mesh goes beside the generator, not inside it.
+            let parent = parent.map(|p| if doc.scene.is_spline_generator(p) { doc.scene.get(p).and_then(|o| o.parent) } else { Some(p) }).unwrap_or(None);
             let unique = doc.scene.unique_name(&format!("{name} Mesh"));
             let new = doc.scene.add(unique, ObjectKind::Mesh { source: modelcraft_scene::Source::Mesh { mesh: Arc::new(mesh) }, steps: vec![] }, parent)?;
             doc.scene.edit(new)?.transform = transform;

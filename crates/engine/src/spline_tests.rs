@@ -394,3 +394,12 @@ fn to_mesh_fills_closed_curves_with_holes_and_refuses_the_rest() {
     d.execute(Command::SetLocked { ids: vec![a], locked: true }).unwrap();
     assert!(d.execute(Command::Spline(S::ToMesh { id: a })).is_err());
 }
+
+#[test]
+fn to_mesh_of_a_generator_input_puts_the_mesh_beside_the_generator() {
+    let mut d = Document::new();
+    let g = d.execute(Command::Spline(S::AddGenerator { kind: "extrude".into(), inputs: vec![] })).unwrap().created[0];
+    let star = d.scene.spline_children(g)[0];
+    let m = d.execute(Command::Spline(S::ToMesh { id: star })).unwrap().created[0];
+    assert_eq!(d.scene.get(m).unwrap().parent, None, "not inside the generator, where it would be taken for an input");
+}

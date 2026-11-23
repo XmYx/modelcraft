@@ -9,7 +9,7 @@
 
 use glam::Vec3;
 
-use crate::{CurveKind, HandleMode, Knot, KnotRef, Segment, Spline, SplineError, Tessellation};
+use crate::{CurveKind, HandleMode, Knot, KnotRef, MAX_KNOTS, Segment, Spline, SplineError, Tessellation};
 
 /// How a corner is cut.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,8 +31,11 @@ impl Segment {
     /// Reverse the direction of the curve (the same curve, run the other way). A closed curve
     /// keeps its first point first.
     pub fn reverse(&mut self) {
-        for k in &mut self.knots {
-            std::mem::swap(&mut k.tan_in, &mut k.tan_out);
+        // The handles each point really has (a mirrored or smooth point's stored ones may differ).
+        let handles = self.effective_handles();
+        for (k, (hin, hout)) in self.knots.iter_mut().zip(handles) {
+            k.tan_in = hout;
+            k.tan_out = hin;
         }
         if self.closed && self.knots.len() > 1 {
             self.knots[1..].reverse();
@@ -49,12 +52,14 @@ impl Segment {
             && let (Some(first), Some(last)) = (self.knots.first().copied(), self.knots.last().copied())
             && first.pos.distance_squared(last.pos) < 1e-10
         {
+            let h = self.effective_handles();
+            let (arriving, leaving) = (h.last().map_or(Vec3::ZERO, |h| h.0), h.first().map_or(Vec3::ZERO, |h| h.1));
             self.knots.pop();
             if let Some(f) = self.knots.first_mut() {
-                f.tan_in = last.tan_in;
-                if f.mode == HandleMode::Free && last.mode != HandleMode::Free {
-                    f.mode = HandleMode::Aligned;
-                }
+                // The joined point keeps the handle it arrives with and the one it leaves with.
+                f.tan_in = arriving;
+                f.tan_out = leaving;
+                f.mode = HandleMode::Free;
             }
         }
         self.closed = true;
@@ -146,13 +151,60 @@ impl Segment {
         if report.cut == 0 {
             return Ok(report);
         }
-        if matches!(cut, Cut::Fillet(_)) && self.kind == CurveKind::Linear {
-            // The arcs need handles; the straight edges keep their zero handles.
+        // Refuse before building: each cut adds one point.
+        if n + report.cut > MAX_KNOTS {
+            return Err(SplineError::TooManyKnots(n + report.cut));
+        }
+        let fillet = matches!(cut, Cut::Fillet(_));
+        // Put the new points in one pass over the old ones (replacements are in index order).
+        let mut out: Vec<Knot> = Vec::with_capacity(n + report.cut);
+        let mut from_cut: Vec<bool> = Vec::with_capacity(n + report.cut);
+        let mut next = replacements.into_iter().peekable();
+        for (i, k) in self.knots.iter().enumerate() {
+            if next.peek().is_some_and(|(r, _)| *r == i)
+                && let Some((_, pair)) = next.next()
+            {
+                for (j, p) in pair.into_iter().enumerate() {
+                    // A cut clamped to half an edge at both ends meets the neighbour's cut: one point.
+                    if j == 0
+                        && from_cut.last() == Some(&true)
+                        && let Some(prev) = out.last_mut()
+                        && prev.pos.distance_squared(p.pos) < 1e-12
+                    {
+                        prev.tan_out = p.tan_out;
+                        continue;
+                    }
+                    out.push(p);
+                    from_cut.push(true);
+                }
+            } else {
+                // Linear points keep any handles they have stored; a fillet turns the curve into a
+                // Bezier one, so it must not bring them back.
+                let mut k = *k;
+                if fillet && self.kind == CurveKind::Linear {
+                    (k.tan_in, k.tan_out, k.mode) = (Vec3::ZERO, Vec3::ZERO, HandleMode::Free);
+                }
+                out.push(k);
+                from_cut.push(false);
+            }
+        }
+        // Around the start of a closed curve the last cut may meet the first.
+        if self.closed
+            && out.len() > 3
+            && from_cut.first() == Some(&true)
+            && from_cut.last() == Some(&true)
+            && let (Some(first), Some(last)) = (out.first().copied(), out.last().copied())
+            && first.pos.distance_squared(last.pos) < 1e-12
+        {
+            out.pop();
+            if let Some(f) = out.first_mut() {
+                f.tan_in = last.tan_in;
+            }
+        }
+        if fillet && self.kind == CurveKind::Linear {
             self.kind = CurveKind::Bezier;
         }
-        for (i, pair) in replacements.into_iter().rev() {
-            self.knots.splice(i..=i, pair);
-        }
+        self.knots = out;
         Ok(report)
     }
 
@@ -177,17 +229,25 @@ impl Spline {
     /// Cut the corners at `knots` (any segments). An error when none could be cut, naming why the
     /// first was skipped; the spline is changed only when something was cut.
     pub(crate) fn cut(&mut self, knots: &[KnotRef], cut: Cut) -> Result<usize, SplineError> {
+        // Each cut adds at most one point: refuse before touching anything when that passes the cap.
+        if self.knot_count().saturating_add(knots.len()) > MAX_KNOTS {
+            return Err(SplineError::TooManyKnots(self.knot_count().saturating_add(knots.len())));
+        }
+        let mut sorted = knots.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
         let mut total = 0;
         let mut why: Option<&'static str> = None;
-        let mut segments: Vec<usize> = knots.iter().map(|k| k.segment).collect();
-        segments.sort_unstable();
-        segments.dedup();
-        for s in segments {
-            let at: Vec<usize> = knots.iter().filter(|k| k.segment == s).map(|k| k.knot).collect();
+        let mut i = 0;
+        while i < sorted.len() {
+            let s = sorted[i].segment;
+            let end = sorted[i..].iter().position(|k| k.segment != s).map_or(sorted.len(), |p| i + p);
+            let at: Vec<usize> = sorted[i..end].iter().map(|k| k.knot).collect();
             let seg = self.segments.get_mut(s).ok_or_else(|| SplineError::Invalid(format!("there is no segment {s}")))?;
             let r = seg.cut_corners(&at, cut)?;
             total += r.cut;
             why = why.or(r.skipped.first().map(|x| x.1));
+            i = end;
         }
         if total == 0 {
             return Err(SplineError::Invalid(format!("there is no corner to cut here ({})", why.unwrap_or("no point chosen"))));
