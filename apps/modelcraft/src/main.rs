@@ -34,6 +34,9 @@ mod demo;
 mod display_modes;
 mod dock;
 mod exchange_ui;
+mod field_layers_ui;
+#[cfg(test)]
+mod field_layers_ui_tests;
 mod field_ui;
 #[cfg(test)]
 mod field_ui_tests;
@@ -110,6 +113,9 @@ mod uv_ui;
 mod uv_ui_tests;
 #[cfg(test)]
 mod ux_ui_tests;
+mod view_header;
+#[cfg(test)]
+mod view_header_tests;
 mod viewport;
 
 use args::{Cli, Launch};

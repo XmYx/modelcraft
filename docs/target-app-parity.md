@@ -116,7 +116,7 @@ Weight: 6
 | Orbit, pan, zoom with navigation presets | C M Z | D | S | Three presets (Alt + buttons, middle button, right button); arrows and ± keys; wheel |
 | Frame selection and frame all | C M Z | D | S | F |
 | Perspective and orthographic views with presets | C M Z | D | S | Front, Right, Top; Alt+1..4 |
-| Single and four-view layouts | C M | D | S | Space |
+| Single and four-view layouts | C M | D | S | Space; each view has a header with View (presets, frame), Display (shading mode, patches), Options (grid, axes, statistics) and Camera (editor camera, reset) menus that change only that view |
 | Ground grid and axis triad | C M Z | D | S | |
 | Shaded with wireframe on selection | C M Z | D | S | Auto-smoothed normals (40°) |
 | Display modes: flat, smooth, wireframe, see-through, bounding box | C M Z | D | M | Organize ▸ Display Mode for the view, a Display tag per object; each mode drawn and read back on a real GPU adapter in a test |
@@ -131,7 +131,7 @@ Weight: 6
 | Screen-space ambient occlusion, reflections, antialiasing options | C M | M | M | |
 | Matcap library for sculpting | C M Z | P | S | One clay look |
 | Textures shown in the viewport | C M Z | M | M | |
-| Heads-up statistics (polygons, frame rate) | C M Z | P | S | Frame rate in the status bar; no polygon counts |
+| Heads-up statistics (polygons, frame rate) | C M Z | D | S | Options ▸ Statistics in a view header overlays the selected object's (or the scene's) points and polygons, the sculpt detail level, an estimate of the mesh memory and the grid spacing, as a polite live region; frame rate stays in the status bar |
 | Headless viewport renders for thumbnails and CI | M | P | S | GPU readback works in `modelcraft-cli bench` and tests; no render command |
 | Large-scene drawing: culling, level of detail, proxies | C M | P | L | 2.0 M triangles at ~290 fps; no culling or proxies |
 | Measure tool and scene units | C M | D | M | Measure (View ▸ Snapping and Axes, palette): two clicks on vertices, edge points or surfaces give the distance and its x, y, z parts in the preference's length unit, drawn in the view and announced in the status bar |
@@ -292,8 +292,8 @@ Weight: 4
 | Collision deformer | C | M | M | |
 | Explode / shatter deformer | C | M | S | |
 | Deformer weights painted per vertex | C M | M | M | |
-| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear and noise fields with a remap curve; they weight the deformers they sit in; no radial or shader field |
-| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer, blended by multiply, add, subtract, smallest or largest, then remapped; no delay or freeze |
+| Falloff fields: linear, spherical, radial, box, noise, shader | C | P | L | Sphere, box, linear, noise, radial, cylinder, cone, capsule, torus, random-cell and formula fields with a remap curve; they weight the deformers and clone modifiers they sit in; no shader field |
+| Field layers: combine, remap, delay, freeze | C | P | M | Several fields per deformer or clone modifier, blended by multiply, add, subtract, smallest or largest at an opacity, then remapped; a list in Properties with a switch, blend, opacity and keyboard reordering for each; no delay or freeze |
 
 ## Procedural cloning and effectors
 
