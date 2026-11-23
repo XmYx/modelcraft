@@ -63,7 +63,7 @@ impl Op {
             Op::Slice => "Model: Shift+C",
             Op::Connect => "Model: Shift+J",
             Op::Pen => "Model: P",
-            Op::PenNumbers => "Model: Shift+P",
+            Op::PenNumbers => "Model: Alt+Shift+P",
         })
     }
 }

@@ -223,10 +223,9 @@ Limits of what exists:
   number; when the scripting crate lands they can call into it instead of growing.
 - Deformer stack (owned by the animation and rigging stream: blend shapes, lattice / FFD,
   clusters; the parametric deformers such as bend, shear, wrap and spline wrap belong to the
-  procedural-modeling stream): the stack deformers and skins run in child order *after* the
-  parametric deformers, whose loop in `eval.rs` this stream did not touch. One order for both
-  kinds needs that loop to hand its deformers to `rig::apply_stack`; until then a bend always
-  runs before a lattice. Lattice control points and cluster weights are edited by number and by
+  procedural-modeling stream): the parametric deformers (bend, shear, bulge, shrink-wrap…) now
+  run inside `rig::apply_stack`, in child order with the stack deformers and skins, so a bend and
+  a lattice have one order that `move_in_stack` changes. Lattice control points and cluster weights are edited by number and by
   command, not picked or painted in the viewport; a lattice only moves points inside its box;
   blend-shape targets are made from another mesh and are not edited in place; shape offsets are
   saved as JSON, not as a blob.
@@ -265,6 +264,8 @@ The largest workstream by points because it spans six areas. **M1** closes the e
 | **M11** NURBS curves and surfaces with trimming and tessellation | 5 | 178 | 2.37 | 70 | — |
 | **M12** Voronoi fracture | 1 | 25 | 0.67 | 36 | D1 |
 | **M13** GPU subdivision | 1 | 25 | 0.56 | 44 | — |
+
+**M6 status (splines, stream D):** the spline type is a UI-free crate (`modelcraft-spline`: Bezier, B-spline and polyline segments, open or closed, tessellation, point editing, a path builder for outlines) that 3D text and any other outline source can use. In the app: circle, rectangle, star, n-side, arc and helix spline objects; a pen, point and handle editing and a numeric point list; chamfer, fillet, reverse, close, convert to polygon and to mesh; and the live extrude, revolve, loft and sweep generators over spline children (caps with holes, UVs, undo, export, nesting in arrays). **Still open in M6:** a text outline primitive (it comes with 3D text), spline offset, outline and 2D booleans, objects placed or bent along a spline and the spline deformer, snapping and rectangle selection of points, a pen that draws B-splines directly (a curve's type can be switched), per-point radius or tilt for sweeps, and NURBS (**M11**).
 
 ## UV and paint
 

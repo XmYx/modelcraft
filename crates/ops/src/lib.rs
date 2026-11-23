@@ -10,6 +10,7 @@
 
 pub mod array;
 pub mod bevel;
+pub mod bvh;
 pub mod cut;
 pub mod decimate;
 pub mod deform;
@@ -23,6 +24,7 @@ mod primitives_more;
 pub mod remesh;
 pub mod select;
 pub mod soft;
+pub mod spline_gen;
 pub mod subdivide;
 pub mod trim;
 

@@ -22,15 +22,23 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod apply;
 mod curve;
 pub mod edit;
 mod path;
+pub mod primitives;
 mod tess;
 
-pub use curve::{CurveKind, HandleMode, Knot, Piece, Segment, Side, Spline};
+pub use apply::{KnotMove, KnotRef, SplineEdit};
+pub use curve::{CurveKind, HandleMode, Knot, Piece, Segment, Side, Spline, derivative_piece, eval_piece, split_piece};
 pub use path::PathBuilder;
+pub use primitives::{ArcClose, Plane, SplinePrimitive};
 pub use tess::{MODES, Polyline, Tessellation, tessellate_pieces};
 
+#[cfg(test)]
+mod apply_tests;
+#[cfg(test)]
+mod prim_tests;
 #[cfg(test)]
 mod tests;
 

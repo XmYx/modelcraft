@@ -145,7 +145,7 @@ fn connect_vertices_by_keyboard() {
 fn polygon_by_numbers_by_keyboard() {
     let mut h = harness();
     cube(&mut h);
-    h.key_press_modifiers(Modifiers::SHIFT, Key::P);
+    h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::P);
     h.run();
     assert!(h.get_by_label("Points").is_focused());
     h.event(egui::Event::Text("3 3 0; 4 3 0; 4 4 0".into()));
@@ -163,7 +163,7 @@ fn polygon_by_numbers_by_keyboard() {
     undo(&mut h);
     assert_eq!(steps(&h).len(), 0);
     // A line that is not a point is reported on the spot.
-    h.key_press_modifiers(Modifiers::SHIFT, Key::P);
+    h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::P);
     h.run();
     h.event(egui::Event::Text("1 2".into()));
     h.run();

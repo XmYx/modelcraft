@@ -99,6 +99,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
                         | ObjectKind::SmoothCage { .. }
                         | ObjectKind::Array { .. }
                         | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
                         | ObjectKind::Cloner { .. }
                         | ObjectKind::Instance { .. }
                 )
@@ -486,6 +487,10 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
     {
         return;
     }
+    // The pen tool and the points and handles of the selected spline.
+    if !is_nav(app, ui) && crate::spline_pen::input(app, ui, resp, i, rect) {
+        return;
+    }
     let pointer = resp.interact_pointer_pos().or_else(|| resp.hover_pos());
     let shift = ui.input(|inp| inp.modifiers.shift);
     if resp.drag_started_by(egui::PointerButton::Primary)
@@ -624,6 +629,20 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
             }
         } else {
             app.select_only(joint);
+        }
+        return;
+    }
+    // A curve under the pointer is picked before the surfaces: splines have no surface to hit.
+    if let Some(spline) = crate::spline_ui::pick_curve(app, i, rect, at) {
+        if add {
+            match app.selection.iter().position(|s| *s == spline) {
+                Some(p) => {
+                    app.selection.remove(p);
+                }
+                None => app.selection.push(spline),
+            }
+        } else {
+            app.select_only(spline);
         }
         return;
     }
@@ -928,6 +947,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
     for (a, b, color) in crate::hair_ui::guide_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
+    for (a, b, color) in crate::spline_ui::curve_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
     if app.workspace == Workspace::Sculpt {
         return out;
     }
@@ -1043,6 +1065,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     let cam = app.views[i].camera;
     crate::snap_ui::overlay(app, &painter, &cam, rect);
     crate::cut_ui::overlay(app, &painter, i, rect, resp.hover_pos());
+    crate::spline_pen::overlay(app, &painter, i, rect);
     // Focus/active outline (the view's name is in its header).
     let active = app.active_view == i;
     if (app.quad && active) || resp.has_focus() {
@@ -1057,8 +1080,8 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
         axis_triad(&painter, &cam, rect);
     }
     // Component points; with soft selection on, each is coloured by its weight.
-    let soft_w = if app.workspace == Workspace::Model { crate::soft_ui::weights(app) } else { None };
-    if app.workspace == Workspace::Model
+    let soft_w = if app.workspace.models() { crate::soft_ui::weights(app) } else { None };
+    if app.workspace.models()
         && (app.mode == SelectMode::Vertex || soft_w.is_some())
         && let Some((_, m, w)) = edit_mesh(app)
     {
@@ -1100,7 +1123,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(232, 138, 60, 28));
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
     }
-    if app.workspace == Workspace::Model {
+    if app.workspace.models() {
         gizmo(app, &painter, i, rect);
     }
     crate::sculpt_groups_ui::overlay(app, &painter, i);
