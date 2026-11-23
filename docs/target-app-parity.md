@@ -227,16 +227,16 @@ Weight: 9
 |---|---|---|---|---|
 | Vertex, edge, face modes; click and box select | C M | D | S | 1–4, Ctrl+A, Shift adds |
 | Loop, ring, grow and shrink selection | C M | D | S | Alt+L / double-click, Alt+R, Ctrl+= / Ctrl+- |
-| Soft selection (falloff around the selection) | C M Z | M | M | |
-| Extrude faces (region) | C M Z | D | S | |
-| Extrude edges and vertices; extrude along a curve | C M | M | M | |
+| Soft selection (falloff around the selection) | C M Z | D | M | Move, rotate and scale (gizmo or Transform by Numbers) pull the vertices around the selection by a radius and a remap curve, recorded in the Move step; weights show as colour on the vertices; radius by field or Alt+[ / Alt+]. Euclidean distance (not along the surface) |
+| Extrude faces (region) | C M Z | D | S | Options page with live preview: distance, offset, rows on the walls, seeded variation, caps on or off, region or each face on its own |
+| Extrude edges and vertices; extrude along a curve | C M | P | M | Border edges of an open mesh extrude outwards and up (Extrude Edges step); extruding a vertex is not possible (no loose edges in a polygon mesh), and no extrusion along a curve |
 | Inset faces | C M | D | S | Per face |
-| Bevel edges with segments and profile | C M Z | P | M | One flat segment; skips boundary edges |
-| Bevel / chamfer vertices | C M | M | S | |
-| Loop cut (edge ring) | C M | D | M | N cuts; stops at non-quads, keeps neighbours conforming |
+| Bevel edges with segments and profile | C M Z | D | M | 1–16 segments; flat, round (circular) or custom (tension) profile; options page with live preview; skips border edges |
+| Bevel / chamfer vertices | C M | D | S | Bevel Vertices step cuts the corner at interior vertices (flat); skips border vertices |
+| Loop cut (edge ring) | C M | D | M | N cuts; slide, symmetric placement and a spacing curve on an options page with live preview; stops at non-quads, keeps neighbours conforming |
 | Slide edges and vertices | C M | M | S | |
-| Connect vertices / split polygons | C M | M | S | |
-| Knife, slice and plane cut | C M | M | M | |
+| Connect vertices / split polygons | C M | D | S | Connect Vertices step (Shift+J): two corners of a face split it, three or more are joined in order; neighbours and single vertices say why nothing happens |
+| Knife, slice and plane cut | C M | D | M | Slice by Plane (both halves kept, by numbers or limited to selected faces); Knife (C) drags a line, Knife by Numbers types its ends and view; visible-faces-only means faces turned away, not occlusion; a cut that ends inside a face leaves that face whole |
 | Merge vertices, weld by distance | C M | D | S | |
 | Collapse edges and faces to a point | C M | M | S | |
 | Delete vertices, edges, faces | C M Z | D | S | |
@@ -250,7 +250,7 @@ Weight: 9
 | Shell / solidify (give thickness) | C M Z | M | S | |
 | Smooth and relax vertices | C M Z | M | S | Sculpt smooth brush only |
 | Mirror modeling with a welded seam | C M Z | D | S | Mirror X/Y/Z step, keeps UVs |
-| Live symmetric component editing | C M Z | M | M | |
+| Live symmetric component editing | C M Z | D | M | Mirrors move, rotate and scale across X, Y or Z (Shift+Y cycles), matching vertices by position within a tolerance; recorded in the Move step; works with soft selection. Meshes that are not symmetric keep the unmatched vertices as they are |
 | Mesh booleans | C M Z | M | L | |
 | Manual retopology: draw quads snapped to a surface | C M Z | M | L | |
 | Edge creases and hard edges | C M Z | M | M | Auto-smoothing angle only |
@@ -259,7 +259,7 @@ Weight: 9
 | Mesh cleanup: non-manifold, lamina faces, n-gon finder | C M | D | S | `PolyMesh::build` repairs non-manifold and lamina faces on every result; Mesh ▸ Patches and Cleanup finds n-gons, triangles, open borders, faces with no area and poles, and Clean Up Mesh welds and removes no-area faces |
 | Transfer attributes between meshes (positions, UVs, normals) | M | M | M | |
 | Align, distribute and snap objects together | C M | M | S | |
-| Polygon pen: draw polygons point by point | C M | M | M | |
+| Polygon pen: draw polygons point by point | C M | P | M | Polygon Pen (P) clicks points snapped to vertices, edges (splitting both faces) and the surface, Enter makes one polygon; Polygon by Numbers types them. Single polygons only: no quad strips, no snapping to other objects |
 | Topology validated after every operation | | X | S | Every result rebuilds through `PolyMesh::build`; property-tested |
 
 ## Subdivision surfaces

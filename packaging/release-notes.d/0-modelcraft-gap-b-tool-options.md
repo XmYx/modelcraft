@@ -1,0 +1,1 @@
+- Modeling: Bevel now has segments and a round, flat or custom profile, can cut the corner at vertices, and Extrude and Loop Cut have options (offset, rows, variation, caps, slide, symmetric placement), all with a live preview in a tool options window.

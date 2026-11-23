@@ -162,9 +162,7 @@ fn constraints_are_baked_into_the_clip_and_limits_are_said() {
     // through the static reader (one mesh object, no group of joints).
     let mut plain = Document::new();
     let cube = plain.execute(Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }).unwrap().created[0];
-    plain
-        .execute(Command::AddStep { id: cube, op: StepOp::MoveVertices { verts: vec![0], translate: Vec3::X, rotate: Quat::IDENTITY, scale: Vec3::ONE } })
-        .unwrap();
+    plain.execute(Command::AddStep { id: cube, op: StepOp::move_vertices(vec![0], Vec3::X, Quat::IDENTITY, Vec3::ONE) }).unwrap();
     let still = dir.join("still.glb");
     assert!(plain.export_report(&still, Default::default()).unwrap().is_empty());
     assert!(!modelcraft_formats::gltf_rig::file_has_rig(&std::fs::read(&still).unwrap()));

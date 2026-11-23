@@ -51,10 +51,7 @@ fn blend_shapes_from_a_copy_with_a_weight_field_and_a_key() {
     let rest = h.state_mut().doc.eval.evaluate(&scene, copy).mesh;
     let verts: Vec<u32> = rest.positions().iter().enumerate().filter(|(_, p)| p.y > 0.0).map(|(i, _)| i as u32).collect();
     let high = rest.positions().iter().map(|p| p.y).fold(f32::MIN, f32::max);
-    assert!(
-        h.state_mut()
-            .run(Command::AddStep { id: copy, op: StepOp::MoveVertices { verts, translate: Vec3::Y, rotate: glam::Quat::IDENTITY, scale: Vec3::ONE } })
-    );
+    assert!(h.state_mut().run(Command::AddStep { id: copy, op: StepOp::move_vertices(verts, Vec3::Y, glam::Quat::IDENTITY, Vec3::ONE) }));
     // Without the two meshes selected the action says what it needs.
     h.state_mut().select_only(face);
     palette(&mut h, "Add Blend Shape from Mesh");

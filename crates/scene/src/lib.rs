@@ -258,6 +258,30 @@ pub enum StepOp {
     Extrude {
         faces: Vec<u32>,
         distance: f32,
+        /// Slide the new border towards the middle of the faces (negative: outwards).
+        #[serde(default, skip_serializing_if = "f32_is_zero")]
+        offset: f32,
+        /// Rows of quads on each wall.
+        #[serde(default = "one", skip_serializing_if = "u32_is_one")]
+        subdivisions: u32,
+        /// Seeded random change of the distance, 0 to 1.
+        #[serde(default, skip_serializing_if = "f32_is_zero")]
+        variation: f32,
+        #[serde(default, skip_serializing_if = "u32_is_zero")]
+        seed: u32,
+        /// Keep the faces at the end of the extrusion.
+        #[serde(default = "yes", skip_serializing_if = "bool_is_true")]
+        caps: bool,
+        /// Extrude every face on its own.
+        #[serde(default, skip_serializing_if = "bool_is_false")]
+        individual: bool,
+    },
+    /// Extrude edges on the border of an open mesh: outwards by `distance`, up by `lift`.
+    ExtrudeEdges {
+        edges: Vec<u32>,
+        distance: f32,
+        #[serde(default, skip_serializing_if = "f32_is_zero")]
+        lift: f32,
     },
     Inset {
         faces: Vec<u32>,
@@ -266,10 +290,57 @@ pub enum StepOp {
     Bevel {
         edges: Vec<u32>,
         width: f32,
+        /// Rows of quads across the bevel, 1 to 16.
+        #[serde(default = "one", skip_serializing_if = "u32_is_one")]
+        segments: u32,
+        #[serde(default, skip_serializing_if = "profile_is_default")]
+        profile: modelcraft_ops::bevel::BevelProfile,
+        /// Shape of the custom profile, 0 (straight) to 1 (towards the corner).
+        #[serde(default = "half", skip_serializing_if = "f32_is_half")]
+        tension: f32,
+    },
+    /// Cut off the corner at each listed vertex.
+    BevelVertices {
+        verts: Vec<u32>,
+        width: f32,
+    },
+    /// Cut every face a plane crosses and keep both sides (`faces` limits it when not empty).
+    SlicePlane {
+        point: Vec3,
+        normal: Vec3,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<u32>,
+    },
+    /// A knife line: cut along the plane through `a` and `b` that holds the direction `view`,
+    /// between the two points; with `front_only`, faces turned away from `view` are not cut.
+    CutLine {
+        a: Vec3,
+        b: Vec3,
+        view: Vec3,
+        #[serde(default, skip_serializing_if = "bool_is_false")]
+        front_only: bool,
+    },
+    /// Join the listed vertices across the faces that have them as corners.
+    Connect {
+        verts: Vec<u32>,
+    },
+    /// The polygon pen: one new polygon through the points (facing `toward` when it joins no edge).
+    AddPolygon {
+        points: Vec<modelcraft_ops::cut::PenPoint>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toward: Option<Vec3>,
     },
     LoopCut {
         edge: u32,
         cuts: u32,
+        /// Slide, -1 to 1 (see `modelcraft_ops::loopcut::LoopCutOptions`).
+        #[serde(default, skip_serializing_if = "f32_is_zero")]
+        offset: f32,
+        #[serde(default, skip_serializing_if = "bool_is_false")]
+        symmetric: bool,
+        /// Spacing curve, -1 to 1.
+        #[serde(default, skip_serializing_if = "f32_is_zero")]
+        profile: f32,
     },
     Merge {
         verts: Vec<u32>,
@@ -291,6 +362,12 @@ pub enum StepOp {
         translate: Vec3,
         rotate: Quat,
         scale: Vec3,
+        /// Vertices near the selection follow it by a falloff.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        soft: Option<modelcraft_ops::soft::Soft>,
+        /// Mirror the edit across a plane through the origin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        symmetry: Option<modelcraft_ops::soft::Symmetry>,
     },
     Flip {
         faces: Vec<u32>,
@@ -448,6 +525,42 @@ pub enum StepOp {
     },
 }
 
+fn one() -> u32 {
+    1
+}
+
+fn half() -> f32 {
+    0.5
+}
+
+fn f32_is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
+fn u32_is_zero(v: &u32) -> bool {
+    *v == 0
+}
+
+fn u32_is_one(v: &u32) -> bool {
+    *v == 1
+}
+
+fn f32_is_half(v: &f32) -> bool {
+    *v == 0.5
+}
+
+fn bool_is_true(v: &bool) -> bool {
+    *v
+}
+
+fn bool_is_false(v: &bool) -> bool {
+    !*v
+}
+
+fn profile_is_default(p: &modelcraft_ops::bevel::BevelProfile) -> bool {
+    *p == modelcraft_ops::bevel::BevelProfile::default()
+}
+
 fn default_rotation() -> Rotation {
     Rotation::Fit
 }
@@ -484,6 +597,22 @@ fn default_strength() -> f32 {
 }
 
 impl StepOp {
+    /// Move, rotate and scale components, without soft selection or symmetry.
+    pub fn move_vertices(verts: Vec<u32>, translate: Vec3, rotate: Quat, scale: Vec3) -> StepOp {
+        StepOp::MoveVertices { verts, translate, rotate, scale, soft: None, symmetry: None }
+    }
+    /// A plain extrude of faces along their normals.
+    pub fn extrude(faces: Vec<u32>, distance: f32) -> StepOp {
+        StepOp::Extrude { faces, distance, offset: 0.0, subdivisions: 1, variation: 0.0, seed: 0, caps: true, individual: false }
+    }
+    /// A one-segment flat bevel.
+    pub fn bevel(edges: Vec<u32>, width: f32) -> StepOp {
+        StepOp::Bevel { edges, width, segments: 1, profile: modelcraft_ops::bevel::BevelProfile::Flat, tension: 0.5 }
+    }
+    /// Evenly spaced loop cuts.
+    pub fn loop_cut(edge: u32, cuts: u32) -> StepOp {
+        StepOp::LoopCut { edge, cuts, offset: 0.0, symmetric: false, profile: 0.0 }
+    }
     /// A step that only records information and leaves the mesh as it is.
     pub fn is_marker(&self) -> bool {
         matches!(self, StepOp::Seams { .. })
@@ -495,6 +624,12 @@ impl StepOp {
             StepOp::Extrude { .. } => "Extrude",
             StepOp::Inset { .. } => "Inset",
             StepOp::Bevel { .. } => "Bevel",
+            StepOp::BevelVertices { .. } => "Bevel vertices",
+            StepOp::SlicePlane { .. } => "Slice by plane",
+            StepOp::CutLine { .. } => "Knife cut",
+            StepOp::Connect { .. } => "Connect vertices",
+            StepOp::AddPolygon { .. } => "Add polygon",
+            StepOp::ExtrudeEdges { .. } => "Extrude edges",
             StepOp::LoopCut { .. } => "Loop cut",
             StepOp::Merge { .. } => "Merge",
             StepOp::Weld { .. } => "Weld",
@@ -535,7 +670,7 @@ impl StepOp {
             | StepOp::DeleteFaces { faces }
             | StepOp::Flip { faces }
             | StepOp::SetPatch { faces, .. } => faces.len() * 4,
-            StepOp::Bevel { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
+            StepOp::Bevel { edges, .. } | StepOp::ExtrudeEdges { edges, .. } | StepOp::DeleteEdges { edges } => edges.len() * 4,
             StepOp::Unwrap { seams, pins, .. } => seams.len() * 8 + pins.len() * 12,
             StepOp::ProjectUvs { faces, .. } => faces.len() * 4,
             StepOp::Seams { edges } => edges.len() * 8,
@@ -543,7 +678,13 @@ impl StepOp {
             StepOp::StitchUvs { edges, .. } => edges.len() * 4,
             StepOp::RelaxUvs { corners, .. } | StepOp::StraightenUvs { corners, .. } => corners.len() * 4,
             StepOp::SetUvs { uvs } => uvs.len() * 8,
-            StepOp::Merge { verts } | StepOp::DeleteVertices { verts } | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
+            StepOp::SlicePlane { faces, .. } => faces.len() * 4,
+            StepOp::AddPolygon { points, .. } => points.len() * 16,
+            StepOp::Merge { verts }
+            | StepOp::Connect { verts }
+            | StepOp::DeleteVertices { verts }
+            | StepOp::BevelVertices { verts, .. }
+            | StepOp::MoveVertices { verts, .. } => verts.len() * 4,
             _ => 0,
         }
     }
@@ -1267,6 +1408,8 @@ impl Scene {
     }
 }
 
+#[cfg(test)]
+mod modeling_tests;
 #[cfg(test)]
 mod spline_tests;
 #[cfg(test)]
