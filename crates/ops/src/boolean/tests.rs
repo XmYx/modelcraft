@@ -193,7 +193,7 @@ fn work_is_counted_and_bounded_by_the_overlap() {
     let (m, stats) = combine_with(&a, &b, BoolOp::Union, &Limits::default()).unwrap();
     assert!(closed(&m));
     // Only triangles near the lens of overlap are examined: far fewer pairs than all of them.
-    let all = (to_tris(&a).tris.len() * to_tris(&b).tris.len()) as usize;
+    let all = to_tris(&a).tris.len() * to_tris(&b).tris.len();
     assert!(stats.triangle_pairs * 10 < all, "{} of {all}", stats.triangle_pairs);
     assert!(stats.crossings > 20);
 }

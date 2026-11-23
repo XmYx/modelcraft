@@ -439,7 +439,7 @@ fn a_boolean_generator_is_live_closed_and_keeps_its_inputs_editable() {
     // The sphere moves away: the cube is whole again.
     d.execute(Command::SetTransform { id: b, transform: modelcraft_scene::Transform { translation: glam::Vec3::new(20.0, 0.0, 0.0), ..Default::default() } })
         .unwrap();
-    assert_eq!(d.eval.evaluate(&d.scene, g).mesh.face_count(), 12 * 1, "a cube of two triangles a side, untouched");
+    assert_eq!(d.eval.evaluate(&d.scene, g).mesh.face_count(), 12, "a cube of two triangles a side, untouched");
     // Union keeps both; intersection of two apart is nothing.
     d.execute(Command::Procedural(crate::ProceduralCommand::SetGenerator {
         id: g,

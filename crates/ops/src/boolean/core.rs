@@ -70,7 +70,7 @@ fn run(a: &TriMesh, b: &TriMesh, op: BoolOp, limits: &Limits, nudge: f64, attemp
         let centre = |p: &[Vec3]| p.iter().map(|v| v.as_dvec3()).sum::<DVec3>() / p.len().max(1) as f64;
         let toward = (centre(&a.positions) - centre(&b.positions)).normalize_or_zero();
         let toward = if op == BoolOp::Intersect { -toward } else { toward };
-        let dir = (toward * 0.8 + DVec3::new(0.577_350_3, 0.707_106_8, 0.408_248_3) * 0.2).normalize_or_zero() * d;
+        let dir = (toward * 0.8 + DVec3::new(0.577_350_3, std::f64::consts::FRAC_1_SQRT_2, 0.408_248_3) * 0.2).normalize_or_zero() * d;
         for p in &mut b.positions {
             *p += dir.as_vec3();
         }
@@ -350,7 +350,7 @@ pub fn volume(m: &TriMesh) -> f64 {
     m.tris
         .iter()
         .map(|t| {
-            let p = |i: u32| m.positions.get(i as usize).map_or(DVec3::ZERO, |v| Vec3::as_dvec3(v));
+            let p = |i: u32| m.positions.get(i as usize).map_or(DVec3::ZERO, Vec3::as_dvec3);
             p(t[0]).dot(p(t[1]).cross(p(t[2])))
         })
         .sum::<f64>()
