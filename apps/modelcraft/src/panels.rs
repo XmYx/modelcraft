@@ -9,7 +9,7 @@ use modelcraft_engine::ops::primitives::Primitive;
 use modelcraft_engine::scene::{Object, ObjectId, ObjectKind, Source, StepOp};
 use modelcraft_engine::sculpt::{BrushKind, Falloff, Stamp};
 
-use crate::actions::{self, ARRAYS, Action, CLONERS, DEFORMERS, FIELDS, MODIFIERS, PRIMITIVES};
+use crate::actions::{self, Action, CLONERS, DEFORMERS, PRIMITIVES};
 use crate::app::{ModelApp, NavPreset, PanelId, SelectMode, Tool, Workspace};
 use crate::dock::Move;
 use crate::theme;
@@ -19,7 +19,7 @@ pub(crate) fn set_name(ui: &egui::Ui, resp: &egui::Response, name: impl Into<Str
     ui.ctx().accesskit_node_builder(resp.id, |n| n.set_label(name));
 }
 
-fn action_button(app: &mut ModelApp, ui: &mut egui::Ui, a: Action) {
+pub(crate) fn action_button(app: &mut ModelApp, ui: &mut egui::Ui, a: Action) {
     let ctx = ui.ctx().clone();
     let b = egui::Button::new(a.label()).shortcut_text(a.shortcut_text(app));
     if ui.add(b).clicked() {
@@ -91,32 +91,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     action_button(app, ui, a);
                 }
             });
-            ui.menu_button(tl!("Create"), |ui| {
-                for p in PRIMITIVES {
-                    action_button(app, ui, Action::AddPrimitive(p));
-                }
-                ui.separator();
-                action_button(app, ui, Action::AddCage);
-                for a in ARRAYS {
-                    action_button(app, ui, Action::AddArray(a));
-                }
-                action_button(app, ui, Action::AddSymmetry);
-                action_button(app, ui, Action::AddGroup);
-                ui.separator();
-                for d in DEFORMERS {
-                    action_button(app, ui, Action::AddDeformer(d));
-                }
-                ui.separator();
-                for f in FIELDS {
-                    action_button(app, ui, Action::AddField(f));
-                }
-                for c in CLONERS {
-                    action_button(app, ui, Action::AddCloner(c));
-                }
-                for m in MODIFIERS {
-                    action_button(app, ui, Action::AddCloneModifier(m));
-                }
-            });
+            crate::create_menu::menu(app, ui);
             ui.menu_button(tl!("Mesh"), |ui| {
                 for a in [
                     Action::Extrude,
@@ -158,7 +133,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             });
             ui.menu_button(tl!("Scripts"), |ui| crate::script_ui::menu(app, ui));
             ui.menu_button(tl!("View"), |ui| {
-                for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
+                for ws in crate::dock::WORKSPACES {
                     action_button(app, ui, Action::Workspace(ws));
                 }
                 ui.separator();
@@ -172,6 +147,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     Action::ViewTop,
                     Action::NextPanel,
                     Action::CoordinatePanel,
+                    Action::IconPalettes,
                     Action::RadialMenu,
                     Action::RenderView,
                 ] {
@@ -225,14 +201,14 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     egui::Panel::top("toolbar").frame(egui::Frame::NONE.fill(theme::PANEL_DEEP).inner_margin(egui::Margin::symmetric(6, 3))).show(ui, |ui| {
         ui.horizontal(|ui| {
-            for ws in [Workspace::Model, Workspace::Sculpt, Workspace::Paint] {
+            for ws in crate::dock::WORKSPACES {
                 let a = Action::Workspace(ws);
                 if tab(ui, app.workspace == ws, ws.label(), format!("{} ({})", a.label(), a.shortcut_text(app))) {
                     app.act(&ctx, a);
                 }
             }
             ui.separator();
-            if app.workspace == Workspace::Model {
+            if app.workspace.models() {
                 for (m, a, l) in [
                     (SelectMode::Object, Action::ModeObject, tl!("Object")),
                     (SelectMode::Vertex, Action::ModeVertex, tl!("Vertex")),
@@ -270,7 +246,7 @@ pub fn toolbar(app: &mut ModelApp, ui: &mut egui::Ui) {
                     }
                 });
             }
-            if app.workspace == Workspace::Model {
+            if app.workspace.models() {
                 let tip = format!("{} ({})", Action::ToggleSnap.label(), Action::ToggleSnap.shortcut_text(app));
                 if tab(ui, app.snap, tl!("Snap"), tip) {
                     app.act(&ctx, Action::ToggleSnap);
@@ -312,71 +288,74 @@ pub fn tool_options(app: &mut ModelApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     egui::Panel::top("tool-options").frame(egui::Frame::NONE.fill(theme::PANEL).inner_margin(egui::Margin::symmetric(8, 3))).show(ui, |ui| {
         ui.horizontal(|ui| match app.workspace {
-            Workspace::Model => match app.mode {
-                SelectMode::Face => {
-                    let mut p = app.ops;
-                    if ui.button(Action::Extrude.label()).clicked() {
-                        app.act(&ctx, Action::Extrude);
+            Workspace::Model | Workspace::Uv | Workspace::Animate | Workspace::Groom => {
+                crate::create_menu::workspace_strip(app, ui);
+                match app.mode {
+                    SelectMode::Face => {
+                        let mut p = app.ops;
+                        if ui.button(Action::Extrude.label()).clicked() {
+                            app.act(&ctx, Action::Extrude);
+                        }
+                        drag(ui, &mut p.extrude, 0.01, -100.0..=100.0, tl!("Distance"));
+                        ui.separator();
+                        if ui.button(Action::Inset.label()).clicked() {
+                            app.act(&ctx, Action::Inset);
+                        }
+                        drag(ui, &mut p.inset, 0.01, 0.0..=0.99, tl!("Amount"));
+                        ui.separator();
+                        for a in [Action::Bridge, Action::GrowSelection, Action::ShrinkSelection, Action::Flip, Action::Delete] {
+                            if ui.button(a.label()).clicked() {
+                                app.act(&ctx, a);
+                            }
+                        }
+                        app.ops = p;
                     }
-                    drag(ui, &mut p.extrude, 0.01, -100.0..=100.0, tl!("Distance"));
-                    ui.separator();
-                    if ui.button(Action::Inset.label()).clicked() {
-                        app.act(&ctx, Action::Inset);
+                    SelectMode::Edge => {
+                        let mut p = app.ops;
+                        if ui.button(Action::Bevel.label()).clicked() {
+                            app.act(&ctx, Action::Bevel);
+                        }
+                        drag(ui, &mut p.bevel, 0.005, 0.0..=10.0, tl!("Width"));
+                        ui.separator();
+                        if ui.button(Action::LoopCut.label()).clicked() {
+                            app.act(&ctx, Action::LoopCut);
+                        }
+                        ui.label(tl!("Cuts"));
+                        let r = ui.add(egui::DragValue::new(&mut p.cuts).range(1..=64));
+                        set_name(ui, &r, tl!("Cuts"));
+                        ui.separator();
+                        for a in [Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
+                            if ui.button(a.label()).clicked() {
+                                app.act(&ctx, a);
+                            }
+                        }
+                        app.ops = p;
                     }
-                    drag(ui, &mut p.inset, 0.01, 0.0..=0.99, tl!("Amount"));
-                    ui.separator();
-                    for a in [Action::Bridge, Action::GrowSelection, Action::ShrinkSelection, Action::Flip, Action::Delete] {
-                        if ui.button(a.label()).clicked() {
-                            app.act(&ctx, a);
+                    SelectMode::Vertex => {
+                        for a in [Action::Merge, Action::Delete, Action::TransformDialog] {
+                            if ui.button(a.label()).clicked() {
+                                app.act(&ctx, a);
+                            }
                         }
                     }
-                    app.ops = p;
-                }
-                SelectMode::Edge => {
-                    let mut p = app.ops;
-                    if ui.button(Action::Bevel.label()).clicked() {
-                        app.act(&ctx, Action::Bevel);
-                    }
-                    drag(ui, &mut p.bevel, 0.005, 0.0..=10.0, tl!("Width"));
-                    ui.separator();
-                    if ui.button(Action::LoopCut.label()).clicked() {
-                        app.act(&ctx, Action::LoopCut);
-                    }
-                    ui.label(tl!("Cuts"));
-                    let r = ui.add(egui::DragValue::new(&mut p.cuts).range(1..=64));
-                    set_name(ui, &r, tl!("Cuts"));
-                    ui.separator();
-                    for a in [Action::SelectLoop, Action::SelectRing, Action::FillHole, Action::Delete] {
-                        if ui.button(a.label()).clicked() {
-                            app.act(&ctx, a);
+                    SelectMode::Object => {
+                        let mut p = app.ops;
+                        if ui.button(Action::Subdivide.label()).clicked() {
+                            app.act(&ctx, Action::Subdivide);
                         }
-                    }
-                    app.ops = p;
-                }
-                SelectMode::Vertex => {
-                    for a in [Action::Merge, Action::Delete, Action::TransformDialog] {
-                        if ui.button(a.label()).clicked() {
-                            app.act(&ctx, a);
+                        ui.label(tl!("Levels"));
+                        let r = ui.add(egui::DragValue::new(&mut p.subdivide).range(1..=4));
+                        set_name(ui, &r, tl!("Levels"));
+                        app.ops = p;
+                        ui.separator();
+                        for a in [Action::AddCage, Action::Mirror(0), Action::Collapse, Action::TransformDialog] {
+                            if ui.button(a.label()).clicked() {
+                                app.act(&ctx, a);
+                            }
                         }
                     }
                 }
-                SelectMode::Object => {
-                    let mut p = app.ops;
-                    if ui.button(Action::Subdivide.label()).clicked() {
-                        app.act(&ctx, Action::Subdivide);
-                    }
-                    ui.label(tl!("Levels"));
-                    let r = ui.add(egui::DragValue::new(&mut p.subdivide).range(1..=4));
-                    set_name(ui, &r, tl!("Levels"));
-                    app.ops = p;
-                    ui.separator();
-                    for a in [Action::AddCage, Action::Mirror(0), Action::Collapse, Action::TransformDialog] {
-                        if ui.button(a.label()).clicked() {
-                            app.act(&ctx, a);
-                        }
-                    }
-                }
-            },
+            }
             Workspace::Sculpt => {
                 ui.label(RichText::new(actions::brush_label(app.brush.kind)).color(theme::ACCENT).strong());
                 ui.separator();
@@ -422,7 +401,7 @@ pub fn status_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
                 };
                 ui.label(dim(crate::tlf!("{count} history steps", count = app.doc.undo.len())));
                 ui.label(dim(crate::tlf!("{count} triangles", count = group_digits(tris))));
-                if app.mode != SelectMode::Object && app.workspace == Workspace::Model {
+                if app.mode != SelectMode::Object && app.workspace.models() {
                     ui.label(dim(crate::tlf!("{count} components selected", count = app.components.len())));
                 }
                 if let (Some(g), Some(_)) = (&app.gpu, &app.doc.sculpt) {
@@ -573,6 +552,14 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
             for dx in [-4.0, 0.0, 4.0] {
                 p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
             }
+        }
+        ObjectKind::SplineGenerator { .. } => {
+            // A profile and the surface it makes.
+            let g = Color32::from_rgb(130, 210, 120);
+            p.circle_stroke(c + egui::vec2(0.0, -3.5), 2.5, egui::Stroke::new(1.2, g));
+            p.line_segment([c + egui::vec2(-2.5, -3.5), c + egui::vec2(-4.0, 4.5)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(2.5, -3.5), c + egui::vec2(4.0, 4.5)], egui::Stroke::new(1.0, g));
+            p.line_segment([c + egui::vec2(-4.0, 4.5), c + egui::vec2(4.0, 4.5)], egui::Stroke::new(1.0, g));
         }
         ObjectKind::Spline { .. } => {
             // A curve with a handle.
@@ -772,6 +759,11 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
         }
+        ObjectKind::SplineGenerator { generator } => {
+            egui::CollapsingHeader::new(crate::spline_gen_ui::kind_label(generator.kind()))
+                .default_open(true)
+                .show(ui, |ui| crate::spline_gen_ui::fields(app, ui, id, generator));
+        }
         ObjectKind::Spline { source, tess } => {
             egui::CollapsingHeader::new(tl!("Spline")).default_open(true).show(ui, |ui| crate::spline_ui::fields(app, ui, id, source, *tess));
         }
@@ -795,7 +787,12 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
     }
     if matches!(
         obj.kind,
-        ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. } | ObjectKind::Instance { .. }
+        ObjectKind::Mesh { .. }
+            | ObjectKind::SmoothCage { .. }
+            | ObjectKind::Array { .. }
+            | ObjectKind::Symmetry { .. }
+            | ObjectKind::SplineGenerator { .. }
+            | ObjectKind::Instance { .. }
     ) {
         egui::CollapsingHeader::new(tl!("Material")).default_open(false).show(ui, |ui| {
             let mut m = obj.material.clone();
