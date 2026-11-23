@@ -17,6 +17,9 @@ pub enum Workspace {
     Model,
     Sculpt,
     Paint,
+    Uv,
+    Animate,
+    Groom,
 }
 
 impl Workspace {
@@ -25,7 +28,16 @@ impl Workspace {
             Workspace::Model => tl!("Model"),
             Workspace::Sculpt => tl!("Sculpt"),
             Workspace::Paint => tl!("Paint"),
+            Workspace::Uv => tl!("UV"),
+            Workspace::Animate => tl!("Animate"),
+            Workspace::Groom => tl!("Groom"),
         }
+    }
+
+    /// Whether the workspace edits the scene as Model does (modes, gizmos, the Properties
+    /// panel), as against Sculpt and Paint, which have their own input.
+    pub fn models(self) -> bool {
+        matches!(self, Workspace::Model | Workspace::Uv | Workspace::Animate | Workspace::Groom)
     }
 }
 
@@ -224,6 +236,8 @@ pub struct ModelApp {
     /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub coord: crate::coord_ui::State,
+    /// The icon columns (tools on the left, create on the right) are shown; off by default.
+    pub icon_palettes: bool,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
     /// The `--screenshot-state` window to open on the first frame.
@@ -386,6 +400,7 @@ impl ModelApp {
             display_mode: Default::default(),
             sculpt_groups: Default::default(),
             coord: Default::default(),
+            icon_palettes: false,
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
             start_state: cli.screenshot_state,
@@ -456,6 +471,9 @@ impl ModelApp {
                 StartWorkspace::Model => Workspace::Model,
                 StartWorkspace::Sculpt => Workspace::Sculpt,
                 StartWorkspace::Paint => Workspace::Paint,
+                StartWorkspace::Uv => Workspace::Uv,
+                StartWorkspace::Animate => Workspace::Animate,
+                StartWorkspace::Groom => Workspace::Groom,
             };
             app.set_workspace(ws);
         }
@@ -692,6 +710,12 @@ impl ModelApp {
             let _ = self.doc.execute(Command::EndSculpt);
         }
         self.workspace = ws;
+        match ws {
+            // The workspaces bring their window or panel up with them.
+            Workspace::Uv if !self.uv.open => crate::uv_ui::toggle(self),
+            Workspace::Animate => self.anim.open = true,
+            _ => {}
+        }
         if ws == Workspace::Sculpt {
             self.mode = SelectMode::Object;
             self.components.clear();
@@ -972,6 +996,10 @@ impl ModelApp {
             ViewTop => self.set_view(ViewPreset::Top),
             TransformDialog => self.numeric = Some(NumericTransform::default()),
             Palette => self.palette = Some(crate::panels::Palette::default()),
+            IconPalettes => {
+                self.icon_palettes = !self.icon_palettes;
+                self.status = if self.icon_palettes { tl!("Icon palettes shown") } else { tl!("Icon palettes hidden") };
+            }
             CoordinatePanel => {
                 // Show the panel (it is off by default) and put the keyboard focus in it.
                 if !self.layouts.shown(self.workspace, PanelId::Coordinates) {
@@ -1387,6 +1415,7 @@ impl ModelApp {
         crate::shelf::bar(self, ui);
         crate::panels::status_bar(self, ui);
         crate::anim_ui::bottom_panel(self, ui);
+        crate::create_menu::palettes(self, ui);
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL)).show(ui, |ui| crate::dock::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         crate::prefs_ui::show(self, &ctx);
