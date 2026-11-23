@@ -12,9 +12,11 @@ workspace = true
 
 [dependencies]
 modelcraft-mesh = { workspace = true }
+modelcraft-spline = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+serde_json = { workspace = true }

@@ -213,6 +213,7 @@ pub fn renderable(scene: &Scene) -> Vec<ObjectId> {
                         | ObjectKind::SmoothCage { .. }
                         | ObjectKind::Array { .. }
                         | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
                         | ObjectKind::Instance { .. }
                 )
             )

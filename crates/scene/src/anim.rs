@@ -686,7 +686,7 @@ mod tests {
         assert!(s.set_attr(id, "translate.x", f64::NAN).is_err());
         assert!(s.set_attr(ObjectId(99), "translate.x", 1.0).is_err());
         // Other kinds are walked as they are saved.
-        let d = s.add("Bend", ObjectKind::Deformer { deformer: Deformer::Bend { angle: 90.0 } }, Some(id)).unwrap();
+        let d = s.add("Bend", ObjectKind::Deformer { deformer: Deformer::Bend { angle: 90.0 }, limits: Default::default(), target: None }, Some(id)).unwrap();
         assert_eq!(s.attr(d, "deformer.angle"), Some(90.0));
         let cage = s.add("Cage", ObjectKind::SmoothCage { levels: 2 }, None).unwrap();
         assert_eq!(s.set_attr(cage, "levels", 3.0), Ok(true));

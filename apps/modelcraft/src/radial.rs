@@ -24,15 +24,15 @@ pub fn items(app: &ModelApp) -> Vec<Action> {
     use modelcraft_engine::sculpt::BrushKind::*;
     match (app.workspace, app.mode) {
         (Workspace::Sculpt, _) => [Draw, Clay, Smooth, Inflate, Grab, Pinch, Flatten, Crease].into_iter().map(Action::Brush).collect(),
-        (Workspace::Model, SelectMode::Object) => {
+        (ws, SelectMode::Object) if ws.models() => {
             let mut v: Vec<Action> = ["cube", "sphere", "cylinder", "torus", "plane", "cone"].into_iter().map(Action::AddPrimitive).collect();
             v.extend([Action::AddCage, Action::AddGroup]);
             v
         }
-        (Workspace::Model, _) => {
+        (ws, _) if ws.models() => {
             vec![Action::Extrude, Action::Inset, Action::Bevel, Action::LoopCut, Action::Merge, Action::Bridge, Action::FillHole, Action::Subdivide]
         }
-        (Workspace::Paint, _) => vec![
+        (_, _) => vec![
             Action::Workspace(Workspace::Model),
             Action::Workspace(Workspace::Sculpt),
             Action::Frame,

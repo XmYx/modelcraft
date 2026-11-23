@@ -99,6 +99,7 @@ fn drawables(scene: &Scene) -> Vec<ObjectId> {
                         | ObjectKind::SmoothCage { .. }
                         | ObjectKind::Array { .. }
                         | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
                         | ObjectKind::Cloner { .. }
                         | ObjectKind::Instance { .. }
                 )
@@ -484,6 +485,10 @@ fn apply_drag(app: &ModelApp, scene: &mut Scene, t: Vec3, r: Quat, s: Vec3, pivo
 fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, rect: Rect) {
     // A rig tool (placing joints, painting weights) takes the pointer while it is on.
     if !is_nav(app, ui) && crate::rig_tools::input(app, ui, resp, i, rect) {
+        return;
+    }
+    // The pen tool and the points and handles of the selected spline.
+    if !is_nav(app, ui) && crate::spline_pen::input(app, ui, resp, i, rect) {
         return;
     }
     let pointer = resp.interact_pointer_pos().or_else(|| resp.hover_pos());
@@ -1076,6 +1081,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
     crate::snap_ui::overlay(app, &painter, &cam, rect);
+    crate::spline_pen::overlay(app, &painter, i, rect);
     // Focus/active outline (the view's name is in its header).
     let active = app.active_view == i;
     if (app.quad && active) || resp.has_focus() {
@@ -1090,7 +1096,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
         axis_triad(&painter, &cam, rect);
     }
     // Component points.
-    if app.workspace == Workspace::Model
+    if app.workspace.models()
         && app.mode == SelectMode::Vertex
         && let Some((_, m, w)) = edit_mesh(app)
     {
@@ -1110,7 +1116,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(232, 138, 60, 28));
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
     }
-    if app.workspace == Workspace::Model {
+    if app.workspace.models() {
         gizmo(app, &painter, i, rect);
     }
     crate::sculpt_groups_ui::overlay(app, &painter, i);

@@ -39,7 +39,7 @@ Object ids are numbers (`info` prints them).
 | `add_primitive` | `kind` (cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron, landscape), `name?`, `parent?` |
 | `add_group` | `name?` |
 | `add_smooth_cage` | `input?`, `levels` (default 2) |
-| `add_deformer` | `kind` (bend, twist, taper, ripple, round), `target` |
+| `add_deformer` | `kind` (bend, twist, taper, ripple, round, shear, bulge, squash, smooth, delta_smooth, displace, shrink_wrap), `target` |
 | `delete` | `ids` |
 | `duplicate`, `collapse`, `begin_sculpt` | `id` |
 | `rename` | `id`, `name` |
@@ -49,7 +49,7 @@ Object ids are numbers (`info` prints them).
 | `set_material` | `id`, `material` {base_color, metallic, roughness, linked?, emission?, emission_strength?, coat?, coat_roughness?, sheen?, transmission?, ior?} |
 | `set_primitive` | `id`, `primitive` {kind, …parameters} |
 | `set_cage_levels` | `id`, `levels` |
-| `set_deformer` | `id`, `deformer` {kind, …} |
+| `set_deformer` | `id`, `deformer` {kind, …}, `limits?` {mode: limited / unlimited / within_box, fit_to_parent, size}, `target?`, `clear_target?` |
 | `add_step` | `id`, `op`: {op: extrude, faces, distance} · {op: inset, faces, amount} · {op: bevel, edges, width} · {op: loop_cut, edge, cuts} · {op: merge, verts} · {op: weld, distance} · {op: delete_faces/delete_edges/delete_vertices, …} · {op: move_vertices, verts, translate, rotate, scale} · {op: flip, faces} · {op: triangulate} · {op: subdivide, levels} · {op: set_patch, faces, patch} · {op: bridge, a, b} · {op: fill_hole, edge} · {op: mirror, axis (0 X, 1 Y, 2 Z), weld} · {op: even_remesh, cell} (closed meshes; even quads of about `cell` size) · {op: unwrap, seams [[v, v]…], angle?, pins [{corner, uv}]…, auto_cut, margin, method (lscm, abf), from_patches?} · {op: stitch_uvs, edges, align?, scale?} · {op: relax_uvs, corners, iterations, mode (rigid, conformal)} · {op: straighten_uvs, corners, strength} · {op: group_patches, grouping: {by: angle, degrees} or {by: shells}} · {op: clean_up, distance} · {op: pack_uvs, margin, rotation (none, quarter, fit), density (keep, uniform), tiles?, texel_density?} · {op: project_uvs, projection {kind: planar/box/cylindrical/spherical/camera, from/axis/view_proj}, fit (none, uniform, stretch), faces} · {op: trim_plane, point, normal, cap} (cuts away the side the normal points to; `cap` closes the cut) · {op: decimate, ratio} (keeps about `ratio` of the triangles, 0..1, with UVs and patches; the result is triangles) |
 | `set_step` | `id`, `index`, `op` |
 | `enable_step` | `id`, `index`, `enabled` |
@@ -129,6 +129,47 @@ are drawn at once.
 
 `modelcraft-cli commands` lists the operations as `sim op=…`, and `modelcraft-cli sim-bench rigid`,
 `sim-bench cloth` and `sim-bench particles` measure a bake.
+
+### Splines
+
+One command, `spline`, with the operation in `op`: `{"cmd":"spline","op":"add","kind":"circle"}`.
+A spline is an object that has no surface: it is drawn as a curve, and the generators below take
+splines as children. `add` makes one: `kind` is `circle`, `rectangle`, `star`, `n_side`, `arc` or
+`helix` (a primitive whose numbers `set_primitive` changes: `{"kind":"star","points":5,"inner":0.45,"outer":1,"plane":"xy"}`;
+`plane` is `xy`, `yz` or `zx`, the axis the shape faces), or `empty` (a curve with no points, to
+draw into). `set_tessellation` sets how many points the curve gets between its knots: `{"mode":"fixed","steps":8}`,
+`{"mode":"uniform","length":0.1}` or `{"mode":"adaptive","tolerance":0.01,"angle_deg":12}`.
+`make_editable` turns a primitive into points and handles; `set_curve` replaces the curve
+(`spline.segments[]`, each with `kind` linear, bezier or b_spline, `closed` and `knots[]` of
+`{pos, tan_in, tan_out, mode}`; handles are offsets from `pos`, `mode` is free, aligned, mirrored
+or auto).
+
+`edit` changes the points with one `edit` object (an undo step each; a primitive becomes editable
+first): `{"cmd":"spline","op":"edit","id":3,"edit":{"edit":"append","segment":0,"knot":{"pos":[1,0,0]}}}`.
+The edits are `append` (a point at the end of a segment; `segment` equal to the number of segments
+starts a new one; `kind?`), `move_knots` (`moves [{at:{segment,knot}, pos}]`), `translate`
+(`knots`, `by`), `set_handle` (`at`, `side` in or out, `offset`), `set_mode`, `set_kind`,
+`set_closed`, `insert` (`segment`, `u`: one unit per piece of curve; the shape is kept), `remove`
+(`knots`; a segment left empty goes), `add_segment` and `remove_segment`. A failed edit changes
+nothing. A spline may have 1,024 segments and 100,000 points, and a curve is cut into at most
+1,000,000 points when it is tessellated; numbers that are not finite are refused.
+
+`add_generator` makes a generator (`kind`: `extrude`, `revolve`, `loft` or `sweep`) that shows a
+surface built from the splines inside it; `inputs` lists spline objects to move inside it (with
+none, it starts with example splines). **Extrude** and **revolve** use every spline inside (a
+closed spline inside another is a hole); **loft** blends through the splines in order (all closed
+or all open); **sweep** moves the first spline (the profile: its origin rides the path) along the
+second (the path) without twisting it. `set_generator` changes the options, which are different for
+each kind: extrude `{distance, axis (auto, x, y, z), steps, cap_start, cap_end}`, revolve
+`{angle (degrees, 360 is a full turn), steps, axis, caps}`, loft `{steps (between curves), smooth,
+caps, points (0: the most any curve has)}`, sweep `{end_scale, twist, roll (degrees), caps}`.
+The surface follows the splines: moving a point of a child re-evaluates the generator, and a
+generator can sit inside an array, a symmetry or a smooth cage. Faces point outwards however the
+splines were drawn, with UVs, and closed curves get caps (holes and concave outlines included).
+A request that would build more than 2,000,000 faces, or a cap of more than 30,000 points, is an
+error before anything is built. The exported mesh of a scene holds the generator's surface.
+
+`modelcraft-cli commands` lists the operations as `spline op=…`.
 
 ### Animation
 

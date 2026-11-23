@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod array;
+pub mod bvh;
 pub mod decimate;
 pub mod deform;
 pub mod edit;
@@ -17,6 +18,7 @@ pub mod primitives;
 mod primitives_more;
 pub mod remesh;
 pub mod select;
+pub mod spline_gen;
 pub mod subdivide;
 pub mod trim;
 

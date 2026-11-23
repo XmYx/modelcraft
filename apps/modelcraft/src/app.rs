@@ -17,6 +17,9 @@ pub enum Workspace {
     Model,
     Sculpt,
     Paint,
+    Uv,
+    Animate,
+    Groom,
 }
 
 impl Workspace {
@@ -25,7 +28,16 @@ impl Workspace {
             Workspace::Model => tl!("Model"),
             Workspace::Sculpt => tl!("Sculpt"),
             Workspace::Paint => tl!("Paint"),
+            Workspace::Uv => tl!("UV"),
+            Workspace::Animate => tl!("Animate"),
+            Workspace::Groom => tl!("Groom"),
         }
+    }
+
+    /// Whether the workspace edits the scene as Model does (modes, gizmos, the Properties
+    /// panel), as against Sculpt and Paint, which have their own input.
+    pub fn models(self) -> bool {
+        matches!(self, Workspace::Model | Workspace::Uv | Workspace::Animate | Workspace::Groom)
     }
 }
 
@@ -224,6 +236,8 @@ pub struct ModelApp {
     /// Patches and visibility while sculpting: the region tool, its dialogs and the patch list.
     pub sculpt_groups: crate::sculpt_groups_ui::State,
     pub coord: crate::coord_ui::State,
+    /// The icon columns (tools on the left, create on the right) are shown; off by default.
+    pub icon_palettes: bool,
     pub screenshot: Option<PathBuf>,
     pub screenshot_sent: bool,
     /// The `--screenshot-state` window to open on the first frame.
@@ -250,6 +264,8 @@ pub struct ModelApp {
     pub pictures: crate::picture_viewer::PictureViewer,
     /// Bake Maps.
     pub bake: crate::bake_ui::BakeUi,
+    /// The pen tool and the selected spline points ([`crate::spline_pen`]).
+    pub spline: crate::spline_pen::SplineUi,
     /// Hair grooming: brush, symmetry, the stroke in progress.
     pub groom: crate::hair_ui::GroomUi,
     pub agents: crate::agents::Agents,
@@ -392,6 +408,7 @@ impl ModelApp {
             display_mode: Default::default(),
             sculpt_groups: Default::default(),
             coord: Default::default(),
+            icon_palettes: false,
             screenshot: cli.screenshot.clone(),
             screenshot_sent: false,
             start_state: cli.screenshot_state,
@@ -410,6 +427,7 @@ impl ModelApp {
             render_ui: Default::default(),
             pictures: Default::default(),
             bake: Default::default(),
+            spline: Default::default(),
             groom: Default::default(),
             agents: Default::default(),
             allow_agents: false,
@@ -465,6 +483,9 @@ impl ModelApp {
                 StartWorkspace::Model => Workspace::Model,
                 StartWorkspace::Sculpt => Workspace::Sculpt,
                 StartWorkspace::Paint => Workspace::Paint,
+                StartWorkspace::Uv => Workspace::Uv,
+                StartWorkspace::Animate => Workspace::Animate,
+                StartWorkspace::Groom => Workspace::Groom,
             };
             app.set_workspace(ws);
         }
@@ -630,7 +651,13 @@ impl ModelApp {
         self.active().filter(|id| {
             matches!(
                 self.doc.scene.get(*id).map(|o| &o.kind),
-                Some(ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                Some(
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             )
         })
     }
@@ -701,6 +728,12 @@ impl ModelApp {
             let _ = self.doc.execute(Command::EndSculpt);
         }
         self.workspace = ws;
+        match ws {
+            // The workspaces bring their window or panel up with them.
+            Workspace::Uv if !self.uv.open => crate::uv_ui::toggle(self),
+            Workspace::Animate => self.anim.open = true,
+            _ => {}
+        }
         if ws == Workspace::Sculpt {
             self.mode = SelectMode::Object;
             self.components.clear();
@@ -792,6 +825,10 @@ impl ModelApp {
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
             Delete => {
+                // Selected spline points go first; with none selected it deletes objects as before.
+                if crate::spline_pen::delete_points(self) {
+                    return;
+                }
                 if self.mode != SelectMode::Object && !self.components.is_empty() {
                     let sel = self.selected_vec();
                     let op = match self.mode {
@@ -980,6 +1017,10 @@ impl ModelApp {
             ViewTop => self.set_view(ViewPreset::Top),
             TransformDialog => self.numeric = Some(NumericTransform::default()),
             Palette => self.palette = Some(crate::panels::Palette::default()),
+            IconPalettes => {
+                self.icon_palettes = !self.icon_palettes;
+                self.status = if self.icon_palettes { tl!("Icon palettes shown") } else { tl!("Icon palettes hidden") };
+            }
             CoordinatePanel => {
                 // Show the panel (it is off by default) and put the keyboard focus in it.
                 if !self.layouts.shown(self.workspace, PanelId::Coordinates) {
@@ -1397,6 +1438,7 @@ impl ModelApp {
         crate::shelf::bar(self, ui);
         crate::panels::status_bar(self, ui);
         crate::anim_ui::bottom_panel(self, ui);
+        crate::create_menu::palettes(self, ui);
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::theme::PANEL)).show(ui, |ui| crate::dock::show(self, ui));
         crate::panels::dialogs(self, &ctx);
         crate::prefs_ui::show(self, &ctx);
@@ -1423,6 +1465,9 @@ impl ModelApp {
             return;
         }
         if crate::sculpt_groups_ui::escape(self, ctx) {
+            return;
+        }
+        if crate::spline_pen::keys(self, ctx) {
             return;
         }
         if self.palette.is_some() || self.numeric.is_some() || self.rename.is_some() || self.pending.is_some() || self.shortcuts_state.is_some() {

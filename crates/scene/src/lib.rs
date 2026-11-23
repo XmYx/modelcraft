@@ -30,6 +30,7 @@ pub mod rig;
 mod rle;
 pub mod sim;
 pub mod snap;
+pub mod spline_gen;
 pub mod splines;
 pub mod stage;
 
@@ -40,7 +41,7 @@ pub use modelcraft_clone::{CloneInstance, CloneSet, Cloner, MAX_CLONES, Modifier
 pub use modelcraft_field::{Field, FieldStack};
 pub use modelcraft_mesh::PolyMesh;
 pub use modelcraft_ops::array::Array;
-pub use modelcraft_ops::deform::Deformer;
+pub use modelcraft_ops::deform::{Deformer, Limits as DeformLimits};
 pub use modelcraft_ops::primitives::Primitive;
 pub use modelcraft_sim::{FrameCache, SimKind, SimObject};
 pub use modelcraft_spline::{Polyline, Spline, SplinePrimitive, Tessellation};
@@ -51,6 +52,7 @@ use serde::{Deserialize, Serialize};
 pub use anim::{Animation, BASE_LAYER, Layer, LayerMode, Track};
 pub use eval::{Evaluated, Evaluator, Instances, StepError};
 pub use organize::{AttributePreset, DisplayLayer, DisplayMode, PresetParts, Tag, TagKind, UserValue};
+pub use spline_gen::SplineGen;
 pub use splines::{SplineEval, SplineSource};
 
 /// Deepest object nesting the scene accepts (hostile files, cycles).
@@ -574,6 +576,12 @@ pub enum ObjectKind {
     },
     Deformer {
         deformer: Deformer,
+        /// The box the deformer works over and how it treats what lies outside it.
+        #[serde(default)]
+        limits: modelcraft_ops::deform::Limits,
+        /// The object a shrink-wrap pulls onto.
+        #[serde(default)]
+        target: Option<ObjectId>,
     },
     /// Shows real copies of its first mesh child joined into one mesh, in a row or a ring.
     Array {
@@ -647,6 +655,11 @@ pub enum ObjectKind {
         #[serde(default)]
         tess: Tessellation,
     },
+    /// Shows a surface made from the splines inside it: extrude, revolve, loft or sweep
+    /// ([`spline_gen`]).
+    SplineGenerator {
+        generator: SplineGen,
+    },
 }
 
 impl ObjectKind {
@@ -670,6 +683,7 @@ impl ObjectKind {
             ObjectKind::Light { light } => light.kind.title(),
             ObjectKind::Camera { .. } => "Camera",
             ObjectKind::Spline { .. } => "Spline",
+            ObjectKind::SplineGenerator { .. } => "Spline generator",
         }
     }
 }
@@ -1174,7 +1188,14 @@ impl Scene {
     pub fn generator_input(&self, id: ObjectId) -> Option<ObjectId> {
         self.children(id).into_iter().find(|c| {
             self.get(*c).is_some_and(|o| {
-                matches!(o.kind, ObjectKind::Mesh { .. } | ObjectKind::SmoothCage { .. } | ObjectKind::Array { .. } | ObjectKind::Symmetry { .. })
+                matches!(
+                    o.kind,
+                    ObjectKind::Mesh { .. }
+                        | ObjectKind::SmoothCage { .. }
+                        | ObjectKind::Array { .. }
+                        | ObjectKind::Symmetry { .. }
+                        | ObjectKind::SplineGenerator { .. }
+                )
             })
         })
     }
@@ -1246,6 +1267,8 @@ impl Scene {
     }
 }
 
+#[cfg(test)]
+mod spline_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
