@@ -191,6 +191,21 @@ pub fn set(o: &mut Object, path: &str, value: f64) -> Result<bool, SceneError> {
             }
             ObjectKind::Skin { .. } | ObjectKind::Sim { .. } | ObjectKind::Hair { .. } => Err(invalid(path)),
             ObjectKind::PointDeformer { deformer } => crate::point_deform::attr_set(deformer, path, value).ok_or_else(|| invalid(path)),
+            // Lights and cameras keep their numbers in range, whatever a curve asks for.
+            ObjectKind::Light { light } => {
+                let inner = path.strip_prefix("light.").ok_or_else(|| invalid(path))?;
+                let before = light.clone();
+                write(light, inner, value).ok_or_else(|| invalid(path))?;
+                *light = light.sanitized();
+                Ok(*light != before)
+            }
+            ObjectKind::Camera { camera } => {
+                let inner = path.strip_prefix("camera.").ok_or_else(|| invalid(path))?;
+                let before = camera.clone();
+                write(camera, inner, value).ok_or_else(|| invalid(path))?;
+                *camera = camera.sanitized();
+                Ok(*camera != before)
+            }
             kind => write(kind, path, value).ok_or_else(|| invalid(path)),
         },
     }
