@@ -796,6 +796,7 @@ impl ModelApp {
             Anim(a) => crate::anim_ui::act(self, a),
             Rig(a) => crate::rig_ui::act(self, a),
             Sim(a) => crate::sim_ui::act(self, a),
+            Spline(a) => crate::spline_ui::act(self, a),
             Hair(a) => crate::hair_ui::act(self, a),
             Sculpt(a) => crate::sculpt_groups_ui::act(self, ctx, a),
             Uv(a) => crate::uv_ui::act(self, a),
@@ -1111,6 +1112,11 @@ impl ModelApp {
         let ids: Vec<ObjectId> = if self.selection.is_empty() { self.doc.scene.objects().iter().map(|o| o.id).collect() } else { self.selection.clone() };
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
         for id in ids {
+            if let Some((a, b)) = crate::spline_ui::world_bounds(self, id) {
+                lo = lo.min(a);
+                hi = hi.max(b);
+                continue;
+            }
             let m = self.doc.eval.evaluate(&self.doc.scene, id).mesh;
             if m.vertex_count() == 0 {
                 continue;

@@ -99,6 +99,9 @@ mod sim_ui;
 #[cfg(test)]
 mod sim_ui_tests;
 mod snap_ui;
+mod spline_ui;
+#[cfg(test)]
+mod spline_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;
