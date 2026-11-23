@@ -55,7 +55,10 @@ fn the_colour_fields_swatches_and_hex_by_keyboard() {
     h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Green").set_value_accesskit(20.0);
     h.run();
     assert_eq!(&h.state().paint.rgba[..2], &[10, 20]);
-    h.get_by_label("Swatch #588EF0").click();
+    // A swatch is a button: focus it and press Space, as a keyboard user does.
+    h.get_by_label("Swatch #588EF0").focus();
+    h.run();
+    h.key_press(Key::Space);
     h.run();
     assert_eq!(&h.state().paint.rgba[..3], &[0x58, 0x8E, 0xF0]);
     // The hex field: Tab to it, replace the text, Tab away.

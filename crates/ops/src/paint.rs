@@ -16,6 +16,8 @@ use crate::{OpError, OpResult, clean_selection};
 pub const MAX_STAMPS: usize = 100_000;
 /// Most corner updates one stroke may do (a bound on the work, not only on the input).
 pub const MAX_UPDATES: usize = 50_000_000;
+/// Most vertices one stroke may look at in the grid, in the brush's reach or not.
+pub const MAX_LOOKS: usize = 200_000_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,13 +91,16 @@ pub fn stroke(m: &PolyMesh, points: &[Vec3], brush: &Brush, falloff: &dyn Fn(f32
     }
     let by_vertex = corners_by_vertex(m);
     let mut colors = start(m);
-    let mut updates = 0usize;
+    let (mut updates, mut looked) = (0usize, 0usize);
     for p in points.iter().filter(|p| p.is_finite()) {
         let (cx, cy, cz) = key(*p);
         for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
                     for &v in grid.get(&(cx + dx, cy + dy, cz + dz)).into_iter().flatten() {
+                        // Every vertex looked at counts, in reach or not: points crowded just
+                        // outside the brush must still run out of budget.
+                        looked += 1;
                         let d = m.position(v).distance(*p);
                         if d >= r {
                             continue;
@@ -118,6 +123,9 @@ pub fn stroke(m: &PolyMesh, points: &[Vec3], brush: &Brush, falloff: &dyn Fn(f32
         }
         if updates > MAX_UPDATES {
             return Err(OpError::TooLarge(updates));
+        }
+        if looked > MAX_LOOKS {
+            return Err(OpError::TooLarge(looked));
         }
     }
     with_colors(m, &colors)
@@ -246,6 +254,19 @@ mod tests {
         assert!(stroke(&g, &many, &red(1.0, 1.0), &flat).is_err());
         // Non-finite points are skipped.
         assert!(stroke(&g, &[Vec3::NAN], &red(1.0, 1.0), &flat).unwrap().corner_colors().iter().all(|c| *c == WHITE));
+    }
+
+    #[test]
+    fn vertices_crowded_just_outside_the_brush_still_use_up_the_budget() {
+        // 40 000 vertices packed into one grid cell, every stamp in the next cell along and out
+        // of reach: nothing is painted, but each stamp looks at every vertex. Without counting
+        // those looks, MAX_STAMPS stamps would be 4e9 distance checks; the budget stops it at
+        // MAX_LOOKS.
+        let dense = Primitive::Plane { width: 0.001, depth: 0.001, segments: 199 }.build().unwrap();
+        assert_eq!(dense.vertex_count(), 40_000);
+        let stamps = vec![Vec3::new(1.5, 0.0, 0.0); MAX_STAMPS];
+        let r = stroke(&dense, &stamps, &red(1.0, 1.0), &flat);
+        assert!(matches!(r, Err(OpError::TooLarge(n)) if n > MAX_LOOKS), "{:?}", r.map(|m| m.vertex_count()));
     }
 
     #[test]
