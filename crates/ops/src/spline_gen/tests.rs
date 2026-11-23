@@ -162,10 +162,12 @@ fn the_extrusion_axis_is_the_plane_normal_or_a_chosen_axis() {
     assert!(closed(&m) && volume(&m).abs() > 1.0);
     let (lo, hi) = m.bounds();
     assert!((hi.y - lo.y - 2.0).abs() < 1e-4, "{lo:?} {hi:?}");
-    // The same circle pushed along X instead is a tube across its own plane: still closed.
+    // The same circle pushed along X instead is a tube across its own plane. Seen along X it has no
+    // area, so there are no caps and the tube is open; it is 3 long and 2 across.
     let x = extrude(&[c], &ExtrudeOptions { distance: 3.0, axis: Axis::X, ..Default::default() }).unwrap();
     let (lo, hi) = x.bounds();
-    assert!((hi.x - lo.x - 3.0 - 2.0).abs() < 1e-3 || (hi.x - lo.x) > 3.0, "{lo:?} {hi:?}");
+    assert!(!closed(&x));
+    assert!((hi.x - lo.x - 5.0).abs() < 0.01, "the circle's own width plus the push along X: {lo:?} {hi:?}");
 }
 
 #[test]
@@ -508,4 +510,64 @@ proptest! {
             prop_assert!(m.validate().is_ok());
         }
     }
+}
+
+// ---------------------------------------------------------------- work bounds
+
+fn nested_squares(count: usize, points_per_side: usize) -> Vec<Polyline> {
+    (0..count)
+        .map(|k| {
+            let r = 1.0 + k as f32 * 0.01;
+            let n = points_per_side;
+            let side = |a: Vec3, b: Vec3| (0..n).map(move |i| a.lerp(b, i as f32 / n as f32));
+            let c = [Vec3::new(-r, -r, 0.0), Vec3::new(r, -r, 0.0), Vec3::new(r, r, 0.0), Vec3::new(-r, r, 0.0)];
+            Polyline { points: (0..4).flat_map(|s| side(c[s], c[(s + 1) % 4]).collect::<Vec<_>>()).collect(), closed: true }
+        })
+        .collect()
+}
+
+#[test]
+fn nesting_counts_its_work_and_refuses_what_would_stall() {
+    // Few, far apart outlines: the boxes rule almost every test out.
+    let apart: Vec<Vec<Vec3>> = (0..1_000).map(|i| rect(i as f32 * 3.0, i as f32 * 3.0 + 1.0, 0.0, 1.0).points).collect();
+    let views: Vec<&[Vec3]> = apart.iter().map(Vec::as_slice).collect();
+    let (nest, work) = cap::nesting_counted(&views, Vec3::Z).unwrap();
+    assert!(nest.iter().all(|n| !n.0));
+    assert!(work < 2_000_000, "boxes keep it near n squared pair checks, not edge tests: {work}");
+    // Concentric outlines all contain each other: real tests, and a budget.
+    let ring = nested_squares(60, 20);
+    let views: Vec<Vec<Vec3>> = ring.iter().map(|p| p.points.clone()).collect();
+    let v: Vec<&[Vec3]> = views.iter().map(Vec::as_slice).collect();
+    let (nest, work) = cap::nesting_counted(&v, Vec3::Z).unwrap();
+    assert_eq!(nest.iter().filter(|n| n.0).count(), 30, "every other one is a hole");
+    assert!(work <= cap::MAX_NEST_WORK);
+    // A thousand concentric outlines of 200 points would be ~1e8 edge tests: an error, quickly.
+    let deep = nested_squares(1_000, 50);
+    let t = std::time::Instant::now();
+    let r = extrude(&deep, &ExtrudeOptions { cap_start: false, cap_end: false, ..Default::default() });
+    assert!(matches!(&r, Err(OpError::Invalid(m)) if m.contains("nested")), "{:?}", r.map(|m| m.face_count()));
+    assert!(t.elapsed().as_secs_f32() < 5.0);
+    // Too many closed curves at all (revolve and sweep too, not only the caps).
+    let many: Vec<Polyline> = (0..cap::MAX_CAP_CONTOURS + 1).map(|i| rect(i as f32 * 3.0, i as f32 * 3.0 + 1.0, 0.0, 1.0)).collect();
+    assert!(extrude(&many, &ExtrudeOptions::default()).is_err());
+    assert!(revolve(&many, &RevolveOptions::default()).is_err());
+    assert!(sweep(&many, &Polyline { points: vec![Vec3::ZERO, Vec3::Z], closed: false }, &SweepOptions::default()).is_err());
+}
+
+#[test]
+fn a_flat_outline_is_not_clipped_over_and_over() {
+    // A circle that lies in the plane containing the axis: seen along it, it has no area.
+    let c = Polyline { points: ring(1.0, 20_000, 0.0).points.iter().map(|p| Vec3::new(p.x, 0.0, p.y)).collect(), closed: true };
+    let t = std::time::Instant::now();
+    let r = extrude(&[c], &ExtrudeOptions { axis: Axis::X, distance: 2.0, ..Default::default() });
+    assert!(t.elapsed().as_secs_f32() < 5.0, "done in {:?}", t.elapsed());
+    // The sides exist; no cap triangles are made from nothing.
+    let m = r.unwrap();
+    assert_eq!(m.face_count(), 20_000);
+}
+
+#[test]
+fn a_full_turn_has_at_least_three_steps() {
+    let m = revolve(&[rect(1.0, 2.0, 0.0, 1.0)], &RevolveOptions { steps: 1, ..Default::default() }).unwrap();
+    assert_solid(&m, (ngon_area(2.0, 3) - ngon_area(1.0, 3)) * 1.0);
 }

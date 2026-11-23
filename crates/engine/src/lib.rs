@@ -25,6 +25,7 @@ pub mod rig;
 pub mod sim;
 pub mod sim_bake;
 pub mod spline;
+pub mod stage;
 mod undo;
 
 pub use anim::{AnimCommand, KeyRef, PastedKey};
@@ -39,6 +40,7 @@ pub use rig::{BindMethod, RigCommand, WeightOp};
 pub use sim::SimCommand;
 pub use sim_bake::{BakeJob, BakeResult};
 pub use spline::SplineCommand;
+pub use stage::StageCommand;
 pub use undo::{UndoEntry, UndoStack};
 
 pub use modelcraft_anim as animation;
@@ -86,5 +88,7 @@ mod sim_rigid_tests;
 mod sim_tests;
 #[cfg(test)]
 mod spline_tests;
+#[cfg(test)]
+mod stage_tests;
 #[cfg(test)]
 mod uv_udim_tests;

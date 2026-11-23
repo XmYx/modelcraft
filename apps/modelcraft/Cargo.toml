@@ -22,6 +22,7 @@ modelcraft-sculpt = { workspace = true }
 modelcraft-formats = { workspace = true }
 modelcraft-engine = { workspace = true }
 modelcraft-render = { workspace = true }
+modelcraft-bake = { workspace = true }
 modelcraft-script = { workspace = true }
 craft-atomic = { workspace = true }
 glam = { workspace = true }
