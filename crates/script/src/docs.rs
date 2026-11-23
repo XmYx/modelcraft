@@ -60,7 +60,11 @@ pub const API: &[(&str, &str, &str)] = &[
         "set_attr(id, name, value)",
         "Set an attribute through its command (one undo step). A material, primitive or deformer map changes only the keys it names.",
     ),
-    ("Edit", "add_primitive(kind) -> id", "Add a primitive: cube, plane, sphere, round_cube, cylinder, cone or torus."),
+    (
+        "Edit",
+        "add_primitive(kind) -> id",
+        "Add a primitive: cube, plane, sphere, round_cube, cylinder, cone, torus, disc, polygon, tube, capsule, pyramid, tetrahedron, octahedron, dodecahedron, icosahedron or landscape.",
+    ),
     ("Edit", "add_primitive(kind, name) -> id", "Add a primitive with a name (made unique when taken)."),
     ("Edit", "add_group() -> id", "Add an empty group."),
     ("Edit", "add_group(name) -> id", "Add an empty group with a name."),

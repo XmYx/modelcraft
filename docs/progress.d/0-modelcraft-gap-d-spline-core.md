@@ -1,0 +1,1 @@
+| 2026-11-23 | New UI-free `modelcraft-spline` crate: the spline type (segments of linear, Bézier or B-spline knots, open or closed), exact evaluation, fixed / uniform / adaptive tessellation with a bounded point budget, point editing and a path builder; property tests, hostile-input tests |

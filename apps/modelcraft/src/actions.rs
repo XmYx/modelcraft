@@ -105,7 +105,7 @@ pub enum Action {
     Organize(crate::organize_ui::Op),
 }
 
-pub const PRIMITIVES: &[&str] = &["cube", "plane", "sphere", "round_cube", "cylinder", "cone", "torus"];
+pub const PRIMITIVES: &[&str] = modelcraft_engine::ops::primitives::KINDS;
 pub const DEFORMERS: &[&str] = &["bend", "twist", "taper", "ripple", "round", "shear"];
 /// The array layouts (`modelcraft_ops::array::KINDS`).
 pub const ARRAYS: &[&str] = modelcraft_engine::ops::array::KINDS;
@@ -219,6 +219,16 @@ fn prim_label(p: &str) -> String {
         "cylinder" => tl!("Cylinder"),
         "cone" => tl!("Cone"),
         "torus" => tl!("Torus"),
+        "disc" => tl!("Disc"),
+        "polygon" => tl!("Polygon"),
+        "tube" => tl!("Tube"),
+        "capsule" => tl!("Capsule"),
+        "pyramid" => tl!("Pyramid"),
+        "tetrahedron" => tl!("Tetrahedron"),
+        "octahedron" => tl!("Octahedron"),
+        "dodecahedron" => tl!("Dodecahedron"),
+        "icosahedron" => tl!("Icosahedron"),
+        "landscape" => tl!("Landscape"),
         _ => p.to_string(),
     }
 }
