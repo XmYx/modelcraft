@@ -33,6 +33,7 @@ pub mod sim;
 pub mod snap;
 pub mod spline_gen;
 pub mod splines;
+pub mod stage;
 
 use std::sync::Arc;
 
@@ -648,6 +649,14 @@ pub enum ObjectKind {
     Generator {
         generator: generator::Generator,
     },
+    /// A light: it shines along its own -Z ([`stage`]).
+    Light {
+        light: stage::LightData,
+    },
+    /// A camera: it looks along its own -Z ([`stage`]).
+    Camera {
+        camera: stage::CameraData,
+    },
     /// A curve: drawn as a line, never as a surface. Spline generators take spline children as
     /// their input ([`splines`]).
     Spline {
@@ -695,6 +704,8 @@ impl ObjectKind {
             ObjectKind::Instance { .. } => "Instance",
             ObjectKind::Hair { .. } => "Hair",
             ObjectKind::Sim { .. } => "Simulation",
+            ObjectKind::Light { light } => light.kind.title(),
+            ObjectKind::Camera { .. } => "Camera",
             ObjectKind::Spline { .. } => "Spline",
             ObjectKind::SplineGenerator { .. } => "Spline generator",
         }
@@ -832,6 +843,10 @@ pub struct Scene {
     /// Saved attribute sets ([`organize::AttributePreset`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<AttributePreset>,
+    /// What renders of the project use: the camera object, and (with the render settings) the rest
+    /// ([`stage::RenderConfig`]).
+    #[serde(default, skip_serializing_if = "stage::RenderConfig::is_default")]
+    pub render: stage::RenderConfig,
 }
 
 #[allow(clippy::borrowed_box)]

@@ -2,15 +2,17 @@
 //!
 //! [`export_scene`] evaluates every visible surface (meshes and smooth cages, not cage inputs,
 //! groups or deformers: the same set the viewport draws), bakes world transforms, converts the
-//! glTF metallic-roughness material and adds lighting, because the scene graph has no light
-//! objects yet. The path tracer itself lives in the UI-free `craft-render-*` crates.
+//! glTF metallic-roughness material and adds lighting: the scene's own light objects, or a studio
+//! rig when it has none. The camera is the scene's render camera object, else the viewport's.
+//! The path tracer itself lives in the UI-free `craft-render-*` crates.
 
 use craft_render_core::shapes::quad;
 use craft_render_core::sky::Sky;
 use craft_render_core::texture::{Image, Kind, Limits, srgb_to_linear};
-use craft_render_core::{Camera as TraceCamera, Material as TraceMaterial, MeshData, Scene as TraceScene, SceneBuilder, SceneError};
+use craft_render_core::{Camera as TraceCamera, Light as TraceLight, Material as TraceMaterial, MeshData, Scene as TraceScene, SceneBuilder, SceneError};
 use glam::{Mat4, Vec2, Vec3};
 use modelcraft_mesh::PolyMesh;
+use modelcraft_scene::stage::{LightKind, Placement};
 use modelcraft_scene::{Evaluator, ObjectId, ObjectKind, Scene};
 
 use crate::buffers::mesh_data;
@@ -36,13 +38,18 @@ pub struct ExportOptions {
     pub lighting: Lighting,
     /// Add a matte ground plane under the scene to catch shadows.
     pub ground: bool,
-    /// Read the maps of linked MaterialCraft materials from disk.
+    /// Read the maps of linked MaterialCraft materials and dome pictures from disk.
     pub linked_materials: bool,
+    /// Width over height of the picture, which a camera object's lens is fitted to.
+    pub aspect: f32,
+    /// Look through the scene's render camera when it has one; otherwise (or when false) use the
+    /// viewport camera given to the export.
+    pub scene_camera: bool,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        ExportOptions { lighting: Lighting::Studio, ground: true, linked_materials: true }
+        ExportOptions { lighting: Lighting::Studio, ground: true, linked_materials: true, aspect: 16.0 / 9.0, scene_camera: true }
     }
 }
 
@@ -177,6 +184,20 @@ pub fn trace_camera(c: &Camera) -> TraceCamera {
     }
 }
 
+/// The path tracer's camera for a camera object, in a picture of `aspect` (width / height).
+pub fn trace_camera_object(scene: &Scene, id: ObjectId, aspect: f32) -> Option<TraceCamera> {
+    let (p, d) = scene.camera_view(id)?;
+    Some(TraceCamera {
+        eye: p.eye,
+        target: p.eye + p.forward * d.focus_distance,
+        up: p.up,
+        fov_y: d.fov_y(aspect),
+        ortho_height: d.orthographic.then_some(d.ortho_height),
+        aperture_radius: d.aperture_radius(),
+        focus_distance: d.focus_distance,
+    })
+}
+
 /// The surfaces a render shows, in tree order.
 pub fn renderable(scene: &Scene) -> Vec<ObjectId> {
     scene
@@ -304,6 +325,7 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
         let y = lo.y - radius * 1e-4;
         b.add_mesh(&quad(Vec3::new(centre.x - s, y, centre.z - s), Vec3::Z * (2.0 * s), Vec3::X * (2.0 * s)), Mat4::IDENTITY, ground)?;
     }
+    let scene_lights = scene.lights();
     match &options.lighting {
         Lighting::Sky(radiance) => b.set_environment(*radiance),
         Lighting::Daylight { elevation, azimuth } => {
@@ -314,6 +336,8 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
             }
         }
         Lighting::Image { image, rotation } => b.set_environment_map(image.clone(), *rotation),
+        // The scene has lights of its own: they are all the light there is.
+        Lighting::Studio if !scene_lights.is_empty() => b.set_environment(Vec3::ZERO),
         Lighting::Studio => {
             b.set_environment(Vec3::new(0.32, 0.36, 0.42));
             // The key: a square of side 1.5 radii, 3 radii away, up and to the camera's left,
@@ -332,8 +356,68 @@ pub fn export_builder(scene: &Scene, eval: &mut Evaluator, camera: &Camera, opti
             b.add_mesh(&quad(pos - u * half - v * half, v * (2.0 * half), u * (2.0 * half)), Mat4::IDENTITY, key)?;
         }
     }
-    b.set_camera(trace_camera(camera));
+    add_scene_lights(&mut b, scene, &scene_lights, options)?;
+    let from_object = options.scene_camera.then(|| scene.render_camera()).flatten().and_then(|id| trace_camera_object(scene, id, options.aspect));
+    b.set_camera(from_object.unwrap_or_else(|| trace_camera(camera)));
     Ok(b)
+}
+
+/// Scale an environment picture by `power`.
+fn scaled(image: &Image, power: Vec3) -> Image {
+    if power == Vec3::ONE {
+        return image.clone();
+    }
+    image.try_map(Kind::Color, &Limits::default(), |p| [p[0] * power.x, p[1] * power.y, p[2] * power.z, p[3]]).unwrap_or_else(|_| image.clone())
+}
+
+/// The scene's light objects as engine lights: points, spots and suns as analytic lights, an area
+/// light as a glowing rectangle, a dome as the environment.
+fn add_scene_lights(b: &mut SceneBuilder, scene: &Scene, lights: &[ObjectId], options: &ExportOptions) -> Result<(), SceneError> {
+    for id in lights {
+        let Some(ObjectKind::Light { light }) = scene.get(*id).map(|o| &o.kind) else { continue };
+        let light = light.sanitized();
+        let power = light.power();
+        let world = scene.world_matrix(*id);
+        let place = Placement::of(world);
+        match light.kind {
+            LightKind::Point => b.add_light(TraceLight::Point { position: place.eye, intensity: power })?,
+            LightKind::Spot => b.add_light(TraceLight::Spot {
+                position: place.eye,
+                direction: place.forward,
+                intensity: power,
+                cone_angle: (light.spread * 0.5).to_radians(),
+                blend: light.softness,
+            })?,
+            LightKind::Sun => b.add_light(TraceLight::Sun { direction: -place.forward, irradiance: power, angular_radius: (light.size * 0.5).to_radians() })?,
+            LightKind::Area => {
+                if power.max_element() <= 0.0 || light.size <= 0.0 || light.height <= 0.0 {
+                    continue;
+                }
+                // The rectangle faces -Z: `e1 × e2` is its front.
+                let (hw, hh) = (light.size * 0.5, light.height * 0.5);
+                let material = b.add_material(TraceMaterial::emitter(power))?;
+                b.add_mesh(&quad(Vec3::new(-hw, -hh, 0.0), Vec3::Y * (2.0 * hh), Vec3::X * (2.0 * hw)), world, material)?;
+            }
+            LightKind::Dome => {
+                let picture = light.image.as_deref().filter(|_| options.linked_materials).and_then(|path| match load_panorama(path) {
+                    Ok(image) => Some(image),
+                    Err(e) => {
+                        log::warn!("dome light {path}: {e}; using its colour");
+                        None
+                    }
+                });
+                match picture {
+                    Some(image) => {
+                        // The picture turns with the object about the vertical axis.
+                        let x = world.transform_vector3(Vec3::X);
+                        b.set_environment_map(scaled(&image, Vec3::from_array(light.color) * light.intensity), x.z.atan2(x.x));
+                    }
+                    None => b.set_environment(power),
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -535,5 +619,143 @@ mod tests {
         let lit =
             export_scene(&scene, &mut eval, &cam, &ExportOptions { lighting: Lighting::Image { image, rotation: 1.0 }, ..ExportOptions::default() }).unwrap();
         assert!(lit.lights.env_map.is_some() && lit.lights.emissive.is_empty());
+    }
+
+    /// A big plane with a grey matte material, a spot light 2 m above its middle shining down and a
+    /// camera 5 m above looking straight down through a long lens.
+    fn spot_scene(intensity: f32) -> Scene {
+        use modelcraft_scene::Transform;
+        use modelcraft_scene::stage::{CameraData, LightData, LightKind};
+        let mut s = Scene::new();
+        let plane = s
+            .add(
+                "Floor",
+                ObjectKind::Mesh { source: Source::Primitive { primitive: Primitive::Plane { width: 20.0, depth: 20.0, segments: 1 } }, steps: vec![] },
+                None,
+            )
+            .unwrap();
+        s.edit(plane).unwrap().material = Material { base_color: [0.5, 0.5, 0.5, 1.0], metallic: 0.0, roughness: 1.0, ..Material::default() };
+        let down = glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let lamp = s.add("Lamp", ObjectKind::Light { light: LightData { intensity, ..LightData::of(LightKind::Spot) } }, None).unwrap();
+        s.edit(lamp).unwrap().transform = Transform { translation: Vec3::new(0.0, 2.0, 0.0), rotation: down, scale: Vec3::ONE };
+        let cam = s.add("Camera", ObjectKind::Camera { camera: CameraData { focal_length: 400.0, ..CameraData::default() } }, None).unwrap();
+        s.edit(cam).unwrap().transform = Transform { translation: Vec3::new(0.0, 5.0, 0.0), rotation: down, scale: Vec3::ONE };
+        s.render.camera = Some(cam);
+        s
+    }
+
+    fn centre_value(film: &craft_render_core::Film) -> f64 {
+        let img = film.mean();
+        let (w, h) = (film.width as usize, film.height as usize);
+        let mut sum = 0.0f64;
+        let mut n = 0;
+        for y in h / 2 - 2..h / 2 + 2 {
+            for x in w / 2 - 2..w / 2 + 2 {
+                sum += f64::from(img[y * w + x][1]);
+                n += 1;
+            }
+        }
+        sum / f64::from(n)
+    }
+
+    /// One GPU device at a time in this test binary: several opened at once from one process have
+    /// crashed inside a vendor driver on a busy machine (as in craft-render-gpu's own tests).
+    static GPU_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_scene_lit_only_by_a_spot_light_matches_the_formula_on_cpu_and_gpu() {
+        let mut eval = Evaluator::new();
+        let options = ExportOptions { ground: false, aspect: 1.0, ..ExportOptions::default() };
+        let mut render = |intensity: f32, gpu: bool| -> Option<f64> {
+            let scene = spot_scene(intensity);
+            let t = export_scene(&scene, &mut eval, &Camera::default(), &options).unwrap();
+            // Only the spot lights the scene: no studio key, no sky.
+            assert_eq!((t.lights.emissive.len(), t.lights.analytic.len()), (0, 1), "the scene's own light replaces the studio rig");
+            assert!(matches!(t.lights.analytic[0], craft_render_core::Light::Spot { .. }));
+            let settings = RenderSettings { width: 16, height: 16, ..RenderSettings::default() };
+            if gpu {
+                let _turn = GPU_TURN.lock().unwrap_or_else(|p| p.into_inner());
+                let ctx = craft_render_gpu::GpuContext::new()?;
+                let mut r = craft_render_gpu::GpuRenderer::new(&ctx, &t, settings).unwrap();
+                r.render(&ctx, 32).unwrap();
+                return Some(centre_value(&r.film(&ctx).unwrap()));
+            }
+            Some(centre_value(&render_image(Arc::new(t), settings, 64).unwrap()))
+        };
+        // Lambert: L = albedo/π · I·cosθ/d², straight below the lamp: 0.5/π · 100/2² = 3.98 (the
+        // rough dielectric lobe adds a little).
+        let want = 0.5 / std::f64::consts::PI * 100.0 / 4.0;
+        let cpu = render(100.0, false).unwrap();
+        assert!((cpu - want).abs() < 0.1 * want, "cpu {cpu} want {want}");
+        let double = render(200.0, false).unwrap();
+        assert!((double / cpu - 2.0).abs() < 0.05, "twice the intensity, twice the light: {double} vs {cpu}");
+        match render(100.0, true) {
+            Some(gpu) => assert!((gpu - cpu).abs() < 0.03 * cpu, "gpu {gpu} cpu {cpu}"),
+            None => eprintln!("skipped the GPU half: no adapter on this machine; the CPU reference covers the formula"),
+        }
+    }
+
+    #[test]
+    fn every_light_kind_reaches_the_renderer_and_a_camera_object_sets_the_view() {
+        use modelcraft_scene::Transform;
+        use modelcraft_scene::stage::{CameraData, LightData, LightKind};
+        let mut s = Scene::new();
+        for kind in LightKind::ALL {
+            let id = s.add(kind.title(), ObjectKind::Light { light: LightData::of(kind) }, None).unwrap();
+            s.edit(id).unwrap().transform = Transform { translation: Vec3::new(1.0, 2.0, 3.0), ..Transform::default() };
+        }
+        let mut eval = Evaluator::new();
+        let options = ExportOptions { ground: false, ..ExportOptions::default() };
+        let t = export_scene(&s, &mut eval, &Camera::default(), &options).unwrap();
+        use craft_render_core::Light as L;
+        assert_eq!(t.lights.analytic.len(), 3, "point, spot and sun");
+        assert!(matches!(t.lights.analytic[0], L::Point { position, .. } if (position - Vec3::new(1.0, 2.0, 3.0)).length() < 1e-5));
+        // A light faces -Z, so the sun's direction towards the light is +Z.
+        assert!(t.lights.analytic.iter().any(|l| matches!(l, L::Sun { direction, .. } if (*direction - Vec3::Z).length() < 1e-5)));
+        assert!(t.lights.analytic.iter().any(|l| matches!(l, L::Spot { direction, .. } if (*direction - Vec3::NEG_Z).length() < 1e-5)));
+        assert_eq!(t.lights.emissive.len(), 2, "the area light is a glowing rectangle");
+        assert_eq!(t.lights.environment, Vec3::ONE, "the dome is the sky");
+        // Hidden lights add nothing.
+        for id in s.lights() {
+            s.edit(id).unwrap().visible = false;
+        }
+        let hidden = export_scene(&s, &mut eval, &Camera::default(), &options).unwrap();
+        assert_eq!((hidden.lights.analytic.len(), hidden.lights.emissive.len()), (0, 2), "hidden: only the studio key remains");
+
+        // The render camera sets eye, direction, lens and blur; the viewport camera is ignored.
+        let cam = s
+            .add("Cam", ObjectKind::Camera { camera: CameraData { focal_length: 100.0, f_stop: 2.0, focus_distance: 3.0, ..CameraData::default() } }, None)
+            .unwrap();
+        s.edit(cam).unwrap().transform = Transform { translation: Vec3::new(0.0, 1.0, 4.0), ..Transform::default() };
+        let viewport = Camera::default();
+        let plain = export_scene(&s, &mut eval, &viewport, &ExportOptions { ground: false, ..ExportOptions::default() }).unwrap();
+        assert_eq!(plain.camera.eye, viewport.eye(), "no render camera chosen: the viewport's");
+        s.render.camera = Some(cam);
+        let t = export_scene(&s, &mut eval, &viewport, &ExportOptions { ground: false, aspect: 1.5, ..ExportOptions::default() }).unwrap();
+        assert!((t.camera.eye - Vec3::new(0.0, 1.0, 4.0)).length() < 1e-5);
+        assert!((t.camera.target - Vec3::new(0.0, 1.0, 1.0)).length() < 1e-5, "{:?}", t.camera.target);
+        assert!((t.camera.fov_y - 2.0 * (0.18f32 / 1.5).atan()).abs() < 1e-5, "the 36 mm film is fitted across a 3:2 picture");
+        assert!((t.camera.aperture_radius - 0.025).abs() < 1e-6 && t.camera.focus_distance == 3.0);
+        // Switched off (a viewport render), the viewport camera is used again.
+        let off = export_scene(&s, &mut eval, &viewport, &ExportOptions { ground: false, scene_camera: false, ..ExportOptions::default() }).unwrap();
+        assert_eq!(off.camera.eye, viewport.eye());
+    }
+
+    #[test]
+    fn a_dome_light_turns_with_its_object_and_lights_by_its_colour() {
+        use modelcraft_scene::stage::{LightData, LightKind};
+        let mut s = Scene::new();
+        let dome =
+            s.add("Sky", ObjectKind::Light { light: LightData { color: [0.0, 0.0, 1.0], intensity: 2.0, ..LightData::of(LightKind::Dome) } }, None).unwrap();
+        let mut eval = Evaluator::new();
+        let options = ExportOptions { ground: false, ..ExportOptions::default() };
+        let t = export_scene(&s, &mut eval, &Camera::default(), &options).unwrap();
+        assert_eq!(t.lights.environment, Vec3::new(0.0, 0.0, 2.0));
+        // A picture that cannot be read falls back to the colour.
+        if let ObjectKind::Light { light } = &mut s.edit(dome).unwrap().kind {
+            light.image = Some("/nonexistent/sky.hdr".into());
+        }
+        let t = export_scene(&s, &mut eval, &Camera::default(), &options).unwrap();
+        assert!(t.lights.env_map.is_none() && t.lights.environment == Vec3::new(0.0, 0.0, 2.0));
     }
 }

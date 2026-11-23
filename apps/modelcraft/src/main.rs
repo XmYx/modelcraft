@@ -15,6 +15,9 @@ mod anim_ui;
 mod anim_ui_tests;
 mod app;
 mod args;
+mod bake_ui;
+#[cfg(test)]
+mod bake_ui_tests;
 mod clone_ui;
 #[cfg(test)]
 mod clone_ui_tests;
@@ -64,6 +67,7 @@ mod modifier_ui_tests;
 mod object_manager;
 mod organize_ui;
 mod panels;
+mod picture_viewer;
 mod plugin_ui;
 #[cfg(test)]
 mod plugin_ui_tests;
@@ -73,6 +77,9 @@ mod procedural_ui;
 #[cfg(test)]
 mod procedural_ui_tests;
 mod radial;
+mod render_ui;
+#[cfg(test)]
+mod render_ui_tests;
 mod render_view;
 mod rig_tools;
 #[cfg(test)]
@@ -115,6 +122,9 @@ mod spline_points_ui;
 mod spline_ui;
 #[cfg(test)]
 mod spline_ui_tests;
+mod stage_ui;
+#[cfg(test)]
+mod stage_ui_tests;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

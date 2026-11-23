@@ -37,6 +37,7 @@ pub fn groups() -> Vec<Group> {
         Group { name: tl!("Clones"), items: clones },
         Group { name: tl!("Deformers"), items: DEFORMERS.iter().map(|d| Action::AddDeformer(d)).collect() },
         Group { name: tl!("Fields"), items: FIELDS.iter().map(|f| Action::AddField(f)).collect() },
+        Group { name: tl!("Lights and cameras"), items: crate::stage_ui::StageAction::ALL.iter().take(7).copied().map(Action::Stage).collect() },
         Group {
             name: tl!("Rig"),
             items: [RigAction::AddJoint, RigAction::AddIk, RigAction::AddBlendShape, RigAction::AddLattice, RigAction::AddCluster].map(Action::Rig).to_vec(),

@@ -6,6 +6,8 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use modelcraft_engine::Document;
+use modelcraft_engine::scene::stage::{OutputFormat, Pass, RenderConfig};
+use modelcraft_render::batch;
 use modelcraft_render::pathtrace::integrator::IntegratorSettings;
 use modelcraft_render::pathtrace::{DenoiseMode, RestirMode, RestirSettings};
 use modelcraft_render::pathtrace::{Film, RenderSettings, Renderer, Scene, scenes};
@@ -41,6 +43,12 @@ pub const USAGE: &str = "  render <file|builtin:NAME> -o <out.png> [options]
       --sky R,G,B                   uniform sky light instead of the studio light; --no-ground
       --sun ELEVATION[,AZIMUTH]     daylight: a physical sky with the sun at these angles (degrees)
       --env FILE.hdr [--env-rotation DEG]  light the scene with a Radiance HDR panorama
+      --camera NAME|ID              look through this camera object (by default the project's render
+                                    camera, else a view that frames the scene); --no-camera to ignore it
+      --frames FIRST-LAST[:STEP]    render a range of frames of the project to numbered files
+                                    (out_0001.png, or the # signs of the name: out_####.png)
+      --passes LIST                 EXR layers to keep: albedo,normal,depth,motion,variance or none
+                                    (default all)
       --seed N";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +84,14 @@ pub struct RenderArgs {
     pub denoise: DenoiseMode,
     pub wide_bvh: bool,
     pub hardware_rays: bool,
+    /// A camera object, by name or id; `None` takes the project's own choice.
+    pub camera: Option<String>,
+    /// Render from the framing view even when the project has a render camera.
+    pub no_camera: bool,
+    /// A range of frames to render to numbered files: first, last, step.
+    pub frames: Option<(i32, i32, u32)>,
+    /// The EXR layers besides the picture; `None` keeps all of them.
+    pub passes: Option<Vec<Pass>>,
 }
 
 impl Default for RenderArgs {
@@ -103,6 +119,10 @@ impl Default for RenderArgs {
             denoise: DenoiseMode::Off,
             wide_bvh: false,
             hardware_rays: false,
+            camera: None,
+            no_camera: false,
+            frames: None,
+            passes: None,
         }
     }
 }
@@ -167,7 +187,41 @@ pub fn parse(a: &[String]) -> Result<RenderArgs, String> {
         denoise: parse_denoise(a)?,
         wide_bvh: parse_bvh(a)?,
         hardware_rays: a.iter().any(|x| x == "--hardware-rays"),
+        camera: value(a, "--camera").map(str::to_string),
+        no_camera: a.iter().any(|x| x == "--no-camera"),
+        frames: parse_frames(a)?,
+        passes: parse_passes(a)?,
     })
+}
+
+/// `--frames FIRST-LAST[:STEP]`: a range of frames to render to numbered files.
+pub fn parse_frames(a: &[String]) -> Result<Option<(i32, i32, u32)>, String> {
+    let Some(v) = value(a, "--frames") else { return Ok(None) };
+    let bad = || format!("--frames: expected FIRST-LAST or FIRST-LAST:STEP (whole numbers), found {v:?}");
+    let (range, step) = match v.split_once(':') {
+        Some((r, s)) => (r, s.parse::<u32>().map_err(|_| bad())?),
+        None => (v, 1),
+    };
+    // A minus sign can start either number: the range's own dash is the first one that follows a digit.
+    let chars: Vec<(usize, char)> = range.char_indices().collect();
+    let at = chars.windows(2).find(|w| w[0].1.is_ascii_digit() && w[1].1 == '-').map(|w| w[1].0).ok_or_else(bad)?;
+    let (first, last) = (range[..at].parse::<i32>().map_err(|_| bad())?, range[at + 1..].parse::<i32>().map_err(|_| bad())?);
+    if step == 0 || last < first {
+        return Err(bad());
+    }
+    Ok(Some((first, last, step)))
+}
+
+/// `--passes albedo,normal,depth,motion,variance` (or `none`): the EXR layers to keep.
+pub fn parse_passes(a: &[String]) -> Result<Option<Vec<Pass>>, String> {
+    let Some(v) = value(a, "--passes") else { return Ok(None) };
+    if v == "none" {
+        return Ok(Some(Vec::new()));
+    }
+    v.split(',')
+        .map(|p| Pass::from_id(p.trim()).ok_or_else(|| format!("--passes: no pass {p:?} (albedo, normal, depth, motion, variance, or none)")))
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 /// `--bvh binary|wide`: whether to trace through the 8-wide hierarchy.
@@ -215,8 +269,9 @@ pub fn builtin(name: &str) -> Result<Scene, String> {
     scenes::by_name(name).ok_or_else(|| format!("unknown built-in scene {name:?} ({}, furnace)", scenes::BENCHMARKS.join(", ")))?.map_err(|e| e.to_string())
 }
 
-/// The path tracer's scene for a document, seen by a camera that frames everything.
-pub fn document_scene(d: &mut Document, args: &RenderArgs) -> Result<Scene, String> {
+/// The view that frames the document and the lighting the arguments ask for; `--camera` picks
+/// the project's render camera.
+pub fn view_and_light(d: &mut Document, args: &RenderArgs) -> Result<(Camera, Lighting), String> {
     d.sync_sculpt();
     let mut cam = Camera::default();
     if let Some(v) = args.fov.filter(|v| v.is_finite()) {
@@ -241,7 +296,61 @@ pub fn document_scene(d: &mut Document, args: &RenderArgs) -> Result<Scene, Stri
     } else {
         args.sky.map_or(Lighting::Studio, |s| Lighting::Sky(glam::Vec3::from_array(s)))
     };
-    export_scene(&d.scene, &mut d.eval, &cam, &ExportOptions { lighting, ground: args.ground, ..ExportOptions::default() }).map_err(|e| e.to_string())
+    if let Some(want) = &args.camera {
+        let found = d.scene.cameras().into_iter().find(|id| d.scene.get(*id).is_some_and(|o| o.name == *want || id.0.to_string() == *want));
+        d.scene.render.camera = Some(found.ok_or_else(|| format!("--camera: no camera named or numbered {want:?}"))?);
+    }
+    Ok((cam, lighting))
+}
+
+/// The path tracer's scene for a document, seen by a camera that frames everything.
+pub fn document_scene(d: &mut Document, args: &RenderArgs) -> Result<Scene, String> {
+    let (cam, lighting) = view_and_light(d, args)?;
+    let options = ExportOptions {
+        lighting,
+        ground: args.ground,
+        aspect: args.width.max(1) as f32 / args.height.max(1) as f32,
+        scene_camera: !args.no_camera,
+        ..ExportOptions::default()
+    };
+    export_scene(&d.scene, &mut d.eval, &cam, &options).map_err(|e| e.to_string())
+}
+
+/// Render a range of frames of a document to numbered files.
+fn run_frames(source: &str, out: &str, args: &RenderArgs, (first, last, step): (i32, i32, u32), d: &mut Document) -> Result<serde_json::Value, String> {
+    let (viewport, lighting) = view_and_light(d, args)?;
+    let lower = out.to_ascii_lowercase();
+    let format = if lower.ends_with(".exr") { OutputFormat::Exr } else { OutputFormat::Png };
+    let config = RenderConfig {
+        camera: d.scene.render_camera().filter(|_| !args.no_camera),
+        width: args.width,
+        height: args.height,
+        samples: args.samples,
+        bounces: args.depth,
+        frame_start: first,
+        frame_end: last,
+        frame_step: step,
+        format,
+        passes: args.passes.clone().unwrap_or_else(|| Pass::ALL.to_vec()),
+        denoise: args.denoise != DenoiseMode::Off,
+        exposure: args.exposure,
+        output: out.to_string(),
+        ..d.scene.render.clone()
+    };
+    let device = match args.device {
+        Device::Auto => batch::Device::Auto,
+        Device::Cpu => batch::Device::Cpu,
+        Device::Gpu => batch::Device::Gpu,
+    };
+    let job = batch::Job { scene: d.scene.clone(), viewport, lighting, config, device, write: true };
+    let t = Instant::now();
+    let files = batch::run(&job, &AtomicBool::new(false), &batch::Progress::default(), &mut |f| eprintln!("frame {} done", f.frame))?;
+    Ok(serde_json::json!({
+        "source": source,
+        "frames": files.len(),
+        "files": files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>(),
+        "render_seconds": (t.elapsed().as_secs_f64() * 1000.0).round() / 1000.0,
+    }))
 }
 
 /// What a render did, for the JSON line the command prints.
@@ -313,50 +422,15 @@ pub fn render(mut scene: Scene, args: &RenderArgs) -> Result<Report, String> {
     Ok(Report { film: r.film().clone(), device: format!("cpu: {threads} threads"), seconds: t.elapsed().as_secs_f64(), denoised: None })
 }
 
-/// The film's image, or the filtered one when there is one, as 8-bit sRGB.
-fn display_pixels(film: &Film, denoised: Option<&[[f32; 3]]>, exposure: f32) -> Vec<u8> {
-    match denoised {
-        Some(image) => Film::image_to_srgb8(image, exposure),
-        None => film.to_srgb8(exposure),
-    }
-}
-
 pub fn write_png(path: &Path, film: &Film, denoised: Option<&[[f32; 3]]>, exposure: f32) -> Result<(), String> {
-    use craft_image_codecs::{ChannelLayout, EncodeOptions, Format, Image, SampleType};
-    let image =
-        Image::from_raw(film.width, film.height, ChannelLayout::Rgba, SampleType::U8, display_pixels(film, denoised, exposure)).map_err(|e| e.to_string())?;
-    let bytes = craft_image_codecs::encode(&image, Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+    modelcraft_render::output::write_png(path, film, denoised, exposure, None)
 }
 
 /// Write the film as one OpenEXR part of 32-bit float channels: `R G B` (linear radiance, not
-/// exposed or tone-mapped), then the feature images in the customary layer names
-/// (`albedo.R/G/B`, `N.X/Y/Z`, `Z`, `motion.X/Y`, `variance`).
-pub fn write_exr(path: &Path, film: &Film, denoised: Option<&[[f32; 3]]>) -> Result<(), String> {
-    use craft_exr::decode::{Channel, Compression, Samples};
-    let k = if film.samples > 0 { 1.0 / film.samples as f32 } else { 0.0 };
-    let plane = |name: &str, values: Vec<f32>| Channel { name: name.to_string(), samples: Samples::F32(values) };
-    let of3 = |src: &[[f32; 3]], c: usize| src.iter().map(|p| p[c] * k).collect::<Vec<f32>>();
-    let mut channels = Vec::new();
-    for (c, name) in ["R", "G", "B"].into_iter().enumerate() {
-        match denoised {
-            Some(image) => {
-                channels.push(plane(name, image.iter().map(|p| p[c]).collect()));
-                channels.push(plane(&format!("noisy.{name}"), of3(&film.sum, c)));
-            }
-            None => channels.push(plane(name, of3(&film.sum, c))),
-        }
-        channels.push(plane(&format!("albedo.{name}"), of3(&film.albedo, c)));
-    }
-    for (c, name) in ["N.X", "N.Y", "N.Z"].into_iter().enumerate() {
-        channels.push(plane(name, of3(&film.normal, c)));
-    }
-    channels.push(plane("Z", film.depth.iter().map(|d| d * k).collect()));
-    channels.push(plane("motion.X", film.motion.iter().map(|m| m[0] * k).collect()));
-    channels.push(plane("motion.Y", film.motion.iter().map(|m| m[1] * k).collect()));
-    channels.push(plane("variance", film.variance()));
-    let bytes = craft_exr::decode::write(film.width, film.height, &channels, Compression::Zip16).map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+/// exposed or tone-mapped), then the passes in the customary layer names (`albedo.R/G/B`,
+/// `N.X/Y/Z`, `Z`, `motion.X/Y`, `variance`).
+pub fn write_exr(path: &Path, film: &Film, denoised: Option<&[[f32; 3]]>, passes: &[Pass]) -> Result<(), String> {
+    modelcraft_render::output::write_exr(path, film, denoised, passes, None)
 }
 
 /// The whole command: load or build the scene, render, write the image, describe the run.
@@ -366,6 +440,12 @@ pub fn run(source: &str, out: &str, args: &RenderArgs, load: impl FnOnce(&str) -
         return Err(format!("{out}: the output must be a .png or .exr file"));
     }
     let t = Instant::now();
+    if let Some(range) = args.frames {
+        if source.starts_with("builtin:") {
+            return Err("--frames needs a project or model file: the built-in scenes have no frames".into());
+        }
+        return run_frames(source, out, args, range, &mut load(source)?);
+    }
     let scene = match source.strip_prefix("builtin:") {
         Some(name) => builtin(name)?,
         None => document_scene(&mut load(source)?, args)?,
@@ -380,7 +460,7 @@ pub fn run(source: &str, out: &str, args: &RenderArgs, load: impl FnOnce(&str) -
     }
     let filtered = report.denoised.as_ref().map(|(image, _)| image.as_slice());
     if lower.ends_with(".exr") {
-        write_exr(Path::new(out), &report.film, filtered)?;
+        write_exr(Path::new(out), &report.film, filtered, args.passes.as_deref().unwrap_or(&Pass::ALL))?;
     } else {
         write_png(Path::new(out), &report.film, filtered, args.exposure)?;
     }
@@ -448,6 +528,80 @@ mod tests {
         let png = dir.join("c.png");
         run("builtin:cornell", png.to_str().unwrap(), &small, |_| Err("no files".into())).unwrap();
         assert!(std::fs::metadata(&png).unwrap().len() > 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parses_frame_ranges_and_passes() {
+        let f = |l: &[&str]| parse(&args(l)).map(|a| a.frames);
+        assert_eq!(f(&["--frames", "1-24"]), Ok(Some((1, 24, 1))));
+        assert_eq!(f(&["--frames", "0-100:5"]), Ok(Some((0, 100, 5))));
+        assert_eq!(f(&["--frames", "-10--2"]), Ok(Some((-10, -2, 1))));
+        assert_eq!(f(&[]), Ok(None));
+        for bad in ["5", "9-3", "1-3:0", "a-b", "1-3:x", ""] {
+            assert!(f(&["--frames", bad]).is_err(), "{bad:?}");
+        }
+        let p = |l: &[&str]| parse(&args(l)).map(|a| a.passes);
+        assert_eq!(p(&["--passes", "depth,albedo"]), Ok(Some(vec![Pass::Depth, Pass::Albedo])));
+        assert_eq!(p(&["--passes", "none"]), Ok(Some(vec![])));
+        assert_eq!(p(&[]), Ok(None));
+        assert!(p(&["--passes", "depth,shine"]).is_err());
+    }
+
+    #[test]
+    fn renders_through_a_camera_object_lit_by_a_light_object_and_a_range_of_frames() {
+        use modelcraft_engine::StageCommand;
+        use modelcraft_engine::scene::ObjectKind;
+        use modelcraft_engine::scene::stage::{CameraData, LightData, LightKind};
+        let dir = std::env::temp_dir().join(format!("modelcraft-frames-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let scene = |_: &str| {
+            let mut d = Document::new();
+            let cube = d.execute(Command::AddPrimitive { kind: "cube".into(), name: None, parent: None }).map_err(|e| e.to_string())?.created[0];
+            let lamp = d
+                .execute(Command::Stage(StageCommand::AddLight { kind: "point".into(), name: None, parent: None, transform: None }))
+                .map_err(|e| e.to_string())?
+                .created[0];
+            d.execute(Command::Stage(StageCommand::SetLight { id: lamp, light: LightData { intensity: 60.0, ..LightData::of(LightKind::Point) } }))
+                .map_err(|e| e.to_string())?;
+            let cam = d
+                .execute(Command::Stage(StageCommand::AddCamera { name: Some("Shot".into()), parent: None, transform: None }))
+                .map_err(|e| e.to_string())?
+                .created[0];
+            d.execute(Command::Stage(StageCommand::SetCamera { id: cam, camera: CameraData { focal_length: 35.0, ..CameraData::default() } }))
+                .map_err(|e| e.to_string())?;
+            // The cube turns over the frames.
+            for (frame, y) in [(0.0, 0.0), (10.0, 45.0)] {
+                d.execute(Command::Anim(modelcraft_engine::anim::AnimCommand::SetKey {
+                    id: cube,
+                    path: "rotate.y".into(),
+                    frame: Some(frame),
+                    value: Some(y),
+                }))
+                .map_err(|e| e.to_string())?;
+            }
+            assert!(matches!(d.scene.get(lamp).map(|o| &o.kind), Some(ObjectKind::Light { .. })));
+            Ok(d)
+        };
+        let small = RenderArgs {
+            width: 32,
+            height: 24,
+            samples: 4,
+            device: Device::Cpu,
+            camera: Some("Shot".into()),
+            frames: Some((0, 10, 10)),
+            ..RenderArgs::default()
+        };
+        let out = dir.join("shot_####.png");
+        let report = run("scene", out.to_str().unwrap(), &small, scene).unwrap();
+        assert_eq!(report["frames"], 2);
+        for name in ["shot_0000.png", "shot_0010.png"] {
+            let image = craft_image_codecs::decode(&std::fs::read(dir.join(name)).unwrap()).unwrap();
+            assert_eq!((image.width(), image.height()), (32, 24), "{name}");
+        }
+        // A camera that does not exist, a built-in scene and a range with nothing to write are errors.
+        assert!(run("scene", out.to_str().unwrap(), &RenderArgs { camera: Some("Nobody".into()), ..small.clone() }, scene).is_err());
+        assert!(run("builtin:cornell", out.to_str().unwrap(), &small, |_| Err("not used".into())).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
