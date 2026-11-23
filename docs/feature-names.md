@@ -85,3 +85,4 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
 | Search objects | outliner filters | Generic | Use |
 | Spline; Circle, Rectangle, Star, N-Side, Arc, Helix (spline kinds); Intermediate points, Fixed steps, Uniform length, Adaptive, Tolerance, Largest turn (tessellation) | spline objects and their primitives | Plain geometry words; the references' "Points", "Intermediate points" and primitive names are generic nouns, no product term (such as their object type name) is used as a label | Use |
+| Pen Tool; Point, Handle in, Handle out, Handles (Free, Aligned, Mirrored, Smooth), Curve type (Polyline, Bezier, B-spline), Closed, Add Point, Insert Point, Delete Points | spline drawing and point editing | Plain drawing words; the references' pen and tangent terms are generic craft terms, no product tool name is used | Use |

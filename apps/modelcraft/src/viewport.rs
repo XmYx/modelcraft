@@ -482,6 +482,10 @@ fn model_input(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usiz
     if !is_nav(app, ui) && crate::rig_tools::input(app, ui, resp, i, rect) {
         return;
     }
+    // The pen tool and the points and handles of the selected spline.
+    if !is_nav(app, ui) && crate::spline_pen::input(app, ui, resp, i, rect) {
+        return;
+    }
     let pointer = resp.interact_pointer_pos().or_else(|| resp.hover_pos());
     let shift = ui.input(|inp| inp.modifiers.shift);
     if resp.drag_started_by(egui::PointerButton::Primary)
@@ -1054,6 +1058,7 @@ fn overlays(app: &mut ModelApp, ui: &egui::Ui, resp: &egui::Response, i: usize, 
     let painter = ui.painter_at(rect);
     let cam = app.views[i].camera;
     crate::snap_ui::overlay(app, &painter, &cam, rect);
+    crate::spline_pen::overlay(app, &painter, i, rect);
     // View name and focus/active outline.
     let active = app.active_view == i;
     painter.text(
