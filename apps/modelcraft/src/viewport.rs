@@ -625,6 +625,20 @@ fn click_select(app: &mut ModelApp, i: usize, rect: Rect, at: Pos2, add: bool) {
         }
         return;
     }
+    // A curve under the pointer is picked before the surfaces: splines have no surface to hit.
+    if let Some(spline) = crate::spline_ui::pick_curve(app, i, rect, at) {
+        if add {
+            match app.selection.iter().position(|s| *s == spline) {
+                Some(p) => {
+                    app.selection.remove(p);
+                }
+                None => app.selection.push(spline),
+            }
+        } else {
+            app.select_only(spline);
+        }
+        return;
+    }
     let mut best: Option<(f32, ObjectId)> = None;
     for id in drawables(&app.doc.scene) {
         if app.doc.scene.get(id).is_some_and(|o| o.template) {
@@ -924,6 +938,9 @@ fn scene_lines(app: &mut ModelApp, i: usize) -> Vec<LineVertex> {
         out.extend(line(a.into(), b.into(), color));
     }
     for (a, b, color) in crate::hair_ui::guide_lines(app) {
+        out.extend(line(a.into(), b.into(), color));
+    }
+    for (a, b, color) in crate::spline_ui::curve_lines(app) {
         out.extend(line(a.into(), b.into(), color));
     }
     if app.workspace == Workspace::Sculpt {

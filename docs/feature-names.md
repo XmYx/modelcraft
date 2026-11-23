@@ -86,3 +86,4 @@ Names deliberately **not** used as labels: the reference products' names and the
 | Selection Sets | named selections / quick selection sets | Generic | Use |
 | Copy Attributes, Paste Attributes | attribute copy tools | Generic | Use |
 | Search objects | outliner filters | Generic | Use |
+| Spline; Circle, Rectangle, Star, N-Side, Arc, Helix (spline kinds); Intermediate points, Fixed steps, Uniform length, Adaptive, Tolerance, Largest turn (tessellation) | spline objects and their primitives | Plain geometry words; the references' "Points", "Intermediate points" and primitive names are generic nouns, no product term (such as their object type name) is used as a label | Use |

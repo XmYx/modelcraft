@@ -205,6 +205,7 @@ pub fn menu_bar(app: &mut ModelApp, ui: &mut egui::Ui) {
             crate::anim_ui::menu(app, ui);
             crate::rig_ui::menu(app, ui);
             crate::sim_ui::menu(app, ui);
+            crate::spline_ui::menu(app, ui);
             crate::organize_ui::menu(app, ui);
             crate::hair_ui::menu(app, ui);
             ui.menu_button(tl!("Help"), |ui| {
@@ -574,6 +575,13 @@ pub(crate) fn kind_badge(ui: &mut egui::Ui, o: &Object) {
                 p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.0, 3.0)), 0.0, o);
             }
         }
+        ObjectKind::Spline { .. } => {
+            // A curve with a handle.
+            let k = Color32::from_rgb(130, 200, 240);
+            let pts: Vec<egui::Pos2> = (0..=10).map(|j| c + egui::vec2(j as f32 - 5.0, -(j as f32 * 0.63).sin() * 4.0)).collect();
+            p.add(egui::Shape::line(pts, egui::Stroke::new(1.4, k)));
+            p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(-5.0, 0.0), egui::vec2(3.0, 3.0)), 0.0, k);
+        }
         ObjectKind::Deformer { .. } => {
             let m = Color32::from_rgb(200, 140, 230);
             let pts: Vec<egui::Pos2> = (0..=10).map(|k| c + egui::vec2(k as f32 - 5.0, (k as f32 * 1.2).sin() * 3.0)).collect();
@@ -764,6 +772,9 @@ fn properties_body(app: &mut ModelApp, ui: &mut egui::Ui) {
         }
         ObjectKind::Symmetry { axis, weld } => {
             egui::CollapsingHeader::new(tl!("Symmetry")).default_open(true).show(ui, |ui| crate::generator_ui::symmetry_fields(app, ui, id, *axis, *weld));
+        }
+        ObjectKind::Spline { source, tess } => {
+            egui::CollapsingHeader::new(tl!("Spline")).default_open(true).show(ui, |ui| crate::spline_ui::fields(app, ui, id, source, *tess));
         }
         ObjectKind::Field { field } => {
             egui::CollapsingHeader::new(tl!("Falloff Field")).default_open(true).show(ui, |ui| crate::field_ui::fields(app, ui, id, field));
